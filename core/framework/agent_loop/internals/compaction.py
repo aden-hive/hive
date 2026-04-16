@@ -80,7 +80,7 @@ def microcompact(
         msg = messages[i]
         if msg.role != "tool" or msg.is_error or msg.is_skill_content:
             continue
-        if msg.content.startswith(("[Pruned tool result", "[Old tool result")):
+        if msg.content.startswith(("Pruned tool result", "[Pruned tool result", "[Old tool result")):
             continue
         if len(msg.content) < 100:
             continue

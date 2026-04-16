@@ -44,6 +44,8 @@ class MockStreamingLLM(LLMProvider):
       consumption. Each worker gets the scenario matching its task.
     """
 
+    model: str = "mock"
+
     def __init__(
         self,
         scenarios: list[list] | None = None,
@@ -52,6 +54,7 @@ class MockStreamingLLM(LLMProvider):
         self.scenarios = scenarios or []
         self.by_task = by_task or {}
         self._call_index = 0
+        self._used_tasks: set[str] = set()
         self.stream_calls: list[dict] = []
 
     async def stream(
@@ -79,14 +82,24 @@ class MockStreamingLLM(LLMProvider):
                     break
             for task_key, events in self.by_task.items():
                 if task_key in first_user:
+                    if task_key in self._used_tasks:
+                        # Already played this scenario; emit a stop so the
+                        # agent loop terminates instead of replaying forever.
+                        yield TextDeltaEvent(content="Done.", snapshot="Done.")
+                        yield FinishEvent(stop_reason="stop", input_tokens=1, output_tokens=1, model="mock")
+                        return
+                    self._used_tasks.add(task_key)
                     for event in events:
                         yield event
                     return
             return
 
-        if not self.scenarios:
+        if not self.scenarios or self._call_index >= len(self.scenarios):
+            # No more scenarios; emit a stop so the agent loop terminates.
+            yield TextDeltaEvent(content="Done.", snapshot="Done.")
+            yield FinishEvent(stop_reason="stop", input_tokens=1, output_tokens=1, model="mock")
             return
-        events = self.scenarios[min(self._call_index, len(self.scenarios) - 1)]
+        events = self.scenarios[self._call_index]
         self._call_index += 1
         for event in events:
             yield event
@@ -236,7 +249,6 @@ class TestReportToParent:
                     summary="Fetched 5 rows from the API.",
                     data={"rows": 5, "table": "honeycomb"},
                 ),
-                # Worker terminates after the report; no follow-up turn needed
             ]
         )
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
@@ -293,6 +305,7 @@ class TestReportToParent:
         """
 
         class CrashingLLM(LLMProvider):
+            model: str = "mock"
             stream_calls: list[dict] = []
 
             async def stream(self, messages, system="", tools=None, max_tokens=4096):

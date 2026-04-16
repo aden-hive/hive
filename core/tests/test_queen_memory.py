@@ -600,13 +600,8 @@ async def test_subscribe_reflection_triggers_runs_housekeeping_for_both_scopes(
     await asyncio.sleep(0.05)
 
     assert len(sub_ids) == 2
-    assert unified_short.await_count == 5
-    unified_long.assert_awaited_once_with(
-        llm,
-        global_memory_dir=global_dir,
-        queen_memory_dir=queen_dir,
-        queen_id="queen_technology",
-    )
+    assert unified_short.await_count == 3
+    unified_long.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -753,6 +748,7 @@ def test_queen_phase_state_appends_global_memory_block():
 
 def test_queen_phase_state_appends_queen_memory_block():
     phase = QueenPhaseState(
+        phase="building",
         prompt_building="base prompt",
         _cached_global_recall_block="--- Global Memories ---\nglobal stuff",
         _cached_queen_recall_block="--- Queen Memories: queen_technology ---\nqueen stuff",

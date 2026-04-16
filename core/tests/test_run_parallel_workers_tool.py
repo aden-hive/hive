@@ -26,7 +26,7 @@ from framework.agent_loop.types import AgentSpec
 from framework.host.colony_runtime import ColonyRuntime
 from framework.host.event_bus import EventBus
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
-from framework.llm.stream_events import FinishEvent, ToolCallEvent
+from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
 from framework.loader.tool_registry import ToolRegistry
 from framework.schemas.goal import Goal
 from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
@@ -37,8 +37,11 @@ from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
 
 
 class _ByTaskMockLLM(LLMProvider):
+    model: str = "mock"
+
     def __init__(self, by_task: dict[str, list]):
         self.by_task = by_task
+        self._used_tasks: set[str] = set()
 
     async def stream(
         self,
@@ -60,6 +63,11 @@ class _ByTaskMockLLM(LLMProvider):
                 break
         for key, events in self.by_task.items():
             if key in first_user:
+                if key in self._used_tasks:
+                    yield TextDeltaEvent(content="Done.", snapshot="Done.")
+                    yield FinishEvent(stop_reason="stop", input_tokens=1, output_tokens=1, model="mock")
+                    return
+                self._used_tasks.add(key)
                 for ev in events:
                     yield ev
                 return

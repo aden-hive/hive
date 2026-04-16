@@ -212,7 +212,7 @@ class TestPhaseAwareCompaction:
         msgs = conv.messages
         old_tool = [m for m in msgs if m.role == "tool" and m.phase_id == "research"]
         assert len(old_tool) == 1
-        assert old_tool[0].content.startswith("[Pruned tool result")
+        assert old_tool[0].content.startswith("Pruned tool result")
 
         # Current phase's tool result should be intact
         current_tool = [m for m in msgs if m.role == "tool" and m.phase_id == "report"]
@@ -264,5 +264,5 @@ class TestPhaseAwareCompaction:
 
         await conv.prune_old_tool_results(protect_tokens=0, min_prune_tokens=100)
 
-        pruned_msg = [m for m in conv.messages if m.content.startswith("[Pruned")][0]
+        pruned_msg = [m for m in conv.messages if m.content.startswith("Pruned")][0]
         assert pruned_msg.phase_id == "research"

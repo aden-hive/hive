@@ -853,7 +853,7 @@ class NodeConversation:
                 continue  # never prune errors
             if msg.is_skill_content:
                 continue  # never prune activated skill instructions (AS-10)
-            if msg.content.startswith("[Pruned tool result"):
+            if msg.content.startswith(("Pruned tool result", "[Pruned tool result")):
                 continue  # already pruned
             # Tiny results (set_output acks, confirmations) — pruning
             # saves negligible space but makes the LLM think the call

@@ -23,6 +23,8 @@ from framework.testing.llm_judge import LLMJudge
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
 
+    model: str = "mock"
+
     def __init__(self, response_content: str = '{"passes": true, "explanation": "Test passed"}'):
         self.response_content = response_content
         self.complete_calls = []

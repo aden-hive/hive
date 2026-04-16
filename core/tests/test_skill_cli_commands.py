@@ -99,7 +99,7 @@ class TestCmdSkillValidate:
 
 class TestCmdSkillDoctor:
     def test_defaults_pass_against_real_framework_skills(self):
-        """All 6 framework default skills should be healthy (no mocking)."""
+        """All 7 framework default skills should be healthy (no mocking)."""
         args = Namespace(defaults=True, name=None, project_dir=None)
         result = cmd_skill_doctor(args)
         assert result == 0
@@ -355,7 +355,7 @@ class TestJsonFlag:
         data = json.loads(out)
         assert result == 0
         assert "skills" in data
-        assert len(data["skills"]) == 6  # 6 framework default skills
+        assert len(data["skills"]) == 7  # 7 framework default skills
         assert data["total_errors"] == 0
 
     def test_search_json_registry_unavailable_exits_1(self, capsys):

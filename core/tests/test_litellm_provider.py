@@ -676,6 +676,8 @@ class TestAsyncComplete:
         call_thread_ids = []
 
         class SlowSyncProvider(LLMProvider):
+            model: str = "mock"
+
             def complete(
                 self,
                 messages,
