@@ -101,6 +101,7 @@ def test_timeout(mcp, monkeypatch):
 
 
 def test_prometheus_connection_error(mcp, monkeypatch):
+    monkeypatch.setenv("PROMETHEUS_BASE_URL", "http://fake-prometheus:9090")
     tool_fn = mcp._tool_manager._tools["prometheus_query"].fn
 
     def mock_get(*args, **kwargs):

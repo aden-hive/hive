@@ -155,3 +155,4 @@ All tools return structured error dicts on failure.
 | Timeout handling  | Out-of-range values reset to `5s`                                   |
 | Query limit       | Must be 1–1000 characters                                           |
 | URL normalization | Trailing `/` removed using `.rstrip('/')`                           |
+| Timeout range     | 1–30 seconds (values outside reset defaults to 5s)                  |

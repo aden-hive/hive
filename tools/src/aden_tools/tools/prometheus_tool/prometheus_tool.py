@@ -98,8 +98,7 @@ def register_tools(
         Use this tool to fetch real-time metrics from a Prometheus server.
 
         Args:
-            query: PromQL query string (e.g., 'up', 'rate(http_requests_total[5m])')
-            base_url: Base URL of Prometheus
+            query: PromQL query string (e.g., 'up', 'sum(rate(http_requests_total[1m]))')
             timeout: Request timeout in seconds (1-30)
 
         Returns:
@@ -145,12 +144,7 @@ def register_tools(
                     "details": data,
                 }
 
-            return {
-                "success": True,
-                "query": query,
-                "result": data.get("data", {}).get("result", []),
-                "raw": data,
-            }
+            return {"success": True, "query": query, "result": data.get("data", {}).get("result", []), "raw": data}
 
         except httpx.TimeoutException:
             return {"error": "Request to Prometheus timed out"}
@@ -174,6 +168,20 @@ def register_tools(
     ) -> dict:
         """
         Query Prometheus over a time range using PromQL.
+
+        Use this tool to fetch historical metrics and time series data
+        from a Prometheus server. Suitable for trend analysis, graphing,
+        and monitoring over a defined time window.
+
+        Args:
+            query: PromQL query string (e.g., 'rate(http_requests_total[5m])')
+            start: Start time (Unix timestamp or RFC3339 format, e.g., "2024-01-01T00:00:00Z")
+            end: End time (Unix timestamp or RFC3339 format, e.g., "2024-01-01T00:00:00Z")
+            step: Query resolution step (e.g., '15s', '5m', '1h')
+            timeout: Request timeout in seconds (1-30)
+
+        Returns:
+            Dict containing time-series results or error
         """
 
         if not query or len(query) > 1000:
@@ -229,6 +237,7 @@ def register_tools(
                 "end": end,
                 "step": step,
                 "result": data.get("data", {}).get("result", []),
+                "raw": data,
             }
 
         except httpx.TimeoutException:
