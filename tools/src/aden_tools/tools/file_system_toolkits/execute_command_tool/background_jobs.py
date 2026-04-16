@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from ..command_sanitizer import CommandBlockedError, validate_command  # noqa: F401
+from ..command_sanitizer import validate_command  # noqa: F401
 
 # 64 KB rolling window per stream. Large enough for long build logs,
 # small enough that a bash infinite loop can't OOM the MCP process.

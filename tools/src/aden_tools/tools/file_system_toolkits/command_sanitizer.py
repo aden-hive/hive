@@ -13,6 +13,8 @@ agents legitimately need (cat x | grep y, cmd && cmd2). The shell
 operator check in this module catches dangerous chained commands.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 
@@ -94,6 +96,8 @@ _BLOCKED_EXECUTABLES: list[str] = [
     # Credential / secret access
     "security",  # macOS keychain: security find-generic-password
 ]
+
+_BLOCKED_EXECUTABLES_SET = frozenset(_BLOCKED_EXECUTABLES)
 
 # Patterns matched against the full (joined) command string.
 # These catch dangerous flags and argument combos even when the
@@ -226,8 +230,10 @@ def validate_command(command: str) -> None:
         names_to_check = {executable}
         if "." in executable:
             names_to_check.add(executable.split(".")[0])
-        if names_to_check & set(_BLOCKED_EXECUTABLES):
-            matched = (names_to_check & set(_BLOCKED_EXECUTABLES)).pop()
+            
+        blocked_match = names_to_check & _BLOCKED_EXECUTABLES_SET
+        if blocked_match:
+            matched = next(iter(blocked_match))
             _security_logger.warning(
                 "command_blocked",
                 extra={

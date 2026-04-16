@@ -164,6 +164,19 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
+            elapsed = round(time.monotonic() - started, 2)
+            _exec_logger.info(
+                "command_executed",
+                extra={
+                    "agent_id": agent_id,
+                    "command_preview": command.strip()[:120],
+                    "cwd": secure_cwd,
+                    "background": False,
+                    "return_code": -1,  # -1 represents timeout/killed
+                    "elapsed_seconds": elapsed,
+                    "error": "TimeoutError",
+                },
+            )
             # Child is still running: kill it, drain what it already
             # wrote so the agent gets a partial log, then report.
             try:
@@ -174,7 +187,6 @@ def register_tools(mcp: FastMCP) -> None:
                 stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=2.0)
             except (TimeoutError, Exception):
                 stdout_b, stderr_b = b"", b""
-            elapsed = round(time.monotonic() - started, 2)
             return {
                 "error": (
                     f"Command timed out after {timeout} seconds. "

