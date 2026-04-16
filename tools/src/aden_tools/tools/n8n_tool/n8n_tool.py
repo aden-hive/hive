@@ -34,10 +34,7 @@ def _get_creds(
     if not api_key or not base_url:
         return {
             "error": "n8n credentials not configured",
-            "help": (
-                "Set N8N_API_KEY and N8N_BASE_URL environment variables "
-                "or configure via credential store"
-            ),
+            "help": ("Set N8N_API_KEY and N8N_BASE_URL environment variables or configure via credential store"),
         }
     base_url = base_url.rstrip("/")
     return api_key, base_url

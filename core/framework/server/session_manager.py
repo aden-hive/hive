@@ -120,9 +120,7 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(
-        self, model: str | None = None, credential_store=None, queen_tool_registry=None
-    ) -> None:
+    def __init__(self, model: str | None = None, credential_store=None, queen_tool_registry=None) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
@@ -350,9 +348,7 @@ class SessionManager:
         _colony_metadata_path = agent_path / "metadata.json"
         if _colony_metadata_path.exists():
             try:
-                _colony_metadata = json.loads(
-                    _colony_metadata_path.read_text(encoding="utf-8")
-                )
+                _colony_metadata = json.loads(_colony_metadata_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -426,9 +422,7 @@ class SessionManager:
 
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
-                build_worker_profile(session.colony_runtime, agent_path=agent_path)
-                if session.colony_runtime
-                else None
+                build_worker_profile(session.colony_runtime, agent_path=agent_path) if session.colony_runtime else None
             )
             await self._start_queen(
                 session,
@@ -678,14 +672,10 @@ class SessionManager:
         )
 
         # Start the worker's agent loop in the background
-        session.queen_task = asyncio.create_task(
-            session.queen_executor.run(initial_message=initial_prompt)
-        )
+        session.queen_task = asyncio.create_task(session.queen_executor.run(initial_message=initial_prompt))
 
         # Set up event persistence
         if session.event_bus and queen_dir:
-            from framework.host.event_bus import EventBus
-
             session.event_bus.start_persistence(queen_dir, iteration_offset=iteration_offset)
 
         logger.info(
@@ -920,9 +910,7 @@ class SessionManager:
                 state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
                 state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
                 state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-                logger.info(
-                    "Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name
-                )
+                logger.info("Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name)
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to clean up stale session %s: %s", d.name, e)
 
@@ -966,12 +954,11 @@ class SessionManager:
             store = session.colony_runtime._session_store
             state = await store.read_state(session_id)
             if state and state.active_triggers:
+                from framework.host.event_bus import AgentEvent, EventType
                 from framework.tools.queen_lifecycle_tools import (
                     _start_trigger_timer,
                     _start_trigger_webhook,
                 )
-
-                from framework.host.event_bus import AgentEvent, EventType
 
                 runner = getattr(session, "runner", None)
                 colony_entry = runner.graph.entry_node if runner else None
@@ -1006,11 +993,7 @@ class SessionManager:
                                         "trigger_type": tdef.trigger_type,
                                         "trigger_config": tdef.trigger_config,
                                         "name": tdef.description or tdef.id,
-                                        **(
-                                            {"entry_node": colony_entry}
-                                            if colony_entry
-                                            else {}
-                                        ),
+                                        **({"entry_node": colony_entry} if colony_entry else {}),
                                     },
                                 )
                             )
@@ -1059,17 +1042,13 @@ class SessionManager:
         meta_path = _queen_session_dir(storage_session_id, session.queen_name) / "meta.json"
         try:
             _agent_name = (
-                session.worker_info.name
-                if session.worker_info
-                else str(agent_path.name).replace("_", " ").title()
+                session.worker_info.name if session.worker_info else str(agent_path.name).replace("_", " ").title()
             )
             existing_meta = {}
             if meta_path.exists():
                 existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
             existing_meta["agent_name"] = _agent_name
-            existing_meta["agent_path"] = (
-                str(session.worker_path) if session.worker_path else str(agent_path)
-            )
+            existing_meta["agent_path"] = str(session.worker_path) if session.worker_path else str(agent_path)
             meta_path.write_text(json.dumps(existing_meta), encoding="utf-8")
         except OSError:
             pass
@@ -1188,9 +1167,7 @@ class SessionManager:
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
             except Exception:
-                logger.warning(
-                    "Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True
-                )
+                logger.warning("Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True)
 
         if session.queen_task is not None:
             session.queen_task.cancel()
@@ -1295,11 +1272,7 @@ class SessionManager:
             _agent_name = (
                 session.worker_info.name
                 if session.worker_info
-                else (
-                    str(session.worker_path.name).replace("_", " ").title()
-                    if session.worker_path
-                    else None
-                )
+                else (str(session.worker_path.name).replace("_", " ").title() if session.worker_path else None)
             )
             # Merge into existing meta.json to preserve fields written by
             # _update_meta_json (e.g. phase, agent_path set during building).
@@ -1354,8 +1327,7 @@ class SessionManager:
                 if max_iter >= 0:
                     iteration_offset = max_iter + 1
                     logger.info(
-                        "Session '%s' resuming with iteration_offset=%d"
-                        " (from events.jsonl max), last phase: %s",
+                        "Session '%s' resuming with iteration_offset=%d (from events.jsonl max), last phase: %s",
                         session.id,
                         iteration_offset,
                         last_phase or "unknown",
@@ -1496,8 +1468,7 @@ class SessionManager:
         session.colony = colony
 
         logger.info(
-            "_start_queen: unified ColonyRuntime ready for session %s "
-            "(%d tools, storage=%s)",
+            "_start_queen: unified ColonyRuntime ready for session %s (%d tools, storage=%s)",
             session.id,
             len(queen_tools),
             queen_dir,
@@ -1529,10 +1500,7 @@ class SessionManager:
                 detail = cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
                 task_info = f' -> task: "{t.task}"' if t.task else " (no task configured)"
                 parts.append(f"  - {t.id} ({t.trigger_type}: {detail}){task_info}")
-            trigger_lines = (
-                "\n\nAvailable triggers (inactive — use set_trigger to activate):\n"
-                + "\n".join(parts)
-            )
+            trigger_lines = "\n\nAvailable triggers (inactive — use set_trigger to activate):\n" + "\n".join(parts)
 
         await node.inject_event(f"[SYSTEM] Colony loaded.{profile}{trigger_lines}")
 
@@ -1835,9 +1803,7 @@ class SessionManager:
                         if isinstance(content, list):
                             # Anthropic-style content blocks
                             content = " ".join(
-                                b.get("text", "")
-                                for b in content
-                                if isinstance(b, dict) and b.get("type") == "text"
+                                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
                             )
                         if content and msg.get("role") == "assistant":
                             last_message = content[:120].strip()

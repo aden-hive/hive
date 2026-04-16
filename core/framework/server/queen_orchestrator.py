@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from framework.agent_loop.internals.types import HookContext, HookResult
+    from framework.loader.tool_registry import ToolRegistry
     from framework.server.session_manager import Session
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ def install_worker_escalation_routing(
         # Defensive: ignore any stray non-worker origin (e.g. queen).
         if not stream_id.startswith("worker:"):
             return
-        worker_id = stream_id[len("worker:"):]
+        worker_id = stream_id[len("worker:") :]
         data = event.data or {}
         request_id = data.get("request_id")
         reason = str(data.get("reason", "")).strip()
@@ -64,8 +66,7 @@ def install_worker_escalation_routing(
                 try:
                     await runtime.inject_input(
                         worker_id,
-                        "[QUEEN_REPLY] queue_full — queen inbox saturated; "
-                        "proceed with best judgment or retry later.",
+                        "[QUEEN_REPLY] queue_full — queen inbox saturated; proceed with best judgment or retry later.",
                     )
                 except Exception:
                     logger.warning(
@@ -100,24 +101,16 @@ def install_worker_escalation_routing(
             lines.append(context_text)
         if request_id:
             lines.append(
-                "Use reply_to_worker(request_id, reply) to unblock, "
-                "or list_worker_questions() to see all pending."
+                "Use reply_to_worker(request_id, reply) to unblock, or list_worker_questions() to see all pending."
             )
         else:
-            lines.append(
-                "No request_id — use inject_message(content=...) to relay "
-                "guidance manually."
-            )
+            lines.append("No request_id — use inject_message(content=...) to relay guidance manually.")
         handoff = "\n".join(lines)
 
         # Fallback: if the queen loop has gone away, publish a
         # CLIENT_INPUT_REQUESTED so the human sees the question and the
         # worker does not wedge.
-        queen_node = (
-            session.queen_executor.node_registry.get("queen")
-            if session.queen_executor is not None
-            else None
-        )
+        queen_node = session.queen_executor.node_registry.get("queen") if session.queen_executor is not None else None
         if queen_node is None or not hasattr(queen_node, "inject_event"):
             if session.event_bus is not None:
                 await session.event_bus.emit_client_input_requested(
@@ -141,9 +134,7 @@ def install_worker_escalation_routing(
                 filter_colony=runtime.colony_id,
             )
         except Exception:
-            logger.warning(
-                "Failed to install colony-scoped escalation sub", exc_info=True
-            )
+            logger.warning("Failed to install colony-scoped escalation sub", exc_info=True)
             # fall through to session bus
     if session.event_bus is None:
         return None
@@ -174,14 +165,12 @@ def _build_credentials_provider() -> Any:
 
     def _provider() -> str:
         now = time.monotonic()
-        if (
-            state["cached"]
-            and (now - state["cached_at"]) < _CREDENTIALS_BLOCK_TTL_SECONDS
-        ):
+        if state["cached"] and (now - state["cached_at"]) < _CREDENTIALS_BLOCK_TTL_SECONDS:
             return state["cached"]
 
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
             from framework.orchestrator.prompting import build_accounts_prompt
 
             adapter = CredentialStoreAdapter.default()
@@ -313,8 +302,8 @@ async def create_queen(
         _shared_building_knowledge,
         finalize_queen_prompt,
     )
-    from framework.llm.capabilities import supports_image_tool_results
     from framework.host.event_bus import AgentEvent, EventType
+    from framework.llm.capabilities import supports_image_tool_results
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
     from framework.tools.queen_lifecycle_tools import (
@@ -326,9 +315,7 @@ async def create_queen(
     # Use pre-loaded cached registry if available (fast path)
     if tool_registry is not None:
         queen_registry = tool_registry
-        logger.info(
-            "Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools())
-        )
+        logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
     else:
         # Build fresh (slow path - for backwards compatibility)
         queen_registry = ToolRegistry()
@@ -456,13 +443,9 @@ async def create_queen(
 
     # Independent phase gets core tools + all MCP tools not claimed by any
     # other phase (coder-tools file I/O, gcu-tools browser, etc.).
-    all_phase_names = (
-        planning_names | building_names | staging_names | running_names | editing_names
-    )
+    all_phase_names = planning_names | building_names | staging_names | running_names | editing_names
     mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
-    phase_state.independent_tools = [
-        t for t in queen_tools if t.name in independent_names
-    ] + mcp_tools
+    phase_state.independent_tools = [t for t in queen_tools if t.name in independent_names] + mcp_tools
     logger.info(
         "Queen: independent tools: %s",
         sorted(t.name for t in phase_state.independent_tools),
@@ -494,9 +477,7 @@ async def create_queen(
     # Resolve vision-only prompt sections based on the session's LLM.
     # session.llm is immutable for the session's lifetime, so this check
     # is stable — prompts never need to be recomposed mid-session.
-    _has_vision = bool(
-        session.llm and supports_image_tool_results(getattr(session.llm, "model", ""))
-    )
+    _has_vision = bool(session.llm and supports_image_tool_results(getattr(session.llm, "model", "")))
 
     _planning_body = (
         _queen_character_core
@@ -625,6 +606,14 @@ async def create_queen(
     )
 
     async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
+        from framework.agent_loop.internals.types import HookResult
+        from framework.agents.queen.queen_profiles import (
+            ensure_default_queens,
+            format_queen_identity_prompt,
+            load_queen_profile,
+            select_queen,
+        )
+
         ensure_default_queens()
         trigger = ctx.trigger or ""
         # If the session was pre-bound to a queen (user clicked a specific
@@ -676,18 +665,12 @@ async def create_queen(
                     try:
                         _meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
                         _meta["queen_id"] = queen_id
-                        _meta_path.write_text(
-                            _json.dumps(_meta, ensure_ascii=False), encoding="utf-8"
-                        )
+                        _meta_path.write_text(_json.dumps(_meta, ensure_ascii=False), encoding="utf-8")
                     except (OSError, _json.JSONDecodeError):
                         pass
                 # Re-point event bus log to new location, preserving offset
-                _offset = getattr(
-                    session.event_bus, "_session_log_iteration_offset", 0
-                )
-                session.event_bus.set_session_log(
-                    _new_dir / "events.jsonl", iteration_offset=_offset
-                )
+                _offset = getattr(session.event_bus, "_session_log_iteration_offset", 0)
+                session.event_bus.set_session_log(_new_dir / "events.jsonl", iteration_offset=_offset)
 
         if _session_event_bus is not None:
             await _session_event_bus.publish(
@@ -742,7 +725,7 @@ async def create_queen(
             logger.debug("Queen: tools not yet available (registered on worker load): %s", missing)
         node_updates["tools"] = available_tools
 
-    adjusted_node = _orig_node.model_copy(update=node_updates)
+    _orig_node.model_copy(update=node_updates)
 
     # Determine session mode:
     # - RESTORE: Resume cold session with history, no initial prompt -> wait for user
@@ -897,9 +880,7 @@ async def create_queen(
             # bootstrap: if the frontend doesn't pass initial_prompt, we must
             # NOT invent a phantom "Hello" — that used to concatenate with the
             # real first chat message and confuse the model.
-            ctx.input_data = {
-                "user_request": None if _is_restore_mode else (initial_prompt or None)
-            }
+            ctx.input_data = {"user_request": None if _is_restore_mode else (initial_prompt or None)}
 
             # Publish the initial prompt as a CLIENT_INPUT_RECEIVED event so
             # it appears in the SSE stream and persists to events.jsonl for

@@ -134,9 +134,7 @@ async def _pump(job: BackgroundJob) -> None:
     job.exit_code = await proc.wait()
 
 
-async def spawn(
-    command: str, cwd: str, agent_id: str
-) -> BackgroundJob:
+async def spawn(command: str, cwd: str, agent_id: str) -> BackgroundJob:
     """Start a subprocess in the background and register it. The caller
     holds the job id returned from here and can poll via ``get()``.
     """
@@ -185,7 +183,7 @@ async def kill(agent_id: str, job_id: str, grace_seconds: float = 3.0) -> str:
         try:
             await asyncio.wait_for(job.process.wait(), timeout=grace_seconds)
             status = f"terminated cleanly (exit={job.process.returncode})"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 job.process.kill()
             except ProcessLookupError:

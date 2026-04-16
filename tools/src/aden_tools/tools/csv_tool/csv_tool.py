@@ -263,10 +263,7 @@ def register_tools(mcp: FastMCP) -> None:
             import duckdb
         except ImportError:
             return {
-                "error": (
-                    "DuckDB not installed. Install with: "
-                    "uv pip install duckdb  or  uv pip install tools[sql]"
-                )
+                "error": ("DuckDB not installed. Install with: uv pip install duckdb  or  uv pip install tools[sql]")
             }
 
         try:

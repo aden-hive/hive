@@ -159,9 +159,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
 
     sse = SSEResponse()
     await sse.prepare(request)
-    logger.info(
-        "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
-    )
+    logger.info("SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types))
 
     # Replay buffered events that were published before this SSE connected.
     # The EventBus keeps a history ring-buffer; we replay the subset that
@@ -215,9 +213,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                 await sse.send_event(data)
                 event_count += 1
                 if event_count == 1:
-                    logger.info(
-                        "SSE first event: session='%s', type='%s'", session.id, data.get("type")
-                    )
+                    logger.info("SSE first event: session='%s', type='%s'", session.id, data.get("type"))
             except TimeoutError:
                 try:
                     await sse.send_keepalive()

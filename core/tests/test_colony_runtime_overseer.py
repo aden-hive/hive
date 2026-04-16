@@ -10,7 +10,6 @@ a real on-disk ``tmp_path``. No HTTP layer, no real LLM.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,6 @@ import pytest
 from framework.agent_loop.types import AgentSpec
 from framework.host.colony_runtime import ColonyRuntime
 from framework.host.event_bus import AgentEvent, EventBus, EventType
-from framework.host.worker import Worker, WorkerStatus
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -28,7 +26,6 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.schemas.goal import Goal
-
 
 # ---------------------------------------------------------------------------
 # Mock LLM
@@ -200,9 +197,7 @@ class TestColonyRuntimeGoalProperty:
 
 class TestStartOverseer:
     @pytest.mark.asyncio
-    async def test_start_overseer_creates_persistent_worker(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_start_overseer_creates_persistent_worker(self, tmp_path, agent_spec, goal, event_bus):
         """Overseer must be a persistent Worker tagged stream_id='overseer'."""
         llm = MockStreamingLLM(scenarios=[_text_scenario("idle")])
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
@@ -232,9 +227,7 @@ class TestStartOverseer:
 
 class TestReportToParent:
     @pytest.mark.asyncio
-    async def test_worker_report_emits_subagent_report_event(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_worker_report_emits_subagent_report_event(self, tmp_path, agent_spec, goal, event_bus):
         """A worker calling report_to_parent emits SUBAGENT_REPORT with structured data."""
         llm = MockStreamingLLM(
             scenarios=[
@@ -264,9 +257,7 @@ class TestReportToParent:
         )
 
         try:
-            worker_ids = await colony.spawn(
-                task="Fetch 5 rows from honeycomb", count=1
-            )
+            worker_ids = await colony.spawn(task="Fetch 5 rows from honeycomb", count=1)
             assert len(worker_ids) == 1
             worker = colony.get_worker(worker_ids[0])
             assert worker is not None
@@ -293,9 +284,7 @@ class TestReportToParent:
             await colony.stop()
 
     @pytest.mark.asyncio
-    async def test_worker_crash_emits_synthesised_failed_report(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_worker_crash_emits_synthesised_failed_report(self, tmp_path, agent_spec, goal, event_bus):
         """Worker whose AgentLoop raises must still emit SUBAGENT_REPORT.
 
         The overseer would otherwise hang waiting for a report from a
@@ -343,9 +332,7 @@ class TestReportToParent:
 
 class TestSpawnBatchAndWaitForReports:
     @pytest.mark.asyncio
-    async def test_spawn_batch_returns_one_id_per_task(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_spawn_batch_returns_one_id_per_task(self, tmp_path, agent_spec, goal, event_bus):
         llm = MockStreamingLLM(
             by_task={
                 "Fetch batch 1": _report_scenario("success", "batch 1 done"),
@@ -370,21 +357,13 @@ class TestSpawnBatchAndWaitForReports:
             await colony.stop()
 
     @pytest.mark.asyncio
-    async def test_wait_for_worker_reports_collects_all(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_wait_for_worker_reports_collects_all(self, tmp_path, agent_spec, goal, event_bus):
         """Fan out 3 workers, wait for reports, verify structured list."""
         llm = MockStreamingLLM(
             by_task={
-                "batch 1": _report_scenario(
-                    "success", "w1 done", {"batch": 1, "rows": 10}
-                ),
-                "batch 2": _report_scenario(
-                    "success", "w2 done", {"batch": 2, "rows": 15}
-                ),
-                "batch 3": _report_scenario(
-                    "failed", "w3 broke", {"batch": 3, "error_code": 503}
-                ),
+                "batch 1": _report_scenario("success", "w1 done", {"batch": 1, "rows": 10}),
+                "batch 2": _report_scenario("success", "w2 done", {"batch": 2, "rows": 15}),
+                "batch 3": _report_scenario("failed", "w3 broke", {"batch": 3, "error_code": 503}),
             }
         )
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
@@ -413,9 +392,7 @@ class TestSpawnBatchAndWaitForReports:
             await colony.stop()
 
     @pytest.mark.asyncio
-    async def test_wait_for_worker_reports_returns_in_input_order(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_wait_for_worker_reports_returns_in_input_order(self, tmp_path, agent_spec, goal, event_bus):
         """Reports must be returned in the same order as the input worker_ids."""
         llm = MockStreamingLLM(
             by_task={
@@ -426,9 +403,7 @@ class TestSpawnBatchAndWaitForReports:
         )
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
         try:
-            ids = await colony.spawn_batch(
-                tasks=[{"task": "task-A"}, {"task": "task-B"}, {"task": "task-C"}]
-            )
+            ids = await colony.spawn_batch(tasks=[{"task": "task-A"}, {"task": "task-B"}, {"task": "task-C"}])
             reports = await colony.wait_for_worker_reports(ids, timeout=10.0)
             assert [r["worker_id"] for r in reports] == ids
             assert [r["summary"] for r in reports] == ["A", "B", "C"]
@@ -436,16 +411,12 @@ class TestSpawnBatchAndWaitForReports:
             await colony.stop()
 
     @pytest.mark.asyncio
-    async def test_wait_for_worker_reports_missing_id(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_wait_for_worker_reports_missing_id(self, tmp_path, agent_spec, goal, event_bus):
         """Unknown worker_id is reported as failed, not crash."""
         llm = MockStreamingLLM(scenarios=[_text_scenario("noop")])
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
         try:
-            reports = await colony.wait_for_worker_reports(
-                ["nonexistent_worker"], timeout=1.0
-            )
+            reports = await colony.wait_for_worker_reports(["nonexistent_worker"], timeout=1.0)
             assert len(reports) == 1
             assert reports[0]["worker_id"] == "nonexistent_worker"
             assert reports[0]["status"] == "failed"
@@ -456,9 +427,7 @@ class TestSpawnBatchAndWaitForReports:
 
 class TestSeedConversation:
     @pytest.mark.asyncio
-    async def test_seed_conversation_writes_parts_to_storage(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_seed_conversation_writes_parts_to_storage(self, tmp_path, agent_spec, goal, event_bus):
         """seed_conversation must write message parts to disk so the
         AgentLoop's NodeConversation picks them up when the overseer
         initialises."""
@@ -492,9 +461,7 @@ class TestSeedConversation:
 
 class TestReportToParentGatingByStream:
     @pytest.mark.asyncio
-    async def test_report_to_parent_only_for_worker_streams(
-        self, tmp_path, agent_spec, goal, event_bus
-    ):
+    async def test_report_to_parent_only_for_worker_streams(self, tmp_path, agent_spec, goal, event_bus):
         """report_to_parent tool should only be in the worker's tool list,
         not the overseer's."""
         llm = MockStreamingLLM(scenarios=[_text_scenario("ok")])

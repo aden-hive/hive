@@ -100,9 +100,7 @@ def _patch_litellm_anthropic_oauth() -> None:
             result["authorization"] = f"Bearer {token}"
             # Merge the OAuth beta header with any existing beta headers.
             existing_beta = result.get("anthropic-beta", "")
-            beta_parts = (
-                [b.strip() for b in existing_beta.split(",") if b.strip()] if existing_beta else []
-            )
+            beta_parts = [b.strip() for b in existing_beta.split(",") if b.strip()] if existing_beta else []
             if ANTHROPIC_OAUTH_BETA_HEADER not in beta_parts:
                 beta_parts.append(ANTHROPIC_OAUTH_BETA_HEADER)
             result["anthropic-beta"] = ",".join(beta_parts)
@@ -262,9 +260,7 @@ def _claude_code_billing_header(messages: list[dict[str, Any]]) -> str:
                 break
 
     sampled = "".join(_sample_js_code_unit(first_text, i) for i in (4, 7, 20))
-    version_hash = hashlib.sha256(
-        f"{_CLAUDE_CODE_BILLING_SALT}{sampled}{CLAUDE_CODE_VERSION}".encode()
-    ).hexdigest()
+    version_hash = hashlib.sha256(f"{_CLAUDE_CODE_BILLING_SALT}{sampled}{CLAUDE_CODE_VERSION}".encode()).hexdigest()
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").strip() or "cli"
     return (
         f"x-anthropic-billing-header: cc_version={CLAUDE_CODE_VERSION}.{version_hash[:3]}; "
@@ -336,9 +332,7 @@ def _prune_failed_request_dumps(max_files: int = MAX_FAILED_REQUEST_DUMPS) -> No
 
 def _remember_openrouter_tool_compat_model(model: str) -> None:
     """Cache OpenRouter tool-compat fallback for a bounded time window."""
-    OPENROUTER_TOOL_COMPAT_MODEL_CACHE[model] = (
-        time.monotonic() + OPENROUTER_TOOL_COMPAT_CACHE_TTL_SECONDS
-    )
+    OPENROUTER_TOOL_COMPAT_MODEL_CACHE[model] = time.monotonic() + OPENROUTER_TOOL_COMPAT_CACHE_TTL_SECONDS
 
 
 def _is_openrouter_tool_compat_cached(model: str) -> bool:
@@ -746,20 +740,14 @@ class LiteLLMProvider(LLMProvider):
             eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
-        self._codex_backend = bool(
-            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
-        )
+        self._codex_backend = bool(self.api_base and "chatgpt.com/backend-api/codex" in self.api_base)
         # Antigravity routes through a local OpenAI-compatible proxy — no patches needed.
         self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
         if litellm is None:
-            raise ImportError(
-                "LiteLLM is not installed. Please install it with: uv pip install litellm"
-            )
+            raise ImportError("LiteLLM is not installed. Please install it with: uv pip install litellm")
 
-    def reconfigure(
-        self, model: str, api_key: str | None = None, api_base: str | None = None
-    ) -> None:
+    def reconfigure(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
         """Hot-swap the model, API key, and/or base URL on this provider instance.
 
         Since the same LiteLLMProvider object is shared by reference across the
@@ -784,9 +772,7 @@ class LiteLLMProvider(LLMProvider):
         if self._claude_code_oauth:
             eh = self.extra_kwargs.setdefault("extra_headers", {})
             eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
-        self._codex_backend = bool(
-            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
-        )
+        self._codex_backend = bool(self.api_base and "chatgpt.com/backend-api/codex" in self.api_base)
         self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
         # Note: The Codex ChatGPT backend is a Responses API endpoint at
@@ -809,9 +795,7 @@ class LiteLLMProvider(LLMProvider):
             return HIVE_API_BASE
         return None
 
-    def _completion_with_rate_limit_retry(
-        self, max_retries: int | None = None, **kwargs: Any
-    ) -> Any:
+    def _completion_with_rate_limit_retry(self, max_retries: int | None = None, **kwargs: Any) -> Any:
         """Call litellm.completion with retry on 429 rate limit errors and empty responses.
 
         When a :class:`KeyPool` is configured, rate-limited keys are rotated
@@ -843,15 +827,10 @@ class LiteLLMProvider(LLMProvider):
                         None,
                     )
                     if last_role == "assistant":
-                        logger.debug(
-                            "[retry] Empty response after assistant message — "
-                            "expected, not retrying."
-                        )
+                        logger.debug("[retry] Empty response after assistant message — expected, not retrying.")
                         return response
 
-                    finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
-                    )
+                    finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
                     # Dump full request to file for debugging
                     token_count, token_method = _estimate_tokens(model, messages)
                     dump_path = _dump_failed_request(
@@ -1050,9 +1029,7 @@ class LiteLLMProvider(LLMProvider):
     # Async variants — non-blocking on the event loop
     # ------------------------------------------------------------------
 
-    async def _acompletion_with_rate_limit_retry(
-        self, max_retries: int | None = None, **kwargs: Any
-    ) -> Any:
+    async def _acompletion_with_rate_limit_retry(self, max_retries: int | None = None, **kwargs: Any) -> Any:
         """Async version of _completion_with_rate_limit_retry.
 
         Uses litellm.acompletion and asyncio.sleep instead of blocking calls.
@@ -1078,15 +1055,10 @@ class LiteLLMProvider(LLMProvider):
                         None,
                     )
                     if last_role == "assistant":
-                        logger.debug(
-                            "[async-retry] Empty response after assistant message — "
-                            "expected, not retrying."
-                        )
+                        logger.debug("[async-retry] Empty response after assistant message — expected, not retrying.")
                         return response
 
-                    finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
-                    )
+                    finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
                     token_count, token_method = _estimate_tokens(model, messages)
                     dump_path = _dump_failed_request(
                         model=model,
@@ -1370,8 +1342,7 @@ class LiteLLMProvider(LLMProvider):
                 )
                 return text_tool_content, text_tool_calls
             logger.info(
-                "[openrouter-tool-compat] %s returned non-JSON fallback content; "
-                "treating it as plain text.",
+                "[openrouter-tool-compat] %s returned non-JSON fallback content; treating it as plain text.",
                 self.model,
             )
             return content.strip(), []
@@ -1523,9 +1494,7 @@ class LiteLLMProvider(LLMProvider):
             )
             return repaired
 
-        raise ValueError(
-            f"Failed to parse tool call arguments for '{tool_name}' (likely truncated JSON)."
-        )
+        raise ValueError(f"Failed to parse tool call arguments for '{tool_name}' (likely truncated JSON).")
 
     def _parse_openrouter_text_tool_calls(
         self,
@@ -1682,11 +1651,7 @@ class LiteLLMProvider(LLMProvider):
         return [
             message
             for message in full_messages
-            if not (
-                message.get("role") == "assistant"
-                and not message.get("content")
-                and not message.get("tool_calls")
-            )
+            if not (message.get("role") == "assistant" and not message.get("content") and not message.get("tool_calls"))
         ]
 
     async def _acomplete_via_openrouter_tool_compat(
@@ -1914,8 +1879,8 @@ class LiteLLMProvider(LLMProvider):
 
         if logger.isEnabledFor(logging.DEBUG) and full_messages:
             import json as _json
-            from pathlib import Path as _Path
             from datetime import datetime as _dt
+            from pathlib import Path as _Path
 
             _debug_dir = _Path.home() / ".hive" / "debug_logs"
             _debug_dir.mkdir(parents=True, exist_ok=True)
@@ -1939,9 +1904,7 @@ class LiteLLMProvider(LLMProvider):
                     }
                 )
             try:
-                _dump_file.write_text(
-                    _json.dumps(_summary, indent=2, ensure_ascii=False), encoding="utf-8"
-                )
+                _dump_file.write_text(_json.dumps(_summary, indent=2, ensure_ascii=False), encoding="utf-8")
                 logger.debug("[LLM-MSG] %d messages dumped to %s", len(full_messages), _dump_file)
             except Exception:
                 pass
@@ -1966,9 +1929,7 @@ class LiteLLMProvider(LLMProvider):
         full_messages = [
             m
             for m in full_messages
-            if not (
-                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
-            )
+            if not (m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls"))
         ]
 
         kwargs: dict[str, Any] = {
@@ -2154,8 +2115,7 @@ class LiteLLMProvider(LLMProvider):
                                 else getattr(usage, "cache_read_input_tokens", 0) or 0
                             )
                             logger.debug(
-                                "[tokens] finish-chunk usage: "
-                                "input=%d output=%d cached=%d model=%s",
+                                "[tokens] finish-chunk usage: input=%d output=%d cached=%d model=%s",
                                 input_tokens,
                                 output_tokens,
                                 cached_tokens,
@@ -2202,8 +2162,7 @@ class LiteLLMProvider(LLMProvider):
                                 else getattr(_usage, "cache_read_input_tokens", 0) or 0
                             )
                             logger.debug(
-                                "[tokens] post-loop chunks fallback:"
-                                " input=%d output=%d cached=%d model=%s",
+                                "[tokens] post-loop chunks fallback: input=%d output=%d cached=%d model=%s",
                                 input_tokens,
                                 output_tokens,
                                 cached_tokens,

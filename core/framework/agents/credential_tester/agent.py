@@ -126,9 +126,7 @@ def _list_local_accounts() -> list[dict]:
     try:
         from framework.credentials.local.registry import LocalCredentialRegistry
 
-        return [
-            info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()
-        ]
+        return [info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()]
     except ImportError as exc:
         logger.debug("Local credential registry unavailable: %s", exc)
         return []
@@ -181,9 +179,7 @@ def _list_env_fallback_accounts() -> list[dict]:
             if spec.credential_group in seen_groups:
                 continue
             group_available = all(
-                _is_configured(n, s)
-                for n, s in CREDENTIAL_SPECS.items()
-                if s.credential_group == spec.credential_group
+                _is_configured(n, s) for n, s in CREDENTIAL_SPECS.items() if s.credential_group == spec.credential_group
             )
             if not group_available:
                 continue
@@ -215,9 +211,7 @@ def list_connected_accounts() -> list[dict]:
 
     # Show env-var fallbacks only for credentials not already in the named registry
     local_providers = {a["provider"] for a in local}
-    env_fallbacks = [
-        a for a in _list_env_fallback_accounts() if a["provider"] not in local_providers
-    ]
+    env_fallbacks = [a for a in _list_env_fallback_accounts() if a["provider"] not in local_providers]
 
     return aden + local + env_fallbacks
 
@@ -272,9 +266,7 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
     group_specs = [
         (cred_name, spec)
         for cred_name, spec in CREDENTIAL_SPECS.items()
-        if spec.credential_group == credential_id
-        or spec.credential_id == credential_id
-        or cred_name == credential_id
+        if spec.credential_group == credential_id or spec.credential_id == credential_id or cred_name == credential_id
     ]
     # Deduplicate — credential_id and credential_group may both match the same spec
     seen_env_vars: set[str] = set()
@@ -419,10 +411,7 @@ nodes = [
     NodeSpec(
         id="tester",
         name="Credential Tester",
-        description=(
-            "Interactive credential testing — lets the user pick an account "
-            "and verify it via API calls."
-        ),
+        description=("Interactive credential testing — lets the user pick an account and verify it via API calls."),
         node_type="event_loop",
         client_facing=True,
         max_node_visits=0,
@@ -469,10 +458,7 @@ pause_nodes = []
 terminal_nodes = ["tester"]  # Tester node can terminate
 
 conversation_mode = "continuous"
-identity_prompt = (
-    "You are a credential tester that verifies connected accounts and API keys "
-    "can make real API calls."
-)
+identity_prompt = "You are a credential tester that verifies connected accounts and API keys can make real API calls."
 loop_config = {
     "max_iterations": 50,
     "max_tool_calls_per_turn": 30,

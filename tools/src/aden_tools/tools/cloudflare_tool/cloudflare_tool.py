@@ -163,9 +163,7 @@ def register_tools(mcp, credentials=None):
     # Tools for listing and retrieving basic domain (zone) information
 
     @mcp.tool("cloudflare_list_zones")
-    def cloudflare_list_zones(
-        page: int = 1, per_page: int = 20, name: str | None = None
-    ) -> dict[str, Any]:
+    def cloudflare_list_zones(page: int = 1, per_page: int = 20, name: str | None = None) -> dict[str, Any]:
         """List Cloudflare zones (domains) in the account.
 
         Args:
@@ -426,9 +424,7 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        result = _make_request(
-            "PATCH", f"/zones/{zone_id}/settings/{setting_id}", token, json_data={"value": value}
-        )
+        result = _make_request("PATCH", f"/zones/{zone_id}/settings/{setting_id}", token, json_data={"value": value})
         return {"updated_setting": result}
 
     # --- DNS MANAGEMENT ---
@@ -473,9 +469,7 @@ def register_tools(mcp, credentials=None):
         if type:
             params["type"] = type.strip().upper()
 
-        result = _make_request(
-            "GET", f"/zones/{zone_id}/dns_records", token, params=params, full_response=True
-        )
+        result = _make_request("GET", f"/zones/{zone_id}/dns_records", token, params=params, full_response=True)
 
         if "error" in result:
             return result
@@ -664,9 +658,7 @@ def register_tools(mcp, credentials=None):
                 "domain": domain,
                 "zone_found": False,
                 "error": zones_result.get("error"),
-                "issues": [
-                    {"code": "ZONE_NOT_FOUND", "message": f"No zone found for domain {domain}"}
-                ],
+                "issues": [{"code": "ZONE_NOT_FOUND", "message": f"No zone found for domain {domain}"}],
             }
 
         # Extract zone
@@ -677,9 +669,7 @@ def register_tools(mcp, credentials=None):
             return {
                 "domain": domain,
                 "zone_found": False,
-                "issues": [
-                    {"code": "ZONE_NOT_FOUND", "message": f"No zone found for domain {domain}"}
-                ],
+                "issues": [{"code": "ZONE_NOT_FOUND", "message": f"No zone found for domain {domain}"}],
                 "summary": f"Zone not found for {domain}.",
             }
 
@@ -688,9 +678,7 @@ def register_tools(mcp, credentials=None):
 
         # Fetch DNS records
         records_params = {"per_page": 100}
-        records_result = _make_request(
-            "GET", f"/zones/{zone_id}/dns_records", token, params=records_params
-        )
+        records_result = _make_request("GET", f"/zones/{zone_id}/dns_records", token, params=records_params)
 
         if "error" in records_result:
             return {
@@ -705,14 +693,8 @@ def register_tools(mcp, credentials=None):
         records = records_result if isinstance(records_result, list) else []
 
         # Categorize records
-        root_records = [
-            r for r in records if r.get("name") == domain and r.get("type") in ("A", "AAAA")
-        ]
-        www_records = [
-            r
-            for r in records
-            if r.get("name") == f"www.{domain}" and r.get("type") in ("A", "AAAA")
-        ]
+        root_records = [r for r in records if r.get("name") == domain and r.get("type") in ("A", "AAAA")]
+        www_records = [r for r in records if r.get("name") == f"www.{domain}" and r.get("type") in ("A", "AAAA")]
         cname_records = [r for r in records if r.get("type") == "CNAME"]
         mx_records = [r for r in records if r.get("type") == "MX"]
         ns_records = [r for r in records if r.get("type") == "NS"]
@@ -876,9 +858,7 @@ def register_tools(mcp, credentials=None):
         if proxied is not None:
             data["proxied"] = proxied
 
-        result = _make_request(
-            "PATCH", f"/zones/{zone_id}/dns_records/{record_id}", token, json_data=data
-        )
+        result = _make_request("PATCH", f"/zones/{zone_id}/dns_records/{record_id}", token, json_data=data)
         return {"updated_record": result}
 
     @mcp.tool("cloudflare_delete_dns_record")
@@ -1141,9 +1121,7 @@ def register_tools(mcp, credentials=None):
         return {
             "security_level": sec_level.get("value") if isinstance(sec_level, dict) else None,
             "ssl_mode": ssl_setting.get("value") if isinstance(ssl_setting, dict) else None,
-            "waf_enabled": waf_setting.get("value") == "on"
-            if isinstance(waf_setting, dict)
-            else None,
+            "waf_enabled": waf_setting.get("value") == "on" if isinstance(waf_setting, dict) else None,
         }
 
     @mcp.tool("cloudflare_list_page_rules")
@@ -1347,10 +1325,7 @@ def register_tools(mcp, credentials=None):
             return validation_error
 
         # Modern Ruleset deletion
-        endpoint = (
-            f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/"
-            f"entrypoint/rules/{rule_id}"
-        )
+        endpoint = f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint/rules/{rule_id}"
         result = _make_request("DELETE", endpoint, token)
         return {"deleted": result}
 
@@ -1408,9 +1383,7 @@ def register_tools(mcp, credentials=None):
         cache_level = _make_request("GET", f"/zones/{zone_id}/settings/cache_level", token)
 
         return {
-            "browser_cache_ttl": browser_cache.get("value")
-            if isinstance(browser_cache, dict)
-            else None,
+            "browser_cache_ttl": browser_cache.get("value") if isinstance(browser_cache, dict) else None,
             "development_mode": dev_mode.get("value") if isinstance(dev_mode, dict) else None,
             "cache_level": cache_level.get("value") if isinstance(cache_level, dict) else None,
         }
@@ -1488,9 +1461,7 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        result = _make_request(
-            "POST", f"/zones/{zone_id}/purge_cache", token, json_data={"purge_everything": True}
-        )
+        result = _make_request("POST", f"/zones/{zone_id}/purge_cache", token, json_data={"purge_everything": True})
         return {"purge_status": result}
 
     @mcp.tool("cloudflare_purge_cache_files")
@@ -1511,9 +1482,7 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        result = _make_request(
-            "POST", f"/zones/{zone_id}/purge_cache", token, json_data={"files": urls}
-        )
+        result = _make_request("POST", f"/zones/{zone_id}/purge_cache", token, json_data={"files": urls})
         return {"purge_status": result}
 
     @mcp.tool("cloudflare_list_advanced_services")
@@ -1574,10 +1543,7 @@ def register_tools(mcp, credentials=None):
         accounts = result if isinstance(result, list) else result.get("accounts", [])
 
         return {
-            "accounts": [
-                {"id": a.get("id"), "name": a.get("name"), "status": a.get("status")}
-                for a in accounts
-            ],
+            "accounts": [{"id": a.get("id"), "name": a.get("name"), "status": a.get("status")} for a in accounts],
             "total": result_info.get("total_count", result_info.get("count", len(accounts))),
             "page": page,
             "per_page": per_page,
@@ -1628,9 +1594,7 @@ def register_tools(mcp, credentials=None):
         return {"members": result}
 
     @mcp.tool("cloudflare_invite_account_member")
-    def cloudflare_invite_account_member(
-        account_id: str, email: str, roles: list[str]
-    ) -> dict[str, Any]:
+    def cloudflare_invite_account_member(account_id: str, email: str, roles: list[str]) -> dict[str, Any]:
         """Invite a new member to an account with specific roles.
 
         Args:
@@ -1832,9 +1796,7 @@ def register_tools(mcp, credentials=None):
         return {"policy": result}
 
     @mcp.tool("cloudflare_create_worker_route")
-    def cloudflare_create_worker_route(
-        zone_id: str, pattern: str, script_name: str
-    ) -> dict[str, Any]:
+    def cloudflare_create_worker_route(zone_id: str, pattern: str, script_name: str) -> dict[str, Any]:
         """Activate a Worker script on a specific URL pattern.
 
         Args:
@@ -1874,9 +1836,7 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        result = _make_request(
-            "PATCH", f"/zones/{zone_id}/settings/ssl", token, json_data={"value": mode}
-        )
+        result = _make_request("PATCH", f"/zones/{zone_id}/settings/ssl", token, json_data={"value": mode})
         return {"ssl_update": result}
 
     return None

@@ -40,10 +40,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -62,9 +59,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Get the specified sheet or active sheet
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        return {
-                            "error": f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
-                        }
+                        return {"error": f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"}
                     ws = wb[sheet]
                 else:
                     ws = wb.active
@@ -117,9 +112,7 @@ def register_tools(mcp: FastMCP) -> None:
                     rows_as_dicts.append(row_dict)
 
                 # Format column names
-                formatted_columns = [
-                    str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(columns)
-                ]
+                formatted_columns = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(columns)]
 
                 return {
                     "success": True,
@@ -165,10 +158,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import Workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -242,10 +232,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -267,11 +254,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Get the specified sheet or active sheet
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        return {
-                            "error": (
-                                f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
-                            )
-                        }
+                        return {"error": (f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}")}
                     ws = wb[sheet]
                 else:
                     ws = wb.active
@@ -336,10 +319,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -366,10 +346,7 @@ def register_tools(mcp: FastMCP) -> None:
                     columns = []
                     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
                     if first_row:
-                        columns = [
-                            str(c) if c is not None else f"Column_{i + 1}"
-                            for i, c in enumerate(first_row)
-                        ]
+                        columns = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(first_row)]
 
                     # Count rows (excluding header)
                     row_count = 0
@@ -419,10 +396,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -486,21 +460,13 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             import duckdb
         except ImportError:
-            return {
-                "error": (
-                    "DuckDB not installed. Install with: "
-                    "pip install duckdb  or  pip install tools[sql]"
-                )
-            }
+            return {"error": ("DuckDB not installed. Install with: pip install duckdb  or  pip install tools[sql]")}
 
         try:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -561,10 +527,7 @@ def register_tools(mcp: FastMCP) -> None:
                         continue
 
                     # Headers from first row
-                    headers = [
-                        str(c) if c is not None else f"Column_{i + 1}"
-                        for i, c in enumerate(rows[0])
-                    ]
+                    headers = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(rows[0])]
 
                     # Data rows
                     records = []
@@ -580,9 +543,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if records:
                         df = pd.DataFrame(records)
                         con.register(f"temp_{table_name}", df)
-                        con.execute(
-                            f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}'
-                        )
+                        con.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}')
                     else:
                         # Empty table
                         cols_sql = ", ".join(f'"{h}" VARCHAR' for h in headers)
@@ -624,8 +585,7 @@ def register_tools(mcp: FastMCP) -> None:
             error_msg = str(e)
             if "Catalog Error" in error_msg or "Table" in error_msg:
                 return {
-                    "error": f"SQL error: {error_msg}. "
-                    "Use 'data' for target sheet or sheet names with underscores."
+                    "error": f"SQL error: {error_msg}. Use 'data' for target sheet or sheet names with underscores."
                 }
             return {"error": f"Query failed: {error_msg}"}
 
@@ -656,10 +616,7 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
@@ -675,9 +632,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "search_term cannot be empty"}
 
             if match_type not in ("contains", "exact", "starts_with", "ends_with"):
-                return {
-                    "error": "match_type must be 'contains', 'exact', 'starts_with', or 'ends_with'"
-                }
+                return {"error": "match_type must be 'contains', 'exact', 'starts_with', or 'ends_with'"}
 
             # Prepare search term
             term = search_term if case_sensitive else search_term.lower()
@@ -699,15 +654,10 @@ def register_tools(mcp: FastMCP) -> None:
                     headers = []
                     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
                     if first_row:
-                        headers = [
-                            str(c) if c is not None else f"Column_{i + 1}"
-                            for i, c in enumerate(first_row)
-                        ]
+                        headers = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(first_row)]
 
                     # Search data rows only (skip header row)
-                    for row_idx, row in enumerate(
-                        ws.iter_rows(min_row=2, values_only=True), start=2
-                    ):
+                    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                         for col_idx, cell_value in enumerate(row):
                             if cell_value is None:
                                 continue
@@ -728,11 +678,7 @@ def register_tools(mcp: FastMCP) -> None:
                                 is_match = compare_val.endswith(term)
 
                             if is_match:
-                                col_name = (
-                                    headers[col_idx]
-                                    if col_idx < len(headers)
-                                    else f"Column_{col_idx + 1}"
-                                )
+                                col_name = headers[col_idx] if col_idx < len(headers) else f"Column_{col_idx + 1}"
                                 matches.append(
                                     {
                                         "sheet": sheet_name,

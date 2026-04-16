@@ -60,9 +60,7 @@ def finalize_queen_prompt(text: str, has_vision: bool) -> str:
 _appendices = _build_appendices()
 
 # GCU guide — shared between planning and building via _shared_building_knowledge.
-_gcu_section = (
-    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide) if _is_gcu_enabled() and _gcu_guide else ""
-)
+_gcu_section = ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide) if _is_gcu_enabled() and _gcu_guide else ""
 
 # Tools available to phases.
 _SHARED_TOOLS = [
@@ -101,7 +99,7 @@ _QUEEN_PLANNING_TOOLS = [
 _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
- ]
+]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 # No backward transitions — staging only goes forward to running.
@@ -933,8 +931,8 @@ You are the agent. You execute directly.
 - If execution is possible → proceed
 - If not → simulate realistically and label it clearly
 
-1. Understand the task  
-2. Plan briefly (1–5 bullets, no system design)  
+1. Understand the task
+2. Plan briefly (1–5 bullets, no system design)
 3. **Do the work yourself, inline. One real instance.** Open the \
    browser, call the real API, write to the real file, send the \
    real message. Use your actual tools against real state. This \
@@ -949,18 +947,18 @@ If action is irreversible or affects real systems → show and confirm before ex
 - What worked / failed
 - Key learnings
 
-5. Iterate inline until the process is reliable  
+5. Iterate inline until the process is reliable
 
-6. Only then consider scaling  
+6. Only then consider scaling
 
-**Hard rule:** no scaling before one successful inline run  
+**Hard rule:** no scaling before one successful inline run
 if you finish one sucessful inline run, follow **Scaling order:**
 - Repeat inline (≤10 items)
 - Parallel workers (batch, immediate results)
 - Colony (only for recurring/background tasks)
 
 
-**Exception:**  
+**Exception:**
 If task is conceptual/strategic → skip execution and answer directly
 """
 

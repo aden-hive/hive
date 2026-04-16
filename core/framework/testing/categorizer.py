@@ -81,9 +81,7 @@ class ErrorCategorizer:
     def __init__(self):
         """Initialize categorizer with compiled patterns."""
         self._logic_patterns = [re.compile(p, re.IGNORECASE) for p in self.LOGIC_ERROR_PATTERNS]
-        self._impl_patterns = [
-            re.compile(p, re.IGNORECASE) for p in self.IMPLEMENTATION_ERROR_PATTERNS
-        ]
+        self._impl_patterns = [re.compile(p, re.IGNORECASE) for p in self.IMPLEMENTATION_ERROR_PATTERNS]
         self._edge_patterns = [re.compile(p, re.IGNORECASE) for p in self.EDGE_CASE_PATTERNS]
 
     def categorize(self, result: TestResult) -> ErrorCategory | None:
@@ -192,8 +190,7 @@ class ErrorCategorizer:
                 "The goal specification may not accurately describe the desired behavior."
             ),
             ErrorCategory.IMPLEMENTATION_ERROR: (
-                "Fix the code in agent nodes/edges. "
-                "There's a bug in the implementation that needs to be corrected."
+                "Fix the code in agent nodes/edges. There's a bug in the implementation that needs to be corrected."
             ),
             ErrorCategory.EDGE_CASE: (
                 "Add a new test for this edge case scenario. "
@@ -226,17 +223,14 @@ class ErrorCategorizer:
                 "action": "Fix nodes/edges implementation",
                 "restart_required": False,
                 "description": (
-                    "There's a code bug. Fix the agent implementation, "
-                    "then re-run Eval (skip Goal stage)."
+                    "There's a code bug. Fix the agent implementation, then re-run Eval (skip Goal stage)."
                 ),
             },
             ErrorCategory.EDGE_CASE: {
                 "stage": "Eval",
                 "action": "Add new test only",
                 "restart_required": False,
-                "description": (
-                    "This is a new scenario. Add a test for it and continue in the Eval stage."
-                ),
+                "description": ("This is a new scenario. Add a test for it and continue in the Eval stage."),
             },
         }
         return guidance.get(

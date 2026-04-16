@@ -150,28 +150,19 @@ def _is_colony_dir(path: Path) -> bool:
     """Check if a directory is a colony with worker config files."""
     if not path.is_dir():
         return False
-    return any(
-        f.suffix == ".json"
-        and f.stem not in _EXCLUDED_JSON_STEMS
-        for f in path.iterdir()
-        if f.is_file()
-    )
+    return any(f.suffix == ".json" and f.stem not in _EXCLUDED_JSON_STEMS for f in path.iterdir() if f.is_file())
 
 
 def _find_worker_configs(colony_dir: Path) -> list[Path]:
     """Find all worker config JSON files in a colony directory."""
     return sorted(
-        p
-        for p in colony_dir.iterdir()
-        if p.is_file()
-        and p.suffix == ".json"
-        and p.stem not in _EXCLUDED_JSON_STEMS
+        p for p in colony_dir.iterdir() if p.is_file() and p.suffix == ".json" and p.stem not in _EXCLUDED_JSON_STEMS
     )
 
 
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     """Extract worker count, tool count, and tags from a colony directory."""
-    tool_count, tags = 0, []
+    tags: list[str] = []
 
     worker_configs = _find_worker_configs(agent_path)
     if worker_configs:
@@ -251,9 +242,6 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     pass
 
             node_count = len(worker_entries)
-            all_tools: set[str] = set()
-            for w in worker_entries:
-                pass  # tool_count already per-worker
             tool_count = max((w.tool_count for w in worker_entries), default=0)
 
             entries.append(

@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-from framework.orchestrator.context_handoff import ContextHandoff, HandoffContext
 from framework.agent_loop.conversation import NodeConversation
 from framework.llm.mock import MockLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse
+from framework.orchestrator.context_handoff import ContextHandoff, HandoffContext
 
 # ---------------------------------------------------------------------------
 # Helpers

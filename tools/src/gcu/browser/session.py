@@ -19,9 +19,7 @@ DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_NAVIGATION_TIMEOUT_MS = 60000
 
 # ContextVar for profile routing (inherited from legacy code)
-_active_profile: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "hive_gcu_profile", default="default"
-)
+_active_profile: contextvars.ContextVar[str] = contextvars.ContextVar("hive_gcu_profile", default="default")
 
 
 def set_active_profile(profile: str) -> contextvars.Token:

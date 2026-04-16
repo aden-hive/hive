@@ -109,7 +109,9 @@ terminal_nodes = []  # Forever-alive
 
 # Module-level vars read by AgentLoader.load()
 conversation_mode = "continuous"
-identity_prompt = "You are a helpful meeting scheduler assistant that manages calendar availability and sends confirmations."
+identity_prompt = (
+    "You are a helpful meeting scheduler assistant that manages calendar availability and sends confirmations."
+)
 loop_config = {
     "max_iterations": 100,
     "max_tool_calls_per_turn": 20,
@@ -200,9 +202,7 @@ class MeetingScheduler:
             await self._agent_runtime.stop()
         self._agent_runtime = None
 
-    async def trigger_and_wait(
-        self, entry_point="default", input_data=None, timeout=None, session_state=None
-    ):
+    async def trigger_and_wait(self, entry_point="default", input_data=None, timeout=None, session_state=None):
         if self._agent_runtime is None:
             raise RuntimeError("Agent not started. Call start() first.")
         return await self._agent_runtime.trigger_and_wait(

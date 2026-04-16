@@ -200,9 +200,7 @@ async def test_autocomplete():
         print(f"Value after fast typing: '{fast_value}'")
 
         # Check events
-        events_result = await bridge.evaluate(
-            tab_id, "(function() { return window.inputEvents; })()"
-        )
+        events_result = await bridge.evaluate(tab_id, "(function() { return window.inputEvents; })()")
         print(f"Events logged: {events_result.get('result', [])}")
 
         # Test 2: Slow typing (with delay) - should work
@@ -220,8 +218,7 @@ async def test_autocomplete():
         # Check if dropdown appeared
         dropdown_result = await bridge.evaluate(
             tab_id,
-            "(function() { return document.querySelectorAll("
-            "'.autocomplete-items div').length; })()",
+            "(function() { return document.querySelectorAll('.autocomplete-items div').length; })()",
         )
         dropdown_count = dropdown_result.get("result", 0)
         print(f"Dropdown items: {dropdown_count}")

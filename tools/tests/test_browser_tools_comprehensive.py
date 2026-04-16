@@ -96,9 +96,7 @@ class TestMultipleSubagentsTabGroups:
     """Tests for multiple subagents creating and managing multiple tab groups."""
 
     @pytest.mark.asyncio
-    async def test_multiple_agents_create_separate_tab_groups(
-        self, mcp: FastMCP, mock_bridge: MagicMock
-    ):
+    async def test_multiple_agents_create_separate_tab_groups(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Multiple subagents should each create their own tab group."""
         call_count = 0
 
@@ -127,9 +125,7 @@ class TestMultipleSubagentsTabGroups:
         assert all(r.get("ok") for r in results)
 
     @pytest.mark.asyncio
-    async def test_concurrent_tab_operations_different_groups(
-        self, mcp: FastMCP, mock_bridge: MagicMock
-    ):
+    async def test_concurrent_tab_operations_different_groups(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Tab operations in different groups should not interfere."""
         group1_tabs = [
             {"id": 101, "url": "https://site1.com", "title": "Site 1"},
@@ -453,9 +449,7 @@ class TestNavigation:
 
         assert result.get("ok") is True
         # The bridge.navigate is called with wait_until as keyword argument
-        mock_bridge.navigate.assert_awaited_once_with(
-            100, "https://example.com", wait_until="networkidle"
-        )
+        mock_bridge.navigate.assert_awaited_once_with(100, "https://example.com", wait_until="networkidle")
 
     @pytest.mark.asyncio
     async def test_navigation_history(self, mcp: FastMCP, mock_bridge: MagicMock):
@@ -631,9 +625,7 @@ class TestAdvancedTools:
     @pytest.mark.asyncio
     async def test_wait_for_selector_timeout(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test wait_for_selector timeout behavior."""
-        mock_bridge.wait_for_selector = AsyncMock(
-            side_effect=TimeoutError("Element not found within timeout")
-        )
+        mock_bridge.wait_for_selector = AsyncMock(side_effect=TimeoutError("Element not found within timeout"))
 
         register_advanced_tools(mcp)
         browser_wait = mcp._tool_manager._tools["browser_wait"].fn
@@ -652,9 +644,7 @@ class TestAdvancedTools:
     @pytest.mark.asyncio
     async def test_evaluate_with_return_value(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test JavaScript evaluation with return value."""
-        mock_bridge.evaluate = AsyncMock(
-            return_value={"result": {"value": {"status": "success", "count": 42}}}
-        )
+        mock_bridge.evaluate = AsyncMock(return_value={"result": {"value": {"status": "success", "count": 42}}})
 
         register_advanced_tools(mcp)
         browser_evaluate = mcp._tool_manager._tools["browser_evaluate"].fn
@@ -764,9 +754,7 @@ class TestIFWrapping:
     """Tests for JavaScript IIFE wrapping to handle return statements."""
 
     @pytest.mark.asyncio
-    async def test_evaluate_passes_script_through_to_bridge(
-        self, mcp: FastMCP, mock_bridge: MagicMock
-    ):
+    async def test_evaluate_passes_script_through_to_bridge(self, mcp: FastMCP, mock_bridge: MagicMock):
         """browser_evaluate should pass the script through to bridge.evaluate unchanged.
 
         IIFE wrapping happens inside bridge.evaluate (see bridge.py), not in
@@ -798,9 +786,7 @@ class TestIFWrapping:
     @pytest.mark.asyncio
     async def test_evaluate_complex_script(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test complex multi-line script execution."""
-        mock_bridge.evaluate = AsyncMock(
-            return_value={"result": {"value": {"total": 100, "filtered": 50}}}
-        )
+        mock_bridge.evaluate = AsyncMock(return_value={"result": {"value": {"total": 100, "filtered": 50}}})
 
         register_advanced_tools(mcp)
         browser_evaluate = mcp._tool_manager._tools["browser_evaluate"].fn

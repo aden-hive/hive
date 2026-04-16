@@ -179,12 +179,8 @@ async def _interactive_shell(verbose=False):
                     click.echo("Goodbye!")
                     break
 
-                contacts = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Contacts (JSON)> "
-                )
-                background = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Your background/role> "
-                )
+                contacts = await asyncio.get_event_loop().run_in_executor(None, input, "Contacts (JSON)> ")
+                background = await asyncio.get_event_loop().run_in_executor(None, input, "Your background/role> ")
 
                 if not contacts.strip():
                     continue

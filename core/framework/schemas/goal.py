@@ -25,9 +25,7 @@ class GoalStatus(StrEnum):
 class SuccessCriterion(BaseModel):
     id: str
     description: str = Field(description="Human-readable description of what success looks like")
-    metric: str = Field(
-        description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'"
-    )
+    metric: str = Field(description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'")
     type: str = Field(default="success_rate", description="Runtime evaluation type")
     target: Any = Field(description="The target value or condition")
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relative importance (0-1)")
@@ -39,15 +37,9 @@ class SuccessCriterion(BaseModel):
 class Constraint(BaseModel):
     id: str
     description: str
-    constraint_type: str = Field(
-        description="Type: 'hard' (must not violate) or 'soft' (prefer not to violate)"
-    )
-    category: str = Field(
-        default="general", description="Category: 'time', 'cost', 'safety', 'scope', 'quality'"
-    )
-    check: str = Field(
-        default="", description="How to check: expression, function name, or 'llm_judge'"
-    )
+    constraint_type: str = Field(description="Type: 'hard' (must not violate) or 'soft' (prefer not to violate)")
+    category: str = Field(default="general", description="Category: 'time', 'cost', 'safety', 'scope', 'quality'")
+    check: str = Field(default="", description="How to check: expression, function name, or 'llm_judge'")
 
     model_config = {"extra": "allow"}
 

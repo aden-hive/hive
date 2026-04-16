@@ -58,9 +58,7 @@ def register_gcu_tools(
 
         register_browser(mcp)
         # Get browser tool names
-        browser_tools = [
-            name for name in mcp._tool_manager._tools.keys() if name.startswith("browser_")
-        ]
+        browser_tools = [name for name in mcp._tool_manager._tools.keys() if name.startswith("browser_")]
         registered.extend(browser_tools)
 
     # Future capabilities (not yet implemented)

@@ -235,9 +235,7 @@ async def _interactive_shell(verbose: bool = False) -> None:
     try:
         while True:
             try:
-                user_input = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Competitors> "
-                )
+                user_input = await asyncio.get_event_loop().run_in_executor(None, input, "Competitors> ")
                 if user_input.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break

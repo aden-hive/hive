@@ -81,9 +81,7 @@ class _GoogleSheetsClient:
         body: dict[str, Any] = {"properties": {"title": title}}
 
         if sheet_titles:
-            body["sheets"] = [
-                {"properties": {"title": sheet_title}} for sheet_title in sheet_titles
-            ]
+            body["sheets"] = [{"properties": {"title": sheet_title}} for sheet_title in sheet_titles]
 
         response = httpx.post(
             GOOGLE_SHEETS_API_BASE,
@@ -260,9 +258,7 @@ def register_tools(
             token = credentials.get("google")
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('google'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('google'), got {type(token).__name__}")
             return token
         return os.getenv("GOOGLE_ACCESS_TOKEN")
 
@@ -272,10 +268,7 @@ def register_tools(
         if not token:
             return {
                 "error": "Google Sheets credentials not configured",
-                "help": (
-                    "Set GOOGLE_ACCESS_TOKEN environment variable "
-                    "or configure 'google' via credential store"
-                ),
+                "help": ("Set GOOGLE_ACCESS_TOKEN environment variable or configure 'google' via credential store"),
             }
         return _GoogleSheetsClient(token)
 
@@ -425,9 +418,7 @@ def register_tools(
             except (json.JSONDecodeError, ValueError):
                 return {"error": "values is not valid JSON"}
         if not isinstance(values, list):
-            return {
-                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
-            }
+            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
         try:
             return client.update_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:
@@ -473,9 +464,7 @@ def register_tools(
             except (json.JSONDecodeError, ValueError):
                 return {"error": "values is not valid JSON"}
         if not isinstance(values, list):
-            return {
-                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
-            }
+            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
         try:
             return client.append_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:

@@ -149,7 +149,6 @@ from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .zoom_tool import register_tools as register_zoom
 
-
 # Tool names registered by `_register_verified()`. Populated on first call.
 # Consumed by the `__aden_verified_manifest` sentinel tool so downstream
 # registries (e.g. the queen's MCP loader) can gate free/credential-less tools

@@ -18,11 +18,11 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 # Show our provider's retry/stream logs
 logging.getLogger("framework.llm.litellm").setLevel(logging.DEBUG)
 
-from framework.config import RuntimeConfig  # noqa: E402
 from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode  # noqa: E402
 from framework.agent_loop.internals.types import LoopConfig  # noqa: E402
-from framework.orchestrator.node import DataBuffer, NodeContext, NodeResult, NodeSpec  # noqa: E402
+from framework.config import RuntimeConfig  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
+from framework.orchestrator.node import DataBuffer, NodeContext, NodeResult, NodeSpec  # noqa: E402
 
 
 def make_provider() -> LiteLLMProvider:
@@ -83,9 +83,7 @@ def make_context(
     )
 
 
-async def run_test(
-    name: str, llm: LiteLLMProvider, system: str, output_keys: list[str]
-) -> NodeResult:
+async def run_test(name: str, llm: LiteLLMProvider, system: str, output_keys: list[str]) -> NodeResult:
     print(f"\n{'=' * 60}")
     print(f"TEST: {name}")
     print(f"{'=' * 60}")
@@ -146,11 +144,7 @@ async def main():
                 if isinstance(event, TextDeltaEvent):
                     text = event.snapshot
                 elif isinstance(event, FinishEvent):
-                    print(
-                        f"  Finish: stop={event.stop_reason}"
-                        f" in={event.input_tokens}"
-                        f" out={event.output_tokens}"
-                    )
+                    print(f"  Finish: stop={event.stop_reason} in={event.input_tokens} out={event.output_tokens}")
                 elif isinstance(event, StreamErrorEvent):
                     print(f"  StreamError: {event.error} (recoverable={event.recoverable})")
                 elif isinstance(event, ToolCallEvent):

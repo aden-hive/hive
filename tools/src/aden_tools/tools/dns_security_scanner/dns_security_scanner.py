@@ -102,8 +102,7 @@ def _check_spf(resolver: dns.resolver.Resolver, domain: str) -> dict:
                 if "~all" in txt:
                     policy = "softfail"
                     issues.append(
-                        "Uses ~all (softfail) instead of -all (hardfail). "
-                        "Spoofed emails may still be delivered."
+                        "Uses ~all (softfail) instead of -all (hardfail). Spoofed emails may still be delivered."
                     )
                 elif "-all" in txt:
                     policy = "hardfail"
@@ -153,8 +152,7 @@ def _check_dmarc(resolver: dns.resolver.Resolver, domain: str) -> dict:
 
                 if policy == "none":
                     issues.append(
-                        "DMARC policy is 'none' — spoofed emails are not blocked. "
-                        "Upgrade to p=quarantine or p=reject."
+                        "DMARC policy is 'none' — spoofed emails are not blocked. Upgrade to p=quarantine or p=reject."
                     )
                 elif policy == "quarantine":
                     pass  # Acceptable
@@ -210,9 +208,7 @@ def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
 
     return {
         "enabled": False,
-        "issues": [
-            "DNSSEC not enabled. The domain is vulnerable to DNS spoofing and cache poisoning."
-        ],
+        "issues": ["DNSSEC not enabled. The domain is vulnerable to DNS spoofing and cache poisoning."],
     }
 
 

@@ -136,9 +136,7 @@ class StreamDecisionTracker:
         self._run_locks[execution_id] = asyncio.Lock()
         self._current_nodes[execution_id] = "unknown"
 
-        logger.debug(
-            f"Started run {run_id} for execution {execution_id} in stream {self.stream_id}"
-        )
+        logger.debug(f"Started run {run_id} for execution {execution_id} in stream {self.stream_id}")
         return run_id
 
     def end_run(
@@ -334,10 +332,7 @@ class StreamDecisionTracker:
         """
         run = self._runs.get(execution_id)
         if run is None:
-            logger.warning(
-                f"report_problem called but no run for execution {execution_id}: "
-                f"[{severity}] {description}"
-            )
+            logger.warning(f"report_problem called but no run for execution {execution_id}: [{severity}] {description}")
             return ""
 
         return run.add_problem(

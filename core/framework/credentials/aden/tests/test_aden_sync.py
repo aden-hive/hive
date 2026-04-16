@@ -493,9 +493,7 @@ class TestAdenCachedStorage:
         assert loaded is not None
         assert loaded.keys["access_token"].value.get_secret_value() == "cached-token"
 
-    def test_load_from_aden_when_stale(
-        self, cached_storage, local_storage, provider, mock_client, aden_response
-    ):
+    def test_load_from_aden_when_stale(self, cached_storage, local_storage, provider, mock_client, aden_response):
         """Test load fetches from Aden when cache is stale."""
         # Create stale cached credential
         cred = CredentialObject(
@@ -521,9 +519,7 @@ class TestAdenCachedStorage:
         assert loaded is not None
         assert loaded.keys["access_token"].value.get_secret_value() == "test-access-token"
 
-    def test_load_falls_back_to_stale_when_aden_fails(
-        self, cached_storage, local_storage, provider, mock_client
-    ):
+    def test_load_falls_back_to_stale_when_aden_fails(self, cached_storage, local_storage, provider, mock_client):
         """Test load falls back to stale cache when Aden fails."""
         # Create stale cached credential
         cred = CredentialObject(

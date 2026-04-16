@@ -221,9 +221,7 @@ def register_tools(mcp: FastMCP) -> None:
             "framework_version_hidden": framework is None or not _has_version(framework),
             "security_txt_present": security_txt,
             "cookies_secure": all(c.get("secure", False) for c in cookies) if cookies else True,
-            "cookies_httponly": (
-                all(c.get("httponly", False) for c in cookies) if cookies else True
-            ),
+            "cookies_httponly": (all(c.get("httponly", False) for c in cookies) if cookies else True),
         }
 
         return {

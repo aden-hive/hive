@@ -544,9 +544,7 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_bot_management_settings(
-        self, tools_registry, monkeypatch, mock_request
-    ):
+    def test_cloudflare_get_bot_management_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
@@ -580,13 +578,9 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_ddos_protection_settings(
-        self, tools_registry, monkeypatch, mock_request
-    ):
+    def test_cloudflare_get_ddos_protection_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
-        mock_request.return_value = _mock_response(
-            200, {"success": True, "result": {"enabled": True}}
-        )
+        mock_request.return_value = _mock_response(200, {"success": True, "result": {"enabled": True}})
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
@@ -966,9 +960,7 @@ class TestCloudflareTools:
             ),
         ):
             fn = tools_registry["cloudflare_create_access_policy"].fn
-            result = fn(
-                account_id="acct1", application_id="app1", name="p1", decision="allow", include=[]
-            )
+            result = fn(account_id="acct1", application_id="app1", name="p1", decision="allow", include=[])
             assert isinstance(result, dict)
             assert "error" not in result
 

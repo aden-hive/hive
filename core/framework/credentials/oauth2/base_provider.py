@@ -95,9 +95,7 @@ class BaseOAuth2Provider(CredentialProvider):
 
                 self._client = httpx.Client(timeout=self.config.request_timeout)
             except ImportError as e:
-                raise ImportError(
-                    "OAuth2 provider requires 'httpx'. Install with: uv pip install httpx"
-                ) from e
+                raise ImportError("OAuth2 provider requires 'httpx'. Install with: uv pip install httpx") from e
         return self._client
 
     def _close_client(self) -> None:
@@ -311,8 +309,7 @@ class BaseOAuth2Provider(CredentialProvider):
         except OAuth2Error as e:
             if e.error == "invalid_grant":
                 raise CredentialRefreshError(
-                    f"Refresh token for '{credential.id}' is invalid or revoked. "
-                    "Re-authorization required."
+                    f"Refresh token for '{credential.id}' is invalid or revoked. Re-authorization required."
                 ) from e
             raise CredentialRefreshError(f"Failed to refresh '{credential.id}': {e}") from e
 
@@ -422,9 +419,7 @@ class BaseOAuth2Provider(CredentialProvider):
         if response.status_code != 200 or "error" in response_data:
             error = response_data.get("error", "unknown_error")
             description = response_data.get("error_description", response.text)
-            raise OAuth2Error(
-                error=error, description=description, status_code=response.status_code
-            )
+            raise OAuth2Error(error=error, description=description, status_code=response.status_code)
 
         return OAuth2Token.from_token_response(response_data)
 

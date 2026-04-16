@@ -959,9 +959,7 @@ class TestConversationIntegration:
                 }
             ],
         )
-        await conv.add_tool_result(
-            "call_calc", "ZeroDivisionError: division by zero", is_error=True
-        )
+        await conv.add_tool_result("call_calc", "ZeroDivisionError: division by zero", is_error=True)
         await conv.add_assistant_message("The calculation failed: division by zero is undefined.")
 
         # Restore
@@ -1113,9 +1111,7 @@ async def _build_tool_heavy_conversation(
 
     # set_output call — must be protected
     so_tc = [_make_tool_call("call_so", "set_output", {"key": "result", "value": "done"})]
-    conv._messages.append(
-        Message(seq=conv._next_seq, role="assistant", content="Setting output", tool_calls=so_tc)
-    )
+    conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="Setting output", tool_calls=so_tc))
     if store:
         await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
     conv._next_seq += 1
@@ -1203,20 +1199,14 @@ class TestAggressiveStructuralCompaction:
 
         # Regular tool call
         tc1 = [_make_tool_call("call_ok", "web_search", {"query": "test"})]
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc1)
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc1))
         conv._next_seq += 1
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="tool", content="results", tool_use_id="call_ok")
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="tool", content="results", tool_use_id="call_ok"))
         conv._next_seq += 1
 
         # Error tool call
         tc2 = [_make_tool_call("call_err", "web_scrape", {"url": "http://broken.com"})]
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc2)
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc2))
         conv._next_seq += 1
         conv._messages.append(
             Message(

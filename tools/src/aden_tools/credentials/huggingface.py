@@ -23,9 +23,7 @@ HUGGINGFACE_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://huggingface.co/settings/tokens",
-        description=(
-            "HuggingFace API token for Hub access (models, datasets, spaces) and Inference API"
-        ),
+        description=("HuggingFace API token for Hub access (models, datasets, spaces) and Inference API"),
         direct_api_key_supported=True,
         api_key_instructions="""To get a HuggingFace token:
 1. Go to https://huggingface.co/settings/tokens

@@ -86,9 +86,7 @@ class TestAirtableGetRecord:
                 return_value=_mock_resp(RECORD_DATA),
             ),
         ):
-            result = tool_fns["airtable_get_record"](
-                base_id="appXXX", table_name="Tasks", record_id="recABC123"
-            )
+            result = tool_fns["airtable_get_record"](base_id="appXXX", table_name="Tasks", record_id="recABC123")
 
         assert result["id"] == "recABC123"
         assert result["fields"]["Status"] == "Active"
@@ -97,16 +95,12 @@ class TestAirtableGetRecord:
 class TestAirtableCreateRecords:
     def test_missing_records(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["airtable_create_records"](
-                base_id="appXXX", table_name="Tasks", records=""
-            )
+            result = tool_fns["airtable_create_records"](base_id="appXXX", table_name="Tasks", records="")
         assert "error" in result
 
     def test_invalid_json(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["airtable_create_records"](
-                base_id="appXXX", table_name="Tasks", records="not json"
-            )
+            result = tool_fns["airtable_create_records"](base_id="appXXX", table_name="Tasks", records="not json")
         assert "error" in result
 
     def test_too_many_records(self, tool_fns):
@@ -114,9 +108,7 @@ class TestAirtableCreateRecords:
 
         records = json.dumps([{"fields": {"Name": f"Item {i}"}} for i in range(11)])
         with patch.dict("os.environ", ENV):
-            result = tool_fns["airtable_create_records"](
-                base_id="appXXX", table_name="Tasks", records=records
-            )
+            result = tool_fns["airtable_create_records"](base_id="appXXX", table_name="Tasks", records=records)
         assert "error" in result
         assert "10" in result["error"]
 

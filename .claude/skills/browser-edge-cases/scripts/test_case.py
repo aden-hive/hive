@@ -137,14 +137,8 @@ async def test_problematic_site(bridge: BeelineBridge, tab_id: int) -> dict:
         changed = False
         for key in after_data:
             if key in before_data:
-                b_val = (
-                    before_data[key].get("scrollTop", 0)
-                    if isinstance(before_data[key], dict)
-                    else 0
-                )
-                a_val = (
-                    after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
-                )
+                b_val = before_data[key].get("scrollTop", 0) if isinstance(before_data[key], dict) else 0
+                a_val = after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
                 if a_val != b_val:
                     print(f"  ✓ CHANGE DETECTED: {key} scrolled from {b_val} to {a_val}")
                     changed = True

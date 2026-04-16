@@ -88,9 +88,7 @@ class TemplateResolver:
             if key_name:
                 value = credential.get_key(key_name)
                 if value is None:
-                    raise CredentialKeyNotFoundError(
-                        f"Key '{key_name}' not found in credential '{cred_id}'"
-                    )
+                    raise CredentialKeyNotFoundError(f"Key '{key_name}' not found in credential '{cred_id}'")
             else:
                 # Use default key
                 value = credential.get_default_key()
@@ -126,9 +124,7 @@ class TemplateResolver:
             ... })
             {"Authorization": "Bearer ghp_xxx", "X-API-Key": "BSAKxxx"}
         """
-        return {
-            key: self.resolve(value, fail_on_missing) for key, value in header_templates.items()
-        }
+        return {key: self.resolve(value, fail_on_missing) for key, value in header_templates.items()}
 
     def resolve_params(
         self,

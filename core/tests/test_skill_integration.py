@@ -121,8 +121,7 @@ class TestEndToEndPipeline:
         skill_dir = tmp_path / ".agents" / "skills" / "my-tool"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: my-tool\ndescription: Tool for testing.\n---\n\n"
-            "## Usage\nUse this tool when testing.\n",
+            "---\nname: my-tool\ndescription: Tool for testing.\n---\n\n## Usage\nUse this tool when testing.\n",
             encoding="utf-8",
         )
 

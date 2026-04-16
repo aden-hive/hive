@@ -114,8 +114,7 @@ class BeelineBridge:
             import websockets
         except ImportError:
             logger.warning(
-                "websockets not installed — Chrome extension bridge disabled. "
-                "Install with: uv pip install websockets"
+                "websockets not installed — Chrome extension bridge disabled. Install with: uv pip install websockets"
             )
             return
 
@@ -133,9 +132,7 @@ class BeelineBridge:
                 "127.0.0.1",
                 port,
                 logger=null_logger,
-                max_size=50
-                * 1024
-                * 1024,  # 50 MB — CDP responses (AX tree, screenshots) can be large
+                max_size=50 * 1024 * 1024,  # 50 MB — CDP responses (AX tree, screenshots) can be large
             )
             logger.info("Beeline bridge listening on ws://127.0.0.1:%d", port)
         except OSError as e:
@@ -186,9 +183,7 @@ class BeelineBridge:
                 pass
             self._status_server = None
 
-    async def _http_status_handler(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def _http_status_handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Minimal asyncio TCP handler serving HTTP GET /status on the status port."""
         try:
             raw = await asyncio.wait_for(reader.read(512), timeout=2.0)
@@ -216,9 +211,7 @@ class BeelineBridge:
                     b"\r\n"
                 )
             else:
-                response = (
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                )
+                response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             writer.write(response)
             await writer.drain()
         except Exception:
@@ -247,14 +240,10 @@ class BeelineBridge:
                     fut = self._pending.pop(msg_id)
                     if not fut.done():
                         if "error" in msg:
-                            log_bridge_message(
-                                "recv", "response", msg_id=msg_id, error=msg["error"]
-                            )
+                            log_bridge_message("recv", "response", msg_id=msg_id, error=msg["error"])
                             fut.set_exception(RuntimeError(msg["error"]))
                         else:
-                            log_bridge_message(
-                                "recv", "response", msg_id=msg_id, result=msg.get("result")
-                            )
+                            log_bridge_message("recv", "response", msg_id=msg_id, result=msg.get("result"))
                             fut.set_result(msg.get("result", {}))
         except Exception:
             pass
@@ -303,9 +292,7 @@ class BeelineBridge:
             # what actually hung — the generic 'cdp' type is useless
             # when ten different CDP calls use the same type.
             detail = f" method={params.get('method')}" if params.get("method") else ""
-            raise RuntimeError(
-                f"Bridge command '{type_}'{detail} timed out after {effective_timeout:.0f}s"
-            ) from None
+            raise RuntimeError(f"Bridge command '{type_}'{detail} timed out after {effective_timeout:.0f}s") from None
         except BaseException:
             # CancelledError or any other exception — remove stale future so a late
             # response from the extension doesn't try to resolve a cancelled future.
@@ -395,9 +382,7 @@ class BeelineBridge:
                         )
                         return result
                 except Exception as retry_exc:
-                    logger.debug(
-                        "CDP reattach+retry for tab %d failed: %s", tab_id, retry_exc
-                    )
+                    logger.debug("CDP reattach+retry for tab %d failed: %s", tab_id, retry_exc)
             raise
 
     async def _try_enable_domain(self, tab_id: int, domain: str) -> None:
@@ -423,9 +408,7 @@ class BeelineBridge:
         Returns {"groupId": int, "tabId": int}.
         """
         result = await self._send("context.create", agentId=agent_id)
-        log_context_event(
-            "create", agent_id, group_id=result.get("groupId"), tab_id=result.get("tabId")
-        )
+        log_context_event("create", agent_id, group_id=result.get("groupId"), tab_id=result.get("tabId"))
         return result
 
     async def destroy_context(self, group_id: int) -> dict:
@@ -683,9 +666,7 @@ class BeelineBridge:
         deadline = poll_start + timeout_ms / 1000
         node_id = None
         while asyncio.get_event_loop().time() < deadline:
-            result = await self._cdp(
-                tab_id, "DOM.querySelector", {"nodeId": root_id, "selector": selector}
-            )
+            result = await self._cdp(tab_id, "DOM.querySelector", {"nodeId": root_id, "selector": selector})
             node_id = result.get("nodeId")
             if node_id:
                 break
@@ -781,9 +762,7 @@ class BeelineBridge:
                 # JavaScript click succeeded — highlight element
                 rx = value.get("x", 0) - value.get("width", 0) / 2
                 ry = value.get("y", 0) - value.get("height", 0) / 2
-                await self.highlight_rect(
-                    tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector
-                )
+                await self.highlight_rect(tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector)
                 return {
                     "ok": True,
                     "action": "click",
@@ -925,7 +904,7 @@ class BeelineBridge:
         button_map = {"left": "left", "right": "right", "middle": "middle"}
         cdp_button = button_map.get(button, "left")
 
-        from .tools.inspection import _screenshot_scales, _screenshot_css_scales
+        from .tools.inspection import _screenshot_css_scales, _screenshot_scales
 
         phys_scale = _screenshot_scales.get(tab_id, "unset")
         css_scale = _screenshot_css_scales.get(tab_id, "unset")
@@ -1116,9 +1095,7 @@ class BeelineBridge:
         )
         rect = (rect_result or {}).get("result")
         if rect:
-            await self.highlight_rect(
-                tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector
-            )
+            await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     # CDP Input.dispatchKeyEvent modifiers bitmask.
@@ -1130,12 +1107,12 @@ class BeelineBridge:
     # event, which is what actually triggers browser shortcuts like
     # Ctrl+A, Cmd+L, Shift+Tab.
     _MODIFIER_KEYS = {
-        "alt":     {"key": "Alt",     "code": "AltLeft",     "windowsVirtualKeyCode": 18},
-        "ctrl":    {"key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17},
+        "alt": {"key": "Alt", "code": "AltLeft", "windowsVirtualKeyCode": 18},
+        "ctrl": {"key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17},
         "control": {"key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17},
-        "meta":    {"key": "Meta",    "code": "MetaLeft",    "windowsVirtualKeyCode": 91},
-        "cmd":     {"key": "Meta",    "code": "MetaLeft",    "windowsVirtualKeyCode": 91},
-        "shift":   {"key": "Shift",   "code": "ShiftLeft",   "windowsVirtualKeyCode": 16},
+        "meta": {"key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91},
+        "cmd": {"key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91},
+        "shift": {"key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16},
     }
 
     def _cdp_modifier_mask(self, modifiers: list[str] | None) -> int:
@@ -1169,9 +1146,7 @@ class BeelineBridge:
         if selector:
             doc = await self._cdp(tab_id, "DOM.getDocument")
             root_id = doc.get("root", {}).get("nodeId")
-            result = await self._cdp(
-                tab_id, "DOM.querySelector", {"nodeId": root_id, "selector": selector}
-            )
+            result = await self._cdp(tab_id, "DOM.querySelector", {"nodeId": root_id, "selector": selector})
             node_id = result.get("nodeId")
             if node_id:
                 await self._cdp(tab_id, "DOM.focus", {"nodeId": node_id})
@@ -1798,9 +1773,7 @@ class BeelineBridge:
         )
         rect = (rect_result or {}).get("result")
         if rect:
-            await self.highlight_rect(
-                tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector
-            )
+            await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
 
         return {"ok": True, "action": "select", "selector": selector, "selected": values}
 
@@ -1814,9 +1787,7 @@ class BeelineBridge:
         stripped = script.strip()
 
         # Already a complete IIFE — run as-is, no re-wrapping
-        is_iife = stripped.startswith("(function") and (
-            stripped.endswith("})()") or stripped.endswith("})();")
-        )
+        is_iife = stripped.startswith("(function") and (stripped.endswith("})()") or stripped.endswith("})();"))
         # Arrow-function IIFE: (() => { ... })()
         is_arrow_iife = stripped.startswith("(()") and (
             stripped.endswith("})()")
@@ -1851,9 +1822,7 @@ class BeelineBridge:
         if "exceptionDetails" in result:
             ex = result["exceptionDetails"]
             # Extract the actual exception message from the nested structure
-            ex_value = (ex.get("exception") or {}).get("description") or ex.get(
-                "text", "Script error"
-            )
+            ex_value = (ex.get("exception") or {}).get("description") or ex.get("text", "Script error")
             return {"ok": False, "error": ex_value}
 
         # The CDP response structure is {result: {type: ..., value: ...}}
@@ -2175,9 +2144,7 @@ class BeelineBridge:
 
         return {"ok": False, "error": f"Element not found: {selector}"}
 
-    async def get_attribute(
-        self, tab_id: int, selector: str, attribute: str, timeout_ms: int = 30000
-    ) -> dict:
+    async def get_attribute(self, tab_id: int, selector: str, attribute: str, timeout_ms: int = 30000) -> dict:
         """Get an attribute value of an element."""
         await self.cdp_attach(tab_id)
 

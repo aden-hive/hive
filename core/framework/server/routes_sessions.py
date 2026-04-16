@@ -59,9 +59,7 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_phase": phase_state.phase
-        if phase_state
-        else ("staging" if session.colony_runtime else "planning"),
+        "queen_phase": phase_state.phase if phase_state else ("staging" if session.colony_runtime else "planning"),
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
         "queen_id": getattr(phase_state, "queen_id", None) if phase_state else None,
         "queen_name": (phase_state.queen_profile or {}).get("name") if phase_state else None,
@@ -229,11 +227,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
                 "trigger_config": ep.trigger_config,
-                **(
-                    {"next_fire_in": nf}
-                    if (nf := rt.get_timer_next_fire_in(ep.id)) is not None
-                    else {}
-                ),
+                **({"next_fire_in": nf} if (nf := rt.get_timer_next_fire_in(ep.id)) is not None else {}),
             }
             for ep in rt.get_entry_points()
         ]
@@ -383,11 +377,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             "entry_node": ep.entry_node,
             "trigger_type": ep.trigger_type,
             "trigger_config": ep.trigger_config,
-            **(
-                {"next_fire_in": nf}
-                if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
-                else {}
-            ),
+            **({"next_fire_in": nf} if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None else {}),
         }
         for ep in eps
     ]
@@ -468,21 +458,13 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
                         )
                 except ImportError:
                     return web.json_response(
-                        {
-                            "error": (
-                                "croniter package not installed — cannot validate cron expression."
-                            )
-                        },
+                        {"error": ("croniter package not installed — cannot validate cron expression.")},
                         status=500,
                     )
                 merged_trigger_config.pop("interval_minutes", None)
             elif interval is None:
                 return web.json_response(
-                    {
-                        "error": (
-                            "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."
-                        )
-                    },
+                    {"error": ("Timer trigger needs 'cron' or 'interval_minutes' in trigger_config.")},
                     status=400,
                 )
             elif not isinstance(interval, (int, float)) or interval <= 0:
@@ -580,9 +562,7 @@ async def handle_activate_trigger(request: web.Request) -> web.Response:
         )
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
-        return web.json_response(
-            {"status": "already_active", "trigger_id": trigger_id}
-        )
+        return web.json_response({"status": "already_active", "trigger_id": trigger_id})
 
     from framework.tools.queen_lifecycle_tools import (
         _persist_active_triggers,
@@ -646,9 +626,7 @@ async def handle_deactivate_trigger(request: web.Request) -> web.Response:
 
     trigger_id = request.match_info["trigger_id"]
     if trigger_id not in getattr(session, "active_trigger_ids", set()):
-        return web.json_response(
-            {"status": "already_inactive", "trigger_id": trigger_id}
-        )
+        return web.json_response({"status": "already_inactive", "trigger_id": trigger_id})
 
     task = session.active_timer_tasks.pop(trigger_id, None)
     if task and not task.done():
@@ -867,9 +845,7 @@ async def handle_delete_agent(request: web.Request) -> web.Response:
         try:
             shutil.rmtree(resolved)
         except OSError as e:
-            return web.json_response(
-                {"error": f"Failed to delete agent directory: {e}"}, status=500
-            )
+            return web.json_response({"error": f"Failed to delete agent directory: {e}"}, status=500)
 
     return web.json_response({"deleted": str(resolved)})
 
@@ -932,9 +908,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
-    app.router.add_patch(
-        "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
-    )
+    app.router.add_patch("/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task)
     app.router.add_post(
         "/api/sessions/{session_id}/triggers/{trigger_id}/activate",
         handle_activate_trigger,

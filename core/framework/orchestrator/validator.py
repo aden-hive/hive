@@ -120,9 +120,7 @@ class OutputValidator:
         nullable_keys = nullable_keys or []
 
         if not isinstance(output, dict):
-            return ValidationResult(
-                success=False, errors=[f"Output is not a dict, got {type(output).__name__}"]
-            )
+            return ValidationResult(success=False, errors=[f"Output is not a dict, got {type(output).__name__}"])
 
         for key in expected_keys:
             if key not in output:
@@ -237,9 +235,7 @@ class OutputValidator:
 
             # Check for overly long values
             if len(value) > max_length:
-                errors.append(
-                    f"Output key '{key}' exceeds max length ({len(value)} > {max_length})"
-                )
+                errors.append(f"Output key '{key}' exceeds max length ({len(value)} > {max_length})")
 
         return ValidationResult(success=len(errors) == 0, errors=errors)
 

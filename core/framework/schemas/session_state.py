@@ -237,9 +237,7 @@ class SessionState(BaseModel):
             progress=SessionProgress(
                 current_node=result.paused_at or (result.path[-1] if result.path else None),
                 paused_at=result.paused_at,
-                resume_from=result.session_state.get("resume_from")
-                if result.session_state
-                else None,
+                resume_from=result.session_state.get("resume_from") if result.session_state else None,
                 steps_executed=result.steps_executed,
                 total_tokens=result.total_tokens,
                 total_latency_ms=result.total_latency_ms,
@@ -256,9 +254,7 @@ class SessionState(BaseModel):
                 error=result.error,
                 output=result.output,
             ),
-            data_buffer=result.session_state.get(
-                "data_buffer", result.session_state.get("memory", {})
-            )
+            data_buffer=result.session_state.get("data_buffer", result.session_state.get("memory", {}))
             if result.session_state
             else {},
             input_data=input_data or {},

@@ -70,13 +70,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         from pathlib import Path
 
         state_path = (
-            Path.home()
-            / ".hive"
-            / "agents"
-            / session.worker_path.name
-            / "sessions"
-            / worker_session_id
-            / "state.json"
+            Path.home() / ".hive" / "agents" / session.worker_path.name / "sessions" / worker_session_id / "state.json"
         )
         if state_path.exists():
             try:
@@ -97,8 +91,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
                 pass
 
     edges = [
-        {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
-        for e in graph.edges
+        {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority} for e in graph.edges
     ]
     rt = session.colony_runtime
     entry_points = [
@@ -108,11 +101,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
             "entry_node": ep.entry_node,
             "trigger_type": ep.trigger_type,
             "trigger_config": ep.trigger_config,
-            **(
-                {"next_fire_in": nf}
-                if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
-                else {}
-            ),
+            **({"next_fire_in": nf} if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None else {}),
         }
         for ep in reg.entry_points.values()
     ]
@@ -250,9 +239,7 @@ async def handle_node_tools(request: web.Request) -> web.Response:
 def register_routes(app: web.Application) -> None:
     """Register worker inspection routes."""
     app.router.add_get("/api/sessions/{session_id}/colonies/{colony_id}/nodes", handle_list_nodes)
-    app.router.add_get(
-        "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}", handle_get_node
-    )
+    app.router.add_get("/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}", handle_get_node)
     app.router.add_get(
         "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}/criteria",
         handle_node_criteria,

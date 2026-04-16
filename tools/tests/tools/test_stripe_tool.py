@@ -454,9 +454,7 @@ class TestStripeClientSubscriptions:
         sc = self._mock_stripe()
         sc.subscriptions.update.return_value = _subscription()
         with patch.object(self.client, "_client", sc):
-            self.client.update_subscription(
-                "sub_test123", metadata={"note": "updated"}, cancel_at_period_end=True
-            )
+            self.client.update_subscription("sub_test123", metadata={"note": "updated"}, cancel_at_period_end=True)
         call_params = sc.subscriptions.update.call_args[0][1]
         assert call_params["cancel_at_period_end"] is True
         assert call_params["metadata"] == {"note": "updated"}
@@ -494,9 +492,7 @@ class TestStripeClientSubscriptions:
         sc.subscriptions.update.return_value = _subscription(cancel_at_period_end=True)
         with patch.object(self.client, "_client", sc):
             result = self.client.cancel_subscription("sub_test123", at_period_end=True)
-        sc.subscriptions.update.assert_called_once_with(
-            "sub_test123", {"cancel_at_period_end": True}
-        )
+        sc.subscriptions.update.assert_called_once_with("sub_test123", {"cancel_at_period_end": True})
         assert result["cancel_at_period_end"] is True
 
 
@@ -538,9 +534,7 @@ class TestStripeClientPaymentIntents:
         sc.payment_intents.confirm.return_value = _payment_intent(status="succeeded")
         with patch.object(self.client, "_client", sc):
             result = self.client.confirm_payment_intent("pi_test123", payment_method="pm_card_visa")
-        sc.payment_intents.confirm.assert_called_once_with(
-            "pi_test123", {"payment_method": "pm_card_visa"}
-        )
+        sc.payment_intents.confirm.assert_called_once_with("pi_test123", {"payment_method": "pm_card_visa"})
         assert result["status"] == "succeeded"
 
     def test_cancel_payment_intent(self):
@@ -745,9 +739,7 @@ class TestStripeClientInvoiceItems:
         sc = self._mock_stripe()
         sc.invoice_items.list.return_value = _make_stripe_list([_invoice_item()])
         with patch.object(self.client, "_client", sc):
-            result = self.client.list_invoice_items(
-                customer_id="cus_test123", invoice_id="in_test123"
-            )
+            result = self.client.list_invoice_items(customer_id="cus_test123", invoice_id="in_test123")
         call_params = sc.invoice_items.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
         assert call_params["invoice"] == "in_test123"
@@ -1237,16 +1229,12 @@ class TestSubscriptionToolValidation:
         assert "cus_" in result["error"]
 
     def test_create_subscription_invalid_price(self):
-        result = self.fns["stripe_create_subscription"](
-            customer_id="cus_test123", price_id="bad_price"
-        )
+        result = self.fns["stripe_create_subscription"](customer_id="cus_test123", price_id="bad_price")
         assert "error" in result
         assert "price_" in result["error"]
 
     def test_create_subscription_invalid_quantity(self):
-        result = self.fns["stripe_create_subscription"](
-            customer_id="cus_test123", price_id="price_test123", quantity=0
-        )
+        result = self.fns["stripe_create_subscription"](customer_id="cus_test123", price_id="price_test123", quantity=0)
         assert "error" in result
         assert "Quantity" in result["error"]
 
@@ -1371,16 +1359,12 @@ class TestInvoiceItemToolValidation:
         self.fns = _setup_tools()
 
     def test_create_invoice_item_invalid_customer(self):
-        result = self.fns["stripe_create_invoice_item"](
-            customer_id="bad", amount=1000, currency="usd"
-        )
+        result = self.fns["stripe_create_invoice_item"](customer_id="bad", amount=1000, currency="usd")
         assert "error" in result
         assert "cus_" in result["error"]
 
     def test_create_invoice_item_zero_amount(self):
-        result = self.fns["stripe_create_invoice_item"](
-            customer_id="cus_test123", amount=0, currency="usd"
-        )
+        result = self.fns["stripe_create_invoice_item"](customer_id="cus_test123", amount=0, currency="usd")
         assert "error" in result
         assert "non-zero" in result["error"]
 
@@ -1400,9 +1384,7 @@ class TestInvoiceItemToolValidation:
         assert result["id"] == "ii_credit"
 
     def test_create_invoice_item_invalid_currency(self):
-        result = self.fns["stripe_create_invoice_item"](
-            customer_id="cus_test123", amount=1000, currency="INVALID"
-        )
+        result = self.fns["stripe_create_invoice_item"](customer_id="cus_test123", amount=1000, currency="INVALID")
         assert "error" in result
         assert "3-letter" in result["error"]
 
@@ -1447,23 +1429,17 @@ class TestPriceToolValidation:
         assert "price_" in result["error"]
 
     def test_create_price_zero_amount(self):
-        result = self.fns["stripe_create_price"](
-            unit_amount=0, currency="usd", product_id="prod_test123"
-        )
+        result = self.fns["stripe_create_price"](unit_amount=0, currency="usd", product_id="prod_test123")
         assert "error" in result
         assert "positive" in result["error"]
 
     def test_create_price_invalid_currency(self):
-        result = self.fns["stripe_create_price"](
-            unit_amount=999, currency="INVALID", product_id="prod_test123"
-        )
+        result = self.fns["stripe_create_price"](unit_amount=999, currency="INVALID", product_id="prod_test123")
         assert "error" in result
         assert "3-letter" in result["error"]
 
     def test_create_price_invalid_product(self):
-        result = self.fns["stripe_create_price"](
-            unit_amount=999, currency="usd", product_id="bad_id"
-        )
+        result = self.fns["stripe_create_price"](unit_amount=999, currency="usd", product_id="bad_id")
         assert "error" in result
         assert "prod_" in result["error"]
 
@@ -1568,9 +1544,7 @@ def test_stripe_error_propagation(tool_name, kwargs):
     fns = _setup_tools()
     with patch("aden_tools.tools.stripe_tool.stripe_tool._StripeClient") as MockClient:
         method_name = tool_name.replace("stripe_", "")
-        getattr(MockClient.return_value, method_name).side_effect = stripe.APIConnectionError(
-            "Network error"
-        )
+        getattr(MockClient.return_value, method_name).side_effect = stripe.APIConnectionError("Network error")
         result = fns[tool_name](**kwargs)
     assert "error" in result
 

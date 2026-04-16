@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Default registry index URL (Phase 3 repo, may not exist yet)
 _DEFAULT_REGISTRY_URL = (
-    "https://raw.githubusercontent.com/hive-skill-registry/"
-    "hive-skill-registry/main/skill_index.json"
+    "https://raw.githubusercontent.com/hive-skill-registry/hive-skill-registry/main/skill_index.json"
 )
 
 _CACHE_DIR = Path.home() / ".hive" / "registry_cache"

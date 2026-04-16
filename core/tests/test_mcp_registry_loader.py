@@ -97,9 +97,7 @@ def test_registry_precedence_over_existing_mcp_servers(monkeypatch):
     ]
 
     registry = ToolRegistry()
-    registry.register_mcp_server(
-        {"name": "pre", "transport": "stdio", "command": "fake", "args": [], "cwd": None}
-    )
+    registry.register_mcp_server({"name": "pre", "transport": "stdio", "command": "fake", "args": [], "cwd": None})
 
     registry.load_registry_servers(
         resolved_servers,

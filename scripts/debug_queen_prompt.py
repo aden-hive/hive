@@ -188,8 +188,5 @@ if __name__ == "__main__":
         print_independent_prompt()
     else:
         print(f"Unknown phase: {phase}")
-        print(
-            "Usage: uv run scripts/debug_queen_prompt.py "
-            "[planning|building|staging|running|independent|all]"
-        )
+        print("Usage: uv run scripts/debug_queen_prompt.py [planning|building|staging|running|independent|all]")
         sys.exit(1)

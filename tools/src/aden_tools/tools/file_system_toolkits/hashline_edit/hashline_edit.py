@@ -7,6 +7,7 @@ import tempfile
 
 from mcp.server.fastmcp import FastMCP
 
+from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 from aden_tools.hashline import (
     HASHLINE_MAX_FILE_BYTES,
     format_hashlines,
@@ -17,8 +18,6 @@ from aden_tools.hashline import (
     strip_insert_echo,
     validate_anchor,
 )
-
-from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 
 from ..security import get_sandboxed_path
 
@@ -107,8 +106,7 @@ def register_tools(mcp: FastMCP) -> None:
             if fresh.status is Freshness.STALE:
                 return {
                     "error": (
-                        f"Refusing to edit '{path}': {fresh.detail}. "
-                        f"Re-read the file with read_file before editing."
+                        f"Refusing to edit '{path}': {fresh.detail}. Re-read the file with read_file before editing."
                     )
                 }
 
@@ -144,9 +142,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if err:
                         return {"error": f"Edit #{i + 1} (set_line): {err}"}
                     if "content" not in op:
-                        return {
-                            "error": f"Edit #{i + 1} (set_line): missing required field 'content'"
-                        }
+                        return {"error": f"Edit #{i + 1} (set_line): missing required field 'content'"}
                     if not isinstance(op["content"], str):
                         return {"error": f"Edit #{i + 1} (set_line): content must be a string"}
                     if "\n" in op["content"] or "\r" in op["content"]:
@@ -179,16 +175,9 @@ def register_tools(mcp: FastMCP) -> None:
                     start_num, _ = parse_anchor(start_anchor)
                     end_num, _ = parse_anchor(end_anchor)
                     if start_num > end_num:
-                        return {
-                            "error": f"Edit #{i + 1} (replace_lines): "
-                            f"start line {start_num} > end line {end_num}"
-                        }
+                        return {"error": f"Edit #{i + 1} (replace_lines): start line {start_num} > end line {end_num}"}
                     if "content" not in op:
-                        return {
-                            "error": (
-                                f"Edit #{i + 1} (replace_lines): missing required field 'content'"
-                            )
-                        }
+                        return {"error": (f"Edit #{i + 1} (replace_lines): missing required field 'content'")}
                     if not isinstance(op["content"], str):
                         return {"error": f"Edit #{i + 1} (replace_lines): content must be a string"}
                     new_content = op["content"]
@@ -282,9 +271,7 @@ def register_tools(mcp: FastMCP) -> None:
                         return {"error": f"Edit #{i + 1} (replace): new_content must be a string"}
                     allow_multiple = op.get("allow_multiple", False)
                     if not isinstance(allow_multiple, bool):
-                        return {
-                            "error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"
-                        }
+                        return {"error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"}
                     replaces.append((old_content, new_content, i, allow_multiple))
 
                 case "append":
@@ -343,8 +330,7 @@ def register_tools(mcp: FastMCP) -> None:
                 if not (e_a < s_b or e_b < s_a):
                     return {
                         "error": (
-                            f"Overlapping edits: edit #{idx_a + 1} "
-                            f"and edit #{idx_b + 1} affect overlapping line ranges"
+                            f"Overlapping edits: edit #{idx_a + 1} and edit #{idx_b + 1} affect overlapping line ranges"
                         )
                     }
 
@@ -454,7 +440,5 @@ def register_tools(mcp: FastMCP) -> None:
         if cleanup_actions:
             result["cleanup_applied"] = cleanup_actions
         if replace_counts:
-            result["replacements"] = {
-                f"edit_{op_idx + 1}": count for op_idx, count in replace_counts
-            }
+            result["replacements"] = {f"edit_{op_idx + 1}": count for op_idx, count in replace_counts}
         return result

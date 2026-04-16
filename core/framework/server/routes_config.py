@@ -281,9 +281,7 @@ def _get_subscription_token(sub_id: str) -> str | None:
     return None
 
 
-def _hot_swap_sessions(
-    request: web.Request, full_model: str, api_key: str | None, api_base: str | None
-) -> int:
+def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | None, api_base: str | None) -> int:
     """Hot-swap the LLM on all running sessions. Returns count of swapped sessions.
 
     Also refreshes the SessionManager's default model so that subsequent
@@ -363,9 +361,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         # ── Subscription mode ────────────────────────────────────────
         sub = _SUBSCRIPTION_MAP.get(subscription_id)
         if not sub:
-            return web.json_response(
-                {"error": f"Unknown subscription: {subscription_id}"}, status=400
-            )
+            return web.json_response({"error": f"Unknown subscription: {subscription_id}"}, status=400)
 
         preset = get_preset(subscription_id)
         # Subscriptions use the fixed model from their preset (no model switching)
@@ -432,9 +428,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         provider = body.get("provider")
         model = body.get("model")
         if not provider or not model:
-            return web.json_response(
-                {"error": "Both 'provider' and 'model' are required"}, status=400
-            )
+            return web.json_response({"error": "Both 'provider' and 'model' are required"}, status=400)
 
         # Look up token limits from catalogue
         model_info = _find_model_info(provider, model)
@@ -552,9 +546,7 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
 
         content = build_memory_document(
             name="User Profile",
-            description=f"User identity: {display_name}"
-            if display_name
-            else "User profile information",
+            description=f"User identity: {display_name}" if display_name else "User profile information",
             mem_type="profile",
             body=new_body if new_body else "No profile information yet.",
         )

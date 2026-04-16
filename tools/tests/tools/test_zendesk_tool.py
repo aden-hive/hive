@@ -137,9 +137,7 @@ class TestZendeskSearchTickets:
 
     def test_successful_search(self, tool_fns):
         data = {
-            "results": [
-                {"id": 123, "subject": "Printer issue", "status": "open", "priority": "high"}
-            ],
+            "results": [{"id": 123, "subject": "Printer issue", "status": "open", "priority": "high"}],
             "count": 1,
         }
         with (

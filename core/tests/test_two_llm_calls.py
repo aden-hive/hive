@@ -348,11 +348,7 @@ async def _stream_and_collect(provider, messages, system, tools):
         elif isinstance(event, ToolCallEvent):
             tool_calls.append(event)
         elif isinstance(event, FinishEvent):
-            print(
-                f"  finish: stop={event.stop_reason}"
-                f" in={event.input_tokens}"
-                f" out={event.output_tokens}"
-            )
+            print(f"  finish: stop={event.stop_reason} in={event.input_tokens} out={event.output_tokens}")
         elif isinstance(event, StreamErrorEvent):
             print(f"  STREAM ERROR: {event.error}")
             return text, tool_calls

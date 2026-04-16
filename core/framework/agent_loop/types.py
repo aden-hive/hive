@@ -76,10 +76,7 @@ class AgentSpec(BaseModel):
 
     max_visits: int = Field(
         default=0,
-        description=(
-            "Max times this agent executes in one colony run. "
-            "0 = unlimited. Set >1 for one-shot agents."
-        ),
+        description=("Max times this agent executes in one colony run. 0 = unlimited. Set >1 for one-shot agents."),
     )
 
     output_model: type[BaseModel] | None = Field(

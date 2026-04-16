@@ -48,9 +48,7 @@ async def main():
         # Navigate to LinkedIn
         print("\n--- Navigating to LinkedIn ---")
         try:
-            await bridge.navigate(
-                tab_id, "https://www.linkedin.com", wait_until="load", timeout_ms=30000
-            )
+            await bridge.navigate(tab_id, "https://www.linkedin.com", wait_until="load", timeout_ms=30000)
             print("✓ Page loaded")
         except Exception as e:
             print(f"Navigation result: {e}")
@@ -142,16 +140,8 @@ async def main():
             if isinstance(before_data, dict) and isinstance(after_data, dict):
                 for key in after_data:
                     if key in before_data:
-                        b_val = (
-                            before_data[key].get("scrollTop", 0)
-                            if isinstance(before_data[key], dict)
-                            else 0
-                        )
-                        a_val = (
-                            after_data[key].get("scrollTop", 0)
-                            if isinstance(after_data[key], dict)
-                            else 0
-                        )
+                        b_val = before_data[key].get("scrollTop", 0) if isinstance(before_data[key], dict) else 0
+                        a_val = after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
                         if a_val != b_val:
                             print(f"  ✓ SCROLL CONFIRMED: {key} changed from {b_val} to {a_val}")
                             changed = True
@@ -169,11 +159,7 @@ async def main():
         for i in range(3):
             try:
                 result = await bridge.scroll(tab_id, "down", 200)
-                print(
-                    f"  Scroll {i + 1}: "
-                    f"{result.get('method', 'failed')} "
-                    f"on {result.get('container', 'unknown')}"
-                )
+                print(f"  Scroll {i + 1}: {result.get('method', 'failed')} on {result.get('container', 'unknown')}")
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"  Scroll {i + 1} failed: {e}")

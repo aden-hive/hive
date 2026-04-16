@@ -98,9 +98,7 @@ def validate_credentials(
         if not result.success:
             # Preserve the original validation_result so callers can
             # inspect which credentials are still missing.
-            exc = CredentialError(
-                "Credential setup incomplete. Run again after configuring the required credentials."
-            )
+            exc = CredentialError("Credential setup incomplete. Run again after configuring the required credentials.")
             if hasattr(e, "validation_result"):
                 exc.validation_result = e.validation_result  # type: ignore[attr-defined]
             if hasattr(e, "failed_cred_names"):

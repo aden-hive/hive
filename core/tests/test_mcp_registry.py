@@ -13,9 +13,7 @@ from framework.loader.mcp_registry import MCPRegistry
 
 def _write_mock_index(cache_dir: Path, servers: dict) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "registry_index.json").write_text(
-        json.dumps({"servers": servers}), encoding="utf-8"
-    )
+    (cache_dir / "registry_index.json").write_text(json.dumps({"servers": servers}), encoding="utf-8")
 
 
 def _setup_registry_with_servers(tmp_path: Path) -> MCPRegistry:
@@ -502,10 +500,7 @@ def test_resolve_max_tools(tmp_path: Path):
     data["servers"]["github"]["manifest"]["tools"] = [{"name": "e"}]
     registry._write_installed(data)
     configs = registry.resolve_for_agent(profile="all", max_tools=3)
-    total = sum(
-        len(registry._read_installed()["servers"][c.name]["manifest"].get("tools", []))
-        for c in configs
-    )
+    total = sum(len(registry._read_installed()["servers"][c.name]["manifest"].get("tools", [])) for c in configs)
     assert total <= 3 and len(configs) >= 1
 
 
@@ -872,9 +867,7 @@ def test_install_version_pin_no_version_in_manifest(tmp_path: Path):
     base = tmp_path / "mcp_registry"
     registry = MCPRegistry(base_path=base)
     registry.initialize()
-    _write_mock_index(
-        base / "cache", {"noversion": {"name": "noversion", "transport": {"default": "stdio"}}}
-    )
+    _write_mock_index(base / "cache", {"noversion": {"name": "noversion", "transport": {"default": "stdio"}}})
     with pytest.raises(ValueError, match="no version field"):
         registry.install("noversion", version="1.0.0")
 
@@ -1139,9 +1132,7 @@ def test_get_hive_version_section_aware(tmp_path: Path, monkeypatch):
     fake_file.touch()
 
     # Put version in [tool.*] before [project] to trigger the old bug
-    toml_content = (
-        '[tool.something]\nversion = "9.9.9"\n\n[project]\nname = "framework"\nversion = "0.7.1"\n'
-    )
+    toml_content = '[tool.something]\nversion = "9.9.9"\n\n[project]\nname = "framework"\nversion = "0.7.1"\n'
     (tmp_path / "pyproject.toml").write_text(toml_content, encoding="utf-8")
 
     monkeypatch.setattr(

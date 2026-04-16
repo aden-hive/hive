@@ -151,10 +151,7 @@ def _parse_key_value_pairs(values: list[str]) -> dict[str, str]:
     result = {}
     for item in values:
         if "=" not in item:
-            raise ValueError(
-                f"Invalid format: '{item}'. Expected KEY=VALUE.\n"
-                f"Example: --set JIRA_API_TOKEN=abc123"
-            )
+            raise ValueError(f"Invalid format: '{item}'. Expected KEY=VALUE.\nExample: --set JIRA_API_TOKEN=abc123")
         key, _, value = item.partition("=")
         if not key:
             raise ValueError(f"Invalid format: '{item}'. Key cannot be empty.")
@@ -300,12 +297,8 @@ def register_mcp_commands(subparsers) -> None:
     # ── install ──
     install_p = mcp_sub.add_parser("install", help="Install a server from the registry")
     install_p.add_argument("name", help="Server name in the registry")
-    install_p.add_argument(
-        "--version", dest="version", default=None, help="Pin to a specific version"
-    )
-    install_p.add_argument(
-        "--transport", default=None, help="Override default transport (stdio, http, unix, sse)"
-    )
+    install_p.add_argument("--version", dest="version", default=None, help="Pin to a specific version")
+    install_p.add_argument("--transport", default=None, help="Override default transport (stdio, http, unix, sse)")
     install_p.set_defaults(func=cmd_mcp_install)
 
     # ── add ──
@@ -342,9 +335,7 @@ def register_mcp_commands(subparsers) -> None:
 
     # ── list ──
     list_p = mcp_sub.add_parser("list", help="List servers")
-    list_p.add_argument(
-        "--available", action="store_true", help="Show available servers from registry"
-    )
+    list_p.add_argument("--available", action="store_true", help="Show available servers from registry")
     list_p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     list_p.set_defaults(func=cmd_mcp_list)
 
@@ -364,9 +355,7 @@ def register_mcp_commands(subparsers) -> None:
         metavar="KEY=VAL",
         help="Set environment variable overrides",
     )
-    config_p.add_argument(
-        "--set-header", dest="set_header", nargs="+", metavar="KEY=VAL", help="Set header overrides"
-    )
+    config_p.add_argument("--set-header", dest="set_header", nargs="+", metavar="KEY=VAL", help="Set header overrides")
     config_p.set_defaults(func=cmd_mcp_config)
 
     # ── search ──
@@ -389,9 +378,7 @@ def register_mcp_commands(subparsers) -> None:
     init_p.set_defaults(func=cmd_mcp_init)
 
     # ── update ──
-    update_p = mcp_sub.add_parser(
-        "update", help="Update installed servers or refresh the registry index"
-    )
+    update_p = mcp_sub.add_parser("update", help="Update installed servers or refresh the registry index")
     update_p.add_argument(
         "name",
         nargs="?",
@@ -495,8 +482,7 @@ def _cmd_mcp_add_from_manifest(registry, manifest_path: str) -> int:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         print(
-            f"Error: invalid JSON in {manifest_path}: {exc}\n"
-            f"Validate with: python -m json.tool {manifest_path}",
+            f"Error: invalid JSON in {manifest_path}: {exc}\nValidate with: python -m json.tool {manifest_path}",
             file=sys.stderr,
         )
         return 1
@@ -695,8 +681,7 @@ def cmd_mcp_config(args) -> int:
         server = registry.get_server(args.name)
         if server is None:
             print(
-                f"Error: server '{args.name}' is not installed.\n"
-                f"Run 'hive mcp list' to see installed servers.",
+                f"Error: server '{args.name}' is not installed.\nRun 'hive mcp list' to see installed servers.",
                 file=sys.stderr,
             )
             return 1
@@ -822,8 +807,7 @@ def cmd_mcp_update(args) -> int:
         count = registry.update_index()
     except Exception as exc:
         print(
-            f"Error: failed to update registry index: {exc}\n"
-            f"Check your network connection and try again.",
+            f"Error: failed to update registry index: {exc}\nCheck your network connection and try again.",
             file=sys.stderr,
         )
         return 1
@@ -832,9 +816,7 @@ def cmd_mcp_update(args) -> int:
 
     # Step 2: update all installed registry servers (skip local/pinned)
     installed = registry.list_installed()
-    registry_servers = [
-        s for s in installed if s.get("source") == "registry" and not s.get("pinned")
-    ]
+    registry_servers = [s for s in installed if s.get("source") == "registry" and not s.get("pinned")]
 
     if not registry_servers:
         return 0
@@ -862,8 +844,7 @@ def _cmd_mcp_update_server(name: str, registry=None) -> int:
     server = registry.get_server(name)
     if server is None:
         print(
-            f"Error: server '{name}' is not installed.\n"
-            f"Run 'hive mcp install {name}' to install it.",
+            f"Error: server '{name}' is not installed.\nRun 'hive mcp install {name}' to install it.",
             file=sys.stderr,
         )
         return 1

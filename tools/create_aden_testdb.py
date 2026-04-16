@@ -44,11 +44,7 @@ def execute_sql_file():
 
         # Connect to master database (to create new database)
         connection_string = (
-            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-            f"SERVER={SERVER};"
-            f"DATABASE=master;"
-            f"UID={USERNAME};"
-            f"PWD={PASSWORD};"
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};DATABASE=master;UID={USERNAME};PWD={PASSWORD};"
         )
 
         print("Connecting to SQL Server...")

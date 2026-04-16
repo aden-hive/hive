@@ -138,9 +138,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
             return nav_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_go_back", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_go_back", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -245,7 +243,5 @@ def register_navigation_tools(mcp: FastMCP) -> None:
             return nav_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_reload", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_reload", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result

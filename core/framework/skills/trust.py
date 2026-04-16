@@ -413,8 +413,7 @@ class TrustGate:
             return
         self._print("")
         self._print(
-            f"{Colors.YELLOW}Security notice:{Colors.NC} Skills inject instructions "
-            "into the agent's system prompt."
+            f"{Colors.YELLOW}Security notice:{Colors.NC} Skills inject instructions into the agent's system prompt."
         )
         self._print(
             "  Only load skills from sources you trust. "
@@ -441,10 +440,7 @@ class TrustGate:
         p(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
         p("")
         proj_label = str(project_dir) if project_dir else "this project"
-        p(
-            f"  The project at {Colors.CYAN}{proj_label}{Colors.NC} wants to load "
-            f"{len(project_skills)} skill(s)"
-        )
+        p(f"  The project at {Colors.CYAN}{proj_label}{Colors.NC} wants to load {len(project_skills)} skill(s)")
         p("  that will inject instructions into the agent's system prompt.")
         if repo_key:
             p(f"  Source: {Colors.BOLD}{repo_key}{Colors.NC}")
@@ -458,10 +454,7 @@ class TrustGate:
         p("  Options:")
         p(f"    {Colors.CYAN}1){Colors.NC} Trust this session only")
         p(f"    {Colors.CYAN}2){Colors.NC} Trust permanently  — remember for future runs")
-        p(
-            f"    {Colors.DIM}3) Deny"
-            f"              — skip all project-scope skills from this repo{Colors.NC}"
-        )
+        p(f"    {Colors.DIM}3) Deny              — skip all project-scope skills from this repo{Colors.NC}")
         p(f"{Colors.YELLOW}{'─' * 60}{Colors.NC}")
 
     def _prompt_consent(self, Colors) -> str:  # noqa: N803

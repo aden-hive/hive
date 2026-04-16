@@ -139,9 +139,7 @@ def register_tools(mcp: FastMCP) -> None:
             elif statement == "cashflow":
                 df = ticker.cashflow
             else:
-                return {
-                    "error": f"Invalid statement type: {statement}. Use: income, balance, cashflow"
-                }
+                return {"error": f"Invalid statement type: {statement}. Use: income, balance, cashflow"}
 
             if df is None or df.empty:
                 return {"error": f"No {statement} statement data for '{symbol}'"}
@@ -152,9 +150,7 @@ def register_tools(mcp: FastMCP) -> None:
                 period_data = {}
                 for idx, val in df[col].items():
                     if val is not None and str(val) != "nan":
-                        period_data[str(idx)] = (
-                            float(val) if isinstance(val, (int, float)) else str(val)
-                        )
+                        period_data[str(idx)] = float(val) if isinstance(val, (int, float)) else str(val)
                 result[str(col.date()) if hasattr(col, "date") else str(col)] = period_data
 
             return {"symbol": symbol.upper(), "statement": statement, "data": result}

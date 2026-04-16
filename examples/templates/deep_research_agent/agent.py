@@ -175,7 +175,7 @@ class DeepResearchAgent:
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
         self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         self._tool_registry: ToolRegistry | None = None
         self._storage_path: Path | None = None
 

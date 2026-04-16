@@ -216,9 +216,7 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         ensure_credential_key_env()
 
         nodes = load_agent_nodes(agent_path)
-        result = validate_agent_credentials(
-            nodes, verify=verify, raise_on_error=False, force_refresh=True
-        )
+        result = validate_agent_credentials(nodes, verify=verify, raise_on_error=False, force_refresh=True)
 
         # If any credential needs Aden, include ADEN_API_KEY as a first-class row
         if any(c.aden_supported for c in result.credentials):
@@ -291,13 +289,15 @@ def _collect_accounts_by_provider() -> dict[str, list[dict]]:
             provider = acct.get("provider", "")
             if not provider:
                 continue
-            grouped.setdefault(provider, []).append({
-                "provider": provider,
-                "alias": acct.get("alias", ""),
-                "identity": acct.get("identity", {}) or {},
-                "source": acct.get("source", "aden"),
-                "credential_id": acct.get("credential_id", provider),
-            })
+            grouped.setdefault(provider, []).append(
+                {
+                    "provider": provider,
+                    "alias": acct.get("alias", ""),
+                    "identity": acct.get("identity", {}) or {},
+                    "source": acct.get("source", "aden"),
+                    "credential_id": acct.get("credential_id", provider),
+                }
+            )
         return grouped
     except Exception:
         logger.debug("Failed to collect accounts for specs response", exc_info=True)
@@ -327,17 +327,17 @@ async def handle_resync_credentials(request: web.Request) -> web.Response:
 
         loop = asyncio.get_running_loop()
         # _presync_aden_tokens makes blocking HTTP calls to the Aden server.
-        await loop.run_in_executor(
-            None, lambda: _presync_aden_tokens(CREDENTIAL_SPECS, force=True)
-        )
+        await loop.run_in_executor(None, lambda: _presync_aden_tokens(CREDENTIAL_SPECS, force=True))
 
         _invalidate_queen_credentials_cache(request)
 
         accounts_by_provider = _collect_accounts_by_provider()
-        return web.json_response({
-            "synced": True,
-            "accounts_by_provider": accounts_by_provider,
-        })
+        return web.json_response(
+            {
+                "synced": True,
+                "accounts_by_provider": accounts_by_provider,
+            }
+        )
     except Exception as exc:
         logger.exception("Error during credential resync: %s", exc)
         return web.json_response(
@@ -366,9 +366,7 @@ async def handle_list_specs(request: web.Request) -> web.Response:
             _presync_aden_tokens(CREDENTIAL_SPECS)
 
         # Build composite store (env → encrypted file)
-        env_mapping = {
-            (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
-        }
+        env_mapping = {(spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
         env_storage = EnvVarStorage(env_mapping=env_mapping)
         if os.environ.get("HIVE_CREDENTIAL_KEY"):
             storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
@@ -396,21 +394,23 @@ async def handle_list_specs(request: web.Request) -> web.Response:
                 available = len(accounts) > 0
             else:
                 available = store.is_available(cred_id)
-            specs.append({
-                "credential_name": name,
-                "credential_id": cred_id,
-                "env_var": spec.env_var,
-                "description": spec.description,
-                "help_url": spec.help_url,
-                "api_key_instructions": spec.api_key_instructions,
-                "tools": spec.tools,
-                "aden_supported": spec.aden_supported,
-                "direct_api_key_supported": spec.direct_api_key_supported,
-                "credential_key": spec.credential_key,
-                "credential_group": spec.credential_group,
-                "available": available,
-                "accounts": accounts,
-            })
+            specs.append(
+                {
+                    "credential_name": name,
+                    "credential_id": cred_id,
+                    "env_var": spec.env_var,
+                    "description": spec.description,
+                    "help_url": spec.help_url,
+                    "api_key_instructions": spec.api_key_instructions,
+                    "tools": spec.tools,
+                    "aden_supported": spec.aden_supported,
+                    "direct_api_key_supported": spec.direct_api_key_supported,
+                    "credential_key": spec.credential_key,
+                    "credential_group": spec.credential_group,
+                    "available": available,
+                    "accounts": accounts,
+                }
+            )
 
         # Include aden_api_key synthetic row if any spec uses Aden
         if any_aden:
@@ -422,7 +422,9 @@ async def handle_list_specs(request: web.Request) -> web.Response:
                     "env_var": "ADEN_API_KEY",
                     "description": "API key from the Developers tab in Settings",
                     "help_url": "https://hive.adenhq.com/",
-                    "api_key_instructions": "1. Go to hive.adenhq.com\n2. Open Settings > Developers\n3. Copy your API key",
+                    "api_key_instructions": (
+                        "1. Go to hive.adenhq.com\n2. Open Settings > Developers\n3. Copy your API key"
+                    ),
                     "tools": [],
                     "aden_supported": True,
                     "direct_api_key_supported": True,
@@ -459,16 +461,12 @@ async def handle_validate_key(request: web.Request) -> web.Response:
     api_key = body.get("api_key", "").strip()
 
     if not provider_id or not api_key:
-        return web.json_response(
-            {"error": "provider_id and api_key are required"}, status=400
-        )
+        return web.json_response({"error": "provider_id and api_key are required"}, status=400)
 
     try:
         checker = _get_llm_key_providers().get(provider_id)
         if not checker:
-            return web.json_response(
-                {"valid": True, "message": f"No health check for {provider_id}"}
-            )
+            return web.json_response({"valid": True, "message": f"No health check for {provider_id}"})
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: checker(api_key))
@@ -476,9 +474,7 @@ async def handle_validate_key(request: web.Request) -> web.Response:
 
     except Exception as exc:
         logger.warning("LLM key validation failed for %s: %s", provider_id, exc)
-        return web.json_response(
-            {"valid": None, "message": f"Validation error: {exc}"}
-        )
+        return web.json_response({"valid": None, "message": f"Validation error: {exc}"})
 
 
 def register_routes(app: web.Application) -> None:

@@ -114,9 +114,7 @@ class TestReadOnlyEnforcement:
     def test_allows_select(self, registered_mcp):
         """SELECT statements should be allowed (will fail on client, not validation)."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             # Mock will raise an error, but we're testing that it gets past validation
             mock_create_client.side_effect = Exception("Mock error")
             result = tool.fn(sql="SELECT * FROM table")
@@ -126,9 +124,7 @@ class TestReadOnlyEnforcement:
     def test_allows_select_with_subquery(self, registered_mcp):
         """Complex SELECT with subqueries should be allowed."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             mock_create_client.side_effect = Exception("Mock error")
             result = tool.fn(
                 sql="""
@@ -168,9 +164,7 @@ class TestRowLimits:
     def test_accepts_valid_max_rows(self, registered_mcp):
         """Valid max_rows values should be accepted."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             mock_create_client.side_effect = Exception("Mock error")
             # These should pass validation (will fail on mock client)
             for max_rows in [1, 100, 1000, 10000]:
@@ -185,9 +179,7 @@ class TestQueryExecution:
         """Test successful query execution with mocked client."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             # Set up mock client and query job
             mock_client = MagicMock()
             mock_create_client.return_value = mock_client
@@ -226,9 +218,7 @@ class TestQueryExecution:
         """Test that results are truncated when exceeding max_rows."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             mock_client = MagicMock()
             mock_create_client.return_value = mock_client
 
@@ -281,9 +271,7 @@ class TestDescribeDataset:
         """Test successful dataset description with mocked client."""
         tool = registered_mcp._tool_manager._tools["describe_dataset"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             mock_client = MagicMock()
             mock_client.project = "test-project"
             mock_create_client.return_value = mock_client
@@ -323,12 +311,8 @@ class TestErrorHandling:
         """Authentication errors should provide helpful messages."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
-            mock_create_client.side_effect = Exception(
-                "Could not automatically determine credentials"
-            )
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
+            mock_create_client.side_effect = Exception("Could not automatically determine credentials")
             result = tool.fn(sql="SELECT 1")
 
             assert "error" in result
@@ -340,12 +324,8 @@ class TestErrorHandling:
         """Permission errors should provide helpful messages."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
-            mock_create_client.side_effect = Exception(
-                "Permission denied for table project.dataset.table"
-            )
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
+            mock_create_client.side_effect = Exception("Permission denied for table project.dataset.table")
             result = tool.fn(sql="SELECT 1")
 
             assert "error" in result
@@ -357,12 +337,8 @@ class TestErrorHandling:
         """Not found errors should provide helpful messages."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
-            mock_create_client.side_effect = Exception(
-                "Not found: Table project.dataset.nonexistent was not found"
-            )
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
+            mock_create_client.side_effect = Exception("Not found: Table project.dataset.nonexistent was not found")
             result = tool.fn(sql="SELECT 1")
 
             assert "error" in result
@@ -373,12 +349,8 @@ class TestErrorHandling:
         """Dataset not found errors should provide helpful messages."""
         tool = registered_mcp._tool_manager._tools["describe_dataset"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
-            mock_create_client.side_effect = Exception(
-                "Not found: Dataset project:nonexistent was not found"
-            )
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
+            mock_create_client.side_effect = Exception("Not found: Dataset project:nonexistent was not found")
             result = tool.fn(dataset_id="nonexistent")
 
             assert "error" in result
@@ -418,9 +390,7 @@ class TestImportError:
         """Should provide helpful message when google-cloud-bigquery not installed."""
         tool = registered_mcp._tool_manager._tools["run_bigquery_query"]
 
-        with patch(
-            "aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client"
-        ) as mock_create_client:
+        with patch("aden_tools.tools.bigquery_tool.bigquery_tool._create_bigquery_client") as mock_create_client:
             mock_create_client.side_effect = ImportError(
                 "google-cloud-bigquery is required for BigQuery tools. "
                 "Install it with: pip install google-cloud-bigquery"

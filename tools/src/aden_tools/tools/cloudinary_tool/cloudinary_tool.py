@@ -271,9 +271,7 @@ def register_tools(
             "expression": expression,
             "max_results": max(1, min(max_results, 500)),
         }
-        data = _request(
-            "post", url, key, secret, json=body, headers={"Content-Type": "application/json"}
-        )
+        data = _request("post", url, key, secret, json=body, headers={"Content-Type": "application/json"})
         if "error" in data:
             return data
 
@@ -407,9 +405,7 @@ def register_tools(
             "public_ids": ids,
             "command": "add",
         }
-        data = _request(
-            "post", url, key, secret, json=body, headers={"Content-Type": "application/json"}
-        )
+        data = _request("post", url, key, secret, json=body, headers={"Content-Type": "application/json"})
         if "error" in data:
             return data
 

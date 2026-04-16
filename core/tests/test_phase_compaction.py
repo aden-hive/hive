@@ -194,9 +194,7 @@ class TestPhaseAwareCompaction:
         conv.set_current_phase("research")
         await conv.add_assistant_message(
             "tool call",
-            tool_calls=[
-                {"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c1", "old_data " * 5000)
 
@@ -204,9 +202,7 @@ class TestPhaseAwareCompaction:
         conv.set_current_phase("report")
         await conv.add_assistant_message(
             "tool call",
-            tool_calls=[
-                {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c2", "current_data " * 5000)
 
@@ -231,17 +227,13 @@ class TestPhaseAwareCompaction:
         # No phase set — messages have phase_id=None
         await conv.add_assistant_message(
             "tool call",
-            tool_calls=[
-                {"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c1", "data " * 5000)  # ~6250 tokens
 
         await conv.add_assistant_message(
             "another tool call",
-            tool_calls=[
-                {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c2", "more " * 100)  # ~125 tokens
 
@@ -258,9 +250,7 @@ class TestPhaseAwareCompaction:
 
         await conv.add_assistant_message(
             "tool call",
-            tool_calls=[
-                {"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c1", "data " * 5000)
 
@@ -268,9 +258,7 @@ class TestPhaseAwareCompaction:
         conv.set_current_phase("report")
         await conv.add_assistant_message(
             "recent",
-            tool_calls=[
-                {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}
-            ],
+            tool_calls=[{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
         )
         await conv.add_tool_result("c2", "x" * 200)
 

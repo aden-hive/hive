@@ -82,8 +82,7 @@ def validate_strict(path: Path) -> ValidationResult:
         frontmatter = yaml.safe_load(raw_yaml)
     except yaml.YAMLError as exc:
         errors.append(
-            f"YAML parse error: {exc}. "
-            'Wrap values containing colons in quotes, e.g. description: "Use for: research".'
+            f'YAML parse error: {exc}. Wrap values containing colons in quotes, e.g. description: "Use for: research".'
         )
         return ValidationResult(passed=False, errors=errors, warnings=warnings)
 
@@ -101,10 +100,7 @@ def validate_strict(path: Path) -> ValidationResult:
     # 6. name present and non-empty (no directory-name fallback in strict mode)
     name = frontmatter.get("name")
     if not name or not str(name).strip():
-        errors.append(
-            "Missing required field: 'name' must be present. "
-            "Add 'name: your-skill-name' to the frontmatter."
-        )
+        errors.append("Missing required field: 'name' must be present. Add 'name: your-skill-name' to the frontmatter.")
     else:
         name = str(name).strip()
         parent_dir_name = path.parent.name
@@ -112,8 +108,7 @@ def validate_strict(path: Path) -> ValidationResult:
         # 7. name length <= 64 chars
         if len(name) > _MAX_NAME_LENGTH:
             errors.append(
-                f"Skill name '{name}' is {len(name)} characters — "
-                f"maximum is {_MAX_NAME_LENGTH}. Shorten the name."
+                f"Skill name '{name}' is {len(name)} characters — maximum is {_MAX_NAME_LENGTH}. Shorten the name."
             )
 
         # 8. name matches parent directory (dot-namespace prefix allowed: hive.X with dir X)
@@ -125,10 +120,7 @@ def validate_strict(path: Path) -> ValidationResult:
 
     # 9. body non-empty
     if not body:
-        errors.append(
-            "Skill body (instructions) is empty. "
-            "Add markdown instructions after the closing --- delimiter."
-        )
+        errors.append("Skill body (instructions) is empty. Add markdown instructions after the closing --- delimiter.")
 
     # 10. license present — warning only
     if not frontmatter.get("license"):
@@ -142,9 +134,7 @@ def validate_strict(path: Path) -> ValidationResult:
         for script_path in sorted(scripts_dir.iterdir()):
             if script_path.is_file():
                 if not (script_path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
-                    errors.append(
-                        f"Script not executable: {script_path.name}. Run: chmod +x {script_path}"
-                    )
+                    errors.append(f"Script not executable: {script_path.name}. Run: chmod +x {script_path}")
 
     # 12. allowed-tools entries are non-empty strings — warning if malformed
     allowed_tools = frontmatter.get("allowed-tools")
