@@ -10,6 +10,8 @@ import {
   Paperclip,
   X,
 } from "lucide-react";
+import WorkerRunBubble from "@/components/WorkerRunBubble";
+import type { WorkerRunGroup } from "@/components/WorkerRunBubble";
 
 export interface ImageContent {
   type: "image_url";
@@ -654,7 +656,8 @@ export default function ChatPanel({
   // so interleaved queen/tool/system messages don't fragment the bubble.
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
-    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
+    | { kind: "worker_run"; runId: string; group: WorkerRunGroup };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -662,6 +665,55 @@ export default function ChatPanel({
     while (i < threadMessages.length) {
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
+
+      // Worker run grouping: collect consecutive worker messages
+      // (role=worker, not subagent) into a collapsible card. This
+      // keeps the queen DM clean — the user sees a single "Worker:
+      // 12 actions" card instead of 12 inline bubbles.
+      if (
+        !isSubagent &&
+        (msg.role === "worker" || msg.type === "tool_status") &&
+        msg.type !== "user" &&
+        msg.type !== "run_divider"
+      ) {
+        const workerMsgs: ChatMessage[] = [];
+        const firstWorkerMsg = msg;
+
+        while (i < threadMessages.length) {
+          const m = threadMessages[i];
+
+          // Hard boundary — stop the worker run group
+          if (m.type === "user" || m.type === "run_divider") break;
+          // Queen message with real text — boundary (queen is talking
+          // to the user, not just emitting a tool)
+          if (m.role === "queen" && m.content?.trim() && !m.type) break;
+          // Subagent message — different group type, stop here
+          if (m.nodeId?.includes(":subagent:")) break;
+
+          // Worker messages and tool_status belong to the run
+          if (m.role === "worker" || m.type === "tool_status") {
+            workerMsgs.push(m);
+            i++;
+            continue;
+          }
+
+          // System message or other — include in the worker run
+          // group to preserve ordering (they'll render inside the
+          // expanded view)
+          workerMsgs.push(m);
+          i++;
+        }
+
+        if (workerMsgs.length > 0) {
+          items.push({
+            kind: "worker_run",
+            runId: `wrun-${firstWorkerMsg.id}`,
+            group: { messages: workerMsgs },
+          });
+        }
+        continue;
+      }
+
       if (!isSubagent) {
         items.push({ kind: "message", msg });
         i++;
@@ -808,6 +860,16 @@ export default function ChatPanel({
                 <ParallelSubagentBubble
                   groupId={item.groupId}
                   groups={item.groups}
+                />
+              </div>
+            );
+          }
+          if (item.kind === "worker_run") {
+            return (
+              <div key={item.runId}>
+                <WorkerRunBubble
+                  runId={item.runId}
+                  group={item.group}
                 />
               </div>
             );
