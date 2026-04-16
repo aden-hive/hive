@@ -4,6 +4,7 @@ import asyncio
 import functools
 import logging
 import os
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import httpx
@@ -49,18 +50,18 @@ class GrafanaClient:
     def __init__(self, url: str, token: str):
         self.url = url.rstrip('/')
         self.headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     @with_retry()
     async def request(self, method: str, endpoint: str, **kwargs) -> Any:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(
-                method, 
-                f"{self.url}/api/{endpoint}", 
-                headers=self.headers, 
-                **kwargs
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self._client.request(
+            method, 
+            f"{self.url}/api/{endpoint}", 
+            headers=self.headers, 
+            **kwargs
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def register_tools(
@@ -198,7 +199,7 @@ def register_tools(
         sanitized_text = sanitize_for_log(text)
         payload = {
             "dashboardUID": dashboard_uid,
-            "time": int(asyncio.get_running_loop().time() * 1000),
+            "time": int(time.time() * 1000),
             "text": sanitized_text,
             "tags": tags + ["hive-agent", "execution-log"],
         }
