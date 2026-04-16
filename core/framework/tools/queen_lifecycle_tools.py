@@ -1189,6 +1189,41 @@ def register_queen_lifecycle_tools(
                 _colony_db_path = str(_pdb.resolve())
                 _colony_id = _wp.name
 
+        # Phase 2: enqueue each task into progress.db BEFORE building
+        # spawn specs so every parallel worker has a pre-assigned row
+        # to claim. Without this the queue stays empty and each
+        # worker's claim UPDATE affects zero rows, silently falling
+        # back to executing from its spawn message.
+        _enqueued_task_ids: list[str | None] = [None] * len(tasks)
+        if _colony_db_path:
+            from pathlib import Path as _PathP
+
+            from framework.host.progress_db import (
+                enqueue_task as _enqueue_task_fn,
+            )
+
+            _pdb_path_obj = _PathP(_colony_db_path)
+            for _i, _spec in enumerate(tasks):
+                if not isinstance(_spec, dict):
+                    continue
+                _task_text_pre = str(_spec.get("task", "")).strip()
+                if not _task_text_pre:
+                    continue
+                try:
+                    _enqueued_task_ids[_i] = await asyncio.to_thread(
+                        _enqueue_task_fn,
+                        _pdb_path_obj,
+                        _task_text_pre,
+                        source="run_parallel_workers",
+                    )
+                except Exception as _enqueue_exc:
+                    logger.warning(
+                        "run_parallel_workers: failed to enqueue tasks[%d] "
+                        "(spawn proceeding without pinned task_id): %s",
+                        _i,
+                        _enqueue_exc,
+                    )
+
         # Normalise: each entry must have a non-empty "task" string.
         normalised: list[dict] = []
         for i, spec in enumerate(tasks):
@@ -1206,6 +1241,8 @@ def register_queen_lifecycle_tools(
                     "db_path": _colony_db_path,
                     "colony_id": _colony_id,
                 }
+                if _enqueued_task_ids[i]:
+                    spec_data["task_id"] = _enqueued_task_ids[i]
             normalised.append(
                 {
                     "task": task_text,
@@ -1214,11 +1251,13 @@ def register_queen_lifecycle_tools(
             )
 
         if _colony_db_path:
+            _pinned = sum(1 for tid in _enqueued_task_ids if tid)
             logger.info(
                 "run_parallel_workers: attached progress_db context to "
-                "%d spawn(s) (colony_id=%s)",
+                "%d spawn(s) (colony_id=%s, %d pinned task_ids)",
                 len(normalised),
                 _colony_id,
+                _pinned,
             )
 
         try:
@@ -4303,6 +4342,39 @@ def register_queen_lifecycle_tools(
                         _worker_path_p.name,
                         _progress_db,
                     )
+
+                    # Phase 2: enqueue the task into progress.db BEFORE
+                    # spawning so the worker has a concrete row to
+                    # claim. Without this the queue is empty and the
+                    # worker's claim UPDATE affects zero rows, so it
+                    # silently falls back to executing from the chat
+                    # spawn message. Any enqueue failure is logged and
+                    # the spawn proceeds without a pinned task_id
+                    # (degrades to the pre-Phase-2 behavior).
+                    try:
+                        from framework.host.progress_db import (
+                            enqueue_task as _enqueue_task_fn,
+                        )
+
+                        _task_id = await asyncio.to_thread(
+                            _enqueue_task_fn,
+                            _progress_db,
+                            task,
+                            source="run_agent_with_input",
+                        )
+                        _spawn_input_data["task_id"] = _task_id
+                        logger.info(
+                            "run_agent_with_input: enqueued task %s into %s",
+                            _task_id,
+                            _progress_db,
+                        )
+                    except Exception as _enqueue_exc:
+                        logger.warning(
+                            "run_agent_with_input: failed to enqueue task "
+                            "into progress.db (spawn proceeding without "
+                            "pinned task_id): %s",
+                            _enqueue_exc,
+                        )
 
             worker_ids = await colony.spawn(
                 task=task,

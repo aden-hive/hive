@@ -12,7 +12,25 @@ metadata:
 
 Access via `execute_command_tool` running `sqlite3 "<db_path>" "..."`. Tables: `tasks` (queue), `steps` (per-task decomposition), `sop_checklist` (hard gates).
 
-### Claim next task (ONLY correct pattern)
+### Claim: assigned task (check this FIRST)
+
+If your spawn message includes a `task_id:` field, the queen pre-assigned a specific row to you. Claim that row by id — **do not** use the generic next-pending pattern below:
+
+```bash
+sqlite3 "<db_path>" <<'SQL'
+UPDATE tasks SET status='claimed', worker_id='<worker-id>',
+  claim_token=lower(hex(randomblob(8))),
+  claimed_at=datetime('now'), updated_at=datetime('now')
+WHERE id='<task_id>' AND status='pending'
+RETURNING id, goal, payload;
+SQL
+```
+
+Empty output → another worker raced you or the row is already done. Stop and report.  Non-empty → that row is yours, proceed to "Load the plan".
+
+### Claim: next pending (fallback when no task_id is assigned)
+
+If your spawn message did NOT include `task_id:` — you are a generic fan-out worker racing on a shared queue. Use the generic next-pending claim:
 
 ```bash
 sqlite3 "<db_path>" <<'SQL'

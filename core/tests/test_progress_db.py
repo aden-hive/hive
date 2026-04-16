@@ -184,6 +184,91 @@ def test_enqueue_task(tmp_path: Path) -> None:
         con.close()
 
 
+def test_enqueue_task_custom_source(tmp_path: Path) -> None:
+    """enqueue_task must accept a custom source value (e.g. run_agent_with_input).
+
+    Phase 2 wiring adds source values: create_colony_auto,
+    run_agent_with_input, run_parallel_workers. Verify the source
+    column stores them verbatim.
+    """
+    db = ensure_progress_db(tmp_path / "c")
+    tid = enqueue_task(db, "chat task", source="run_agent_with_input")
+    con = sqlite3.connect(str(db))
+    try:
+        row = con.execute("SELECT goal, source FROM tasks WHERE id=?", (tid,)).fetchone()
+        assert row == ("chat task", "run_agent_with_input")
+    finally:
+        con.close()
+
+
+def test_claim_by_assigned_id(tmp_path: Path) -> None:
+    """Worker protocol: claim a specific row by id (not the generic next-pending).
+
+    The Phase 2 fix threads ``task_id`` into ``input_data`` when the
+    queen pre-assigns a row. The worker must be able to claim THAT
+    row atomically with an ``UPDATE ... WHERE id=? AND status='pending'``
+    pattern, and a second claim on the same id must return 0 rows.
+    """
+    db = ensure_progress_db(tmp_path / "c")
+    [tid] = seed_tasks(db, [{"goal": "pinned task"}])
+
+    con = sqlite3.connect(str(db), isolation_level=None, timeout=5.0)
+    try:
+        cur = con.execute(
+            """
+            UPDATE tasks SET status='claimed', worker_id=?,
+                claim_token=lower(hex(randomblob(8))),
+                claimed_at=datetime('now'),
+                updated_at=datetime('now')
+            WHERE id=? AND status='pending'
+            RETURNING id, goal
+            """,
+            ("w1", tid),
+        )
+        row = cur.fetchone()
+        assert row == (tid, "pinned task"), f"expected one claim, got {row}"
+
+        # Second attempt on the same id must affect zero rows.
+        cur2 = con.execute(
+            """
+            UPDATE tasks SET status='claimed', worker_id=?,
+                claim_token=lower(hex(randomblob(8))),
+                claimed_at=datetime('now')
+            WHERE id=? AND status='pending'
+            RETURNING id
+            """,
+            ("w2", tid),
+        )
+        assert cur2.fetchone() is None, "second claim should affect zero rows"
+
+        # Ensure worker_id on the row is still the first claimant.
+        owner = con.execute(
+            "SELECT worker_id, status FROM tasks WHERE id=?", (tid,)
+        ).fetchone()
+        assert owner == ("w1", "claimed")
+    finally:
+        con.close()
+
+
+def test_claim_by_id_does_not_steal_unrelated_rows(tmp_path: Path) -> None:
+    """Claim-by-id must only touch the named row, not siblings."""
+    db = ensure_progress_db(tmp_path / "c")
+    ids = seed_tasks(db, [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}])
+    target = ids[1]
+
+    con = sqlite3.connect(str(db), isolation_level=None)
+    try:
+        con.execute(
+            "UPDATE tasks SET status='claimed', worker_id='w1', "
+            "claimed_at=datetime('now') WHERE id=? AND status='pending'",
+            (target,),
+        )
+        statuses = dict(con.execute("SELECT goal, status FROM tasks").fetchall())
+        assert statuses == {"a": "pending", "b": "claimed", "c": "pending"}
+    finally:
+        con.close()
+
+
 def test_seed_tasks_bulk_10k(tmp_path: Path) -> None:
     """10k rows in one transaction should finish under a second on local disk."""
     db = ensure_progress_db(tmp_path / "c")
