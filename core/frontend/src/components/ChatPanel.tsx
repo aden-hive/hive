@@ -738,13 +738,20 @@ export default function ChatPanel({
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
 
-      // Worker run grouping: collect consecutive worker messages
-      // (role=worker, not subagent) into a collapsible card. This
-      // keeps the queen DM clean — the user sees a single "Worker:
-      // 12 actions" card instead of 12 inline bubbles.
+      // Worker run grouping: collect consecutive WORKER-role
+      // messages (and worker tool_status pills) into a collapsible
+      // card. Queen tool_status pills (``role === "queen"``) are
+      // deliberately excluded — the queen's own tool calls are part
+      // of the queen↔user conversation and should render inline as
+      // ToolActivityRows, not fold into a "Worker" bubble. Without
+      // this guard, every queen run_command / read_file / etc. shows
+      // up under a misleading "Worker" label in the DM.
+      const isWorkerCandidate =
+        msg.role === "worker" ||
+        (msg.type === "tool_status" && msg.role !== "queen");
       if (
         !isSubagent &&
-        (msg.role === "worker" || msg.type === "tool_status") &&
+        isWorkerCandidate &&
         msg.type !== "user" &&
         msg.type !== "run_divider"
       ) {
@@ -759,11 +766,18 @@ export default function ChatPanel({
           // Queen message with real text — boundary (queen is talking
           // to the user, not just emitting a tool)
           if (m.role === "queen" && m.content?.trim() && !m.type) break;
+          // Queen tool_status — NOT a worker activity, don't bucket
+          // it. Break so the grouping stops and the queen pill
+          // renders inline.
+          if (m.type === "tool_status" && m.role === "queen") break;
           // Subagent message — different group type, stop here
           if (m.nodeId?.includes(":subagent:")) break;
 
-          // Worker messages and tool_status belong to the run
-          if (m.role === "worker" || m.type === "tool_status") {
+          // Worker text messages and worker tool_status belong to the run
+          if (
+            m.role === "worker" ||
+            (m.type === "tool_status" && m.role !== "queen")
+          ) {
             workerMsgs.push(m);
             i++;
             continue;
