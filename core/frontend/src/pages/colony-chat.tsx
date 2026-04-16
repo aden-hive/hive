@@ -13,7 +13,11 @@ import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent } from "@/api/types";
-import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import {
+  sseEventToChatMessage,
+  formatAgentDisplayName,
+  replayEventsToMessages,
+} from "@/lib/chat-helpers";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
@@ -54,29 +58,38 @@ async function restoreSessionMessages(
     const { events, truncated, total, returned } =
       await sessionsApi.eventsHistory(sessionId);
     if (events.length > 0) {
-      const messages: ChatMessage[] = [];
+      // Walk events twice:
+      //   1. Extract the trailing queen phase (unchanged logic).
+      //   2. Run the full state-machine replay so tool_status pills
+      //      are synthesized just like the live SSE handler does.
+      // Without (2), refreshed sessions showed zero tool activity
+      // because tool_call_started/completed events are ignored by
+      // the stateless converter.
       let runningPhase: ChatMessage["phase"] = undefined;
       for (const evt of events) {
         const p =
           evt.type === "queen_phase_changed"
             ? (evt.data?.phase as string)
             : evt.type === "node_loop_iteration"
-            ? (evt.data?.phase as string | undefined)
-            : undefined;
+              ? (evt.data?.phase as string | undefined)
+              : undefined;
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
         }
-        const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
-        if (!msg) continue;
-        if (evt.stream_id === "queen") {
-          msg.role = "queen";
-          msg.phase = runningPhase;
-        }
-        messages.push(msg);
       }
-      // Prepend a run_divider banner so the user knows how many older
-      // events were dropped. Keeps the chronology readable without
-      // injecting a load-more button (we can add pagination later).
+
+      const messages = replayEventsToMessages(events, thread, agentDisplayName);
+      // Stamp the latest phase on every queen message so the UI's
+      // phase-badge rendering matches what the live path would have
+      // displayed at the time of the refresh.
+      if (runningPhase) {
+        for (const m of messages) {
+          if (m.role === "queen") m.phase = runningPhase;
+        }
+      }
+
+      // Prepend a run_divider banner when the server truncated older
+      // events so the user knows how many are hidden.
       const droppedCount = Math.max(0, total - returned);
       if (truncated && droppedCount > 0) {
         const firstTs = events[0]?.timestamp;
