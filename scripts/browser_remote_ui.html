@@ -457,9 +457,12 @@ let currentView = 'grid';
 
 // Tool categories for sidebar grouping
 const CATEGORIES = {
-  'Interactions': ['browser_click', 'browser_click_coordinate', 'browser_type', 'browser_fill', 'browser_press', 'browser_press_at', 'browser_hover', 'browser_hover_coordinate', 'browser_select', 'browser_scroll'],
+  'Lifecycle': ['browser_start', 'browser_stop', 'browser_status'],
+  'Tabs': ['browser_tabs', 'browser_open', 'browser_close', 'browser_focus'],
   'Navigation': ['browser_navigate', 'browser_go_back', 'browser_go_forward', 'browser_reload'],
-  'Inspection': ['browser_screenshot', 'browser_snapshot', 'browser_get_text', 'browser_evaluate', 'browser_wait'],
+  'Interactions': ['browser_click', 'browser_click_coordinate', 'browser_type', 'browser_fill', 'browser_press', 'browser_press_at', 'browser_hover', 'browser_hover_coordinate', 'browser_select', 'browser_scroll'],
+  'Inspection': ['browser_screenshot', 'browser_snapshot', 'browser_console', 'browser_get_text', 'browser_evaluate', 'browser_wait'],
+  'Advanced': ['browser_resize', 'browser_upload', 'browser_dialog', 'browser_coords'],
 };
 
 async function init() {
@@ -474,15 +477,18 @@ async function checkStatus() {
   try {
     const res = await fetch(`${API_BASE}/status`);
     const data = await res.json();
-    if (data.connected || data.bridge_connected) {
+    if (data.connected) {
       badge.textContent = 'connected';
       badge.className = 'connected';
-      const contexts = Object.entries(data.contexts || {});
-      if (contexts.length > 0) {
-        const parts = contexts.map(([k,v]) => `${k}: tab ${v.activeTabId}`);
-        ctx.textContent = parts.join(', ');
+      if (data.tools_count) {
+        ctx.textContent = `${data.tools_count} tools`;
+      } else if (data.contexts) {
+        const contexts = Object.entries(data.contexts);
+        ctx.textContent = contexts.length > 0
+          ? contexts.map(([k,v]) => `${k}: tab ${v.activeTabId}`).join(', ')
+          : 'no active context';
       } else {
-        ctx.textContent = 'no active context';
+        ctx.textContent = '';
       }
     } else {
       badge.textContent = 'disconnected';
@@ -511,13 +517,25 @@ async function loadTools() {
 function renderSidebar() {
   const sidebar = document.getElementById('sidebar');
   let html = '';
+  const categorized = new Set();
   for (const [group, tools] of Object.entries(CATEGORIES)) {
+    const available = tools.filter(t => toolSchemas[t]);
+    if (available.length === 0) continue;
     html += `<div class="sidebar-group"><div class="sidebar-group-label">${group}</div>`;
-    for (const tool of tools) {
-      if (toolSchemas[tool]) {
-        const shortName = tool.replace('browser_', '');
-        html += `<button class="sidebar-item" data-tool="${tool}" onclick="scrollToTool('${tool}')">${shortName}</button>`;
-      }
+    for (const tool of available) {
+      categorized.add(tool);
+      const shortName = tool.replace('browser_', '');
+      html += `<button class="sidebar-item" data-tool="${tool}" onclick="scrollToTool('${tool}')">${shortName}</button>`;
+    }
+    html += '</div>';
+  }
+  // Show any uncategorized tools from the server
+  const other = Object.keys(toolSchemas).filter(t => !categorized.has(t));
+  if (other.length > 0) {
+    html += `<div class="sidebar-group"><div class="sidebar-group-label">Other</div>`;
+    for (const tool of other) {
+      const shortName = tool.replace('browser_', '');
+      html += `<button class="sidebar-item" data-tool="${tool}" onclick="scrollToTool('${tool}')">${shortName}</button>`;
     }
     html += '</div>';
   }

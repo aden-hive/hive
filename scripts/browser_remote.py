@@ -62,10 +62,11 @@ def get_mcp_client() -> MCPClient:
         )
         _mcp_client = MCPClient(config)
         _mcp_client.connect()
+        tools = _mcp_client.list_tools()
         logger.info(
             "Connected to GCU server, %d tools available: %s",
-            len(_mcp_client.get_tools()),
-            [t.name for t in _mcp_client.get_tools()],
+            len(tools),
+            [t.name for t in tools],
         )
     return _mcp_client
 
@@ -90,7 +91,7 @@ async def handle_status(request: web.Request) -> web.Response:
     """GET /status — connection status."""
     try:
         client = get_mcp_client()
-        tools = client.get_tools()
+        tools = client.list_tools()
         return web.json_response({
             "connected": True,
             "tools_count": len(tools),
@@ -103,7 +104,7 @@ async def handle_tools(request: web.Request) -> web.Response:
     """GET /tools — list available tools with their schemas."""
     try:
         client = get_mcp_client()
-        tools = client.get_tools()
+        tools = client.list_tools()
         schemas = {}
         for tool in tools:
             props = tool.input_schema.get("properties", {})
@@ -236,10 +237,17 @@ def main() -> None:
 
     # Connect to GCU server eagerly so we fail fast if something is wrong
     try:
-        get_mcp_client()
+        client = get_mcp_client()
     except Exception as e:
         logger.error("Failed to connect to GCU server: %s", e)
         sys.exit(1)
+
+    # Auto-start browser context so tools work immediately
+    try:
+        result = client.call_tool("browser_start", {})
+        logger.info("browser_start: %s", result)
+    except Exception as e:
+        logger.warning("browser_start failed (may already be started): %s", e)
 
     app = create_app()
 

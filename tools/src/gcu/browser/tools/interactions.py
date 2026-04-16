@@ -175,7 +175,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def browser_type(
-        selector: str | None,
+        selector: str,
         text: str,
         tab_id: int | None = None,
         profile: str | None = None,
@@ -194,10 +194,6 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         submit buttons. See the gcu-browser skill for the full "click-
         then-type" pattern.
 
-        When ``selector`` is omitted (None), types into the currently
-        focused element — useful after ``browser_click_coordinate``
-        has already focused the target.
-
         By default uses CDP Input.insertText which is the most reliable
         way to insert text into rich editors. Set
         ``use_insert_text=False`` to fall back to per-character
@@ -206,8 +202,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         is required).
 
         Args:
-            selector: CSS selector for the input element (None to type
-                      into the already-focused element)
+            selector: CSS selector for the input element
             text: Text to type
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
@@ -297,6 +292,77 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             clear_first=True,
             timeout_ms=timeout_ms,
         )
+
+    @mcp.tool()
+    async def browser_type_focused(
+        text: str,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        delay_ms: int = 0,
+        clear_first: bool = True,
+        use_insert_text: bool = True,
+    ) -> dict:
+        """
+        Type text into the already-focused element.
+
+        Use after browser_click_coordinate (or browser_click) has
+        focused the target element. Inserts text via CDP
+        Input.insertText by default — much faster than repeated
+        browser_press calls for multi-character input.
+
+        Args:
+            text: Text to type
+            tab_id: Chrome tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+            delay_ms: Delay between keystrokes in ms (default: 0).
+                      Forces per-keystroke dispatch when > 0.
+            clear_first: Clear existing text before typing (default: True)
+            use_insert_text: Use CDP Input.insertText (default: True)
+
+        Returns:
+            Dict with type result
+        """
+        start = time.perf_counter()
+        params = {"text": text, "tab_id": tab_id, "profile": profile}
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_type_focused", params, result=result)
+            return result
+
+        ctx = _get_context(profile)
+        if not ctx:
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_type_focused", params, result=result)
+            return result
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_type_focused", params, result=result)
+            return result
+
+        try:
+            type_result = await bridge.type_text(
+                target_tab,
+                None,
+                text,
+                clear_first=clear_first,
+                delay_ms=delay_ms,
+                use_insert_text=use_insert_text,
+            )
+            log_tool_call(
+                "browser_type_focused",
+                params,
+                result=type_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return type_result
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+            log_tool_call("browser_type_focused", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
+            return result
 
     @mcp.tool()
     async def browser_press(
