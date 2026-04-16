@@ -22,6 +22,24 @@ Use templates when you want to:
 - Start from a known-good structure instead of from scratch
 - See how all the pieces (goal, nodes, edges, config, CLI) fit together in real code
 
+## Quick Decision Guide
+
+| If your goal is... | Start with | Why |
+| --- | --- | --- |
+| Learn agent design patterns before coding | [`recipes/`](recipes/) | Recipes show goals, prompts, and routing logic without implementation details |
+| Get something runnable in minutes | [`templates/`](templates/) | Templates are executable scaffolds you can copy and run |
+| Customize behavior for your own system | [`templates/`](templates/) | You can edit prompts, tools, and node logic in working code |
+| Understand trade-offs across multiple approaches | [`recipes/`](recipes/) | Recipes are easier to compare side-by-side before committing to code |
+| Onboard a new contributor quickly | [`templates/`](templates/) | A runnable baseline reduces setup and architecture guesswork |
+
+## Starter Recommendations
+
+- **First runnable agent:** start with [`templates/email_inbox_management/`](templates/email_inbox_management/) for a practical end-to-end flow.
+- **Research-oriented workflows:** use [`templates/deep_research_agent/`](templates/deep_research_agent/) to learn multi-step reasoning and synthesis patterns.
+- **Security and analysis style tasks:** explore [`templates/vulnerability_assessment/`](templates/vulnerability_assessment/) for structured investigation workflows.
+- **Pattern learning before coding:** read [`recipes/support_troubleshooting/`](recipes/support_troubleshooting/), then implement your own variant.
+- **If you are still unsure:** pick one recipe to understand the design, then move to the closest template and run it.
+
 ## How to use a template
 
 ```bash
