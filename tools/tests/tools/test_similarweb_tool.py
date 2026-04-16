@@ -1568,6 +1568,7 @@ class TestSimilarWebTool:
 
             # Determine what argument the tool needs (domain, app_id, or category)
             import inspect
+
             sig = inspect.signature(tool.fn)
             kwargs = {}
             if "domain" in sig.parameters:
@@ -1600,6 +1601,7 @@ class TestSimilarWebTool:
                 continue
 
             import inspect
+
             sig = inspect.signature(tool.fn)
             kwargs = {}
             if "domain" in sig.parameters:
@@ -1626,6 +1628,7 @@ class TestSimilarWebTool:
 
         # Temporarily clear environment variable if it exists
         import os
+
         original_key = os.environ.pop("SIMILARWEB_API_KEY", None)
 
         try:

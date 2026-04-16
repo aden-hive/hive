@@ -107,8 +107,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/visits"
         return _make_request(endpoint, api_key, params)
@@ -130,8 +128,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/pages-per-visit"
@@ -155,8 +151,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/average-visit-duration"
         return _make_request(endpoint, api_key_res, params)
@@ -178,8 +172,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/bounce-rate"
@@ -203,8 +195,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/page-views"
         return _make_request(endpoint, api_key_res, params)
@@ -226,8 +216,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/desktop-vs-mobile"
@@ -251,8 +239,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/deduplicated-audience"
         return _make_request(endpoint, api_key_res, params)
@@ -274,8 +260,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/global-rank/global-rank"
@@ -299,8 +283,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/country-rank/country-rank"
         return _make_request(endpoint, api_key_res, params)
@@ -323,8 +305,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/industry-rank/industry-rank"
         return _make_request(endpoint, api_key_res, params)
@@ -346,8 +326,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/geography/active-users"
@@ -406,8 +384,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/overview"
         return _make_request(endpoint, api_key, params)
@@ -444,8 +420,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/keywords/organic-search"
         return _make_request(endpoint, api_key, params)
@@ -475,8 +449,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/geography/audience-geography"
@@ -527,8 +499,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
         api_key = api_key_res
 
-
-
         endpoint = "website-analysis/websites/audience-interests/also-visited"
         return _make_request(endpoint, api_key, {"domain": domain})
 
@@ -559,8 +529,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/outgoing-links"
@@ -595,8 +563,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/desktop-vs-mobile"
@@ -648,8 +614,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
         api_key = api_key_res
 
-
-
         endpoint = "website-analysis/websites/technologies/technologies-used"
         return _make_request(endpoint, api_key, {"domain": domain})
 
@@ -669,8 +633,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/social"
@@ -693,8 +655,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/referrals"
         return _make_request(endpoint, api_key_res, params)
@@ -716,8 +676,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-and-engagement/subdomains"
         return _make_request(endpoint, api_key_res, params)
@@ -738,8 +696,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/popular-pages/popular-pages"
@@ -794,8 +750,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/display-publishers"
         return _make_request(endpoint, api_key_res, params)
@@ -816,8 +770,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-
-
 
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/paid-search-competitors"
@@ -840,8 +792,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/traffic-sources/ad-creatives"
         return _make_request(endpoint, api_key_res, params)
@@ -863,8 +813,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-
-
         params["domain"] = domain
         endpoint = "website-analysis/websites/audience-interests/cross-browsing"
         return _make_request(endpoint, api_key_res, params)
@@ -877,8 +825,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         api_key_res = _get_api_key(credentials)
         if isinstance(api_key_res, dict):
             return api_key_res
-
-
 
         endpoint = "website-analysis/websites/company-info/company-info"
         return _make_request(endpoint, api_key_res, {"domain": domain})
@@ -2290,7 +2236,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
 
         ep = "account/user-remaining-credits"
         return _make_request(ep, api_key_res, params)
-
 
     @mcp.tool()
     def similarweb_get_keyword_analysis(

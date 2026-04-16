@@ -111,8 +111,7 @@ SIMILARWEB_CREDENTIALS = {
             "similarweb_get_batch_describe_tables",
             "similarweb_get_test_webhooks",
             "similarweb_get_remaining_credits",
-            "similarweb_get_remaining_user_credits"
-
+            "similarweb_get_remaining_user_credits",
         ],
         required=True,
         help_url="https://developer.similarweb.com/",
