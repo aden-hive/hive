@@ -9,9 +9,13 @@ function PromptCard({ prompt, onUse }: { prompt: typeof prompts[0]; onUse: (cont
   const queenName = queenNames[queenId] || "Queen";
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(prompt.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(prompt.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+    }
   };
 
   return (
