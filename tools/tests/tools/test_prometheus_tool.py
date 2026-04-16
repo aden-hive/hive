@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import httpx
 import pytest
 from fastmcp import FastMCP
@@ -44,7 +46,7 @@ def test_prometheus_query_success(mcp, monkeypatch):
     assert "result" in result
 
 
-def test_prometheus_range_query_success(mcp, monkeypatch):
+def test_prometheus_query_range_success(mcp, monkeypatch):
     monkeypatch.setenv("PROMETHEUS_BASE_URL", "http://fake-prometheus:9090")
     tool_fn = mcp._tool_manager._tools["prometheus_query_range"].fn
 

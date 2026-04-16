@@ -4,7 +4,7 @@ Provides PromQL-based querying tools for agents to fetch real-time and historica
 
 ## Authentication
 
-Authentication is **optional** as most prometheus servers are deployed within private infrastucture. If no credentials are set, requests are sent without auth headers (suitable for open/internal Prometheus instances).
+Authentication is **optional** as most prometheus servers are deployed within private infrastructure. If no credentials are set, requests are sent without auth headers (suitable for open/internal Prometheus instances).
 
 When credentials are present, **Bearer token takes priority** over Basic Auth:
 

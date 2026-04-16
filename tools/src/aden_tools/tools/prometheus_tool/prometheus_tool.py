@@ -11,6 +11,8 @@ Optional Authentication:
 API Reference: https://prometheus.io/docs/prometheus/latest/querying/api/
 """
 
+from __future__ import annotations
+
 import os
 
 import httpx
@@ -62,8 +64,8 @@ def _missing_prometheus_credential_response() -> dict:
     }
 
 
-def _get_auth():
-    headers = {}
+def _get_auth() -> tuple[dict[str, str], httpx.BasicAuth | None]:
+    headers: dict[str, str] = {}
     auth = None
 
     # Bearer token
@@ -144,7 +146,12 @@ def register_tools(
                     "details": data,
                 }
 
-            return {"success": True, "query": query, "result": data.get("data", {}).get("result", []), "raw": data}
+            return {
+                "success": True,
+                "query": query,
+                "result": data.get("data", {}).get("result", []),
+                "raw": data,
+            }
 
         except httpx.TimeoutException:
             return {"error": "Request to Prometheus timed out"}
