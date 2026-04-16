@@ -27,6 +27,8 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import { useColony } from "@/context/ColonyContext";
+import { useQueenProfile } from "@/context/QueenProfileContext";
 import ParallelSubagentBubble, {
   type SubagentGroup,
 } from "@/components/ParallelSubagentBubble";
@@ -338,6 +340,15 @@ function InlineAskUserBubble({
   const color = getColor(msg.agent, msg.role);
   const thread = msg.thread || activeThread;
 
+  const { queenProfiles } = useColony();
+  const { openQueenProfile } = useQueenProfile();
+  const queenProfileId = isQueen
+    ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
+    : null;
+  const handleQueenClick = queenProfileId
+    ? () => openQueenProfile(queenProfileId)
+    : undefined;
+
   const handleSingle = (answer: string) => {
     setState("submitted");
     onSend(answer, thread);
@@ -357,12 +368,14 @@ function InlineAskUserBubble({
   return (
     <div className="flex gap-3">
       <div
-        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
         style={{
           backgroundColor: `${color}18`,
           border: `1.5px solid ${color}35`,
           boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
         }}
+        onClick={handleQueenClick}
+        title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
       >
         {isQueen ? (
           <Crown className="w-4 h-4" style={{ color }} />
@@ -375,8 +388,9 @@ function InlineAskUserBubble({
       >
         <div className="flex items-center gap-2 mb-1">
           <span
-            className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+            className={`font-medium ${isQueen ? "text-sm" : "text-xs"}${handleQueenClick ? " cursor-pointer hover:underline" : ""}`}
             style={{ color }}
+            onClick={handleQueenClick}
           >
             {msg.agent}
           </span>
@@ -436,6 +450,13 @@ const MessageBubble = memo(
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
     const color = getColor(msg.agent, msg.role);
+
+    // Resolve queen profile ID so clicking avatar/name opens the profile panel
+    const { queenProfiles } = useColony();
+    const { openQueenProfile } = useQueenProfile();
+    const queenProfileId = isQueen
+      ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
+      : null;
 
     if (msg.type === "run_divider") {
       return (
@@ -531,15 +552,21 @@ const MessageBubble = memo(
       );
     }
 
+    const handleQueenClick = queenProfileId
+      ? () => openQueenProfile(queenProfileId)
+      : undefined;
+
     return (
       <div className="flex gap-3">
         <div
-          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
           style={{
             backgroundColor: `${color}18`,
             border: `1.5px solid ${color}35`,
             boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
           }}
+          onClick={handleQueenClick}
+          title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
         >
           {isQueen ? (
             <Crown className="w-4 h-4" style={{ color }} />
@@ -552,8 +579,9 @@ const MessageBubble = memo(
         >
           <div className="flex items-center gap-2 mb-1">
             <span
-              className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+              className={`font-medium ${isQueen ? "text-sm" : "text-xs"}${handleQueenClick ? " cursor-pointer hover:underline" : ""}`}
               style={{ color }}
+              onClick={handleQueenClick}
             >
               {msg.agent}
             </span>
