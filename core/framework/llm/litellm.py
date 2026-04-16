@@ -161,9 +161,58 @@ def _patch_litellm_metadata_nonetype() -> None:
         )
 
 
+def _patch_litellm_responses_bridge_store_param() -> None:
+    """Patch LiteLLM's chat-to-Responses bridge for the ChatGPT Codex backend.
+
+    The ChatGPT Codex backend rejects Responses API requests unless
+    ``store`` is explicitly false. Hive passes ``store=False`` to LiteLLM,
+    but LiteLLM 1.83.4 drops it while translating chat-completions requests
+    to Responses API requests. This patch restores the flag at the final
+    transformed request layer for that backend only.
+    """
+    try:
+        from litellm.completion_extras.litellm_responses_transformation.transformation import (
+            LiteLLMResponsesTransformationHandler,
+        )
+    except ImportError:
+        logger.warning(
+            "Could not apply litellm Responses bridge store patch — litellm internals "
+            "may have changed. Codex subscription calls may fail with 'Store must be "
+            "set to false'. Current litellm version: %s",
+            getattr(litellm, "__version__", "unknown"),
+        )
+        return
+
+    patch_marker = "_hive_codex_store_patch_applied"
+    if getattr(LiteLLMResponsesTransformationHandler, patch_marker, False):
+        return
+
+    original = LiteLLMResponsesTransformationHandler.transform_request
+
+    def _patched_transform_request(self, *args, **kwargs):
+        request_data = original(self, *args, **kwargs)
+
+        api_base = request_data.get("api_base")
+        if not api_base:
+            litellm_params = kwargs.get("litellm_params")
+            if litellm_params is None and len(args) >= 4:
+                litellm_params = args[3]
+            if isinstance(litellm_params, dict):
+                api_base = litellm_params.get("api_base")
+
+        if api_base and "chatgpt.com/backend-api/codex" in str(api_base).lower():
+            request_data["store"] = False
+
+        return request_data
+
+    LiteLLMResponsesTransformationHandler.transform_request = _patched_transform_request
+    setattr(LiteLLMResponsesTransformationHandler, patch_marker, True)
+
+
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
     _patch_litellm_metadata_nonetype()
+    _patch_litellm_responses_bridge_store_param()
     # Let litellm silently drop params unsupported by the target provider
     # (e.g. stream_options for Anthropic) instead of forwarding them verbatim.
     litellm.drop_params = True
