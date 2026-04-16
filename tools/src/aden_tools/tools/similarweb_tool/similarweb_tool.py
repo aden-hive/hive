@@ -535,40 +535,6 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
-    def similarweb_get_device_split(
-        domain: str,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        country: str = "world",
-    ) -> dict[str, Any]:
-        """
-        Get the split of traffic between Desktop and Mobile web for a domain.
-
-        Args:
-            domain: The website domain.
-            start_date: Format YYYY-MM. Optional.
-            end_date: Format YYYY-MM. Optional.
-            country: 2-letter ISO country code or 'world'.
-
-        Returns:
-            Dict showing the desktop vs mobile traffic percentage breakdown.
-        """
-        api_key_res = _get_api_key(credentials)
-        if isinstance(api_key_res, dict):
-            return api_key_res
-        api_key = api_key_res
-
-        params: dict[str, Any] = {"country": country}
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-
-        params["domain"] = domain
-        endpoint = "website-analysis/websites/traffic-and-engagement/desktop-vs-mobile"
-        return _make_request(endpoint, api_key, params)
-
-    @mcp.tool()
     def similarweb_get_category_leaders(
         category: str,
         country: str = "world",
@@ -2332,7 +2298,7 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
-        """Get details on how much time uses spend using an app per session."""
+        """Get details on how much time users spend using an app per session."""
         api_key_res = _get_api_key(credentials)
         if isinstance(api_key_res, dict):
             return api_key_res

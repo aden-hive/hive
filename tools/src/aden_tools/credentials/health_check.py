@@ -1091,8 +1091,9 @@ class SimilarWebHealthChecker(BaseHttpHealthChecker):
         "https://api.similarweb.com/v1/website/google.com/total-traffic-and-engagement/visits"
     )
     SERVICE_NAME = "SimilarWeb"
-    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
-    AUTH_QUERY_PARAM_NAME = "api"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_HEADER
+    AUTH_HEADER_NAME = "api-key"
+    AUTH_HEADER_TEMPLATE = "{token}"
 
     def _build_params(self, credential_value: str) -> dict[str, str]:
         params = super()._build_params(credential_value)

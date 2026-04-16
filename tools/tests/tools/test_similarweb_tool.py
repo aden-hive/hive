@@ -280,20 +280,6 @@ class TestSimilarWebTool:
         assert mock_get.call_args[1]["params"].get("format") == "json"
 
     @patch("aden_tools.tools.similarweb_tool.similarweb_tool.httpx.get")
-    def test_similarweb_get_device_split_success(self, mock_get, mcp_with_tools):
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"data": "success"}
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        tool = mcp_with_tools._tool_manager._tools["similarweb_get_device_split"]
-        _ = tool.fn(domain="example_value")
-
-        mock_get.assert_called_once()
-        assert mock_get.call_args[1]["headers"]["api-key"] == "test_api_key_123"
-        assert mock_get.call_args[1]["params"].get("format") == "json"
-
-    @patch("aden_tools.tools.similarweb_tool.similarweb_tool.httpx.get")
     def test_similarweb_get_category_leaders_success(self, mock_get, mcp_with_tools):
         mock_response = MagicMock()
         mock_response.json.return_value = {"data": "success"}

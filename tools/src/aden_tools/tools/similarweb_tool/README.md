@@ -341,7 +341,7 @@ similarweb_get_remaining_user_credits()
 
 ## Authentication
 
-The tool passes your `SIMILARWEB_API_KEY` to the API calls as a query parameter (or header) during communication with the endpoints hosted under `https://api.similarweb.com`. The framework's credential adapter intercepts the secret parameter injected into your workspace securely.
+The tool passes your `SIMILARWEB_API_KEY` to the API calls via the `api-key` HTTP header during communication with the endpoints hosted under `https://api.similarweb.com`. The framework's credential adapter intercepts the secret parameter injected into your workspace securely.
 
 ## Error Handling
 
