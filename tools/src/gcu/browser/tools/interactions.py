@@ -175,7 +175,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def browser_type(
-        selector: str,
+        selector: str | None,
         text: str,
         tab_id: int | None = None,
         profile: str | None = None,
@@ -194,6 +194,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         submit buttons. See the gcu-browser skill for the full "click-
         then-type" pattern.
 
+        When ``selector`` is omitted (None), types into the currently
+        focused element — useful after ``browser_click_coordinate``
+        has already focused the target.
+
         By default uses CDP Input.insertText which is the most reliable
         way to insert text into rich editors. Set
         ``use_insert_text=False`` to fall back to per-character
@@ -202,7 +206,8 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         is required).
 
         Args:
-            selector: CSS selector for the input element
+            selector: CSS selector for the input element (None to type
+                      into the already-focused element)
             text: Text to type
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")

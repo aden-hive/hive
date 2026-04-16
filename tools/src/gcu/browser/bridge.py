@@ -930,12 +930,50 @@ class BeelineBridge:
         )
 
         await self.highlight_point(tab_id, x, y, label=f"click ({x},{y})")
-        return {"ok": True, "action": "click_coordinate", "x": x, "y": y}
+
+        # Query the focused element after the click
+        focused_info = None
+        try:
+            await self._try_enable_domain(tab_id, "Runtime")
+            result = await self.evaluate(
+                tab_id,
+                """
+                (function() {
+                    var el = document.activeElement;
+                    if (!el || el === document.body) return null;
+                    var rect = el.getBoundingClientRect();
+                    var attrs = {};
+                    for (var i = 0; i < el.attributes.length && i < 10; i++) {
+                        attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+                    }
+                    return {
+                        tag: el.tagName.toLowerCase(),
+                        id: el.id || null,
+                        className: el.className || null,
+                        name: el.getAttribute('name') || null,
+                        type: el.getAttribute('type') || null,
+                        role: el.getAttribute('role') || null,
+                        text: (el.innerText || '').substring(0, 200),
+                        value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
+                        attributes: attrs,
+                        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+                    };
+                })()
+                """,
+            )
+            focused_info = (result or {}).get("result")
+        except Exception:
+            pass
+
+        resp = {"ok": True, "action": "click_coordinate", "x": x, "y": y}
+        if focused_info:
+            resp["focused_element"] = focused_info
+        return resp
 
     async def type_text(
         self,
         tab_id: int,
-        selector: str,
+        selector: str | None,
         text: str,
         clear_first: bool = True,
         delay_ms: int = 0,
@@ -974,79 +1012,98 @@ class BeelineBridge:
         await self._try_enable_domain(tab_id, "Input")
         await self._try_enable_domain(tab_id, "Runtime")
 
-        # Find + scroll + (optionally) clear via JS. We still need the
-        # rect, and clearing via `.value = ''` / `.textContent = ''`
-        # is the most reliable way to reset pre-existing content.
-        focus_script = f"""
-            (function() {{
-                const el = document.querySelector({json.dumps(selector)});
-                if (!el) return null;
+        if selector is not None:
+            # Find + scroll + (optionally) clear via JS. We still need the
+            # rect, and clearing via `.value = ''` / `.textContent = ''`
+            # is the most reliable way to reset pre-existing content.
+            focus_script = f"""
+                (function() {{
+                    const el = document.querySelector({json.dumps(selector)});
+                    if (!el) return null;
 
-                // Scroll into view so the click lands in-viewport.
-                el.scrollIntoView({{ block: 'center' }});
+                    // Scroll into view so the click lands in-viewport.
+                    el.scrollIntoView({{ block: 'center' }});
 
-                // Clear if requested.
-                if ({str(clear_first).lower()}) {{
-                    if (el.value !== undefined) {{
-                        el.value = '';
-                        // Nudge React's onChange — the framework reads
-                        // .value via a setter hook, and without firing
-                        // an input event the component state remains
-                        // stale after our value assignment.
-                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
-                    }} else if (el.isContentEditable) {{
-                        el.textContent = '';
-                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    // Clear if requested.
+                    if ({str(clear_first).lower()}) {{
+                        if (el.value !== undefined) {{
+                            el.value = '';
+                            // Nudge React's onChange — the framework reads
+                            // .value via a setter hook, and without firing
+                            // an input event the component state remains
+                            // stale after our value assignment.
+                            el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        }} else if (el.isContentEditable) {{
+                            el.textContent = '';
+                            el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        }}
                     }}
-                }}
 
-                const r = el.getBoundingClientRect();
-                return {{
-                    x: r.left + r.width / 2,
-                    y: r.top + r.height / 2,
-                    w: r.width,
-                    h: r.height,
-                }};
-            }})();
-        """
+                    const r = el.getBoundingClientRect();
+                    return {{
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2,
+                        w: r.width,
+                        h: r.height,
+                    }};
+                }})();
+            """
 
-        focus_result = await self.evaluate(tab_id, focus_script)
-        rect = (focus_result or {}).get("result")
-
-        if not rect:
-            # Element not found — wait + retry until timeout.
-            deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
-            while asyncio.get_event_loop().time() < deadline:
-                result = await self.evaluate(tab_id, focus_script)
-                rect = (result or {}).get("result") if result else None
-                if rect:
-                    break
-                await asyncio.sleep(0.1)
+            focus_result = await self.evaluate(tab_id, focus_script)
+            rect = (focus_result or {}).get("result")
 
             if not rect:
-                return {"ok": False, "error": f"Element not found: {selector}"}
+                # Element not found — wait + retry until timeout.
+                deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+                while asyncio.get_event_loop().time() < deadline:
+                    result = await self.evaluate(tab_id, focus_script)
+                    rect = (result or {}).get("result") if result else None
+                    if rect:
+                        break
+                    await asyncio.sleep(0.1)
 
-        if not rect.get("w") or not rect.get("h"):
-            return {
-                "ok": False,
-                "error": f"Element has zero dimensions, can't click to focus: {selector}",
-            }
+                if not rect:
+                    return {"ok": False, "error": f"Element not found: {selector}"}
 
-        # Fire a real CDP pointer click at the element's center. This is
-        # what unblocks rich-text editors — JS el.focus() is not enough.
-        click_x = rect["x"]
-        click_y = rect["y"]
-        await self._cdp(
-            tab_id,
-            "Input.dispatchMouseEvent",
-            {"type": "mousePressed", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
-        )
-        await self._cdp(
-            tab_id,
-            "Input.dispatchMouseEvent",
-            {"type": "mouseReleased", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
-        )
-        await asyncio.sleep(0.15)  # Let focus / editor-init animations settle.
+            if not rect.get("w") or not rect.get("h"):
+                return {
+                    "ok": False,
+                    "error": f"Element has zero dimensions, can't click to focus: {selector}",
+                }
+
+            # Fire a real CDP pointer click at the element's center. This is
+            # what unblocks rich-text editors — JS el.focus() is not enough.
+            click_x = rect["x"]
+            click_y = rect["y"]
+            await self._cdp(
+                tab_id,
+                "Input.dispatchMouseEvent",
+                {"type": "mousePressed", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
+            )
+            await self._cdp(
+                tab_id,
+                "Input.dispatchMouseEvent",
+                {"type": "mouseReleased", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
+            )
+            await asyncio.sleep(0.15)  # Let focus / editor-init animations settle.
+        else:
+            # No selector — assume the caller already focused the target
+            # element (e.g. via browser_click_coordinate). Just clear the
+            # active element if requested, then insert text directly.
+            if clear_first:
+                await self.evaluate(tab_id, """
+                    (function() {
+                        const el = document.activeElement;
+                        if (!el) return;
+                        if (el.value !== undefined) {
+                            el.value = '';
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                        } else if (el.isContentEditable) {
+                            el.textContent = '';
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                        }
+                    })();
+                """)
 
         if use_insert_text and delay_ms <= 0:
             # CDP Input.insertText is the most reliable way to insert
@@ -1086,16 +1143,28 @@ class BeelineBridge:
                     await asyncio.sleep(delay_ms / 1000)
 
         # Highlight the element that was typed into
-        rect_result = await self.evaluate(
-            tab_id,
-            f"(function(){{const el=document.querySelector("
-            f"{json.dumps(selector)});if(!el)return null;"
-            f"const r=el.getBoundingClientRect();"
-            f"return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
-        )
-        rect = (rect_result or {}).get("result")
-        if rect:
-            await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
+        if selector is not None:
+            rect_result = await self.evaluate(
+                tab_id,
+                f"(function(){{const el=document.querySelector("
+                f"{json.dumps(selector)});if(!el)return null;"
+                f"const r=el.getBoundingClientRect();"
+                f"return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
+            )
+            rect = (rect_result or {}).get("result")
+            if rect:
+                await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
+        else:
+            # Highlight the active element when no selector was provided
+            rect_result = await self.evaluate(
+                tab_id,
+                "(function(){const el=document.activeElement;if(!el)return null;"
+                "const r=el.getBoundingClientRect();"
+                "return{x:r.left,y:r.top,w:r.width,h:r.height};})()",
+            )
+            rect = (rect_result or {}).get("result")
+            if rect:
+                await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label="active element")
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     # CDP Input.dispatchKeyEvent modifiers bitmask.
