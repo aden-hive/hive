@@ -238,7 +238,9 @@ class TestReportToParent:
                     summary="Fetched 5 rows from the API.",
                     data={"rows": 5, "table": "honeycomb"},
                 ),
-                # Worker terminates after the report; no follow-up turn needed
+                # After tool_calls finish, the loop does another turn; emit a
+                # text stop so the worker terminates cleanly.
+                _text_scenario("Done."),
             ]
         )
         colony = await _make_colony(tmp_path, llm, agent_spec, goal, event_bus)
