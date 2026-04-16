@@ -258,6 +258,14 @@ class TestEnvVarStorage:
         with pytest.raises(NotImplementedError):
             storage.delete("test")
 
+    def test_exists_matches_load_for_empty_value(self):
+        """Test exists() and load() stay consistent for empty values."""
+        storage = EnvVarStorage(env_mapping={"empty": "EMPTY_API_KEY"})
+
+        with patch.object(storage, "_read_env_value", return_value=""):
+            assert storage.load("empty") is None
+            assert not storage.exists("empty")
+
 
 class TestEncryptedFileStorage:
     """Tests for EncryptedFileStorage."""
