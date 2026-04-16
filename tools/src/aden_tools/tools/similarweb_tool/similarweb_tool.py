@@ -47,18 +47,20 @@ def _make_request(
     if params is None:
         params = {}
 
-    # SimilarWeb official API uses the api key as a query parameter
-    params["api"] = api_key
+    # SimilarWeb official API v5 uses the api key as a header
+    headers = {"api-key": api_key}
 
-    # Defaults according to official v1 API structure
+    params["format"] = "json"
+
+    # Defaults according to official v5 API structure
     if "start_date" not in params:
         # Some default/dummy dates or required by specific endpoints
         pass
 
-    url = f"https://api.similarweb.com/v1/{endpoint}"
+    url = f"https://api.similarweb.com/v5/{endpoint}"
 
     try:
-        response = httpx.get(url, params=params, timeout=30.0)
+        response = httpx.get(url, params=params, headers=headers, timeout=30.0)
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -105,8 +107,251 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/total-traffic-and-engagement/visits"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/visits"
         return _make_request(endpoint, api_key, params)
+
+    @mcp.tool()
+    def similarweb_get_pages_per_visit(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get pages per visit for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/pages-per-visit"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_average_visit_duration(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get average visit duration for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/average-visit-duration"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_bounce_rate(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get bounce rate for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/bounce-rate"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_page_views(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get page views for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/page-views"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_vs_mobile(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get desktop vs mobile split for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/desktop-vs-mobile"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_deduplicated_audience(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get deduplicated audience for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/deduplicated-audience"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_global_rank(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get global rank for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/global-rank/global-rank"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_country_rank(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get country rank for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/country-rank/country-rank"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_industry_rank(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get industry rank for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/industry-rank/industry-rank"
+        return _make_request(endpoint, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_geography(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """Get geography data for a specific website domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/geography/active-users"
+        return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
     def similarweb_get_similar_competitors(domain: str, limit: int = 10) -> dict[str, Any]:
@@ -126,7 +371,9 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         api_key = api_key_res
 
         params = {"limit": limit}
-        endpoint = f"website/{domain}/similar-sites/similarsites"
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/similar-sites/similarsites"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -159,7 +406,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/overview"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/overview"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -194,7 +444,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/keywords/organic-search"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/keywords/organic-search"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -223,7 +476,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/geography/audience-geography"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/geography/audience-geography"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -249,7 +505,8 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         api_key = api_key_res
 
         params: dict[str, Any] = {"country": country, "store": store}
-        endpoint = f"app/{store}/app/{app_id}/performance/overview"
+        params["app_id"] = app_id
+        endpoint = f"app-analysis/{store}/apps/performance/overview"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -270,8 +527,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
         api_key = api_key_res
 
-        endpoint = f"website/{domain}/audience-interests/also-visited"
-        return _make_request(endpoint, api_key, {})
+
+
+        endpoint = "website-analysis/websites/audience-interests/also-visited"
+        return _make_request(endpoint, api_key, {"domain": domain})
 
     @mcp.tool()
     def similarweb_get_top_outgoing_links(
@@ -301,7 +560,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/outgoing-links"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/outgoing-links"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -334,7 +596,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/total-traffic-and-engagement/desktop-vs-mobile"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/desktop-vs-mobile"
         return _make_request(endpoint, api_key, params)
 
     @mcp.tool()
@@ -383,8 +648,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
         api_key = api_key_res
 
-        endpoint = f"website/{domain}/technologies/technologies-used"
-        return _make_request(endpoint, api_key, {})
+
+
+        endpoint = "website-analysis/websites/technologies/technologies-used"
+        return _make_request(endpoint, api_key, {"domain": domain})
 
     @mcp.tool()
     def similarweb_get_social_media_traffic(
@@ -403,7 +670,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/social"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/social"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -423,7 +693,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/referrals"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/referrals"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -443,7 +716,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/total-traffic-and-engagement/subdomains"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-and-engagement/subdomains"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -463,7 +739,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/popular-pages/popular-pages"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/popular-pages/popular-pages"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -478,7 +757,8 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
 
         params: dict[str, Any] = {"country": country, "store": store}
-        endpoint = f"app/{store}/app/{app_id}/ranking/category-rank"
+        params["app_id"] = app_id
+        endpoint = f"app-analysis/{store}/apps/ranking/category-rank"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -493,7 +773,8 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
             return api_key_res
 
         params: dict[str, Any] = {"country": country, "store": store}
-        endpoint = f"app/{store}/app/{app_id}/engagement/usage-metrics"
+        params["app_id"] = app_id
+        endpoint = f"app-analysis/{store}/apps/engagement/usage-metrics"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -513,7 +794,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/display-publishers"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/display-publishers"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -533,7 +817,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/paid-search-competitors"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/paid-search-competitors"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -553,7 +840,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/traffic-sources/ad-creatives"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/traffic-sources/ad-creatives"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -573,7 +863,10 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if end_date:
             params["end_date"] = end_date
 
-        endpoint = f"website/{domain}/audience-interests/cross-browsing"
+
+
+        params["domain"] = domain
+        endpoint = "website-analysis/websites/audience-interests/cross-browsing"
         return _make_request(endpoint, api_key_res, params)
 
     @mcp.tool()
@@ -585,5 +878,1546 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         if isinstance(api_key_res, dict):
             return api_key_res
 
-        endpoint = f"website/{domain}/company-info/company-info"
-        return _make_request(endpoint, api_key_res, {})
+
+
+        endpoint = "website-analysis/websites/company-info/company-info"
+        return _make_request(endpoint, api_key_res, {"domain": domain})
+
+    @mcp.tool()
+    def similarweb_get_desktop_visits(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_visits."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/visits-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_pages_per_visit(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_pages_per_visit."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/pages-per-visit-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_average_visit_duration(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_average_visit_duration."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/average-visit-duration-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_bounce_rate(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_bounce_rate."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/bounce-rate-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_pageviews(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_pageviews."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/page-views-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_unique_visitors(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_unique_visitors."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/total-traffic-and-engagement/unique-visitors-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_geography(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_geography."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/geography/desktop-active-users"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_visits_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_visits_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/desktop-visits-by-channel"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_pages_per_visit_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_pages_per_visit_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/desktop-pages-per-visit-by-channel"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_average_visit_duration_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated tool for similarweb_get_desktop_average_visit_duration_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/desktop-average-visit-duration-by-channel"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_bounce_rate_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_bounce_rate_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/desktop-bounce-rate-by-channel"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_referrals(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_referrals."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/referrals-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_social_referrals(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_social_referrals."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/social-referrals-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_ad_networks(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_ad_networks."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/ad-networks-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_display_publishers(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_display_publishers."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/display-publishers-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_publishers_per_ad_network(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_publishers_per_ad_network."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/publishers-per-ad-network-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_organic_keyword_competitors(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_organic_keyword_competitors."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/keywords/organic-competitors-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_paid_keyword_competitors(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_paid_keyword_competitors."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/keywords/paid-competitors-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_organic_outgoing_links(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_organic_outgoing_links."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/outgoing-links/organic-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_outgoing_ads_networks(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_outgoing_ads_networks."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/outgoing-links/ad-networks-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_outgoing_ads_advertisers(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_outgoing_ads_advertisers."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/outgoing-links/advertisers-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_traffic_sources_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_traffic_sources_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/overview-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_desktop_ppc_spend(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_desktop_ppc_spend."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/ppc-spend-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_mobile_traffic_sources_by_channel(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_mobile_traffic_sources_by_channel."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/overview-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_mobile_referrals(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_mobile_referrals."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/referrals-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_mobile_outgoing_referrals(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_mobile_outgoing_referrals."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/outgoing-links/referrals-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_mobile_organic_keyword_competitors(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_mobile_organic_keyword_competitors."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/keywords/organic-competitors-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_mobile_paid_keyword_competitors(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_mobile_paid_keyword_competitors."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/keywords/paid-competitors-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_all_traffic_ppc_spend(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_all_traffic_ppc_spend."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/traffic-sources/ppc-spend-total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_demographics_groups(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_demographics_groups."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/demographics-groups"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_demographics_age(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_demographics_age."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/demographics-age"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_demographics_gender(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_demographics_gender."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/demographics-gender"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_interests_all(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_interests_all."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/interests-total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_interests_desktop(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_interests_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/interests-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_interests_mobile(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_interests_mobile."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/interests-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_overlap_desktop(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_overlap_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/overlap-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_audience_new_vs_returning(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_audience_new_vs_returning."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/audience/new-vs-returning"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_subdomains_desktop(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_subdomains_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/structure/subdomains-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_subdomains_mobile(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_subdomains_mobile."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/structure/subdomains-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_folders(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_folders."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/structure/folders"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_popular_pages(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_popular_pages."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/structure/popular-pages"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_custom_segments(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_custom_segments."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/custom/list"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_predefined_segments(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_predefined_segments."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/predefined/list"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_segment_traffic_total(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_segment_traffic_total."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/traffic/total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_segment_traffic_desktop(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_segment_traffic_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/traffic/desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_segment_marketing_channels_desktop(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_segment_marketing_channels_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/marketing-channels/desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_segment_marketing_channels_all(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_segment_marketing_channels_all."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "segments/marketing-channels/total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_conversion_segments(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_conversion_segments."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "conversions/segments"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_conversion_analysis_desktop(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_conversion_analysis_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "conversions/analysis-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_api_lite(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_api_lite."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/api-lite"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_website_description(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_website_description."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/description"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_top_similar_rank(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_top_similar_rank."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/similar-ranking"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_top_sites_total(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_top_sites_total."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "top-sites/total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_top_sites_desktop(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_top_sites_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "top-sites/desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_top_sites_mobile(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_top_sites_mobile."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "top-sites/mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_rank_tracking_campaigns(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_rank_tracking_campaigns."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "rank-tracking/campaigns"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_rank_tracking_position_trend(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_rank_tracking_position_trend."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "rank-tracking/position-trend"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_rank_tracking_snapshot(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_rank_tracking_snapshot."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "rank-tracking/snapshot"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_rank_tracker_describe(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_rank_tracker_describe."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "rank-tracking/describe"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_list_companies(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_list_companies."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "companies/list"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_company_analysis_total(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_company_analysis_total."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"companies/{domain}/analysis-total"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_company_analysis_desktop(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_company_analysis_desktop."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"companies/{domain}/analysis-desktop"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_company_analysis_mobile(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_company_analysis_mobile."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"companies/{domain}/analysis-mobile"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_website_technologies(
+        domain: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_website_technologies."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/technologies"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_batch_describe_tables(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_batch_describe_tables."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "batch/describe"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_test_webhooks(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_test_webhooks."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "webhooks/test"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_remaining_credits(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_remaining_credits."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "account/remaining-credits"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_remaining_user_credits(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str = "world",
+    ) -> dict[str, Any]:
+        """A generated SimilarWeb tool for similarweb_get_remaining_user_credits."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "granularity": "monthly"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = "account/user-remaining-credits"
+        return _make_request(ep, api_key_res, params)
+
+
+    @mcp.tool()
+    def similarweb_get_keyword_analysis(
+        keyword: str,
+        country: str = "us",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get keyword analysis metrics like Search Volume, CPC, and Keyword Difficulty."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"keywords/{keyword}/analysis"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_keyword_competitors(
+        keyword: str,
+        country: str = "us",
+        limit: int = 100,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Find domains dominating a specific keyword in organic and paid search results."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country, "limit": limit}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"keywords/{keyword}/competitors"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_app_dau_mau(
+        app_id: str,
+        store: str,
+        country: str = "us",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get Daily Active Users (DAU) and Monthly Active Users (MAU) for a mobile app."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"app/{store}/{app_id}/engagement/dau-mau"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_app_retention(
+        app_id: str,
+        store: str,
+        country: str = "us",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get app retention rate metrics mapping how long users use it after install."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"app/{store}/{app_id}/engagement/retention"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_app_session_details(
+        app_id: str,
+        store: str,
+        country: str = "us",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get details on how much time uses spend using an app per session."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"app/{store}/{app_id}/engagement/session-details"
+        return _make_request(ep, api_key_res, params)
+
+    @mcp.tool()
+    def similarweb_get_conversion_rate(
+        domain: str,
+        country: str = "us",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Get e-commerce conversion rate (users who made a purchase) for a domain."""
+        api_key_res = _get_api_key(credentials)
+        if isinstance(api_key_res, dict):
+            return api_key_res
+
+        params: dict[str, Any] = {"country": country}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        ep = f"website/{domain}/conversion-rate"
+        return _make_request(ep, api_key_res, params)
