@@ -1,4 +1,4 @@
-"""Tests for similarweb_tool - Website traffic and competitor analytics."""
+"""Tests for similarweb_tool - Websites traffic and competitor analytics."""
 
 from unittest.mock import MagicMock, patch
 
