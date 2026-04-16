@@ -30,6 +30,10 @@ import MultiQuestionWidget from "@/components/MultiQuestionWidget";
 import ParallelSubagentBubble, {
   type SubagentGroup,
 } from "@/components/ParallelSubagentBubble";
+import {
+  formatMessageTime,
+  formatDayDividerLabel,
+} from "@/lib/chat-helpers";
 
 export interface ChatMessage {
   id: string;
@@ -516,10 +520,11 @@ const MessageBubble = memo(
             {msg.content && (
               <p className="whitespace-pre-wrap break-words">{msg.content}</p>
             )}
-            {msg.queued && (
-              <span className="block text-[10px] opacity-60 mt-1 text-right">
-                queued
-              </span>
+            {(msg.queued || msg.createdAt) && (
+              <div className="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-60">
+                {msg.queued && <span>queued</span>}
+                {msg.createdAt && <span>{formatMessageTime(msg.createdAt)}</span>}
+              </div>
             )}
           </div>
         </div>
@@ -571,6 +576,11 @@ const MessageBubble = memo(
                           ? "planning"
                           : "building"
                   : "Worker"}
+              </span>
+            )}
+            {msg.createdAt && (
+              <span className="text-[10px] text-muted-foreground">
+                {formatMessageTime(msg.createdAt)}
               </span>
             )}
           </div>
@@ -657,7 +667,8 @@ export default function ChatPanel({
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
-    | { kind: "worker_run"; runId: string; group: WorkerRunGroup };
+    | { kind: "worker_run"; runId: string; group: WorkerRunGroup }
+    | { kind: "day_divider"; key: string; createdAt: number };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -779,6 +790,41 @@ export default function ChatPanel({
     return items;
   }, [threadMessages, contextUsage]);
 
+  // Inject day-separator dividers between items that cross a calendar-day
+  // boundary, and one before the very first item. Helps the user see when
+  // activity resumed after a gap — important since some answers take hours.
+  const itemsWithDividers = useMemo<RenderItem[]>(() => {
+    const getTime = (item: RenderItem): number | undefined => {
+      if (item.kind === "message") return item.msg.createdAt;
+      if (item.kind === "parallel") {
+        for (const g of item.groups) {
+          for (const m of g.messages) {
+            if (m.createdAt) return m.createdAt;
+          }
+        }
+      }
+      return undefined;
+    };
+    const dayKey = (ts: number) => {
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    };
+    const out: RenderItem[] = [];
+    let lastDay: string | null = null;
+    for (const item of renderItems) {
+      const ts = getTime(item);
+      if (ts) {
+        const key = dayKey(ts);
+        if (key !== lastDay) {
+          out.push({ kind: "day_divider", key: `day-${ts}`, createdAt: ts });
+          lastDay = key;
+        }
+      }
+      out.push(item);
+    }
+    return out;
+  }, [renderItems]);
+
   // Mark current thread as read
   useEffect(() => {
     const count = messages.filter((m) => m.thread === activeThread).length;
@@ -853,7 +899,21 @@ export default function ChatPanel({
         onScroll={handleScroll}
         className="flex-1 overflow-auto px-5 py-4 space-y-3"
       >
-        {renderItems.map((item) => {
+        {itemsWithDividers.map((item) => {
+          if (item.kind === "day_divider") {
+            return (
+              <div
+                key={item.key}
+                className="flex items-center gap-3 py-2 my-1"
+              >
+                <div className="flex-1 h-px bg-border/60" />
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  {formatDayDividerLabel(item.createdAt)}
+                </span>
+                <div className="flex-1 h-px bg-border/60" />
+              </div>
+            );
+          }
           if (item.kind === "parallel") {
             return (
               <div key={item.groupId}>

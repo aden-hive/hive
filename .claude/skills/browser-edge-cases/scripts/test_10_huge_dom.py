@@ -87,9 +87,7 @@ async def test_huge_dom():
         await bridge.navigate(tab_id, data_url, wait_until="load")
 
         # Count elements
-        count_result = await bridge.evaluate(
-            tab_id, "(function() { return document.querySelectorAll('*').length; })()"
-        )
+        count_result = await bridge.evaluate(tab_id, "(function() { return document.querySelectorAll('*').length; })()")
         elem_count = count_result.get("result", 0)
         print(f"DOM elements: {elem_count}")
 
@@ -122,14 +120,10 @@ async def test_huge_dom():
 
         # Test 3: Real LinkedIn
         print("\n--- Test 3: Real LinkedIn Feed ---")
-        await bridge.navigate(
-            tab_id, "https://www.linkedin.com/feed", wait_until="load", timeout_ms=30000
-        )
+        await bridge.navigate(tab_id, "https://www.linkedin.com/feed", wait_until="load", timeout_ms=30000)
         await asyncio.sleep(2)
 
-        count_result = await bridge.evaluate(
-            tab_id, "(function() { return document.querySelectorAll('*').length; })()"
-        )
+        count_result = await bridge.evaluate(tab_id, "(function() { return document.querySelectorAll('*').length; })()")
         elem_count = count_result.get("result", 0)
         print(f"LinkedIn DOM elements: {elem_count}")
 

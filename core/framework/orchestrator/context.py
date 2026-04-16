@@ -175,9 +175,7 @@ def _resolve_available_tools(
         return always_tools
 
     declared = set(node_spec.tools)
-    declared_tools = [
-        t for t in tools if t.name in declared and t.name not in _ALWAYS_AVAILABLE_TOOLS
-    ]
+    declared_tools = [t for t in tools if t.name in declared and t.name not in _ALWAYS_AVAILABLE_TOOLS]
     return always_tools + declared_tools
 
 

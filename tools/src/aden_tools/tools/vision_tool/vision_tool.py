@@ -71,9 +71,7 @@ class _VisionClient:
         except Exception as e:
             return {"error": f"Failed to read file: {str(e)}"}
 
-    def _call_api(
-        self, image_data: dict[str, Any], features: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def _call_api(self, image_data: dict[str, Any], features: list[dict[str, Any]]) -> dict[str, Any]:
         """Make request to Vision API."""
         try:
             response = httpx.post(
@@ -118,9 +116,7 @@ class _VisionClient:
         if "error" in image_data:
             return image_data
 
-        result = self._call_api(
-            image_data, [{"type": "LABEL_DETECTION", "maxResults": max_results}]
-        )
+        result = self._call_api(image_data, [{"type": "LABEL_DETECTION", "maxResults": max_results}])
         if "error" in result:
             return result
 
@@ -185,9 +181,7 @@ class _VisionClient:
         if "error" in image_data:
             return image_data
 
-        result = self._call_api(
-            image_data, [{"type": "OBJECT_LOCALIZATION", "maxResults": max_results}]
-        )
+        result = self._call_api(image_data, [{"type": "OBJECT_LOCALIZATION", "maxResults": max_results}])
         if "error" in result:
             return result
 
@@ -226,9 +220,7 @@ class _VisionClient:
         if "error" in image_data:
             return image_data
 
-        result = self._call_api(
-            image_data, [{"type": "LANDMARK_DETECTION", "maxResults": max_results}]
-        )
+        result = self._call_api(image_data, [{"type": "LANDMARK_DETECTION", "maxResults": max_results}])
         if "error" in result:
             return result
 

@@ -149,9 +149,7 @@ async def write_cursor(
             cursor["recent_responses"] = recent_responses
         if recent_tool_fingerprints is not None:
             # Convert list[list[tuple]] → list[list[list]] for JSON
-            cursor["recent_tool_fingerprints"] = [
-                [list(pair) for pair in fps] for fps in recent_tool_fingerprints
-            ]
+            cursor["recent_tool_fingerprints"] = [[list(pair) for pair in fps] for fps in recent_tool_fingerprints]
         # Persist blocked-input state so restored runs re-block instead of
         # manufacturing a synthetic continuation turn.
         cursor["pending_input"] = pending_input
@@ -163,9 +161,7 @@ async def drain_injection_queue(
     conversation: NodeConversation,
     *,
     ctx: NodeContext,
-    describe_images_as_text_fn: (
-        Callable[[list[dict[str, Any]]], Awaitable[str | None]] | None
-    ) = None,
+    describe_images_as_text_fn: (Callable[[list[dict[str, Any]]], Awaitable[str | None]] | None) = None,
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
     count = 0

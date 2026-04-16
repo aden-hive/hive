@@ -217,7 +217,7 @@ def truncate_tool_result(
     When *spillover_dir* is configured, EVERY non-error tool result is
     written to disk for debugging. The LLM-visible content is then
     shaped to avoid a **poison pattern** that we traced on 2026-04-15
-    through a gemini-3.1-pro-preview queen session: the prior format
+    through a gemini-3.1-pro-preview-customtools queen session: the prior format
     appended ``\\n\\n[Saved to '/abs/path/file.txt']`` after every
     small result, and frontier pattern-matching models (gemini 3.x in
     particular) learned to autocomplete the `[Saved to '...']` trailer
@@ -277,8 +277,7 @@ def truncate_tool_result(
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
-            "draw counts, totals, or conclusions from it."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
         )
 
         truncated = f"{header}\n\nPreview (truncated):\n{preview_block}"
@@ -348,8 +347,7 @@ def truncate_tool_result(
             if metadata_str:
                 header += f"\nData structure:\n{metadata_str}\n"
             header += (
-                "\nWARNING: the preview below is a SAMPLE only — do NOT "
-                "draw counts, totals, or conclusions from it."
+                "\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
             )
 
             content = f"{header}\n\nPreview (truncated):\n{preview_block}"
@@ -416,8 +414,7 @@ def truncate_tool_result(
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
-            "draw counts, totals, or conclusions from it."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
         )
 
         truncated = f"{header}\n\n{preview_block}"

@@ -215,9 +215,7 @@ async def _interactive_shell(verbose=False):
 
                 click.echo("\nProcessing inbox...\n")
 
-                result = await agent.trigger_and_wait(
-                    "start", {"rules": rules, "max_emails": max_emails}
-                )
+                result = await agent.trigger_and_wait("start", {"rules": rules, "max_emails": max_emails})
 
                 if result is None:
                     click.echo("\n[Execution timed out]\n")

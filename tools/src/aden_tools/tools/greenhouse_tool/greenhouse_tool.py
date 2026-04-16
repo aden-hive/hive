@@ -90,9 +90,7 @@ def _post(path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "GREENHOUSE_API_TOKEN not set",
-        "help": (
-            "Get your API key from Greenhouse: Configure > Dev Center > API Credential Management"
-        ),
+        "help": ("Get your API key from Greenhouse: Configure > Dev Center > API Credential Management"),
     }
 
 
@@ -179,9 +177,7 @@ def register_tools(
             "confidential": data.get("confidential", False),
             "departments": [d.get("name", "") for d in data.get("departments", [])],
             "offices": [o.get("name", "") for o in data.get("offices", [])],
-            "openings": [
-                {"id": o.get("id"), "status": o.get("status", "")} for o in data.get("openings", [])
-            ],
+            "openings": [{"id": o.get("id"), "status": o.get("status", "")} for o in data.get("openings", [])],
             "created_at": data.get("created_at", ""),
             "updated_at": data.get("updated_at", ""),
             "notes": (data.get("notes") or "")[:500],
@@ -358,10 +354,7 @@ def register_tools(
         stage = data.get("current_stage") or {}
         source = data.get("source") or {}
         jobs = [j.get("name", "") for j in data.get("jobs", [])]
-        answers = [
-            {"question": a.get("question", ""), "answer": a.get("answer", "")}
-            for a in data.get("answers", [])
-        ]
+        answers = [{"question": a.get("question", ""), "answer": a.get("answer", "")} for a in data.get("answers", [])]
 
         return {
             "id": data.get("id"),

@@ -56,9 +56,7 @@ class TestRegisterTools:
             status_code=200,
             json=lambda: {"status": 1, "request": "req456"},
         )
-        result = self.tools["pushover_send_notification_with_url"](
-            message="Check this", url="https://example.com"
-        )
+        result = self.tools["pushover_send_notification_with_url"](message="Check this", url="https://example.com")
         assert result["success"] is True
 
     @patch.dict(

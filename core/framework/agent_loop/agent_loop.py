@@ -126,9 +126,7 @@ _STRIP_RE = re.compile(
 # The value cannot contain `<` or `\n` — those terminate the label.
 # Trailing whitespace (including the terminating newline) is consumed
 # so the visible text that follows starts cleanly.
-_LABEL_STRIP_RE = re.compile(
-    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>[^<\n]*\s*"
-)
+_LABEL_STRIP_RE = re.compile(r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>[^<\n]*\s*")
 
 # Matches a trailing `<` that could be the start of an internal tag.
 # We build a pattern that matches `<` followed by any prefix of any
@@ -138,9 +136,7 @@ for _tag in _INTERNAL_TAGS:
     for _i in range(1, len(_tag) + 1):
         _PARTIAL_PREFIXES.add(_tag[:_i])
 _PARTIAL_OPEN_RE = re.compile(
-    r"<(?:"
-    + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True))
-    + r")$"
+    r"<(?:" + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True)) + r")$"
 )
 
 _GENERIC_TAG_RE = re.compile(r"</?[a-zA-Z_][\w-]*\s*/?>")
@@ -351,9 +347,7 @@ class AgentLoop(AgentProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = (
-            asyncio.Queue()
-        )
+        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = asyncio.Queue()
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Queen input blocking state
         self._input_ready = asyncio.Event()
@@ -510,9 +504,7 @@ class AgentLoop(AgentProtocol):
                     output_tokens=0,
                     latency_ms=0,
                 )
-            return self._finalize_result(
-                AgentResult(success=False, error=error_msg), "guard_failure"
-            )
+            return self._finalize_result(AgentResult(success=False, error=error_msg), "guard_failure")
 
         # 2. Restore or create new conversation + accumulator
         restored = await self._restore(ctx)
@@ -571,11 +563,7 @@ class AgentLoop(AgentProtocol):
             if ctx.default_skill_batch_nudge:
                 from framework.skills.defaults import is_batch_scenario as _is_batch
 
-                _input_text = (
-                    (ctx.goal_context or "")
-                    + " "
-                    + " ".join(str(v) for v in ctx.input_data.values() if v)
-                )
+                _input_text = (ctx.goal_context or "") + " " + " ".join(str(v) for v in ctx.input_data.values() if v)
                 if _is_batch(_input_text):
                     system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
                     logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
@@ -587,9 +575,7 @@ class AgentLoop(AgentProtocol):
                 store=self._conversation_store,
                 run_id=ctx.effective_run_id,
                 compaction_buffer_tokens=self._config.compaction_buffer_tokens,
-                compaction_warning_buffer_tokens=(
-                    self._config.compaction_warning_buffer_tokens
-                ),
+                compaction_warning_buffer_tokens=(self._config.compaction_warning_buffer_tokens),
             )
             accumulator = OutputAccumulator(
                 store=self._conversation_store,
@@ -690,9 +676,7 @@ class AgentLoop(AgentProtocol):
                     node_id,
                     iteration,
                 )
-                await self._publish_loop_completed(
-                    stream_id, node_id, iteration, execution_id
-                )
+                await self._publish_loop_completed(stream_id, node_id, iteration, execution_id)
                 return AgentResult(
                     success=True,
                     output=accumulator.to_dict(),
@@ -773,9 +757,7 @@ class AgentLoop(AgentProtocol):
                         prompt=str(pending_input_state.get("prompt", "")),
                         options=pending_input_state.get("options"),
                         questions=pending_input_state.get("questions"),
-                        emit_client_request=bool(
-                            pending_input_state.get("emit_client_request", True)
-                        ),
+                        emit_client_request=bool(pending_input_state.get("emit_client_request", True)),
                     )
                     logger.info(
                         "[%s] iter=%d: restored wait unblocked, got_input=%s",
@@ -784,9 +766,7 @@ class AgentLoop(AgentProtocol):
                         got_input,
                     )
                     if not got_input:
-                        await self._publish_loop_completed(
-                            stream_id, node_id, iteration + 1, execution_id
-                        )
+                        await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                         latency_ms = int((time.time() - start_time) * 1000)
                         return AgentResult(
                             success=True,
@@ -797,8 +777,7 @@ class AgentLoop(AgentProtocol):
                         )
                     if self._injection_queue.empty() and self._trigger_queue.empty():
                         logger.info(
-                            "[%s] iter=%d: pending-input wait woke"
-                            " without queued input; re-waiting",
+                            "[%s] iter=%d: pending-input wait woke without queued input; re-waiting",
                             node_id,
                             iteration,
                         )
@@ -863,9 +842,7 @@ class AgentLoop(AgentProtocol):
                 iteration,
                 len(conversation.messages),
             )
-            logger.debug(
-                "[AgentLoop.execute] iteration=%d: entering _run_single_turn loop", iteration
-            )
+            logger.debug("[AgentLoop.execute] iteration=%d: entering _run_single_turn loop", iteration)
             _stream_retry_count = 0
             _capacity_retry_started_at: float | None = None
             _capacity_retry_attempt = 0
@@ -892,9 +869,7 @@ class AgentLoop(AgentProtocol):
                         request_system_prompt,
                         request_messages,
                         _,
-                    ) = await self._run_single_turn(
-                        ctx, conversation, tools, iteration, accumulator
-                    )
+                    ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
                     logger.debug(
                         "[AgentLoop.execute] iteration=%d: _run_single_turn completed successfully",
                         iteration,
@@ -910,10 +885,7 @@ class AgentLoop(AgentProtocol):
                         len(real_tool_results),
                         outputs_set or "[]",
                         turn_tokens,
-                        {
-                            k: ("set" if v is not None else "None")
-                            for k, v in accumulator.to_dict().items()
-                        },
+                        {k: ("set" if v is not None else "None") for k, v in accumulator.to_dict().items()},
                     )
                     total_input_tokens += turn_tokens.get("input", 0)
                     total_output_tokens += turn_tokens.get("output", 0)
@@ -982,10 +954,7 @@ class AgentLoop(AgentProtocol):
                     # still publishes a retry event so the UI can see us
                     # waiting (the "heartbeat" — no silent stalls).
                     self._bump("llm_turn_exception")
-                    if (
-                        self._is_capacity_error(e)
-                        and self._config.capacity_retry_max_seconds > 0
-                    ):
+                    if self._is_capacity_error(e) and self._config.capacity_retry_max_seconds > 0:
                         self._bump("capacity_error")
                         now = time.monotonic()
                         if _capacity_retry_started_at is None:
@@ -994,8 +963,7 @@ class AgentLoop(AgentProtocol):
                         if elapsed < self._config.capacity_retry_max_seconds:
                             _capacity_retry_attempt += 1
                             delay = min(
-                                self._config.stream_retry_backoff_base
-                                * (2 ** min(_capacity_retry_attempt - 1, 6)),
+                                self._config.stream_retry_backoff_base * (2 ** min(_capacity_retry_attempt - 1, 6)),
                                 self._config.capacity_retry_max_delay,
                             )
                             logger.warning(
@@ -1023,15 +991,11 @@ class AgentLoop(AgentProtocol):
                             continue  # retry same iteration
 
                     # Retry transient errors with exponential backoff
-                    if (
-                        self._is_transient_error(e)
-                        and _stream_retry_count < self._config.max_stream_retries
-                    ):
+                    if self._is_transient_error(e) and _stream_retry_count < self._config.max_stream_retries:
                         self._bump("llm_transient_retry")
                         _stream_retry_count += 1
                         delay = min(
-                            self._config.stream_retry_backoff_base
-                            * (2 ** (_stream_retry_count - 1)),
+                            self._config.stream_retry_backoff_base * (2 ** (_stream_retry_count - 1)),
                             self._config.stream_retry_max_delay,
                         )
                         logger.warning(
@@ -1079,8 +1043,7 @@ class AgentLoop(AgentProtocol):
                     if ctx.supports_direct_user_io:
                         error_msg = f"LLM call failed: {e}"
                         _guardrail_phrase = (
-                            "no endpoints available matching your guardrail restrictions "
-                            "and data policy"
+                            "no endpoints available matching your guardrail restrictions and data policy"
                         )
                         if _guardrail_phrase in str(e).lower():
                             error_msg += (
@@ -1219,9 +1182,7 @@ class AgentLoop(AgentProtocol):
                         node_id,
                         iteration,
                     )
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     return AgentResult(
                         success=True,
@@ -1442,10 +1403,7 @@ class AgentLoop(AgentProtocol):
             _has_tools_no_text = bool(real_tool_results) and not assistant_text
             if _has_tools_no_text:
                 _silent_tool_streak += 1
-                if (
-                    _silent_tool_streak > 0
-                    and _silent_tool_streak % self._config.silent_tool_streak_threshold == 0
-                ):
+                if _silent_tool_streak > 0 and _silent_tool_streak % self._config.silent_tool_streak_threshold == 0:
                     nudge = (
                         "[SYSTEM] You have been calling tools for "
                         f"{_silent_tool_streak} consecutive turns without "
@@ -1488,10 +1446,7 @@ class AgentLoop(AgentProtocol):
                 and self._event_bus is not None
             )
             _worker_no_tool_turn = (
-                not real_tool_results
-                and not outputs_set
-                and not queen_input_requested
-                and not user_input_requested
+                not real_tool_results and not outputs_set and not queen_input_requested and not user_input_requested
             )
             if _is_worker and _worker_no_tool_turn:
                 _worker_text_only_streak += 1
@@ -1599,9 +1554,7 @@ class AgentLoop(AgentProtocol):
                                     step_index=iteration,
                                     verdict="CONTINUE",
                                     verdict_feedback=(
-                                        "Auto-block grace"
-                                        f" ({_cf_text_only_streak}"
-                                        f"/{self._config.cf_grace_turns})"
+                                        f"Auto-block grace ({_cf_text_only_streak}/{self._config.cf_grace_turns})"
                                     ),
                                     tool_calls=logged_tool_calls,
                                     llm_text=assistant_text,
@@ -1614,9 +1567,7 @@ class AgentLoop(AgentProtocol):
                         # through to judge
 
                 if self._shutdown:
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -1702,9 +1653,7 @@ class AgentLoop(AgentProtocol):
                     )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -1800,9 +1749,7 @@ class AgentLoop(AgentProtocol):
             # until the queen injects guidance.
             if queen_input_requested:
                 if self._shutdown:
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     self._log_skip_judge(
@@ -1870,15 +1817,11 @@ class AgentLoop(AgentProtocol):
                             stream_id=stream_id,
                             node_id=node_id,
                             reason="Blocked waiting for queen guidance - no input received",
-                            context=(
-                                "Worker escalated but received no queen guidance before shutdown"
-                            ),
+                            context=("Worker escalated but received no queen guidance before shutdown"),
                             execution_id=execution_id,
                             request_id=uuid.uuid4().hex,
                         )
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     self._log_skip_judge(
@@ -2143,9 +2086,7 @@ class AgentLoop(AgentProtocol):
                 continue
 
         # 7. Max iterations exhausted
-        await self._publish_loop_completed(
-            stream_id, node_id, self._config.max_iterations, execution_id
-        )
+        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations, execution_id)
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
@@ -2168,9 +2109,7 @@ class AgentLoop(AgentProtocol):
         return self._finalize_result(
             AgentResult(
                 success=False,
-                error=(
-                    f"Max iterations ({self._config.max_iterations}) reached without acceptance"
-                ),
+                error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
                 output=accumulator.to_dict(),
                 tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
@@ -2204,9 +2143,7 @@ class AgentLoop(AgentProtocol):
             image_content: Optional list of OpenAI-style image blocks to attach.
         """
         logger.debug(
-            "[AgentLoop.inject_event] content_len=%d,"
-            " is_client_input=%s, has_images=%s,"
-            " queue_size_before=%d",
+            "[AgentLoop.inject_event] content_len=%d, is_client_input=%s, has_images=%s, queue_size_before=%d",
             len(content) if content else 0,
             is_client_input,
             bool(image_content),
@@ -2440,9 +2377,7 @@ class AgentLoop(AgentProtocol):
             # generating. Unsafe tools (bash, edits, browser actions)
             # still wait for FinishEvent so we don't race a write
             # against a decision the model hasn't finished making.
-            _early_safe_names = {
-                t.name for t in tools if getattr(t, "concurrency_safe", False)
-            }
+            _early_safe_names = {t.name for t in tools if getattr(t, "concurrency_safe", False)}
             _early_tasks: dict[str, asyncio.Task] = {}
 
             async def _timed_execute(
@@ -2539,9 +2474,7 @@ class AgentLoop(AgentProtocol):
                             and "_raw" not in event.tool_input
                             and event.tool_use_id not in _tasks
                         ):
-                            _tasks[event.tool_use_id] = asyncio.create_task(
-                                _exec_fn(event)
-                            )
+                            _tasks[event.tool_use_id] = asyncio.create_task(_exec_fn(event))
 
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
@@ -2558,9 +2491,7 @@ class AgentLoop(AgentProtocol):
 
             _llm_stream_t0 = time.monotonic()
             self._stream_task = asyncio.create_task(_do_stream())
-            logger.debug(
-                "[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn
-            )
+            logger.debug("[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn)
             _inactivity_limit = self._config.llm_stream_inactivity_timeout_seconds
             try:
                 if _inactivity_limit and _inactivity_limit > 0:
@@ -2574,9 +2505,7 @@ class AgentLoop(AgentProtocol):
                     # TimeoutError of its own" — wait_for conflates them.
                     _check_interval = min(5.0, _inactivity_limit / 2)
                     while True:
-                        done, _pending = await asyncio.wait(
-                            {self._stream_task}, timeout=_check_interval
-                        )
+                        done, _pending = await asyncio.wait({self._stream_task}, timeout=_check_interval)
                         if self._stream_task in done:
                             # Let any exception the task raised propagate
                             # naturally via the outer ``await`` below.
@@ -2607,9 +2536,7 @@ class AgentLoop(AgentProtocol):
                 # watchdog loop exited via ``break`` the task is done, and
                 # ``await`` is the cheapest way to surface its exception.
                 await self._stream_task
-                logger.debug(
-                    "[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn
-                )
+                logger.debug("[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn)
             except asyncio.CancelledError:
                 logger.debug("[_run_single_turn] inner_turn=%d: Stream task cancelled", inner_turn)
                 if accumulated_text:
@@ -2631,9 +2558,7 @@ class AgentLoop(AgentProtocol):
                     raise
                 raise TurnCancelled() from None
             except Exception as e:
-                logger.exception(
-                    "[_run_single_turn] inner_turn=%d: Stream task failed: %s", inner_turn, e
-                )
+                logger.exception("[_run_single_turn] inner_turn=%d: Stream task failed: %s", inner_turn, e)
                 # Don't orphan early tool tasks on a stream failure
                 # either - the outer retry loop will re-emit the tool
                 # calls on the next attempt.
@@ -2652,9 +2577,7 @@ class AgentLoop(AgentProtocol):
                 for _early in _early_tasks.values():
                     if not _early.done():
                         _early.cancel()
-                raise ConnectionError(
-                    f"Stream failed with recoverable error: {_stream_error.error}"
-                )
+                raise ConnectionError(f"Stream failed with recoverable error: {_stream_error.error}")
 
             final_text = accumulated_text
             logger.info(
@@ -2735,19 +2658,14 @@ class AgentLoop(AgentProtocol):
             # capping them strands work mid-turn and the next turn just
             # re-emits the discarded calls, which is strictly worse.
             if self._config.max_tool_calls_per_turn > 0:
-                hard_limit = int(
-                    self._config.max_tool_calls_per_turn
-                    * (1 + self._config.tool_call_overflow_margin)
-                )
+                hard_limit = int(self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin))
             else:
                 hard_limit = 0  # disabled
 
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools for parallel execution.
             results_by_id: dict[str, ToolResult] = {}
-            timing_by_id: dict[
-                str, dict[str, Any]
-            ] = {}  # tool_use_id -> {start_timestamp, duration_s}
+            timing_by_id: dict[str, dict[str, Any]] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
 
             for tc in tool_calls:
@@ -2801,9 +2719,7 @@ class AgentLoop(AgentProtocol):
                         sanitize_ask_user_inputs,
                     )
 
-                    ask_user_prompt, recovered_options = sanitize_ask_user_inputs(
-                        ask_user_prompt, raw_options
-                    )
+                    ask_user_prompt, recovered_options = sanitize_ask_user_inputs(ask_user_prompt, raw_options)
                     if recovered_options is not None and raw_options is None:
                         raw_options = recovered_options
                     # Defensive: ensure options is a list of strings.
@@ -2930,8 +2846,7 @@ class AgentLoop(AgentProtocol):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
                             content=(
-                                "ERROR: escalate is only available to worker "
-                                "nodes/sub-agents, not queen/judge streams."
+                                "ERROR: escalate is only available to worker nodes/sub-agents, not queen/judge streams."
                             ),
                             is_error=True,
                         )
@@ -2941,9 +2856,7 @@ class AgentLoop(AgentProtocol):
                     if self._event_bus is None:
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
-                            content=(
-                                "ERROR: EventBus unavailable. Could not emit escalation request."
-                            ),
+                            content=("ERROR: EventBus unavailable. Could not emit escalation request."),
                             is_error=True,
                         )
                         results_by_id[tc.tool_use_id] = result
@@ -2973,10 +2886,7 @@ class AgentLoop(AgentProtocol):
                     # owner (Worker instance) records the explicit report
                     # via ``record_explicit_report`` so Worker.run()'s
                     # terminal event emission picks it up.
-                    if not (
-                        isinstance(stream_id, str)
-                        and stream_id.startswith("worker:")
-                    ):
+                    if not (isinstance(stream_id, str) and stream_id.startswith("worker:")):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
                             content=(
@@ -3064,9 +2974,7 @@ class AgentLoop(AgentProtocol):
                     async with _sem:
                         return await _timed_execute(_tc)
 
-                timed_results_by_id: dict[
-                    str, tuple[ToolResult | BaseException, str, float] | BaseException
-                ] = {}
+                timed_results_by_id: dict[str, tuple[ToolResult | BaseException, str, float] | BaseException] = {}
 
                 async def _cancel_turn_with_stubs(
                     _pending: list[ToolCallEvent] = pending_real,  # noqa: B006,B008
@@ -3108,9 +3016,7 @@ class AgentLoop(AgentProtocol):
                             _awaitables.append(early)
                         else:
                             _awaitables.append(_capped(tc))
-                    self._tool_task = asyncio.ensure_future(
-                        asyncio.gather(*_awaitables, return_exceptions=True)
-                    )
+                    self._tool_task = asyncio.ensure_future(asyncio.gather(*_awaitables, return_exceptions=True))
                     try:
                         parallel_timed = await self._tool_task
                     finally:
@@ -3196,9 +3102,7 @@ class AgentLoop(AgentProtocol):
                         result = _build_tool_error_result(tc, raw)
                     else:
                         result = raw
-                    results_by_id[tc.tool_use_id] = await self._truncate_tool_result(
-                        result, tc.tool_name
-                    )
+                    results_by_id[tc.tool_use_id] = await self._truncate_tool_result(result, tc.tool_name)
 
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
@@ -3227,8 +3131,7 @@ class AgentLoop(AgentProtocol):
                 image_content = result.image_content
                 if image_content and ctx.llm and not supports_image_tool_results(ctx.llm.model):
                     logger.info(
-                        "Stripping image_content from tool result; "
-                        "model '%s' does not support images in tool results",
+                        "Stripping image_content from tool result; model '%s' does not support images in tool results",
                         ctx.llm.model,
                     )
                     image_content = None
@@ -3240,11 +3143,7 @@ class AgentLoop(AgentProtocol):
                     image_content=image_content,
                     is_skill_content=result.is_skill_content,
                 )
-                if (
-                    tc.tool_name in ("ask_user", "ask_user_multiple")
-                    and user_input_requested
-                    and not result.is_error
-                ):
+                if tc.tool_name in ("ask_user", "ask_user_multiple") and user_input_requested and not result.is_error:
                     # Defer tool_call_completed until after user responds
                     self._deferred_tool_complete = {
                         "stream_id": stream_id,
@@ -3704,10 +3603,7 @@ class AgentLoop(AgentProtocol):
         # function only touches disk / does heavy JSON work when the
         # result exceeds either the truncation or spillover threshold,
         # so cheap pass-throughs stay on the main loop.
-        needs_offload = (
-            len(result.content) > 10_000
-            and not result.is_error
-        )
+        needs_offload = len(result.content) > 10_000 and not result.is_error
         if not needs_offload:
             return truncate_tool_result(
                 result=result,
@@ -3868,9 +3764,7 @@ class AgentLoop(AgentProtocol):
             pending_input=pending_input,
         )
 
-    async def _drain_injection_queue(
-        self, conversation: NodeConversation, ctx: AgentContext
-    ) -> int:
+    async def _drain_injection_queue(self, conversation: NodeConversation, ctx: AgentContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         return await drain_injection_queue(
             queue=self._injection_queue,
@@ -3912,9 +3806,7 @@ class AgentLoop(AgentProtocol):
     # EventBus publishing helpers
     # -------------------------------------------------------------------
 
-    async def _publish_loop_started(
-        self, stream_id: str, node_id: str, execution_id: str = ""
-    ) -> None:
+    async def _publish_loop_started(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
         return await publish_loop_started(
             event_bus=self._event_bus,
             stream_id=stream_id,

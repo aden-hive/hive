@@ -336,9 +336,7 @@ def register_tools(
         if credentials is not None:
             token = credentials.get("telegram")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('telegram'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('telegram'), got {type(token).__name__}")
             return token
         return os.getenv("TELEGRAM_BOT_TOKEN")
 

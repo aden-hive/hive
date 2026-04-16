@@ -56,8 +56,7 @@ def validate_agent_path(agent_path: str | Path) -> Path:
         if resolved.is_relative_to(root) and resolved != root:
             return resolved
     raise ValueError(
-        "agent_path must be inside an allowed directory "
-        "(~/.hive/colonies/, exports/, examples/, or ~/.hive/agents/)"
+        "agent_path must be inside an allowed directory (~/.hive/colonies/, exports/, examples/, or ~/.hive/agents/)"
     )
 
 
@@ -186,9 +185,7 @@ async def handle_browser_status(request: web.Request) -> web.Response:
     status_port = bridge_port + 1
 
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection("127.0.0.1", status_port), timeout=0.5
-        )
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", status_port), timeout=0.5)
         writer.write(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         await writer.drain()
         raw = await asyncio.wait_for(reader.read(512), timeout=0.5)
@@ -232,9 +229,7 @@ def create_app(model: str | None = None) -> web.Application:
                 from framework.credentials.key_storage import generate_and_save_credential_key
 
                 generate_and_save_credential_key()
-                logger.info(
-                    "Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key"
-                )
+                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key")
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
@@ -274,9 +269,7 @@ def create_app(model: str | None = None) -> web.Application:
                 log_collisions=True,
                 max_tools=selection_max_tools,
             )
-        logger.info(
-            "Pre-loaded queen tool registry with %d tools", len(_queen_tool_registry.get_tools())
-        )
+        logger.info("Pre-loaded queen tool registry with %d tools", len(_queen_tool_registry.get_tools()))
     except Exception as e:
         logger.warning("Failed to pre-load queen tool registry: %s", e)
 
@@ -297,11 +290,11 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
-    from framework.server.routes_workers import register_routes as register_worker_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_messages import register_routes as register_message_routes
     from framework.server.routes_queens import register_routes as register_queen_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
+    from framework.server.routes_workers import register_routes as register_worker_routes
 
     register_config_routes(app)
     register_credential_routes(app)

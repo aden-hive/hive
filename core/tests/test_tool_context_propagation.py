@@ -57,8 +57,7 @@ async def test_execution_context_propagates_to_tool_executor() -> None:
 
     assert result.content == "ok"
     assert captured["exec_ctx"] is not None, (
-        "execution context was None inside worker thread, "
-        "contextvars did not propagate through run_in_executor"
+        "execution context was None inside worker thread, contextvars did not propagate through run_in_executor"
     )
     assert captured["exec_ctx"]["data_dir"] == "/tmp/test_data"
 

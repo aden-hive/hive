@@ -475,9 +475,7 @@ class TestMockedAPIResponses:
         assert len(cal["free_slots"]) == 3  # 8-9, 10-14, 15-17
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_check_availability_skips_transparent_events(
-        self, mock_get, calendar_tools, monkeypatch
-    ):
+    def test_check_availability_skips_transparent_events(self, mock_get, calendar_tools, monkeypatch):
         """check_availability ignores transparent (show-as-free) events."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -589,9 +587,7 @@ class TestTokenRefresh:
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool._create_lifecycle_manager")
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_auto_refresh_uses_lifecycle_manager(
-        self, mock_get, mock_create_lifecycle, mcp, monkeypatch
-    ):
+    def test_auto_refresh_uses_lifecycle_manager(self, mock_get, mock_create_lifecycle, mcp, monkeypatch):
         """Token auto-refresh uses TokenLifecycleManager when available."""
         pytest.importorskip("framework.credentials", reason="Requires framework.credentials module")
         from unittest.mock import MagicMock
@@ -958,9 +954,7 @@ class TestCreateEventWithAttendees:
         assert params["sendUpdates"] == "all"
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
-    def test_create_event_with_attendees_includes_conference_data(
-        self, mock_post, calendar_tools, monkeypatch
-    ):
+    def test_create_event_with_attendees_includes_conference_data(self, mock_post, calendar_tools, monkeypatch):
         """create_event with attendees auto-generates conferenceData with unique requestId."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -984,9 +978,7 @@ class TestCreateEventWithAttendees:
         assert len(request_id) > len("meet-")
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
-    def test_create_event_with_attendees_sets_conference_data_version(
-        self, mock_post, calendar_tools, monkeypatch
-    ):
+    def test_create_event_with_attendees_sets_conference_data_version(self, mock_post, calendar_tools, monkeypatch):
         """create_event with attendees includes conferenceDataVersion=1 in query params."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1003,9 +995,7 @@ class TestCreateEventWithAttendees:
         assert params["conferenceDataVersion"] == 1
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
-    def test_create_event_without_attendees_no_conference_data(
-        self, mock_post, calendar_tools, monkeypatch
-    ):
+    def test_create_event_without_attendees_no_conference_data(self, mock_post, calendar_tools, monkeypatch):
         """create_event without attendees does not add conferenceData."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1027,9 +1017,7 @@ class TestListEventsOutputFields:
     """Tests for list_events output field coverage."""
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_list_events_includes_description_and_hangout_link(
-        self, mock_get, calendar_tools, monkeypatch
-    ):
+    def test_list_events_includes_description_and_hangout_link(self, mock_get, calendar_tools, monkeypatch):
         """list_events output includes description and hangoutLink fields."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1243,9 +1231,7 @@ class TestRemoveAttendees:
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_remove_attendees_case_insensitive(
-        self, mock_get, mock_patch, calendar_tools, monkeypatch
-    ):
+    def test_remove_attendees_case_insensitive(self, mock_get, mock_patch, calendar_tools, monkeypatch):
         """remove_attendees matching is case-insensitive."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1301,9 +1287,7 @@ class TestRemoveAttendees:
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_remove_attendees_from_event_with_no_attendees(
-        self, mock_get, mock_patch, calendar_tools, monkeypatch
-    ):
+    def test_remove_attendees_from_event_with_no_attendees(self, mock_get, mock_patch, calendar_tools, monkeypatch):
         """remove_attendees on event with no attendees sends empty list."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1323,9 +1307,7 @@ class TestRemoveAttendees:
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
-    def test_remove_attendees_sets_conference_data_version(
-        self, mock_get, mock_patch, calendar_tools, monkeypatch
-    ):
+    def test_remove_attendees_sets_conference_data_version(self, mock_get, mock_patch, calendar_tools, monkeypatch):
         """remove_attendees triggers conferenceDataVersion=1 in query params."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
@@ -1394,9 +1376,7 @@ class TestUpdateMeetLink:
         assert params["conferenceDataVersion"] == 1
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
-    def test_update_event_without_meet_link_no_conference_data(
-        self, mock_patch, calendar_tools, monkeypatch
-    ):
+    def test_update_event_without_meet_link_no_conference_data(self, mock_patch, calendar_tools, monkeypatch):
         """update_event without add_meet_link does not add conferenceData."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 

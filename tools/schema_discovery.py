@@ -35,10 +35,7 @@ def get_connection():
         )
     else:
         connection_string = (
-            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-            f"SERVER={SERVER};"
-            f"DATABASE={DATABASE};"
-            f"Trusted_Connection=yes;"
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};DATABASE={DATABASE};Trusted_Connection=yes;"
         )
 
     return pyodbc.connect(connection_string, timeout=10)

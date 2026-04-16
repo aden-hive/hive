@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from framework.config import MEMORIES_DIR
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -26,8 +28,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
-
-from framework.config import MEMORIES_DIR
 
 MAX_FILES: int = 200
 MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file

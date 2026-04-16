@@ -25,9 +25,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..command_sanitizer import CommandBlockedError, validate_command
 from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
-from .background_jobs import get as get_job
-from .background_jobs import kill as kill_job
-from .background_jobs import spawn as spawn_job
+from .background_jobs import get as get_job, kill as kill_job, spawn as spawn_job
 
 # Bounds on per-call timeout. 1s minimum prevents accidental zeros that
 # would cause every command to fail. 600s maximum (10 min) is the same
@@ -144,10 +142,8 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Failed to execute command: {e}"}
 
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
             # Child is still running: kill it, drain what it already
             # wrote so the agent gets a partial log, then report.
             try:
@@ -155,10 +151,8 @@ def register_tools(mcp: FastMCP) -> None:
             except ProcessLookupError:
                 pass
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=2.0
-                )
-            except (asyncio.TimeoutError, Exception):
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            except (TimeoutError, Exception):
                 stdout_b, stderr_b = b"", b""
             elapsed = round(time.monotonic() - started, 2)
             return {

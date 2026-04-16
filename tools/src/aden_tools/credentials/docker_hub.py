@@ -21,9 +21,7 @@ DOCKER_HUB_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://hub.docker.com/settings/security",
-        description=(
-            "Docker Hub personal access token (also set DOCKER_HUB_USERNAME for listing own repos)"
-        ),
+        description=("Docker Hub personal access token (also set DOCKER_HUB_USERNAME for listing own repos)"),
         direct_api_key_supported=True,
         api_key_instructions="""To get a Docker Hub personal access token:
 1. Go to https://hub.docker.com/settings/security

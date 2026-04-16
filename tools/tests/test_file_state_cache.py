@@ -153,9 +153,7 @@ def test_edit_file_proceeds_after_read(sandbox: Path, tools):
     assert target.read_text() == "print('world')\n"
 
 
-def test_edit_file_refuses_when_file_changed_between_read_and_edit(
-    sandbox: Path, tools
-):
+def test_edit_file_refuses_when_file_changed_between_read_and_edit(sandbox: Path, tools):
     target = sandbox / "g.py"
     target.write_text("print('hello')\n")
     file_state_cache.reset_all()
@@ -189,9 +187,7 @@ def test_write_file_refuses_overwrite_without_prior_read(sandbox: Path, tools):
     assert target.read_text() == "do not clobber\n"  # unchanged
 
 
-def test_chained_edits_in_same_turn_do_not_self_invalidate(
-    sandbox: Path, tools
-):
+def test_chained_edits_in_same_turn_do_not_self_invalidate(sandbox: Path, tools):
     target = sandbox / "chained.py"
     target.write_text("print('a')\nprint('b')\n")
     file_state_cache.reset_all()

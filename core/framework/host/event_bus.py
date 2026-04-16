@@ -446,11 +446,7 @@ class EventBus:
         # iteration values.  Without this, live SSE would use raw iterations
         # while events.jsonl would use offset iterations, causing ID collisions
         # on the frontend when replaying after cold resume.
-        if (
-            self._session_log_iteration_offset
-            and isinstance(event.data, dict)
-            and "iteration" in event.data
-        ):
+        if self._session_log_iteration_offset and isinstance(event.data, dict) and "iteration" in event.data:
             offset = self._session_log_iteration_offset
             event.data = {**event.data, "iteration": event.data["iteration"] + offset}
 

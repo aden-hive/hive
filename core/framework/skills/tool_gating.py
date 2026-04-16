@@ -15,8 +15,8 @@ descriptions to get picked up on demand.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 logger = logging.getLogger(__name__)
 

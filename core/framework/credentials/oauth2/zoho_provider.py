@@ -100,9 +100,7 @@ class ZohoOAuth2Provider(BaseOAuth2Provider):
         )
         super().__init__(config, provider_id="zoho_crm_oauth2")
         self._accounts_domain = base
-        self._api_domain = (
-            api_domain or os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com")
-        ).rstrip("/")
+        self._api_domain = (api_domain or os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com")).rstrip("/")
 
     @property
     def supported_types(self) -> list[CredentialType]:

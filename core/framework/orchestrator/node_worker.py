@@ -379,9 +379,7 @@ class NodeWorker:
 
                 # Failure
                 if attempt + 1 < total_attempts:
-                    gc.retry_counts[self.node_spec.id] = (
-                        gc.retry_counts.get(self.node_spec.id, 0) + 1
-                    )
+                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
@@ -411,9 +409,7 @@ class NodeWorker:
 
             except Exception as exc:
                 if attempt + 1 < total_attempts:
-                    gc.retry_counts[self.node_spec.id] = (
-                        gc.retry_counts.get(self.node_spec.id, 0) + 1
-                    )
+                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
@@ -469,9 +465,7 @@ class NodeWorker:
             if len(conditionals) > 1:
                 max_prio = max(e.priority for e in conditionals)
                 traversable = [
-                    e
-                    for e in traversable
-                    if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
+                    e for e in traversable if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
                 ]
 
         # When parallel execution is disabled, follow first match only (sequential)
@@ -541,9 +535,7 @@ class NodeWorker:
                 logger.warning("Worker %s output validation warnings: %s", node_spec.id, errors)
 
         # Determine if this worker is a fan-out branch
-        is_fanout_branch = any(
-            tag.via_branch == node_spec.id for tag in self._inherited_fan_out_tags
-        )
+        is_fanout_branch = any(tag.via_branch == node_spec.id for tag in self._inherited_fan_out_tags)
 
         # Collect keys to write: declared output_keys + any extra output items
         # (for fan-out branches, all output items need conflict checking)
@@ -642,9 +634,7 @@ class NodeWorker:
             self._node_impl = node
             return node
 
-        raise RuntimeError(
-            f"No implementation for node '{self.node_spec.id}' (type: {self.node_spec.node_type})"
-        )
+        raise RuntimeError(f"No implementation for node '{self.node_spec.id}' (type: {self.node_spec.node_type})")
 
     def _build_node_context(self) -> NodeContext:
         """Build NodeContext for this worker's execution."""
@@ -749,9 +739,7 @@ class NodeWorker:
             inherited_conversation=gc.continuous_conversation,
             narrative=narrative,
         )
-        gc.continuous_conversation.update_system_prompt(
-            build_system_prompt_for_node_context(next_ctx)
-        )
+        gc.continuous_conversation.update_system_prompt(build_system_prompt_for_node_context(next_ctx))
         gc.continuous_conversation.set_current_phase(next_spec.id)
 
         buffer_items, data_files = self._prepare_transition_payload()
@@ -799,8 +787,7 @@ class NodeWorker:
                     file_path.write_text(write_content, encoding="utf-8")
                     file_size = file_path.stat().st_size
                     buffer_items[key] = (
-                        f"[Saved to '{filename}' ({file_size:,} bytes). "
-                        f"Use read_file(path='{filename}') to access.]"
+                        f"[Saved to '{filename}' ({file_size:,} bytes). Use read_file(path='{filename}') to access.]"
                     )
                     continue
                 except Exception:

@@ -184,9 +184,7 @@ class TwitterNewsAgent:
             await self._agent_runtime.stop()
         self._agent_runtime = None
 
-    async def trigger_and_wait(
-        self, entry_point="default", input_data=None, timeout=None, session_state=None
-    ):
+    async def trigger_and_wait(self, entry_point="default", input_data=None, timeout=None, session_state=None):
         if self._agent_runtime is None:
             raise RuntimeError("Agent not started. Call start() first.")
         return await self._agent_runtime.trigger_and_wait(

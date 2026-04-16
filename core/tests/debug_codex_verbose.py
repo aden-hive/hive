@@ -54,10 +54,7 @@ async def main():
         elif isinstance(event, ToolCallEvent):
             print(f"ToolCall: {event.tool_name}({event.tool_input})")
         elif isinstance(event, FinishEvent):
-            print(
-                f"Finish: stop={event.stop_reason} "
-                f"in={event.input_tokens} out={event.output_tokens}"
-            )
+            print(f"Finish: stop={event.stop_reason} in={event.input_tokens} out={event.output_tokens}")
         elif isinstance(event, StreamErrorEvent):
             print(f"StreamError: {event.error} (recoverable={event.recoverable})")
 

@@ -226,9 +226,7 @@ class OutputAccumulator:
             ext = ".json" if isinstance(value, (dict, list)) else ".txt"
             filename = f"output_{key}{ext}"
             write_content = (
-                json.dumps(value, indent=2, ensure_ascii=False)
-                if isinstance(value, (dict, list))
-                else str(value)
+                json.dumps(value, indent=2, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
             )
             file_path = spill_path / filename
             file_path.write_text(write_content, encoding="utf-8")

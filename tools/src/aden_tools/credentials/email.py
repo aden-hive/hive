@@ -86,9 +86,7 @@ EMAIL_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://hive.adenhq.com",
-        description=(
-            "Google OAuth2 access token (via Aden) - used for Gmail, Calendar, Sheets, and Docs"
-        ),
+        description=("Google OAuth2 access token (via Aden) - used for Gmail, Calendar, Sheets, and Docs"),
         aden_supported=True,
         aden_provider_name="google",
         direct_api_key_supported=False,

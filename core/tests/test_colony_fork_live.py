@@ -15,17 +15,14 @@ Costs a few cents per run.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import os
 import shutil
-import sys
 import time
 from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-
 
 # ---------------------------------------------------------------------------
 # Skip if no live LLM credentials are available
@@ -55,68 +52,25 @@ pytestmark = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
-# Fixture: isolated ~/.hive in a temp dir
+# Fixture: copy real LLM config into the conftest-provided isolated ~/.hive
 # ---------------------------------------------------------------------------
 
 
-# Modules that import HIVE_HOME / QUEENS_DIR / COLONIES_DIR / MEMORIES_DIR /
-# HIVE_CONFIG_FILE at import time and need their bindings rewritten when we
-# redirect ~/.hive to a temp directory.
-_HIVE_PATH_CONSUMERS = (
-    "framework.config",
-    "framework.server.session_manager",
-    "framework.server.queen_orchestrator",
-    "framework.server.routes_queens",
-    "framework.server.app",
-    "framework.agents.discovery",
-    "framework.agents.queen.queen_profiles",
-    "framework.tools.queen_lifecycle_tools",
-    "framework.storage.migrate_v2",
-    "framework.loader.cli",
-)
-
-_HIVE_PATH_NAMES = (
-    ("HIVE_HOME", lambda h: h),
-    ("QUEENS_DIR", lambda h: h / "agents" / "queens"),
-    ("COLONIES_DIR", lambda h: h / "colonies"),
-    ("MEMORIES_DIR", lambda h: h / "memories"),
-    ("HIVE_CONFIG_FILE", lambda h: h / "configuration.json"),
-)
-
-
 @pytest.fixture
-def isolated_hive_home(tmp_path, monkeypatch):
-    """Redirect ~/.hive to a temp directory.
+def isolated_hive_home(_isolate_hive_home_autouse):
+    """Extend the conftest autouse fixture with the user's LLM configuration.
 
-    Patches Path.home() AND every module-level binding of HIVE_HOME and
-    its derivatives, since those constants were captured at import time
-    and won't follow Path.home() changes alone.
-
-    Copies the user's real ~/.hive/configuration.json into the temp home
-    so the LLM provider config (model, api_base) is preserved.
+    The conftest ``_isolate_hive_home_autouse`` fixture already redirects
+    ``~/.hive`` to a temp directory and patches all module-level path
+    constants. This fixture just copies the real ``configuration.json``
+    so the live integration test can pick up API keys and model config.
     """
-    fake_home_root = tmp_path
-    fake_hive = fake_home_root / ".hive"
-    fake_hive.mkdir()
+    fake_hive = _isolate_hive_home_autouse
 
-    # Copy LLM configuration so the framework picks up the user's model.
-    # Done BEFORE we monkey-patch Path.home so the source resolves correctly.
-    real_config = Path.home() / ".hive" / "configuration.json"
+    # Use os.path.expanduser since Path.home() is already patched by conftest.
+    real_config = Path(os.path.expanduser("~/.hive/configuration.json"))
     if real_config.exists():
         shutil.copy(real_config, fake_hive / "configuration.json")
-
-    # Patch Path.home -> tmp_path so any call-site computation goes there.
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home_root))
-
-    # Patch every module-level binding that captured a path constant.
-    for mod_name in _HIVE_PATH_CONSUMERS:
-        try:
-            mod = importlib.import_module(mod_name)
-        except ImportError:
-            continue
-        for attr_name, builder in _HIVE_PATH_NAMES:
-            if hasattr(mod, attr_name):
-                monkeypatch.setattr(mod, attr_name, builder(fake_hive))
 
     yield fake_hive
 
@@ -202,9 +156,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
 
         # ── 2. Wait for queen identity hook to fire ────────────────
         queen_name = await _wait_for_queen_identity(client, session_id)
-        assert queen_name != "default", (
-            f"Identity hook didn't pick a real queen, got {queen_name!r}"
-        )
+        assert queen_name != "default", f"Identity hook didn't pick a real queen, got {queen_name!r}"
 
         # ── 3. Fork to a colony ────────────────────────────────────
         colony_name = "live_test_honeycomb"
@@ -249,10 +201,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
         # ── 5. Validate the forked queen session dir ──────────────
         # It must live under the SELECTED queen identity, not "default".
         dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
-        assert dest_queen_dir.is_dir(), (
-            f"Forked session dir not under {queen_name}/, expected "
-            f"{dest_queen_dir}"
-        )
+        assert dest_queen_dir.is_dir(), f"Forked session dir not under {queen_name}/, expected {dest_queen_dir}"
         # Conversations from the original queen session were copied
         assert (dest_queen_dir / "conversations").is_dir()
 
@@ -267,22 +216,16 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
 
         cold = SessionManager.list_cold_sessions()
         forked_in_history = [s for s in cold if s.get("session_id") == colony_session_id]
-        assert not forked_in_history, (
-            f"Forked colony session leaked into queen DM history: {forked_in_history}"
-        )
+        assert not forked_in_history, f"Forked colony session leaked into queen DM history: {forked_in_history}"
 
         # ── 7. Worker storage received the conversations ──────────
-        worker_storage_convs = (
-            isolated_hive_home / "agents" / colony_name / "worker" / "conversations"
-        )
+        worker_storage_convs = isolated_hive_home / "agents" / colony_name / "worker" / "conversations"
         assert worker_storage_convs.is_dir()
         # The queen has had at least one turn (the initial_prompt acknowledgment),
         # so there should be conversation parts.
         parts_dir = worker_storage_convs / "parts"
         if parts_dir.exists():
-            assert any(parts_dir.iterdir()), (
-                "worker storage has conversations dir but no parts"
-            )
+            assert any(parts_dir.iterdir()), "worker storage has conversations dir but no parts"
 
         # ── 8. Stop the live session cleanly ──────────────────────
         resp = await client.delete(f"/api/sessions/{session_id}")

@@ -132,9 +132,7 @@ class TestSlackSendMessage:
             }
             mock_post.return_value = mock_response
 
-            result = slack_send_message_fn(
-                channel="C123", text="Reply", thread_ts="1234567890.123456"
-            )
+            result = slack_send_message_fn(channel="C123", text="Reply", thread_ts="1234567890.123456")
 
         assert result["success"] is True
         call_kwargs = mock_post.call_args[1]
@@ -206,9 +204,7 @@ class TestSlackAddReaction:
             mock_response.json.return_value = {"ok": True}
             mock_post.return_value = mock_response
 
-            result = slack_add_reaction_fn(
-                channel="C123", timestamp="1234567890.123456", emoji="thumbsup"
-            )
+            result = slack_add_reaction_fn(channel="C123", timestamp="1234567890.123456", emoji="thumbsup")
 
         assert result["success"] is True
 
@@ -512,9 +508,7 @@ class TestSlackUploadFile:
             mock_complete_response.status_code = 200
             mock_complete_response.json.return_value = {
                 "ok": True,
-                "files": [
-                    {"id": "F123", "name": "test.csv", "title": "Test", "permalink": "https://..."}
-                ],
+                "files": [{"id": "F123", "name": "test.csv", "title": "Test", "permalink": "https://..."}],
             }
             mock_post.side_effect = [mock_upload_response, mock_complete_response]
 

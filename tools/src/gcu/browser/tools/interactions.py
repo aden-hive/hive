@@ -96,9 +96,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return click_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_click", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_click", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -151,7 +149,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            from .inspection import _screenshot_scales, _screenshot_css_scales
+            from .inspection import _screenshot_css_scales, _screenshot_scales
 
             click_result = await bridge.click_coordinate(target_tab, x, y, button=button)
             log_tool_call(
@@ -259,9 +257,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return type_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_type", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_type", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -351,9 +347,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            press_result = await bridge.press_key(
-                target_tab, key, selector=selector, modifiers=modifiers
-            )
+            press_result = await bridge.press_key(target_tab, key, selector=selector, modifiers=modifiers)
             log_tool_call(
                 "browser_press",
                 params,
@@ -363,9 +357,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return press_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_press", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_press", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -419,9 +411,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return hover_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_hover", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_hover", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -604,9 +594,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return select_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_select", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_select", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -660,9 +648,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return scroll_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_scroll", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_scroll", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()

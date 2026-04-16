@@ -198,9 +198,7 @@ def build_ask_user_multiple_tool() -> Tool:
                         "properties": {
                             "id": {
                                 "type": "string",
-                                "description": (
-                                    "Short identifier for this question (used in the response)."
-                                ),
+                                "description": ("Short identifier for this question (used in the response)."),
                             },
                             "prompt": {
                                 "type": "string",
@@ -256,10 +254,7 @@ def build_set_output_tool(output_keys: list[str] | None) -> Tool | None:
                 },
                 "value": {
                     "type": "string",
-                    "description": (
-                        "The output value — a brief note, count, status, "
-                        "or data filename reference."
-                    ),
+                    "description": ("The output value — a brief note, count, status, or data filename reference."),
                 },
             },
             "required": ["key", "value"],
@@ -283,9 +278,7 @@ def build_escalate_tool() -> Tool:
             "properties": {
                 "reason": {
                     "type": "string",
-                    "description": (
-                        "Short reason for escalation (e.g. 'Tool repeatedly failing')."
-                    ),
+                    "description": ("Short reason for escalation (e.g. 'Tool repeatedly failing')."),
                 },
                 "context": {
                     "type": "string",
@@ -377,10 +370,7 @@ def handle_report_to_parent(tool_input: dict[str, Any]) -> ToolResult:
     }
     return ToolResult(
         tool_use_id=tool_input.get("tool_use_id", ""),
-        content=(
-            f"Report delivered to overseer (status={status}). "
-            f"This worker will terminate now."
-        ),
+        content=(f"Report delivered to overseer (status={status}). This worker will terminate now."),
     )
 
 

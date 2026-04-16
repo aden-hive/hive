@@ -247,12 +247,8 @@ def register_tools(
                     "snippet": item.get("snippet", ""),
                     "result_id": item.get("result_id", ""),
                     "publication_info": item.get("publication_info", {}).get("summary", ""),
-                    "cited_by_count": (
-                        item.get("inline_links", {}).get("cited_by", {}).get("total", 0)
-                    ),
-                    "cites_id": (
-                        item.get("inline_links", {}).get("cited_by", {}).get("cites_id", "")
-                    ),
+                    "cited_by_count": (item.get("inline_links", {}).get("cited_by", {}).get("total", 0)),
+                    "cites_id": (item.get("inline_links", {}).get("cited_by", {}).get("cites_id", "")),
                 }
                 authors = item.get("publication_info", {}).get("authors", [])
                 if authors:
@@ -580,15 +576,12 @@ def register_tools(
                     "snippet": item.get("snippet", ""),
                     "result_id": item.get("result_id", ""),
                     "publication_info": item.get("publication_info", {}).get("summary", ""),
-                    "cited_by_count": (
-                        item.get("inline_links", {}).get("cited_by", {}).get("total", 0)
-                    ),
+                    "cited_by_count": (item.get("inline_links", {}).get("cited_by", {}).get("total", 0)),
                 }
                 authors = item.get("publication_info", {}).get("authors", [])
                 if authors:
                     result["authors"] = [
-                        {"name": a.get("name", ""), "author_id": a.get("author_id", "")}
-                        for a in authors
+                        {"name": a.get("name", ""), "author_id": a.get("author_id", "")} for a in authors
                     ]
                 results.append(result)
 

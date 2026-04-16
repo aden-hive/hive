@@ -26,13 +26,7 @@ class TestFinalizeQueenPrompt:
 
     def test_multiline_block_handled(self):
         """Regex must use DOTALL so blocks can span newlines."""
-        text = (
-            "- item 1\n"
-            "<!-- vision-only -->\n"
-            "- item 2 (vision only)\n"
-            "<!-- /vision-only -->\n"
-            "- item 3\n"
-        )
+        text = "- item 1\n<!-- vision-only -->\n- item 2 (vision only)\n<!-- /vision-only -->\n- item 3\n"
         vision = finalize_queen_prompt(text, has_vision=True)
         text_only = finalize_queen_prompt(text, has_vision=False)
         assert "- item 2 (vision only)" in vision
@@ -40,10 +34,7 @@ class TestFinalizeQueenPrompt:
         assert "- item 1" in text_only and "- item 3" in text_only
 
     def test_multiple_blocks_in_same_text(self):
-        text = (
-            "A <!-- vision-only -->X<!-- /vision-only --> "
-            "B <!-- vision-only -->Y<!-- /vision-only --> C"
-        )
+        text = "A <!-- vision-only -->X<!-- /vision-only --> B <!-- vision-only -->Y<!-- /vision-only --> C"
         assert finalize_queen_prompt(text, has_vision=True) == "A X B Y C"
         assert finalize_queen_prompt(text, has_vision=False) == "A  B  C"
 
@@ -51,11 +42,7 @@ class TestFinalizeQueenPrompt:
         """A naïve greedy regex would match from the first opening marker
         to the last closing marker and wipe out the middle section. Lock
         that down so a future refactor can't regress to greedy."""
-        text = (
-            "<!-- vision-only -->first<!-- /vision-only -->"
-            "KEEP"
-            "<!-- vision-only -->second<!-- /vision-only -->"
-        )
+        text = "<!-- vision-only -->first<!-- /vision-only -->KEEP<!-- vision-only -->second<!-- /vision-only -->"
         assert finalize_queen_prompt(text, has_vision=False) == "KEEP"
         assert finalize_queen_prompt(text, has_vision=True) == "firstKEEPsecond"
 

@@ -713,9 +713,7 @@ def test_convert_mcp_tool_strips_context_params():
 def test_load_mcp_config_list_format(tmp_path, monkeypatch):
     """load_mcp_config should accept the {\"servers\": [...]} list format."""
     config_file = tmp_path / "mcp_servers.json"
-    config_file.write_text(
-        '{"servers": [{"name": "s1", "transport": "http", "url": "http://localhost:9000"}]}'
-    )
+    config_file.write_text('{"servers": [{"name": "s1", "transport": "http", "url": "http://localhost:9000"}]}')
 
     called_with = []
 
@@ -856,6 +854,7 @@ class TestMcpToolProducesImageFlag:
 def test_mcp_tool_conversion_marks_known_safe_tools():
     """MCP tools whose names are in CONCURRENCY_SAFE_TOOLS become concurrency_safe."""
     from framework.loader.mcp_client import MCPTool
+
     registry = ToolRegistry()
 
     safe_mcp = MCPTool(

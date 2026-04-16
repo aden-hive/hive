@@ -34,9 +34,7 @@ goal = Goal(
     success_criteria=[
         SuccessCriterion(
             id="correct-action-execution",
-            description=(
-                "Gmail actions are applied correctly to the right emails based on the user's rules"
-            ),
+            description=("Gmail actions are applied correctly to the right emails based on the user's rules"),
             metric="action_correctness",
             target=">=95%",
             weight=0.30,
@@ -54,8 +52,7 @@ goal = Goal(
         SuccessCriterion(
             id="batch-completeness",
             description=(
-                "All fetched emails up to the configured max are processed and acted upon; "
-                "none are silently skipped"
+                "All fetched emails up to the configured max are processed and acted upon; none are silently skipped"
             ),
             metric="emails_processed_ratio",
             target="100%",
@@ -82,8 +79,7 @@ goal = Goal(
         Constraint(
             id="non-destructive-default",
             description=(
-                "Archiving removes from inbox but preserves the email; only explicit "
-                "trash rules move emails to trash"
+                "Archiving removes from inbox but preserves the email; only explicit trash rules move emails to trash"
             ),
             constraint_type="hard",
             category="safety",

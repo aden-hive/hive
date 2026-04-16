@@ -173,9 +173,7 @@ class TestTelegramClient:
         mock_response.json.return_value = {"ok": True, "result": {}}
         mock_post.return_value = mock_response
 
-        self.client.edit_message_text(
-            chat_id="123", message_id=456, text="<b>Bold</b>", parse_mode="HTML"
-        )
+        self.client.edit_message_text(chat_id="123", message_id=456, text="<b>Bold</b>", parse_mode="HTML")
 
         call_kwargs = mock_post.call_args.kwargs
         assert call_kwargs["json"]["parse_mode"] == "HTML"
@@ -500,9 +498,7 @@ class TestNewToolOperations:
 
         register_tools(self.mcp, credentials=None)
         tools = self._get_tools()
-        result = tools["telegram_forward_message"].fn(
-            chat_id="456", from_chat_id="123", message_id=789
-        )
+        result = tools["telegram_forward_message"].fn(chat_id="456", from_chat_id="123", message_id=789)
 
         assert result["ok"] is True
 
@@ -767,9 +763,7 @@ class TestNewOperationsErrorHandling:
 
         register_tools(self.mcp, credentials=None)
         tools = self._get_tools()
-        result = tools["telegram_forward_message"].fn(
-            chat_id="456", from_chat_id="123", message_id=1
-        )
+        result = tools["telegram_forward_message"].fn(chat_id="456", from_chat_id="123", message_id=1)
 
         assert "error" in result
         assert "timed out" in result["error"].lower()

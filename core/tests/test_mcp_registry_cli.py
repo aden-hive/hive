@@ -911,9 +911,7 @@ def test_main_dispatches_mcp_list_through_real_argparse(registry_home, monkeypat
     assert "No servers installed" in out.getvalue()
 
 
-def test_main_dispatches_mcp_install_through_real_argparse(
-    registry_home, sample_index, monkeypatch
-):
+def test_main_dispatches_mcp_install_through_real_argparse(registry_home, sample_index, monkeypatch):
     """hive mcp install jira goes through main() -> real argparse -> cmd_mcp_install."""
     from framework.loader.mcp_registry import MCPRegistry
 
@@ -969,9 +967,7 @@ def test_info_json_includes_agent_usage(registry, sample_index, tmp_path, monkey
     # Create a fake agent dir with mcp_registry.json that includes jira
     agent_dir = tmp_path / "fake_agent"
     agent_dir.mkdir()
-    (agent_dir / "mcp_registry.json").write_text(
-        json.dumps({"include": ["jira"]}), encoding="utf-8"
-    )
+    (agent_dir / "mcp_registry.json").write_text(json.dumps({"include": ["jira"]}), encoding="utf-8")
 
     # Patch _find_agents_using_server to use our fake directory
     monkeypatch.setattr(
@@ -1064,9 +1060,7 @@ def test_health_all_servers_json(registry, sample_index, monkeypatch):
 # ── _find_agents_using_server with real files ────────────────────
 
 
-def test_find_agents_using_server_resolves_via_load_agent_selection(
-    registry_home, tmp_path, monkeypatch
-):
+def test_find_agents_using_server_resolves_via_load_agent_selection(registry_home, tmp_path, monkeypatch):
     """_find_agents_using_server exercises the real helper with patched candidate dirs."""
     from framework.loader.mcp_registry import MCPRegistry
 
@@ -1088,9 +1082,7 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
         }
     }
     (cache_dir / "registry_index.json").write_text(json.dumps(index), encoding="utf-8")
-    (cache_dir / "last_fetched").write_text(
-        json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8"
-    )
+    (cache_dir / "last_fetched").write_text(json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8")
     reg.install("jira")
 
     # Create fake agent directories: one that includes jira, one that doesn't
@@ -1098,14 +1090,10 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
     exports_dir.mkdir()
     agent_yes = exports_dir / "agent_with_jira"
     agent_yes.mkdir()
-    (agent_yes / "mcp_registry.json").write_text(
-        json.dumps({"include": ["jira"]}), encoding="utf-8"
-    )
+    (agent_yes / "mcp_registry.json").write_text(json.dumps({"include": ["jira"]}), encoding="utf-8")
     agent_no = exports_dir / "agent_without_jira"
     agent_no.mkdir()
-    (agent_no / "mcp_registry.json").write_text(
-        json.dumps({"include": ["slack"]}), encoding="utf-8"
-    )
+    (agent_no / "mcp_registry.json").write_text(json.dumps({"include": ["slack"]}), encoding="utf-8")
 
     # Patch the path resolution so the helper scans our tmp_path dirs
     import framework.loader.mcp_registry_cli as cli_mod
@@ -1185,9 +1173,7 @@ def test_integration_real_registry_install_list_info_remove(tmp_path, monkeypatc
         }
     }
     (cache_dir / "registry_index.json").write_text(json.dumps(index), encoding="utf-8")
-    (cache_dir / "last_fetched").write_text(
-        json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8"
-    )
+    (cache_dir / "last_fetched").write_text(json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8")
     # Security notice sentinel so install doesn't prompt
     (registry_base / ".security_notice_shown").touch()
 
@@ -1316,9 +1302,7 @@ def test_security_notice_not_persisted_on_failed_install(registry, registry_home
 
 
 @pytest.mark.usefixtures("_patch_get_registry")
-def test_security_notice_persisted_on_successful_install(
-    registry, registry_home, sample_index, monkeypatch
-):
+def test_security_notice_persisted_on_successful_install(registry, registry_home, sample_index, monkeypatch):
     """Sentinel must be written after a successful install."""
     monkeypatch.setattr("builtins.input", lambda prompt: "")
     sentinel = registry_home / ".security_notice_shown"

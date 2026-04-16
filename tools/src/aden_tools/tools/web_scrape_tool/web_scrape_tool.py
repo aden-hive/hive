@@ -26,9 +26,7 @@ from playwright_stealth import Stealth
 
 # Browser-like User-Agent for actual page requests
 BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 
@@ -222,9 +220,7 @@ def register_tools(mcp: FastMCP) -> None:
             soup = BeautifulSoup(html_content, "html.parser")
 
             # Remove noise elements
-            for tag in soup(
-                ["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]
-            ):
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
                 tag.decompose()
 
             # Get title and description

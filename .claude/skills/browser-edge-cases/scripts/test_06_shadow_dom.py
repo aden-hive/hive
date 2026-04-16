@@ -130,9 +130,7 @@ async def test_shadow_dom():
         print(f"JS click result: {click_result.get('result', {})}")
 
         # Verify click was registered
-        count_result = await bridge.evaluate(
-            tab_id, "(function() { return window.shadowClickCount || 0; })()"
-        )
+        count_result = await bridge.evaluate(tab_id, "(function() { return window.shadowClickCount || 0; })()")
         count = count_result.get("result") or 0
         print(f"Shadow click count: {count}")
 

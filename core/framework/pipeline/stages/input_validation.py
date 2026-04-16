@@ -40,8 +40,7 @@ class InputValidationStage(PipelineStage):
                 return PipelineResult(
                     action="reject",
                     rejection_reason=(
-                        f"Input key '{key}' has type {type(value).__name__}, "
-                        f"expected {expected_type.__name__}"
+                        f"Input key '{key}' has type {type(value).__name__}, expected {expected_type.__name__}"
                     ),
                 )
         return PipelineResult(action="continue")

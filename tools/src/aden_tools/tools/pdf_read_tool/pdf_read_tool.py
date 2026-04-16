@@ -134,9 +134,7 @@ def register_tools(mcp: FastMCP) -> None:
                     content_type = response.headers.get("content-type", "").lower()
                     if "application/pdf" not in content_type:
                         return {
-                            "error": (
-                                f"URL does not point to a PDF file. Content-Type: {content_type}"
-                            ),
+                            "error": (f"URL does not point to a PDF file. Content-Type: {content_type}"),
                             "content_type": content_type,
                             "url": file_path,
                         }
@@ -223,9 +221,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "subject": meta.get("/Subject"),
                     "creator": meta.get("/Creator"),
                     "producer": meta.get("/Producer"),
-                    "created": str(meta.get("/CreationDate"))
-                    if meta.get("/CreationDate")
-                    else None,
+                    "created": str(meta.get("/CreationDate")) if meta.get("/CreationDate") else None,
                     "modified": str(meta.get("/ModDate")) if meta.get("/ModDate") else None,
                 }
 

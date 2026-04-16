@@ -853,7 +853,7 @@ class NodeConversation:
                 continue  # never prune errors
             if msg.is_skill_content:
                 continue  # never prune activated skill instructions (AS-10)
-            if msg.content.startswith("[Pruned tool result"):
+            if msg.content.startswith(("Pruned tool result", "[Pruned tool result")):
                 continue  # already pruned
             # Tiny results (set_output acks, confirmations) — pruning
             # saves negligible space but makes the LLM think the call
@@ -890,9 +890,7 @@ class NodeConversation:
                     f"Read the complete data with read_file(path='{spillover}')."
                 )
             else:
-                placeholder = (
-                    f"Pruned tool result ({orig_len:,} chars) cleared from context."
-                )
+                placeholder = f"Pruned tool result ({orig_len:,} chars) cleared from context."
 
             self._messages[i] = Message(
                 seq=msg.seq,
@@ -974,16 +972,13 @@ class NodeConversation:
             )
             evicted += 1
             if self._store:
-                await self._store.write_part(
-                    msg.seq, self._messages[idx].to_storage_dict()
-                )
+                await self._store.write_part(msg.seq, self._messages[idx].to_storage_dict())
 
         if evicted:
             # Reset token estimate — image blocks no longer contribute.
             self._last_api_input_tokens = None
             logger.info(
-                "evict_old_images: dropped image_content from %d message(s), "
-                "kept %d most recent",
+                "evict_old_images: dropped image_content from %d message(s), kept %d most recent",
                 evicted,
                 keep_latest,
             )
@@ -1141,9 +1136,7 @@ class NodeConversation:
             for msg in old_messages:
                 if msg.role != "assistant" or not msg.tool_calls:
                     continue
-                has_protected = any(
-                    tc.get("function", {}).get("name") == "set_output" for tc in msg.tool_calls
-                )
+                has_protected = any(tc.get("function", {}).get("name") == "set_output" for tc in msg.tool_calls)
                 tc_ids = {tc.get("id", "") for tc in msg.tool_calls}
                 if has_protected:
                     protected_tc_ids |= tc_ids
@@ -1339,11 +1332,7 @@ class NodeConversation:
 
     def export_summary(self) -> str:
         """Structured summary with [STATS], [CONFIG], [RECENT_MESSAGES] sections."""
-        prompt_preview = (
-            self._system_prompt[:80] + "..."
-            if len(self._system_prompt) > 80
-            else self._system_prompt
-        )
+        prompt_preview = self._system_prompt[:80] + "..." if len(self._system_prompt) > 80 else self._system_prompt
 
         lines = [
             "[STATS]",
@@ -1390,9 +1379,7 @@ class NodeConversation:
             "max_context_tokens": self._max_context_tokens,
             "compaction_threshold": self._compaction_threshold,
             "compaction_buffer_tokens": self._compaction_buffer_tokens,
-            "compaction_warning_buffer_tokens": (
-                self._compaction_warning_buffer_tokens
-            ),
+            "compaction_warning_buffer_tokens": (self._compaction_warning_buffer_tokens),
             "output_keys": self._output_keys,
         }
         await self._store.write_meta(run_meta)
@@ -1441,9 +1428,7 @@ class NodeConversation:
             store=store,
             run_id=run_id,
             compaction_buffer_tokens=meta.get("compaction_buffer_tokens"),
-            compaction_warning_buffer_tokens=meta.get(
-                "compaction_warning_buffer_tokens"
-            ),
+            compaction_warning_buffer_tokens=meta.get("compaction_warning_buffer_tokens"),
         )
         conv._meta_persisted = True
 
@@ -1457,8 +1442,7 @@ class NodeConversation:
                 # sessions) persisted parts without phase_id. In that case, the
                 # phase filter would incorrectly hide the entire conversation.
                 logger.info(
-                    "Restoring legacy unphased conversation without applying "
-                    "phase filter (phase_id=%s, parts=%d)",
+                    "Restoring legacy unphased conversation without applying phase filter (phase_id=%s, parts=%d)",
                     phase_id,
                     len(parts),
                 )

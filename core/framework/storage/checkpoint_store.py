@@ -123,9 +123,7 @@ class CheckpointStore:
                 return None
 
             try:
-                return CheckpointIndex.model_validate_json(
-                    self.index_path.read_text(encoding="utf-8")
-                )
+                return CheckpointIndex.model_validate_json(self.index_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.error(f"Failed to load checkpoint index: {e}")
                 return None
@@ -317,9 +315,7 @@ class CheckpointStore:
 
         # Update latest_checkpoint_id if we removed the latest
         if index.latest_checkpoint_id == checkpoint_id:
-            index.latest_checkpoint_id = (
-                index.checkpoints[-1].checkpoint_id if index.checkpoints else None
-            )
+            index.latest_checkpoint_id = index.checkpoints[-1].checkpoint_id if index.checkpoints else None
 
         # Write updated index
         await asyncio.to_thread(_write, index)

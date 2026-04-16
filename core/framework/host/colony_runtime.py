@@ -15,7 +15,6 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -25,16 +24,13 @@ from typing import TYPE_CHECKING, Any
 from framework.agent_loop.types import AgentContext, AgentSpec
 from framework.host.event_bus import AgentEvent, EventBus, EventType
 from framework.host.triggers import TriggerDefinition
-from framework.host.worker import Worker, WorkerInfo, WorkerResult, WorkerStatus
-from framework.observability import set_trace_context
+from framework.host.worker import Worker, WorkerInfo, WorkerResult
 from framework.schemas.goal import Goal
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
-    from framework.agent_loop.agent_loop import AgentLoop
     from framework.llm.provider import LLMProvider, Tool
-    from framework.pipeline.runner import PipelineRunner
     from framework.skills.manager import SkillsManagerConfig
     from framework.tracker.runtime_log_store import RuntimeLogStore
 
@@ -195,9 +191,7 @@ class ColonyRuntime:
                 DeprecationWarning,
                 stacklevel=2,
             )
-            self._skills_manager = SkillsManager.from_precomputed(
-                skills_catalog_prompt, protocols_prompt
-            )
+            self._skills_manager = SkillsManager.from_precomputed(skills_catalog_prompt, protocols_prompt)
         else:
             self._skills_manager = SkillsManager()
             self._skills_manager.load()
@@ -210,9 +204,7 @@ class ColonyRuntime:
         self._accounts_prompt = accounts_prompt
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
-        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
-            None
-        )
+        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None
 
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         self._storage_path: Path = storage_path_obj
@@ -560,9 +552,7 @@ class ColonyRuntime:
                         encoding="utf-8",
                     )
                 except (json.JSONDecodeError, OSError) as exc:
-                    logger.warning(
-                        "spawn fork: failed to copy queen meta.json: %s", exc
-                    )
+                    logger.warning("spawn fork: failed to copy queen meta.json: %s", exc)
 
             # Append the task as the next user message so the worker's
             # LLM sees it as the most recent turn in the conversation
@@ -711,9 +701,7 @@ class ColonyRuntime:
                 input_data=input_data,
             )
 
-            worker_conv_store = FileConversationStore(
-                worker_storage / "conversations"
-            )
+            worker_conv_store = FileConversationStore(worker_storage / "conversations")
 
             # AgentLoop takes bus/judge/config/executor at construction;
             # LLM, tools, stream_id, execution_id all come from the
@@ -885,9 +873,7 @@ class ColonyRuntime:
                 if remaining <= 0:
                     break
                 try:
-                    report = await asyncio.wait_for(
-                        report_queue.get(), timeout=remaining
-                    )
+                    report = await asyncio.wait_for(report_queue.get(), timeout=remaining)
                 except TimeoutError:
                     break
                 wid = report.get("worker_id")
@@ -956,10 +942,7 @@ class ColonyRuntime:
             return self._overseer
 
         if not self._running:
-            raise RuntimeError(
-                "start_overseer requires the ColonyRuntime to be running "
-                "(call start() first)"
-            )
+            raise RuntimeError("start_overseer requires the ColonyRuntime to be running (call start() first)")
 
         from framework.agent_loop.agent_loop import AgentLoop
         from framework.storage.conversation_store import FileConversationStore
@@ -970,9 +953,7 @@ class ColonyRuntime:
         # {colony_session}/conversations/. Workers get their own sub-dirs
         # under workers/{worker_id}/; the overseer is the root occupant.
         self._storage_path.mkdir(parents=True, exist_ok=True)
-        overseer_conv_store = FileConversationStore(
-            self._storage_path / "conversations"
-        )
+        overseer_conv_store = FileConversationStore(self._storage_path / "conversations")
         agent_loop = AgentLoop(
             event_bus=self._scoped_event_bus,
             tool_executor=self._tool_executor,
@@ -1133,9 +1114,7 @@ class ColonyRuntime:
     def get_worker_result(self, worker_id: str) -> WorkerResult | None:
         return self._execution_results.get(worker_id)
 
-    async def wait_for_worker(
-        self, worker_id: str, timeout: float | None = None
-    ) -> WorkerResult | None:
+    async def wait_for_worker(self, worker_id: str, timeout: float | None = None) -> WorkerResult | None:
         worker = self._workers.get(worker_id)
         if worker is None:
             return self._execution_results.get(worker_id)
@@ -1143,7 +1122,7 @@ class ColonyRuntime:
             return worker.info.result
         try:
             await asyncio.wait_for(asyncio.shield(worker._task_handle), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
         return worker.info.result
 
@@ -1184,9 +1163,7 @@ class ColonyRuntime:
         if worker and worker.is_active:
             loop = worker._agent_loop
             if hasattr(loop, "inject_event"):
-                await loop.inject_event(
-                    content, is_client_input=is_client_input, image_content=image_content
-                )
+                await loop.inject_event(content, is_client_input=is_client_input, image_content=image_content)
                 return True
         return False
 

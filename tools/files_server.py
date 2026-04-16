@@ -82,8 +82,7 @@ def main() -> None:
 
     if not args.stdio:
         logger.info(
-            "Registered 6 file tools: read_file, write_file, edit_file, "
-            "list_directory, search_files, run_command"
+            "Registered 6 file tools: read_file, write_file, edit_file, list_directory, search_files, run_command"
         )
 
     if args.stdio:

@@ -128,9 +128,7 @@ def _get_pool(database_url: str):
     if _connection_pool is None or _pool_database_url != database_url:
         if _connection_pool is not None:
             _connection_pool.closeall()
-        _connection_pool = pool.ThreadedConnectionPool(
-            MIN_POOL_SIZE, MAX_POOL_SIZE, dsn=database_url
-        )
+        _connection_pool = pool.ThreadedConnectionPool(MIN_POOL_SIZE, MAX_POOL_SIZE, dsn=database_url)
         _pool_database_url = database_url
     return _connection_pool
 

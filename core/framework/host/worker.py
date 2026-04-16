@@ -92,9 +92,7 @@ class Worker:
         # result.json, data). Required when seed_conversation() is used —
         # we deliberately do NOT fall back to CWD, which previously caused
         # conversation parts to leak into the process working directory.
-        self._storage_path: Path | None = (
-            Path(storage_path) if storage_path is not None else None
-        )
+        self._storage_path: Path | None = Path(storage_path) if storage_path is not None else None
         self._task_handle: asyncio.Task | None = None
         self._started_at: float = 0.0
         self._result: WorkerResult | None = None
@@ -153,14 +151,10 @@ class Worker:
 
             if result.success:
                 self.status = WorkerStatus.COMPLETED
-                self._result = self._build_result(
-                    result, duration, default_status="success"
-                )
+                self._result = self._build_result(result, duration, default_status="success")
             else:
                 self.status = WorkerStatus.FAILED
-                self._result = self._build_result(
-                    result, duration, default_status="failed"
-                )
+                self._result = self._build_result(result, duration, default_status="failed")
 
             await self._emit_terminal_events(result)
 
@@ -292,11 +286,7 @@ class Worker:
 
         # EXECUTION_COMPLETED / EXECUTION_FAILED (backwards-compat)
         if agent_result is not None:
-            lifecycle_type = (
-                EventType.EXECUTION_COMPLETED
-                if agent_result.success
-                else EventType.EXECUTION_FAILED
-            )
+            lifecycle_type = EventType.EXECUTION_COMPLETED if agent_result.success else EventType.EXECUTION_FAILED
             await self._event_bus.publish(
                 AgentEvent(
                     type=lifecycle_type,
@@ -309,11 +299,7 @@ class Worker:
                         "task": self.task,
                         "success": agent_result.success,
                         "error": agent_result.error,
-                        "output_keys": (
-                            list(agent_result.output.keys())
-                            if agent_result.output
-                            else []
-                        ),
+                        "output_keys": (list(agent_result.output.keys()) if agent_result.output else []),
                     },
                 )
             )
@@ -348,9 +334,7 @@ class Worker:
 
     async def start_background(self) -> None:
         """Spawn the worker's run() as an asyncio background task."""
-        self._task_handle = asyncio.create_task(
-            self.run(), name=f"worker:{self.id}"
-        )
+        self._task_handle = asyncio.create_task(self.run(), name=f"worker:{self.id}")
         # Surface any exception that escapes run(); without this callback
         # a crash here only becomes visible when stop() eventually awaits
         # the handle (and is silently lost if stop() is never called).
@@ -406,8 +390,7 @@ class Worker:
         """
         if self.status != WorkerStatus.PENDING:
             raise RuntimeError(
-                f"seed_conversation must be called before start_background "
-                f"(worker {self.id} is {self.status})"
+                f"seed_conversation must be called before start_background (worker {self.id} is {self.status})"
             )
 
         # Write parts directly to the worker's on-disk conversation store

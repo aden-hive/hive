@@ -14,8 +14,7 @@ intake_node = NodeSpec(
     input_keys=[],
     output_keys=["resume_text", "role_analysis"],
     success_criteria=(
-        "The user's resume has been analyzed and 3-5 target roles identified "
-        "based on their actual experience."
+        "The user's resume has been analyzed and 3-5 target roles identified based on their actual experience."
     ),
     system_prompt="""\
 You are a career analyst. Your task is to analyze the user's resume and identify the best role fits.
@@ -88,10 +87,7 @@ job_review_node = NodeSpec(
     max_node_visits=1,
     input_keys=["job_listings", "resume_text"],
     output_keys=["selected_jobs"],
-    success_criteria=(
-        "User has reviewed all job listings and explicitly selected "
-        "which jobs they want to apply to."
-    ),
+    success_criteria=("User has reviewed all job listings and explicitly selected which jobs they want to apply to."),
     system_prompt="""\
 You are helping a job seeker choose which positions to apply to.
 

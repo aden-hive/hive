@@ -453,17 +453,13 @@ class TestSpreadsheetTools:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get")
     def test_get_spreadsheet(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"spreadsheetId": "123"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"spreadsheetId": "123"}))
         result = self._fn("google_sheets_get_spreadsheet")(spreadsheet_id="123")
         assert result["spreadsheetId"] == "123"
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
     def test_create_spreadsheet(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"spreadsheetId": "456"})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"spreadsheetId": "456"}))
         result = self._fn("google_sheets_create_spreadsheet")(title="New Sheet")
         assert result["spreadsheetId"] == "456"
 
@@ -496,12 +492,8 @@ class TestReadDataTools:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get")
     def test_get_values(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"values": [["A", "B"]]})
-        )
-        result = self._fn("google_sheets_get_values")(
-            spreadsheet_id="123", range_name="Sheet1!A1:B1"
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"values": [["A", "B"]]}))
+        result = self._fn("google_sheets_get_values")(spreadsheet_id="123", range_name="Sheet1!A1:B1")
         assert result["values"] == [["A", "B"]]
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get")
@@ -526,9 +518,7 @@ class TestWriteDataTools:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.put")
     def test_update_values(self, mock_put):
-        mock_put.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"updatedCells": 2})
-        )
+        mock_put.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"updatedCells": 2}))
         result = self._fn("google_sheets_update_values")(
             spreadsheet_id="123", range_name="Sheet1!A1:B1", values=[["A", "B"]]
         )
@@ -549,9 +539,7 @@ class TestWriteDataTools:
         mock_post.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"clearedRange": "Sheet1!A1:B2"})
         )
-        result = self._fn("google_sheets_clear_values")(
-            spreadsheet_id="123", range_name="Sheet1!A1:B2"
-        )
+        result = self._fn("google_sheets_clear_values")(spreadsheet_id="123", range_name="Sheet1!A1:B2")
         assert result["clearedRange"] == "Sheet1!A1:B2"
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.put")
@@ -578,9 +566,7 @@ class TestBatchOperationsTools:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
     def test_batch_update_values(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"totalUpdatedCells": 4})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"totalUpdatedCells": 4}))
         data = [
             {"range": "Sheet1!A1", "values": [["A"]]},
             {"range": "Sheet1!B1", "values": [["B"]]},
@@ -593,9 +579,7 @@ class TestBatchOperationsTools:
         mock_post.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"clearedRanges": ["Sheet1!A1"]})
         )
-        result = self._fn("google_sheets_batch_clear_values")(
-            spreadsheet_id="123", ranges=["Sheet1!A1"]
-        )
+        result = self._fn("google_sheets_batch_clear_values")(spreadsheet_id="123", ranges=["Sheet1!A1"])
         assert "clearedRanges" in result
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
@@ -624,18 +608,14 @@ class TestSheetManagementTools:
     def test_add_sheet(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"replies": [{"addSheet": {"properties": {"sheetId": 1}}}]}
-            ),
+            json=MagicMock(return_value={"replies": [{"addSheet": {"properties": {"sheetId": 1}}}]}),
         )
         result = self._fn("google_sheets_add_sheet")(spreadsheet_id="123", title="New Sheet")
         assert "replies" in result
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
     def test_delete_sheet(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"replies": [{}]})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"replies": [{}]}))
         result = self._fn("google_sheets_delete_sheet")(spreadsheet_id="123", sheet_id=456)
         assert "replies" in result
 
@@ -671,9 +651,7 @@ class TestErrorSanitization:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get")
     def test_bearer_token_redacted_from_error(self, mock_get):
-        mock_get.side_effect = httpx.RequestError(
-            "Connection failed, Authorization: Bearer ya29.secret_token_here"
-        )
+        mock_get.side_effect = httpx.RequestError("Connection failed, Authorization: Bearer ya29.secret_token_here")
         result = self._fn("google_sheets_get_spreadsheet")(spreadsheet_id="123")
         assert "error" in result
         assert "Network error" in result["error"]
@@ -722,9 +700,7 @@ class TestTrackingParameters:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get")
     def test_tracking_params_accepted_by_get_spreadsheet(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"spreadsheetId": "123"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"spreadsheetId": "123"}))
         result = self._fn("google_sheets_get_spreadsheet")(
             spreadsheet_id="123",
             workspace_id="ws-1",
@@ -735,9 +711,7 @@ class TestTrackingParameters:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
     def test_tracking_params_accepted_by_create_spreadsheet(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"spreadsheetId": "456"})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"spreadsheetId": "456"}))
         result = self._fn("google_sheets_create_spreadsheet")(
             title="Test",
             workspace_id="ws-1",
@@ -748,9 +722,7 @@ class TestTrackingParameters:
 
     @patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.post")
     def test_tracking_params_accepted_by_clear_values(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"clearedRange": "A1:B2"})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"clearedRange": "A1:B2"}))
         result = self._fn("google_sheets_clear_values")(
             spreadsheet_id="123",
             range_name="Sheet1!A1:B2",

@@ -136,8 +136,7 @@ class EncryptedFileStorage(CredentialStorage):
             from cryptography.fernet import Fernet
         except ImportError as e:
             raise ImportError(
-                "Encrypted storage requires 'cryptography'. "
-                "Install with: uv pip install cryptography"
+                "Encrypted storage requires 'cryptography'. Install with: uv pip install cryptography"
             ) from e
 
         self.base_path = Path(base_path or self.DEFAULT_PATH).expanduser()
@@ -213,9 +212,7 @@ class EncryptedFileStorage(CredentialStorage):
             json_bytes = self._fernet.decrypt(encrypted)
             data = json.loads(json_bytes.decode("utf-8-sig"))
         except Exception as e:
-            raise CredentialDecryptionError(
-                f"Failed to decrypt credential '{credential_id}': {e}"
-            ) from e
+            raise CredentialDecryptionError(f"Failed to decrypt credential '{credential_id}': {e}") from e
 
         # Deserialize
         return self._deserialize_credential(data)
@@ -316,8 +313,7 @@ class EncryptedFileStorage(CredentialStorage):
         visible_keys = [
             name
             for name in credential.keys.keys()
-            if name not in self.INDEX_INTERNAL_KEY_NAMES
-            and not name.startswith("_identity_")
+            if name not in self.INDEX_INTERNAL_KEY_NAMES and not name.startswith("_identity_")
         ]
 
         # Earliest expiry across all keys (most likely the access_token).
@@ -336,9 +332,7 @@ class EncryptedFileStorage(CredentialStorage):
             "key_names": sorted(visible_keys),
             "created_at": credential.created_at.isoformat() if credential.created_at else None,
             "updated_at": credential.updated_at.isoformat() if credential.updated_at else None,
-            "last_refreshed": (
-                credential.last_refreshed.isoformat() if credential.last_refreshed else None
-            ),
+            "last_refreshed": (credential.last_refreshed.isoformat() if credential.last_refreshed else None),
             "expires_at": earliest_expiry.isoformat() if earliest_expiry else None,
             "auto_refresh": credential.auto_refresh,
             "tags": list(credential.tags),
@@ -480,8 +474,7 @@ class EnvVarStorage(CredentialStorage):
     def save(self, credential: CredentialObject) -> None:
         """Cannot save to environment variables at runtime."""
         raise NotImplementedError(
-            "EnvVarStorage is read-only. Set environment variables "
-            "externally or use EncryptedFileStorage."
+            "EnvVarStorage is read-only. Set environment variables externally or use EncryptedFileStorage."
         )
 
     def load(self, credential_id: str) -> CredentialObject | None:
@@ -501,9 +494,7 @@ class EnvVarStorage(CredentialStorage):
 
     def delete(self, credential_id: str) -> bool:
         """Cannot delete environment variables at runtime."""
-        raise NotImplementedError(
-            "EnvVarStorage is read-only. Unset environment variables externally."
-        )
+        raise NotImplementedError("EnvVarStorage is read-only. Unset environment variables externally.")
 
     def list_all(self) -> list[str]:
         """List credentials that are available in environment."""

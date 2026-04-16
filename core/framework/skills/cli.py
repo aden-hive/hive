@@ -134,9 +134,7 @@ def register_skill_commands(subparsers) -> None:
     info_parser.set_defaults(func=cmd_skill_info)
 
     # hive skill init
-    init_parser = skill_sub.add_parser(
-        "init", help="Scaffold a new skill directory with a SKILL.md template"
-    )
+    init_parser = skill_sub.add_parser("init", help="Scaffold a new skill directory with a SKILL.md template")
     init_parser.add_argument("--name", dest="skill_name", default=None, metavar="NAME")
     init_parser.add_argument(
         "--dir",
@@ -193,9 +191,7 @@ def register_skill_commands(subparsers) -> None:
     update_parser.set_defaults(func=cmd_skill_update)
 
     # hive skill search
-    search_parser = skill_sub.add_parser(
-        "search", help="Search the skill registry by name, tag, or description"
-    )
+    search_parser = skill_sub.add_parser("search", help="Search the skill registry by name, tag, or description")
     search_parser.add_argument("query", help="Search query string")
     search_parser.add_argument("--json", action="store_true", help="Output as JSON")
     search_parser.set_defaults(func=cmd_skill_search)
@@ -231,9 +227,7 @@ def register_skill_commands(subparsers) -> None:
     fork_parser.set_defaults(func=cmd_skill_fork)
 
     # hive skill test
-    test_parser = skill_sub.add_parser(
-        "test", help="Run a skill in isolation or execute its eval suite (CLI-9)"
-    )
+    test_parser = skill_sub.add_parser("test", help="Run a skill in isolation or execute its eval suite (CLI-9)")
     test_parser.add_argument("path", help="Path to SKILL.md or its parent directory")
     test_parser.add_argument(
         "--input",
@@ -649,9 +643,7 @@ def cmd_skill_validate(args) -> int:
             print(f"✓ {path} — valid ({len(result.warnings)} warning(s))")
         return 0
     else:
-        print(
-            f"✗ {path} — invalid ({len(result.errors)} error(s), {len(result.warnings)} warning(s))"
-        )
+        print(f"✗ {path} — invalid ({len(result.errors)} error(s), {len(result.warnings)} warning(s))")
         return 1
 
 
@@ -672,9 +664,7 @@ def cmd_skill_doctor(args) -> int:
         for skill_name, dir_name in SKILL_REGISTRY.items():
             skill_md = _DEFAULT_SKILLS_DIR / dir_name / "SKILL.md"
             if use_json:
-                report = _doctor_skill_file(
-                    skill_name, skill_md, parse_skill_md, json_mode=True, scope="framework"
-                )
+                report = _doctor_skill_file(skill_name, skill_md, parse_skill_md, json_mode=True, scope="framework")
                 overall_errors += len(report["errors"])
                 skill_results.append(report)
             else:
@@ -696,9 +686,7 @@ def cmd_skill_doctor(args) -> int:
             candidate = USER_SKILLS_DIR / args.name / "SKILL.md"
             if candidate.exists():
                 if use_json:
-                    report = _doctor_skill_file(
-                        args.name, candidate, parse_skill_md, json_mode=True, scope="user"
-                    )
+                    report = _doctor_skill_file(args.name, candidate, parse_skill_md, json_mode=True, scope="user")
                     print(_json.dumps({"skills": [report], "total_errors": len(report["errors"])}))
                     return 1 if report["errors"] else 0
                 print(f"\nChecking skill: {args.name}  [user]")
@@ -838,8 +826,7 @@ def cmd_skill_update(args) -> int:
 
         if not installed_version and not use_json:
             print(
-                f"Warning: installed skill '{args.name}' has no version field — "
-                "cannot compare. Re-installing.",
+                f"Warning: installed skill '{args.name}' has no version field — cannot compare. Re-installing.",
                 file=sys.stderr,
             )
 
@@ -1057,9 +1044,7 @@ def cmd_skill_test(args) -> int:
 
     # ── 4. Structural-only mode (no LLM needed) ───────────────────────────────
     if not has_input and not has_evals:
-        doctor_errors = _doctor_skill_file(
-            skill.name, path, parse_skill_md, json_mode=use_json, scope="user"
-        )
+        doctor_errors = _doctor_skill_file(skill.name, path, parse_skill_md, json_mode=use_json, scope="user")
         if use_json:
             print(
                 _json.dumps(
@@ -1209,9 +1194,7 @@ def cmd_skill_test(args) -> int:
                                 constraint=assertion,
                                 source_document=eval_prompt,
                                 summary=skill_response,
-                                criteria=(
-                                    "Evaluate whether the skill response satisfies the assertion."
-                                ),
+                                criteria=("Evaluate whether the skill response satisfies the assertion."),
                             )
                             passes = judged.get("passes", False)
                             explanation = judged.get("explanation", "")

@@ -120,9 +120,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("a/b/c/d/e/file.txt", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir / "test-agent" / "current" / "a" / "b" / "c" / "d" / "e" / "file.txt"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "a" / "b" / "c" / "d" / "e" / "file.txt"
         assert result == str(expected)
 
     def test_path_with_spaces(self, agent_id):

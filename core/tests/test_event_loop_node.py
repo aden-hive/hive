@@ -13,8 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
-from framework.agent_loop.agent_loop import OutputAccumulator
+from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode, OutputAccumulator
 from framework.agent_loop.conversation import NodeConversation
 from framework.agent_loop.internals.types import JudgeProtocol, JudgeVerdict, LoopConfig
 from framework.host.event_bus import EventBus, EventType
@@ -25,8 +24,7 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.orchestrator.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
-from framework.server.session_manager import Session, SessionManager
+from framework.orchestrator.node import DataBuffer, NodeContext, NodeSpec
 from framework.storage.conversation_store import FileConversationStore
 from framework.tracker.decision_tracker import DecisionTracker as Runtime
 
@@ -41,6 +39,8 @@ class MockStreamingLLM(LLMProvider):
     Each call to stream() consumes the next scenario from the list.
     Cycles back to the beginning if more calls are made than scenarios.
     """
+
+    model: str = "mock"
 
     def __init__(self, scenarios: list[list] | None = None):
         self.scenarios = scenarios or []
@@ -75,9 +75,7 @@ def text_scenario(text: str, input_tokens: int = 10, output_tokens: int = 5) -> 
     """Build a stream scenario that produces text and finishes."""
     return [
         TextDeltaEvent(content=text, snapshot=text),
-        FinishEvent(
-            stop_reason="stop", input_tokens=input_tokens, output_tokens=output_tokens, model="mock"
-        ),
+        FinishEvent(stop_reason="stop", input_tokens=input_tokens, output_tokens=output_tokens, model="mock"),
     ]
 
 
@@ -91,12 +89,8 @@ def tool_call_scenario(
     events = []
     if text:
         events.append(TextDeltaEvent(content=text, snapshot=text))
-    events.append(
-        ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input)
-    )
-    events.append(
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
-    )
+    events.append(ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input))
+    events.append(FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"))
     return events
 
 
@@ -263,9 +257,7 @@ class TestJudgeIntegration:
         llm = MockStreamingLLM(scenarios=[text_scenario("Attempt")])
 
         judge = AsyncMock(spec=JudgeProtocol)
-        judge.evaluate = AsyncMock(
-            return_value=JudgeVerdict(action="ESCALATE", feedback="Tone violation")
-        )
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ESCALATE", feedback="Tone violation"))
 
         ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
@@ -528,13 +520,9 @@ class TestQueenInteractionBlocking:
         llm = MockStreamingLLM(
             scenarios=[
                 [
-                    ToolCallEvent(
-                        tool_use_id="tool_1", tool_name="search", tool_input={"q": "test"}
-                    ),
+                    ToolCallEvent(tool_use_id="tool_1", tool_name="search", tool_input={"q": "test"}),
                     ToolCallEvent(tool_use_id="ask_1", tool_name="ask_user", tool_input={}),
-                    FinishEvent(
-                        stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"
-                    ),
+                    FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
                 ],
                 text_scenario("Done"),
             ]
@@ -568,9 +556,7 @@ class TestQueenInteractionBlocking:
         assert llm._call_index >= 2
 
     @pytest.mark.asyncio
-    async def test_ask_user_not_available_for_workers_even_with_legacy_client_facing(
-        self, runtime, buffer
-    ):
+    async def test_ask_user_not_available_for_workers_even_with_legacy_client_facing(self, runtime, buffer):
         """Workers should not receive ask_user even if legacy client_facing=True is set."""
         spec = NodeSpec(
             id="internal",
@@ -707,6 +693,7 @@ class TestWriteThroughPersistence:
         parts = await store.read_parts()
         assert len(parts) >= 2  # at least initial user msg + assistant msg
 
+
 class TestCrashRecovery:
     @pytest.mark.asyncio
     async def test_restore_from_checkpoint(self, tmp_path, runtime, node_spec, buffer):
@@ -750,9 +737,7 @@ class TestCrashRecovery:
         assert result.output.get("result") == "partial_value"
 
     @pytest.mark.asyncio
-    async def test_restore_reblocks_pending_user_input_instead_of_continuing(
-        self, tmp_path, runtime, buffer
-    ):
+    async def test_restore_reblocks_pending_user_input_instead_of_continuing(self, tmp_path, runtime, buffer):
         """A restored queen wait should re-emit the question, not self-continue."""
         store = FileConversationStore(tmp_path / "conv")
         conv = NodeConversation(
@@ -836,9 +821,7 @@ class TestCrashRecovery:
             "live manual flow. Unskip once the legacy restore is fixed."
         )
     )
-    async def test_restore_legacy_unphased_assistant_message_preserves_store(
-        self, tmp_path, runtime, buffer
-    ):
+    async def test_restore_legacy_unphased_assistant_message_preserves_store(self, tmp_path, runtime, buffer):
         """Legacy queen stores without phase_id should resume instead of being cleared.
 
         The queen node uses skip_judge=True (forever-alive conversational
@@ -904,9 +887,7 @@ class TestCrashRecovery:
         assert len(llm.stream_calls) == 1
         assert [m["role"] for m in llm.stream_calls[0]["messages"]] == ["assistant", "user"]
         assert llm.stream_calls[0]["messages"][0]["content"] == "[Error: previous turn failed.]"
-        assert llm.stream_calls[0]["messages"][1]["content"] == (
-            "[Continue working on your current task.]"
-        )
+        assert llm.stream_calls[0]["messages"][1]["content"] == ("[Continue working on your current task.]")
 
         restored = await NodeConversation.restore(store, phase_id="queen")
         assert restored is not None
@@ -1069,6 +1050,8 @@ class ErrorThenSuccessLLM(LLMProvider):
     Used to test the retry-with-backoff wrapper around _run_single_turn().
     """
 
+    model: str = "mock"
+
     def __init__(self, error: Exception, fail_count: int, success_scenario: list):
         self.error = error
         self.fail_count = fail_count
@@ -1195,6 +1178,8 @@ class TestTransientErrorRetry:
         call_index = 0
 
         class StreamErrorThenSuccessLLM(LLMProvider):
+            model: str = "mock"
+
             async def stream(self, messages, system="", tools=None, max_tokens=4096):
                 nonlocal call_index
                 idx = call_index
@@ -1257,6 +1242,7 @@ class TestTransientErrorRetry:
         assert len(retry_events) == 1
         assert retry_events[0].data["retry_count"] == 1
 
+
 class TestIsTransientError:
     """Unit tests for _is_transient_error() classification."""
 
@@ -1314,16 +1300,12 @@ class TestFingerprintToolCalls:
             {"tool_name": "fetch", "tool_input": {"url": "b"}},
             {"tool_name": "search", "tool_input": {"q": "a"}},
         ]
-        assert EventLoopNode._fingerprint_tool_calls(r1) != (
-            EventLoopNode._fingerprint_tool_calls(r2)
-        )
+        assert EventLoopNode._fingerprint_tool_calls(r1) != (EventLoopNode._fingerprint_tool_calls(r2))
 
     def test_sort_keys_deterministic(self):
         r1 = [{"tool_name": "t", "tool_input": {"b": 2, "a": 1}}]
         r2 = [{"tool_name": "t", "tool_input": {"a": 1, "b": 2}}]
-        assert EventLoopNode._fingerprint_tool_calls(r1) == EventLoopNode._fingerprint_tool_calls(
-            r2
-        )
+        assert EventLoopNode._fingerprint_tool_calls(r1) == EventLoopNode._fingerprint_tool_calls(r2)
 
 
 class TestIsToolDoomLoop:
@@ -1367,10 +1349,12 @@ class TestIsToolDoomLoop:
 class ToolRepeatLLM(LLMProvider):
     """LLM that produces identical tool calls across outer iterations.
 
-    Alternates: even calls → tool call, odd calls → text (exits inner loop).
+    Alternates: even calls -> tool call, odd calls -> text (exits inner loop).
     This ensures each outer iteration = 2 LLM calls with 1 tool executed.
     After tool_turns outer iterations, always returns text.
     """
+
+    model: str = "mock"
 
     def __init__(
         self,
@@ -1614,6 +1598,8 @@ class TestToolDoomLoopIntegration:
         call_idx = 0
 
         class DiffArgsLLM(LLMProvider):
+            model: str = "mock"
+
             async def stream(self, messages, **kwargs):
                 nonlocal call_idx
                 idx = call_idx
@@ -1851,12 +1837,8 @@ def _multi_tool_scenario(*calls: tuple[str, dict, str]) -> list:
     """
     events: list = []
     for name, inp, uid in calls:
-        events.append(
-            ToolCallEvent(tool_use_id=uid, tool_name=name, tool_input=inp)
-        )
-    events.append(
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
-    )
+        events.append(ToolCallEvent(tool_use_id=uid, tool_name=name, tool_input=inp))
+    events.append(FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"))
     return events
 
 
@@ -1864,9 +1846,7 @@ class TestToolConcurrencyPartition:
     """Gap 5: safe tools run in parallel, unsafe tools serialize after them."""
 
     @pytest.mark.asyncio
-    async def test_safe_tools_overlap_unsafe_tools_do_not(
-        self, runtime, node_spec, buffer
-    ):
+    async def test_safe_tools_overlap_unsafe_tools_do_not(self, runtime, node_spec, buffer):
         """A turn with (safe, safe, unsafe) schedules safes in parallel and
         runs unsafe strictly after both safes have started."""
         scenario = _multi_tool_scenario(
@@ -1935,9 +1915,7 @@ class TestToolConcurrencyPartition:
         assert starts["call_3"] >= ends["call_2"]
 
     @pytest.mark.asyncio
-    async def test_serial_exception_cascades_cancel_siblings(
-        self, runtime, node_spec, buffer
-    ):
+    async def test_serial_exception_cascades_cancel_siblings(self, runtime, node_spec, buffer):
         """When an unsafe tool raises, the remaining unsafe siblings are
         cancelled with a clear error rather than silently executed."""
         scenario = _multi_tool_scenario(
@@ -1981,9 +1959,7 @@ class TestToolConcurrencyPartition:
         assert executed == ["call_1"]
 
     @pytest.mark.asyncio
-    async def test_safe_tool_starts_before_finish_event(
-        self, runtime, node_spec, buffer
-    ):
+    async def test_safe_tool_starts_before_finish_event(self, runtime, node_spec, buffer):
         """Gap 1: a concurrency-safe tool must start executing while the
         stream is still in flight, not after the final FinishEvent.
 
@@ -1997,6 +1973,8 @@ class TestToolConcurrencyPartition:
         delay = 0.25
 
         class SlowStreamLLM(LLMProvider):
+            model: str = "mock"
+
             def __init__(self):
                 self._calls = 0
 
@@ -2086,9 +2064,7 @@ class TestToolConcurrencyPartition:
         assert turn_ended - turn_started >= delay
 
     @pytest.mark.asyncio
-    async def test_soft_error_does_not_cascade(
-        self, runtime, node_spec, buffer
-    ):
+    async def test_soft_error_does_not_cascade(self, runtime, node_spec, buffer):
         """A ToolResult with is_error=True (e.g. 'file not found') is a
         normal return and must NOT cancel subsequent serial siblings - the
         model needs to see all tool errors to decide what to do next."""

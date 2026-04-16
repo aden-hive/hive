@@ -113,8 +113,7 @@ _REFLECTION_TOOLS: list[Tool] = [
     Tool(
         name="delete_memory_file",
         description=(
-            "Delete a memory file by filename.  Use during long "
-            "reflection to prune stale or redundant memories."
+            "Delete a memory file by filename.  Use during long reflection to prune stale or redundant memories."
         ),
         parameters={
             "type": "object",
@@ -254,10 +253,7 @@ def _execute_tool(
         fm = parse_frontmatter(content)
         mem_type = (fm.get("type") or "").strip().lower()
         if mem_type and mem_type not in GLOBAL_MEMORY_CATEGORIES:
-            return (
-                f"ERROR: Invalid memory type '{mem_type}'. "
-                f"Allowed types: {', '.join(GLOBAL_MEMORY_CATEGORIES)}."
-            )
+            return f"ERROR: Invalid memory type '{mem_type}'. Allowed types: {', '.join(GLOBAL_MEMORY_CATEGORIES)}."
         # Enforce file size limit.
         if len(content.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
             return f"ERROR: Content exceeds {MAX_FILE_SIZE_BYTES} byte limit."
@@ -543,9 +539,7 @@ Rules:
 def _build_unified_long_reflect_system(queen_id: str | None = None) -> str:
     """Build the unified housekeeping prompt across memory scopes."""
     queen_scope = (
-        f"- `queen`: memories specific to how queen '{queen_id}' should work with this user\n"
-        if queen_id
-        else ""
+        f"- `queen`: memories specific to how queen '{queen_id}' should work with this user\n" if queen_id else ""
     )
     return f"""\
 You are a reflection agent performing a periodic housekeeping pass over the
@@ -649,9 +643,7 @@ async def run_unified_short_reflection(
         session_dir,
         llm,
         memory_dirs,
-        system_prompt=_build_unified_short_reflect_system(
-            queen_id if "queen" in memory_dirs else None
-        ),
+        system_prompt=_build_unified_short_reflect_system(queen_id if "queen" in memory_dirs else None),
         log_label="unified",
         queen_id=queen_id if "queen" in memory_dirs else None,
     )
@@ -771,9 +763,7 @@ async def run_unified_long_reflection(
     if queen_memory_dir is not None and queen_id:
         memory_dirs["queen"] = queen_memory_dir
 
-    manifest = _format_multi_scope_manifest(
-        memory_dirs, queen_id=queen_id if "queen" in memory_dirs else None
-    )
+    manifest = _format_multi_scope_manifest(memory_dirs, queen_id=queen_id if "queen" in memory_dirs else None)
     user_msg = (
         "## Current memory manifest across scopes\n\n"
         f"{manifest}\n\n"

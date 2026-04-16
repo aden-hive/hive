@@ -202,9 +202,7 @@ class Orchestrator:
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
         self.logger.debug(
-            "[Orchestrator.__init__] Created with"
-            " stream_id=%s, execution_id=%s,"
-            " initial node_registry keys: %s",
+            "[Orchestrator.__init__] Created with stream_id=%s, execution_id=%s, initial node_registry keys: %s",
             stream_id,
             execution_id,
             list(self.node_registry.keys()),
@@ -347,8 +345,7 @@ class Orchestrator:
             missing = [t for t in declared if t not in available_tool_names]
             if missing:
                 self.logger.warning(
-                    "Node '%s' (id=%s) declares %d tools not in this runtime; "
-                    "stripping them and continuing: %s",
+                    "Node '%s' (id=%s) declares %d tools not in this runtime; stripping them and continuing: %s",
                     node.name,
                     node.id,
                     len(missing),
@@ -391,10 +388,7 @@ class Orchestrator:
                 lines.append(f"[tool result]: {c}")
             elif m.role == "assistant" and m.tool_calls:
                 names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
-                lines.append(
-                    f"[assistant (calls: {', '.join(names)})]: "
-                    f"{m.content[:200] if m.content else ''}"
-                )
+                lines.append(f"[assistant (calls: {', '.join(names)})]: {m.content[:200] if m.content else ''}")
             else:
                 lines.append(f"[{m.role}]: {m.content}")
         formatted = "\n\n".join(lines)
@@ -565,8 +559,7 @@ class Orchestrator:
             # [RESTORED] Type safety check
             if not isinstance(buffer_data, dict):
                 self.logger.warning(
-                    f"⚠️ Invalid data buffer type in session state: "
-                    f"{type(buffer_data).__name__}, expected dict"
+                    f"⚠️ Invalid data buffer type in session state: {type(buffer_data).__name__}, expected dict"
                 )
             else:
                 # Restore buffer from previous session.
@@ -590,8 +583,7 @@ class Orchestrator:
         # contains all state including the original input, and re-writing
         # input_data would overwrite intermediate results with stale values.
         _is_resuming = bool(
-            session_state
-            and (session_state.get("paused_at") or session_state.get("resume_from_checkpoint"))
+            session_state and (session_state.get("paused_at") or session_state.get("resume_from_checkpoint"))
         )
         if input_data and not _is_resuming:
             for key, value in input_data.items():
@@ -616,11 +608,7 @@ class Orchestrator:
                 # If resuming at a specific node (paused_at), that node was counted
                 # but never completed, so decrement its count
                 paused_at = session_state.get("paused_at")
-                if (
-                    paused_at
-                    and paused_at in node_visit_counts
-                    and node_visit_counts[paused_at] > 0
-                ):
+                if paused_at and paused_at in node_visit_counts and node_visit_counts[paused_at] > 0:
                     old_count = node_visit_counts[paused_at]
                     node_visit_counts[paused_at] -= 1
                     self.logger.info(
@@ -636,10 +624,7 @@ class Orchestrator:
                 checkpoint = await checkpoint_store.load_checkpoint(checkpoint_id)
 
                 if checkpoint:
-                    self.logger.info(
-                        f"🔄 Resuming from checkpoint: {checkpoint_id} "
-                        f"(node: {checkpoint.current_node})"
-                    )
+                    self.logger.info(f"🔄 Resuming from checkpoint: {checkpoint_id} (node: {checkpoint.current_node})")
                     checkpoint_run_id = checkpoint.run_id or LEGACY_RUN_ID
                     self._run_id = checkpoint_run_id
 
@@ -648,9 +633,7 @@ class Orchestrator:
                         buffer.write(key, value, validate=False)
 
                     # Start from checkpoint's next node or current node
-                    current_node_id = (
-                        checkpoint.next_node or checkpoint.current_node or graph.entry_node
-                    )
+                    current_node_id = checkpoint.next_node or checkpoint.current_node or graph.entry_node
 
                     # Restore execution path
                     path.extend(checkpoint.execution_path)
@@ -660,16 +643,11 @@ class Orchestrator:
                         f"resuming at node: {current_node_id}"
                     )
                 else:
-                    self.logger.warning(
-                        f"Checkpoint {checkpoint_id} not found, resuming from normal entry point"
-                    )
+                    self.logger.warning(f"Checkpoint {checkpoint_id} not found, resuming from normal entry point")
                     current_node_id = graph.get_entry_point(session_state)
 
             except Exception as e:
-                self.logger.error(
-                    f"Failed to load checkpoint {checkpoint_id}: {e}, "
-                    f"resuming from normal entry point"
-                )
+                self.logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}, resuming from normal entry point")
                 current_node_id = graph.get_entry_point(session_state)
         else:
             current_node_id = graph.get_entry_point(session_state)
@@ -757,20 +735,14 @@ class Orchestrator:
         "human_input": "event_loop",  # Use queen interaction / escalation instead
     }
 
-    def _get_node_implementation(
-        self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
-    ) -> NodeProtocol:
+    def _get_node_implementation(self, node_spec: NodeSpec, cleanup_llm_model: str | None = None) -> NodeProtocol:
         """Get or create a node implementation."""
         # Check registry first
         if node_spec.id in self.node_registry:
-            logger.debug(
-                "[Orchestrator._get_node_implementation] Found node '%s' in registry", node_spec.id
-            )
+            logger.debug("[Orchestrator._get_node_implementation] Found node '%s' in registry", node_spec.id)
             return self.node_registry[node_spec.id]
         logger.debug(
-            "[Orchestrator._get_node_implementation]"
-            " Node '%s' not in registry (keys: %s),"
-            " creating new",
+            "[Orchestrator._get_node_implementation] Node '%s' not in registry (keys: %s), creating new",
             node_spec.id,
             list(self.node_registry.keys()),
         )
@@ -840,9 +812,7 @@ class Orchestrator:
             # Cache so inject_event() is reachable for queen interaction and escalation routing
             self.node_registry[node_spec.id] = node
             logger.debug(
-                "[Orchestrator._get_node_implementation]"
-                " Cached node '%s' in node_registry,"
-                " registry now has keys: %s",
+                "[Orchestrator._get_node_implementation] Cached node '%s' in node_registry, registry now has keys: %s",
                 node_spec.id,
                 list(self.node_registry.keys()),
             )
@@ -925,9 +895,7 @@ class Orchestrator:
             if len(conditionals) > 1:
                 max_prio = max(e.priority for e in conditionals)
                 traversable = [
-                    e
-                    for e in traversable
-                    if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
+                    e for e in traversable if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
                 ]
 
         return traversable
@@ -1090,9 +1058,7 @@ class Orchestrator:
                             execution_id=self._execution_id,
                         )
 
-                    self.logger.info(
-                        f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
-                    )
+                    self.logger.info(f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})")
                     result = await node_impl.execute(ctx)
                     last_result = result
 
@@ -1153,19 +1119,13 @@ class Orchestrator:
                         )
                         return branch, result
 
-                    self.logger.warning(
-                        f"      ↻ Branch {node_spec.name}: "
-                        f"retry {attempt + 1}/{effective_max_retries}"
-                    )
+                    self.logger.warning(f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{effective_max_retries}")
 
                 # All retries exhausted
                 branch.status = "failed"
                 branch.error = last_result.error if last_result else "Unknown error"
                 branch.result = last_result
-                self.logger.error(
-                    f"      ✗ Branch {node_spec.name}: "
-                    f"failed after {effective_max_retries} attempts"
-                )
+                self.logger.error(f"      ✗ Branch {node_spec.name}: failed after {effective_max_retries} attempts")
                 return branch, last_result
 
             except Exception as e:
@@ -1208,10 +1168,7 @@ class Orchestrator:
                 # Branch timed out
                 branch.status = "timed_out"
                 branch.error = f"Branch timed out after {timeout}s"
-                self.logger.warning(
-                    f"      ⏱ Branch {graph.get_node(branch.node_id).name}: "
-                    f"timed out after {timeout}s"
-                )
+                self.logger.warning(f"      ⏱ Branch {graph.get_node(branch.node_id).name}: timed out after {timeout}s")
                 path.append(branch.node_id)
                 failed_branches.append(branch)
             elif isinstance(result, Exception):
@@ -1235,13 +1192,9 @@ class Orchestrator:
             if self._parallel_config.on_branch_failure == "fail_all":
                 raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":
-                self.logger.warning(
-                    f"⚠ Some branches failed ({failed_names}), continuing with successful ones"
-                )
+                self.logger.warning(f"⚠ Some branches failed ({failed_names}), continuing with successful ones")
 
-        self.logger.info(
-            f"   ⑃ Fan-out complete: {len(branch_results)}/{len(branches)} branches succeeded"
-        )
+        self.logger.info(f"   ⑃ Fan-out complete: {len(branch_results)}/{len(branches)} branches succeeded")
         return branch_results, total_tokens, total_latency
 
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:
@@ -1432,15 +1385,10 @@ class Orchestrator:
                 return True
             if not terminal_worker_ids:
                 # No terminals: check if all workers are done
-                return all(
-                    w.lifecycle in (WorkerLifecycle.COMPLETED, WorkerLifecycle.FAILED)
-                    for w in workers.values()
-                )
+                return all(w.lifecycle in (WorkerLifecycle.COMPLETED, WorkerLifecycle.FAILED) for w in workers.values())
             if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
                 return False
-            return any(
-                tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids
-            )
+            return any(tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids)
 
         def _mark_quiescent_terminal_failure() -> bool:
             nonlocal execution_error
@@ -1448,22 +1396,15 @@ class Orchestrator:
                 return False
             if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
                 return False
-            if any(
-                tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids
-            ):
+            if any(tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids):
                 return False
-            execution_error = (
-                "Worker execution ended before terminal nodes completed: "
-                f"{sorted(terminal_worker_ids)}"
-            )
+            execution_error = f"Worker execution ended before terminal nodes completed: {sorted(terminal_worker_ids)}"
             self.logger.error(execution_error)
             return True
 
         # Track fan-out branch workers for per-branch timeout enforcement
         _fanout_branch_tasks: dict[str, asyncio.Task] = {}  # worker_id → timeout-wrapper task
-        branch_timeout = (
-            self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
-        )
+        branch_timeout = self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
 
         def _route_activation(
             activation: Activation,
@@ -1498,9 +1439,7 @@ class Orchestrator:
                 target_worker.activate(inherited_tags=activation.fan_out_tags)
                 if target_worker._task is not None:
                     # Fan-out branch: wrap with timeout
-                    is_fanout_branch = any(
-                        tag.via_branch == activation.target_id for tag in activation.fan_out_tags
-                    )
+                    is_fanout_branch = any(tag.via_branch == activation.target_id for tag in activation.fan_out_tags)
                     if is_fanout_branch and branch_timeout > 0:
                         timed_task = asyncio.ensure_future(
                             asyncio.wait_for(target_worker._task, timeout=branch_timeout)
@@ -1555,9 +1494,7 @@ class Orchestrator:
                 if completion.conversation is not None:
                     gc.continuous_conversation = completion.conversation
 
-            self.logger.info(
-                f"  ✓ Worker completed: {worker_id} ({len(activations)} outgoing activation(s))"
-            )
+            self.logger.info(f"  ✓ Worker completed: {worker_id} ({len(activations)} outgoing activation(s))")
 
             # Route activations to target workers
             for activation in activations:
@@ -1598,9 +1535,7 @@ class Orchestrator:
                 completion_event.set()
 
         # Subscribe to events (only if event bus has subscribe capability)
-        has_event_subscription = self._event_bus is not None and hasattr(
-            self._event_bus, "subscribe"
-        )
+        has_event_subscription = self._event_bus is not None and hasattr(self._event_bus, "subscribe")
         if has_event_subscription:
             sub_completed = self._event_bus.subscribe(
                 event_types=[EventType.WORKER_COMPLETED],
@@ -1642,14 +1577,12 @@ class Orchestrator:
                         )
                         if unresolved_terminals:
                             execution_error = (
-                                "Worker execution ended before terminal nodes completed: "
-                                f"{unresolved_terminals}"
+                                f"Worker execution ended before terminal nodes completed: {unresolved_terminals}"
                             )
                             self.logger.error(execution_error)
                         else:
                             execution_error = (
-                                "Worker execution ended before all workers reached "
-                                "a terminal lifecycle state"
+                                "Worker execution ended before all workers reached a terminal lifecycle state"
                             )
                             self.logger.error(execution_error)
                         break
@@ -1680,10 +1613,7 @@ class Orchestrator:
                             task_error = exc
 
                         # Check for fan-out branch timeout
-                        if (
-                            isinstance(task_error, asyncio.TimeoutError)
-                            and wid in _fanout_branch_tasks
-                        ):
+                        if isinstance(task_error, asyncio.TimeoutError) and wid in _fanout_branch_tasks:
                             error = f"Branch failed (timed out after {branch_timeout}s)"
                             failed_workers[wid] = error
                             worker.lifecycle = WorkerLifecycle.FAILED
@@ -1727,10 +1657,7 @@ class Orchestrator:
                                 src_spec = graph.get_node(wid)
                                 if src_spec and src_spec.tools:
                                     for t in self.tools:
-                                        if (
-                                            t.name in src_spec.tools
-                                            and t.name not in gc.cumulative_tool_names
-                                        ):
+                                        if t.name in src_spec.tools and t.name not in gc.cumulative_tool_names:
                                             gc.cumulative_tools.append(t)
                                             gc.cumulative_tool_names.add(t.name)
                                 if src_spec and src_spec.output_keys:
@@ -1741,8 +1668,7 @@ class Orchestrator:
                                     gc.continuous_conversation = completion_conversation
 
                             self.logger.info(
-                                f"  ✓ Worker completed: {wid} "
-                                f"({len(outgoing_activations)} outgoing activation(s))"
+                                f"  ✓ Worker completed: {wid} ({len(outgoing_activations)} outgoing activation(s))"
                             )
 
                             # Route activations
@@ -1787,8 +1713,7 @@ class Orchestrator:
                             error = str(task_error)
                         else:
                             error = (
-                                "Worker task completed without publishing a completion "
-                                f"(lifecycle={worker.lifecycle})"
+                                f"Worker task completed without publishing a completion (lifecycle={worker.lifecycle})"
                             )
 
                         failed_workers[wid] = error

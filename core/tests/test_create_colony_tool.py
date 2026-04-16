@@ -29,7 +29,6 @@ from framework.llm.provider import ToolUse
 from framework.loader.tool_registry import ToolRegistry
 from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
 
-
 # ---------------------------------------------------------------------------
 # Fixtures + helpers
 # ---------------------------------------------------------------------------
@@ -55,9 +54,7 @@ def _make_executor():
 
 
 async def _call(executor, **inputs) -> dict:
-    result = executor(
-        ToolUse(id="tu_create_colony", name="create_colony", input=inputs)
-    )
+    result = executor(ToolUse(id="tu_create_colony", name="create_colony", input=inputs))
     if asyncio.iscoroutine(result):
         result = await result
     return json.loads(result.content)
@@ -119,11 +116,7 @@ def _write_skill(
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md = skill_dir / "SKILL.md"
     skill_md.write_text(
-        "---\n"
-        f"name: {fm_name}\n"
-        f'description: "{description}"\n'
-        "---\n\n"
-        f"{body}",
+        f'---\nname: {fm_name}\ndescription: "{description}"\n---\n\n{body}',
         encoding="utf-8",
     )
     return skill_dir
@@ -153,14 +146,10 @@ async def test_happy_path_emits_colony_created_event(
         handler=_on_colony_created,
     )
 
-    skill_src = _write_skill(
-        tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
-    )
+    skill_src = _write_skill(tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill")
     skill_src.parent.mkdir(parents=True, exist_ok=True)
     # Re-create after parent mkdir
-    skill_src = _write_skill(
-        tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
-    )
+    skill_src = _write_skill(tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill")
 
     payload = await _call(
         executor,
@@ -233,9 +222,7 @@ async def test_happy_path_external_folder_is_copied_into_skills_root(
 
 
 @pytest.mark.asyncio
-async def test_happy_path_in_place_authored_skill(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_happy_path_in_place_authored_skill(patched_home: Path, patched_fork: list[dict]) -> None:
     """Skill authored directly at ~/.hive/skills/{name}/ is accepted in-place."""
     executor, _ = _make_executor()
 
@@ -282,9 +269,7 @@ async def test_missing_skill_path_rejected(patched_home, patched_fork) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skill_path_is_file_not_directory_rejected(
-    tmp_path, patched_home, patched_fork
-) -> None:
+async def test_skill_path_is_file_not_directory_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
     bogus = tmp_path / "not-a-dir.md"
     bogus.write_text("hi", encoding="utf-8")
@@ -300,9 +285,7 @@ async def test_skill_path_is_file_not_directory_rejected(
 
 
 @pytest.mark.asyncio
-async def test_skill_missing_skill_md_rejected(
-    tmp_path, patched_home, patched_fork
-) -> None:
+async def test_skill_missing_skill_md_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
     folder = tmp_path / "no-skill-md"
     folder.mkdir()
@@ -318,15 +301,11 @@ async def test_skill_missing_skill_md_rejected(
 
 
 @pytest.mark.asyncio
-async def test_skill_md_missing_frontmatter_marker_rejected(
-    tmp_path, patched_home, patched_fork
-) -> None:
+async def test_skill_md_missing_frontmatter_marker_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
     folder = tmp_path / "broken-fm"
     folder.mkdir()
-    (folder / "SKILL.md").write_text(
-        "no frontmatter here, just body\n", encoding="utf-8"
-    )
+    (folder / "SKILL.md").write_text("no frontmatter here, just body\n", encoding="utf-8")
     payload = await _call(
         executor,
         colony_name="ok_name",
@@ -339,9 +318,7 @@ async def test_skill_md_missing_frontmatter_marker_rejected(
 
 
 @pytest.mark.asyncio
-async def test_skill_md_missing_description_rejected(
-    tmp_path, patched_home, patched_fork
-) -> None:
+async def test_skill_md_missing_description_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
     folder = tmp_path / "no-description"
     folder.mkdir()
@@ -361,9 +338,7 @@ async def test_skill_md_missing_description_rejected(
 
 
 @pytest.mark.asyncio
-async def test_directory_name_mismatch_with_frontmatter_rejected(
-    tmp_path, patched_home, patched_fork
-) -> None:
+async def test_directory_name_mismatch_with_frontmatter_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
     folder = tmp_path / "wrong-dir-name"
     folder.mkdir()
@@ -385,9 +360,7 @@ async def test_directory_name_mismatch_with_frontmatter_rejected(
 @pytest.mark.asyncio
 async def test_invalid_colony_name_rejected(tmp_path, patched_home, patched_fork) -> None:
     executor, _ = _make_executor()
-    skill_src = _write_skill(
-        tmp_path, dir_name="valid-skill", fm_name="valid-skill"
-    )
+    skill_src = _write_skill(tmp_path, dir_name="valid-skill", fm_name="valid-skill")
     payload = await _call(
         executor,
         colony_name="NotValid-Colony",
@@ -400,9 +373,7 @@ async def test_invalid_colony_name_rejected(tmp_path, patched_home, patched_fork
 
 
 @pytest.mark.asyncio
-async def test_fork_failure_keeps_installed_skill(
-    tmp_path, patched_home, monkeypatch
-) -> None:
+async def test_fork_failure_keeps_installed_skill(tmp_path, patched_home, monkeypatch) -> None:
     """If the fork raises, the installed skill stays under ~/.hive/skills/."""
 
     async def _failing_fork(**kwargs):
@@ -414,9 +385,7 @@ async def test_fork_failure_keeps_installed_skill(
     )
 
     executor, _ = _make_executor()
-    skill_src = _write_skill(
-        tmp_path, dir_name="durable-skill", fm_name="durable-skill"
-    )
+    skill_src = _write_skill(tmp_path, dir_name="durable-skill", fm_name="durable-skill")
 
     payload = await _call(
         executor,

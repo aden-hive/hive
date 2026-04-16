@@ -115,17 +115,13 @@ def resolve_ref(selector: str, ref_map: RefMap | None) -> str:
         return selector
 
     if ref_map is None:
-        raise ValueError(
-            f"Ref '{selector}' used but no snapshot has been taken yet. "
-            "Call browser_snapshot first."
-        )
+        raise ValueError(f"Ref '{selector}' used but no snapshot has been taken yet. Call browser_snapshot first.")
 
     entry = ref_map.get(selector)
     if entry is None:
         valid = ", ".join(sorted(ref_map.keys(), key=lambda k: int(k[1:])))
         raise ValueError(
-            f"Ref '{selector}' not found. Valid refs: {valid}. "
-            "The page may have changed - take a new snapshot."
+            f"Ref '{selector}' not found. Valid refs: {valid}. The page may have changed - take a new snapshot."
         )
 
     # Build CSS selector

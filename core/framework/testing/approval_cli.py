@@ -96,20 +96,14 @@ def batch_approval(
         # Validate request
         valid, error = req.validate_action()
         if not valid:
-            results.append(
-                ApprovalResult.error_result(req.test_id, req.action, error or "Invalid request")
-            )
+            results.append(ApprovalResult.error_result(req.test_id, req.action, error or "Invalid request"))
             counts["errors"] += 1
             continue
 
         # Load test
         test = storage.load_test(goal_id, req.test_id)
         if not test:
-            results.append(
-                ApprovalResult.error_result(
-                    req.test_id, req.action, f"Test {req.test_id} not found"
-                )
-            )
+            results.append(ApprovalResult.error_result(req.test_id, req.action, f"Test {req.test_id} not found"))
             counts["errors"] += 1
             continue
 
@@ -132,9 +126,7 @@ def batch_approval(
                 storage.update_test(test)
 
             results.append(
-                ApprovalResult.success_result(
-                    req.test_id, req.action, f"Test {req.action.value}d successfully"
-                )
+                ApprovalResult.success_result(req.test_id, req.action, f"Test {req.action.value}d successfully")
             )
 
         except Exception as e:
@@ -233,9 +225,7 @@ def _process_action(
                 test.approve()
                 storage.update_test(test)
                 print("✓ Approved (no modifications)")
-                return ApprovalResult.success_result(
-                    test.id, ApprovalAction.APPROVE, "No modifications made"
-                )
+                return ApprovalResult.success_result(test.id, ApprovalAction.APPROVE, "No modifications made")
 
         elif action == ApprovalAction.SKIP:
             print("⏭ Skipped (remains pending)")

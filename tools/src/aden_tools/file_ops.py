@@ -467,8 +467,7 @@ def register_file_tools(
                 )
             if _fresh.status is Freshness.STALE:
                 return (
-                    f"Refusing to overwrite '{path}': {_fresh.detail}. "
-                    f"Re-read the file with read_file before writing."
+                    f"Refusing to overwrite '{path}': {_fresh.detail}. Re-read the file with read_file before writing."
                 )
 
         try:
@@ -497,9 +496,7 @@ def register_file_tools(
             except Exception:
                 pass
 
-            line_count = content_str.count("\n") + (
-                1 if content_str and not content_str.endswith("\n") else 0
-            )
+            line_count = content_str.count("\n") + (1 if content_str and not content_str.endswith("\n") else 0)
             action = "Updated" if existed else "Created"
             return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:
@@ -535,10 +532,7 @@ def register_file_tools(
                 f"edit it."
             )
         if _fresh.status is Freshness.STALE:
-            return (
-                f"Refusing to edit '{path}': {_fresh.detail}. Re-read "
-                f"the file with read_file before editing."
-            )
+            return f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with read_file before editing."
 
         try:
             with open(resolved, encoding="utf-8") as f:
@@ -575,9 +569,7 @@ def register_file_tools(
                     break
 
             if matched_text is None:
-                close = difflib.get_close_matches(
-                    old_text[:200], content.split("\n"), n=3, cutoff=0.4
-                )
+                close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
                 msg = f"Error: Could not find a unique match for old_text in {path}."
                 if close:
                     suggestions = "\n".join(f"  {line}" for line in close)
@@ -662,9 +654,7 @@ def register_file_tools(
             return f"Error listing directory: {e}"
 
     @mcp.tool()
-    def search_files(
-        pattern: str, path: str = ".", include: str = "", hashline: bool = False
-    ) -> str:
+    def search_files(pattern: str, path: str = ".", include: str = "", hashline: bool = False) -> str:
         """Search file contents using regex. Uses ripgrep if available.
 
         Results sorted by file with line numbers. Set hashline=True to include
@@ -742,9 +732,7 @@ def register_file_tools(
                 total = output.count("\n") + 1
                 result_str = "\n".join(lines)
                 if total > SEARCH_RESULT_LIMIT:
-                    result_str += (
-                        f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                    )
+                    result_str += f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
                 return result_str
         except FileNotFoundError:
             pass  # ripgrep not installed — fall through to Python
@@ -780,9 +768,7 @@ def register_file_tools(
                                         h = compute_line_hash(stripped)
                                         matches.append(f"{display_path}:{i}:{h}|{stripped}")
                                     else:
-                                        matches.append(
-                                            f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}"
-                                        )
+                                        matches.append(f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}")
                                     if len(matches) >= SEARCH_RESULT_LIMIT:
                                         return "\n".join(matches) + "\n... (truncated)"
                     except (OSError, UnicodeDecodeError):
@@ -925,15 +911,9 @@ def register_file_tools(
                     start_num, _ = parse_anchor(start_anchor)
                     end_num, _ = parse_anchor(end_anchor)
                     if start_num > end_num:
-                        return (
-                            f"Error: Edit #{i + 1} (replace_lines): "
-                            f"start line {start_num} > end line {end_num}"
-                        )
+                        return f"Error: Edit #{i + 1} (replace_lines): start line {start_num} > end line {end_num}"
                     if "content" not in op:
-                        return (
-                            f"Error: Edit #{i + 1} (replace_lines): "
-                            f"missing required field 'content'"
-                        )
+                        return f"Error: Edit #{i + 1} (replace_lines): missing required field 'content'"
                     if not isinstance(op["content"], str):
                         return f"Error: Edit #{i + 1} (replace_lines): content must be a string"
                     new_content = op["content"]
@@ -1190,7 +1170,6 @@ def register_file_tools(
         parts.append(hashline_content)
         if total_lines > preview_limit:
             parts.append(
-                f"\n(Showing first {preview_limit} of {total_lines} lines. "
-                f"Use read_file with offset to see more.)"
+                f"\n(Showing first {preview_limit} of {total_lines} lines. Use read_file with offset to see more.)"
             )
         return "\n".join(parts)

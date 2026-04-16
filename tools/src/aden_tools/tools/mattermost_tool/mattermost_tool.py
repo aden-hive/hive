@@ -193,10 +193,7 @@ def register_tools(
                 return credentials.get_by_alias("mattermost", account)
             token = credentials.get("mattermost")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    "Expected string from credentials.get('mattermost'), "
-                    f"got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('mattermost'), got {type(token).__name__}")
             return token
         return os.getenv("MATTERMOST_ACCESS_TOKEN")
 
@@ -205,10 +202,7 @@ def register_tools(
         if credentials is not None:
             url = credentials.get("mattermost_url")
             if url is not None and not isinstance(url, str):
-                raise TypeError(
-                    "Expected string from credentials.get('mattermost_url'), "
-                    f"got {type(url).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('mattermost_url'), got {type(url).__name__}")
             if url:
                 return url
         return os.getenv("MATTERMOST_URL")

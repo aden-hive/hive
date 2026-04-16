@@ -452,9 +452,7 @@ class ExecutionManager:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(
-                    content, is_client_input=is_client_input, image_content=image_content
-                )
+                await node.inject_event(content, is_client_input=is_client_input, image_content=image_content)
                 return True
         return False
 
@@ -669,9 +667,7 @@ class ExecutionManager:
                 if self._runtime_log_store:
                     from framework.tracker.runtime_logger import RuntimeLogger
 
-                    runtime_logger = RuntimeLogger(
-                        store=self._runtime_log_store, agent_id=self.graph.id
-                    )
+                    runtime_logger = RuntimeLogger(store=self._runtime_log_store, agent_id=self.graph.id)
 
                 # Derive storage from session_store (graph-specific for secondary
                 # graphs) so that all files — conversations, state, checkpoints,
@@ -887,9 +883,7 @@ class ExecutionManager:
                     if has_result and result.paused_at:
                         await self._write_session_state(execution_id, ctx, result=result)
                     else:
-                        await self._write_session_state(
-                            execution_id, ctx, error="Execution cancelled"
-                        )
+                        await self._write_session_state(execution_id, ctx, error="Execution cancelled")
 
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no

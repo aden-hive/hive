@@ -148,9 +148,7 @@ def _transform_profile_for_api(profile: dict) -> dict:
             details.append(f"Drive: {hidden['deep_motive']}")
         if hidden.get("behavioral_mapping"):
             details.append(f"Approach: {hidden['behavioral_mapping']}")
-        experience.append(
-            {"role": f"{profile.get('title', 'Executive Advisor')}", "details": details}
-        )
+        experience.append({"role": f"{profile.get('title', 'Executive Advisor')}", "details": details})
     if experience:
         result["experience"] = experience
 
@@ -161,9 +159,7 @@ def _transform_profile_for_api(profile: dict) -> dict:
     # Signature achievement from world_lore
     world_lore = profile.get("world_lore", {})
     if world_lore.get("habitat"):
-        result["signature_achievement"] = (
-            f"{world_lore['habitat']}. {world_lore.get('lexicon', '')}".strip()
-        )
+        result["signature_achievement"] = f"{world_lore['habitat']}. {world_lore.get('lexicon', '')}".strip()
 
     return result
 

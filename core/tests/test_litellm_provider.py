@@ -61,9 +61,7 @@ class TestLiteLLMProviderInit:
 
     def test_init_with_api_base(self):
         """Test initialization with custom API base."""
-        provider = LiteLLMProvider(
-            model="gpt-4o-mini", api_key="my-key", api_base="https://my-proxy.com/v1"
-        )
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="my-key", api_base="https://my-proxy.com/v1")
         assert provider.api_base == "https://my-proxy.com/v1"
 
     def test_init_minimax_defaults_api_base(self):
@@ -165,9 +163,7 @@ class TestLiteLLMProviderComplete:
         mock_completion.return_value = mock_response
 
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
-        provider.complete(
-            messages=[{"role": "user", "content": "Hello"}], system="You are a helpful assistant."
-        )
+        provider.complete(messages=[{"role": "user", "content": "Hello"}], system="You are a helpful assistant.")
 
         call_kwargs = mock_completion.call_args[1]
         messages = call_kwargs["messages"]
@@ -199,9 +195,7 @@ class TestLiteLLMProviderComplete:
             )
         ]
 
-        provider.complete(
-            messages=[{"role": "user", "content": "What's the weather?"}], tools=tools
-        )
+        provider.complete(messages=[{"role": "user", "content": "What's the weather?"}], tools=tools)
 
         call_kwargs = mock_completion.call_args[1]
         assert "tools" in call_kwargs
@@ -430,9 +424,7 @@ class TestJsonMode:
         mock_completion.return_value = mock_response
 
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
-        provider.complete(
-            messages=[{"role": "user", "content": "Hello"}], system="You are helpful."
-        )
+        provider.complete(messages=[{"role": "user", "content": "Hello"}], system="You are helpful.")
 
         call_kwargs = mock_completion.call_args[1]
         assert "response_format" not in call_kwargs
@@ -662,9 +654,7 @@ class TestAsyncComplete:
         assert result.content == "done"
         # Heartbeat should have ticked multiple times during the 300ms LLM call
         # (if the event loop were blocked, we'd see 0-1 ticks)
-        assert len(heartbeat_ticks) >= 3, (
-            f"Event loop was blocked — only {len(heartbeat_ticks)} heartbeat ticks"
-        )
+        assert len(heartbeat_ticks) >= 3, f"Event loop was blocked — only {len(heartbeat_ticks)} heartbeat ticks"
 
     @pytest.mark.asyncio
     async def test_mock_provider_acomplete(self):
@@ -686,6 +676,8 @@ class TestAsyncComplete:
         call_thread_ids = []
 
         class SlowSyncProvider(LLMProvider):
+            model: str = "mock"
+
             def complete(
                 self,
                 messages,
@@ -709,9 +701,7 @@ class TestAsyncComplete:
 
         assert result.content == "sync done"
         # The sync complete() should have run on a different thread
-        assert call_thread_ids[0] != main_thread_id, (
-            "Base acomplete() should offload sync complete() to a thread pool"
-        )
+        assert call_thread_ids[0] != main_thread_id, "Base acomplete() should offload sync complete() to a thread pool"
 
 
 class TestMiniMaxStreamFallback:
@@ -887,8 +877,7 @@ class TestOpenRouterToolCompatFallback:
             call_state["count"] += 1
             if kwargs.get("stream"):
                 raise RuntimeError(
-                    'OpenrouterException - {"error":{"message":"No endpoints found '
-                    'that support tool use.","code":404}}'
+                    'OpenrouterException - {"error":{"message":"No endpoints found that support tool use.","code":404}}'
                 )
             return compat_response
 
@@ -970,8 +959,7 @@ class TestOpenRouterToolCompatFallback:
         async def side_effect(*args, **kwargs):
             if kwargs.get("stream"):
                 raise RuntimeError(
-                    'OpenrouterException - {"error":{"message":"No endpoints found '
-                    'that support tool use.","code":404}}'
+                    'OpenrouterException - {"error":{"message":"No endpoints found that support tool use.","code":404}}'
                 )
             return compat_response
 
@@ -997,9 +985,7 @@ class TestOpenRouterToolCompatFallback:
         text_events = [event for event in events if isinstance(event, TextDeltaEvent)]
         assert len(text_events) == 1
         assert "ask_user(" not in text_events[0].snapshot
-        assert text_events[0].snapshot == (
-            "Queen has been loaded. It's ready to assist with your planning needs."
-        )
+        assert text_events[0].snapshot == ("Queen has been loaded. It's ready to assist with your planning needs.")
 
         finish_events = [event for event in events if isinstance(event, FinishEvent)]
         assert len(finish_events) == 1
@@ -1034,8 +1020,7 @@ class TestOpenRouterToolCompatFallback:
         async def side_effect(*args, **kwargs):
             if kwargs.get("stream"):
                 raise RuntimeError(
-                    'OpenrouterException - {"error":{"message":"No endpoints found '
-                    'that support tool use.","code":404}}'
+                    'OpenrouterException - {"error":{"message":"No endpoints found that support tool use.","code":404}}'
                 )
             return compat_response
 

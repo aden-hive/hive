@@ -31,14 +31,10 @@ class SubagentJudge:
 
         if remaining <= 3:
             urgency = (
-                f"URGENT: Only {remaining} iterations left. "
-                f"Stop all other work and call set_output NOW for: {missing}"
+                f"URGENT: Only {remaining} iterations left. Stop all other work and call set_output NOW for: {missing}"
             )
         elif remaining <= self._max_iterations // 2:
-            urgency = (
-                f"WARNING: {remaining} iterations remaining. "
-                f"You must call set_output for: {missing}"
-            )
+            urgency = f"WARNING: {remaining} iterations remaining. You must call set_output for: {missing}"
         else:
             urgency = f"Missing output keys: {missing}. Use set_output to provide them."
 
@@ -109,9 +105,7 @@ async def judge_turn(
     if tool_results:
         return JudgeVerdict(action="RETRY")  # feedback=None → not logged
 
-    missing = get_missing_output_keys_fn(
-        accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
-    )
+    missing = get_missing_output_keys_fn(accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys)
 
     if missing:
         return JudgeVerdict(
@@ -133,10 +127,7 @@ async def judge_turn(
     if all_nullable and none_set:
         return JudgeVerdict(
             action="RETRY",
-            feedback=(
-                f"No output keys have been set yet. "
-                f"Use set_output to set at least one of: {output_keys}"
-            ),
+            feedback=(f"No output keys have been set yet. Use set_output to set at least one of: {output_keys}"),
         )
 
     # Level 2b: conversation-aware quality check (if success_criteria set)

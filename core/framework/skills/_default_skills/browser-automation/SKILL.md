@@ -424,7 +424,7 @@ Avoid it when:
 
 ## Login & auth walls
 
-- If you see a "Log in" or "Sign up" prompt, report the auth wall immediately — do NOT attempt to log in.
+- If you see a "Log in" or "Sign up" prompt, report the auth wall to user immediately — do NOT attempt to log in.
 - Check for cookie consent banners and dismiss them if they block content.
 
 ## Error recovery

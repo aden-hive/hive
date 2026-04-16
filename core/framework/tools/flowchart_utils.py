@@ -215,9 +215,7 @@ def synthesize_draft_from_runtime(
                 "id": f"edge-{i}",
                 "source": re.source,
                 "target": re.target,
-                "condition": str(re.condition.value)
-                if hasattr(re.condition, "value")
-                else str(re.condition),
+                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
                 "description": getattr(re, "description", "") or "",
                 "label": "",
             }
@@ -315,8 +313,7 @@ def synthesize_draft_from_runtime(
         "entry_node": nodes[0]["id"] if nodes else "",
         "terminal_nodes": sorted(terminal_ids),
         "flowchart_legend": {
-            fc_type: {"shape": meta["shape"], "color": meta["color"]}
-            for fc_type, meta in FLOWCHART_TYPES.items()
+            fc_type: {"shape": meta["shape"], "color": meta["color"]} for fc_type, meta in FLOWCHART_TYPES.items()
         },
     }
 

@@ -142,9 +142,7 @@ def _resolve_read_path(path: str) -> str:
             ):
                 p = prefix.rstrip("/") + "/"
                 prefix_stripped = prefix.rstrip("/")
-                if path_norm.startswith(p) or (
-                    path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)
-                ):
+                if path_norm.startswith(p) or (path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)):
                     suffix = path_norm[len(prefix_stripped) :].lstrip("/")
                     if suffix:
                         path = suffix.replace("/", os.sep)
@@ -262,9 +260,7 @@ _resolve_path = _resolve_read_path
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30, encoding="utf-8", stdin=subprocess.DEVNULL
-    )
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding="utf-8", stdin=subprocess.DEVNULL)
     return result.stdout.strip()
 
 
@@ -391,19 +387,13 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         output = "\n".join(parts)
 
         if len(output) > MAX_COMMAND_OUTPUT:
-            output = (
-                output[:MAX_COMMAND_OUTPUT]
-                + f"\n\n... (output truncated at {MAX_COMMAND_OUTPUT:,} chars)"
-            )
+            output = output[:MAX_COMMAND_OUTPUT] + f"\n\n... (output truncated at {MAX_COMMAND_OUTPUT:,} chars)"
 
         code = result.returncode
         output += f"\n\n[exit code: {code}, {elapsed:.1f}s]"
         return output
     except subprocess.TimeoutExpired:
-        return (
-            f"Error: Command timed out after {timeout}s. "
-            "Consider breaking it into smaller operations."
-        )
+        return f"Error: Command timed out after {timeout}s. Consider breaking it into smaller operations."
     except Exception as e:
         return f"Error executing command: {e}"
 
@@ -513,21 +503,11 @@ def list_agent_tools(
     """
     if output_schema not in ("summary", "names", "simple", "full"):
         return json.dumps(
-            {
-                "error": (
-                    f"Invalid output_schema: {output_schema!r}. "
-                    "Use 'summary', 'names', 'simple', or 'full'."
-                )
-            }
+            {"error": (f"Invalid output_schema: {output_schema!r}. Use 'summary', 'names', 'simple', or 'full'.")}
         )
     if credentials not in ("all", "available", "unavailable"):
         return json.dumps(
-            {
-                "error": (
-                    f"Invalid credentials: {credentials!r}. "
-                    "Use 'all', 'available', or 'unavailable'."
-                )
-            }
+            {"error": (f"Invalid credentials: {credentials!r}. Use 'all', 'available', or 'unavailable'.")}
         )
 
     # Resolve config path
@@ -567,9 +547,7 @@ def list_agent_tools(
     config_dir = Path(config_path).parent
 
     for server_name, server_conf in servers_config.items():
-        resolved = ToolRegistry.resolve_mcp_stdio_config(
-            {"name": server_name, **server_conf}, config_dir
-        )
+        resolved = ToolRegistry.resolve_mcp_stdio_config({"name": server_name, **server_conf}, config_dir)
         try:
             config = MCPServerConfig(
                 name=server_name,
@@ -608,9 +586,7 @@ def list_agent_tools(
             return "google"
         return head
 
-    def _build_provider_metadata() -> tuple[
-        dict[str, dict[str, dict[str, dict]]], dict[str, set[str]]
-    ]:
+    def _build_provider_metadata() -> tuple[dict[str, dict[str, dict[str, dict]]], dict[str, set[str]]]:
         """Build tool->provider->credential metadata index from CredentialSpecs."""
         try:
             from aden_tools.credentials import CREDENTIAL_SPECS
@@ -654,9 +630,7 @@ def list_agent_tools(
         except ImportError:
             return set()
         return {
-            cred_name
-            for cred_name, spec in CREDENTIAL_SPECS.items()
-            if spec.env_var and os.environ.get(spec.env_var)
+            cred_name for cred_name, spec in CREDENTIAL_SPECS.items() if spec.env_var and os.environ.get(spec.env_var)
         }
 
     def _tool_credentials_available(tool_name: str, available_creds: set[str]) -> bool:
@@ -730,9 +704,7 @@ def list_agent_tools(
 
     # Compute credential availability once (used for filtering and summary)
     available_creds: set[str] = (
-        _get_available_credential_names()
-        if credentials != "all" or output_schema == "summary"
-        else set()
+        _get_available_credential_names() if credentials != "all" or output_schema == "summary" else set()
     )
 
     # Apply credentials filter before grouping (filter tool list)
@@ -741,8 +713,7 @@ def list_agent_tools(
         filtered_tools = [
             t
             for t in all_tools
-            if (credentials == "available")
-            == _tool_credentials_available(t["name"], available_creds)
+            if (credentials == "available") == _tool_credentials_available(t["name"], available_creds)
         ]
 
     provider_groups = _group_by_provider(filtered_tools)
@@ -768,10 +739,7 @@ def list_agent_tools(
             # Only include tools from the already-filtered provider set
             tool_name = t["name"]
             in_provider = any(
-                tool_name
-                in p.get(
-                    "tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]
-                )
+                tool_name in p.get("tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])])
                 for p in provider_groups.values()
             )
             if in_provider and tool_name.startswith(service_prefix):
@@ -789,9 +757,7 @@ def list_agent_tools(
             full_groups = _group_by_provider(all_tools) if credentials != "all" else provider_groups
             summary_providers: dict = {}
             for prov, bucket in full_groups.items():
-                cred_names = bucket.get(
-                    "credentials_required", sorted(bucket.get("authorization", {}).keys())
-                )
+                cred_names = bucket.get("credentials_required", sorted(bucket.get("authorization", {}).keys()))
                 creds_ok = all(c in available_creds for c in cred_names) if cred_names else True
                 summary_providers[prov] = {
                     "tool_count": len(bucket.get("tool_names", bucket.get("tools", []))),
@@ -813,9 +779,7 @@ def list_agent_tools(
             # Re-build from all filtered tools for this provider (ignore service filter for summary)
             provider_tool_names: list[str] = []
             for bucket in provider_groups.values():
-                provider_tool_names.extend(
-                    bucket.get("tool_names", [e.get("name") for e in bucket.get("tools", [])])
-                )
+                provider_tool_names.extend(bucket.get("tool_names", [e.get("name") for e in bucket.get("tools", [])]))
 
             services: dict = {}
             for tn in sorted(set(provider_tool_names)):
@@ -837,8 +801,7 @@ def list_agent_tools(
                 "total_tools": len(provider_tool_names),
                 "services": services,
                 "hint": (
-                    f"Use list_agent_tools(group='{group}', service='<service>') "
-                    "for tool names within a service."
+                    f"Use list_agent_tools(group='{group}', service='<service>') for tool names within a service."
                 ),
             }
         if errors:
@@ -889,10 +852,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
     try:
         resolved = str(validate_agent_path(resolved))
     except ValueError:
-        return {
-            "error": "agent_path must be inside an allowed directory "
-            "(exports/, examples/, or ~/.hive/agents/)"
-        }
+        return {"error": "agent_path must be inside an allowed directory (exports/, examples/, or ~/.hive/agents/)"}
 
     if not os.path.isdir(resolved):
         return {"error": f"Agent directory not found: {agent_path}"}
@@ -923,9 +883,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
         return {"error": f"Failed to read mcp_servers.json: {e}"}
 
     for server_name, server_conf in servers_config.items():
-        resolved = ToolRegistry.resolve_mcp_stdio_config(
-            {"name": server_name, **server_conf}, config_dir
-        )
+        resolved = ToolRegistry.resolve_mcp_stdio_config({"name": server_name, **server_conf}, config_dir)
         try:
             config = MCPServerConfig(
                 name=server_name,
@@ -1111,9 +1069,7 @@ def list_agents() -> str:
                             if start != -1:
                                 end = content.find(quote, start + 3)
                                 if end != -1:
-                                    info["description"] = (
-                                        content[start + 3 : end].strip().split("\n")[0]
-                                    )
+                                    info["description"] = content[start + 3 : end].strip().split("\n")[0]
                                     break
                     except OSError:
                         pass
@@ -1124,9 +1080,7 @@ def list_agents() -> str:
                 sessions_dir = runtime_dir / "sessions"
                 if sessions_dir.is_dir():
                     session_count = sum(
-                        1
-                        for d in sessions_dir.iterdir()
-                        if d.is_dir() and d.name.startswith("session_")
+                        1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_")
                     )
                     info["session_count"] = session_count
                 else:
@@ -1211,9 +1165,7 @@ def list_agent_sessions(
                 "agent_name": agent_name,
                 "sessions": [],
                 "total": 0,
-                "hint": (
-                    f"No sessions found at {agent_dir}/sessions/. Has this agent been run yet?"
-                ),
+                "hint": (f"No sessions found at {agent_dir}/sessions/. Has this agent been run yet?"),
             }
         )
 
@@ -1242,9 +1194,7 @@ def list_agent_sessions(
                 "current_node": progress.get("current_node"),
                 "steps_executed": progress.get("steps_executed", 0),
                 "execution_quality": progress.get("execution_quality", ""),
-                "has_checkpoints": (
-                    checkpoint_dir.exists() and any(checkpoint_dir.glob("cp_*.json"))
-                ),
+                "has_checkpoints": (checkpoint_dir.exists() and any(checkpoint_dir.glob("cp_*.json"))),
             }
         )
 
@@ -1644,9 +1594,7 @@ def validate_agent_package(agent_name: str) -> str:
                 result = json.loads(proc.stdout.strip())
                 steps["schema_validation"] = {
                     "passed": result["valid"],
-                    "output": (
-                        f"{result['nodes']} nodes, {result['edges']} edges, entry={result['entry']}"
-                    ),
+                    "output": (f"{result['nodes']} nodes, {result['edges']} edges, entry={result['entry']}"),
                 }
                 if result.get("errors"):
                     steps["schema_validation"]["errors"] = result["errors"]

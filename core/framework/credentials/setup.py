@@ -268,9 +268,7 @@ class CredentialSetupSession:
         self._print(f"{Colors.YELLOW}Initializing credential store...{Colors.NC}")
         try:
             generate_and_save_credential_key()
-            self._print(
-                f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}"
-            )
+            self._print(f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}")
             return True
         except Exception as e:
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
@@ -449,9 +447,7 @@ class CredentialSetupSession:
                     logger.warning("Unexpected error exporting credential to env", exc_info=True)
                 return True
             else:
-                self._print(
-                    f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}"
-                )
+                self._print(f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}")
                 self._print("Please connect this integration on https://hive.adenhq.com first.")
                 return False
         except Exception as e:

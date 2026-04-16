@@ -177,18 +177,12 @@ def build_prompt_spec_from_node_context(
     # Tool-gated pre-activation: inject full body of default skills whose
     # trigger tools are present in this node's tool list (e.g. browser_*
     # pulls in hive.browser-automation).
-    tool_names = [
-        getattr(t, "name", "") for t in (getattr(ctx, "available_tools", None) or [])
-    ]
-    skills_catalog_prompt = augment_catalog_for_tools(
-        ctx.skills_catalog_prompt or "", tool_names
-    )
+    tool_names = [getattr(t, "name", "") for t in (getattr(ctx, "available_tools", None) or [])]
+    skills_catalog_prompt = augment_catalog_for_tools(ctx.skills_catalog_prompt or "", tool_names)
 
     return NodePromptSpec(
         identity_prompt=ctx.identity_prompt or "",
-        focus_prompt=focus_prompt
-        if focus_prompt is not None
-        else (ctx.node_spec.system_prompt or ""),
+        focus_prompt=focus_prompt if focus_prompt is not None else (ctx.node_spec.system_prompt or ""),
         narrative=narrative if narrative is not None else (ctx.narrative or ""),
         accounts_prompt=ctx.accounts_prompt or "",
         skills_catalog_prompt=skills_catalog_prompt,
@@ -299,8 +293,7 @@ def build_transition_message(spec: TransitionSpec) -> str:
 
     if spec.data_files:
         sections.append(
-            "\nData files (use read_file to access):\n"
-            + "\n".join(f"  {entry}" for entry in spec.data_files)
+            "\nData files (use read_file to access):\n" + "\n".join(f"  {entry}" for entry in spec.data_files)
         )
 
     if spec.cumulative_tool_names:

@@ -197,9 +197,7 @@ def register_tools(mcp: FastMCP) -> None:
                 f.flush()
                 os.fsync(f.fileno())
 
-            line_count = content_str.count("\n") + (
-                1 if content_str and not content_str.endswith("\n") else 0
-            )
+            line_count = content_str.count("\n") + (1 if content_str and not content_str.endswith("\n") else 0)
             action = "Updated" if existed else "Created"
             return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:

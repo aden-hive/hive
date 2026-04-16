@@ -53,17 +53,9 @@ _TOKEN_REFRESH_BUFFER_SECS = 60
 # Credentials file in ~/.hive/ (native implementation)
 _ACCOUNTS_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
 _IDE_STATE_DB_MAC = (
-    Path.home()
-    / "Library"
-    / "Application Support"
-    / "Antigravity"
-    / "User"
-    / "globalStorage"
-    / "state.vscdb"
+    Path.home() / "Library" / "Application Support" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 )
-_IDE_STATE_DB_LINUX = (
-    Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
-)
+_IDE_STATE_DB_LINUX = Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 _IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
 
 _BASE_HEADERS: dict[str, str] = {
@@ -368,9 +360,7 @@ def _to_gemini_contents(
 
 
 def _map_finish_reason(reason: str) -> str:
-    return {"STOP": "stop", "MAX_TOKENS": "max_tokens", "OTHER": "tool_use"}.get(
-        (reason or "").upper(), "stop"
-    )
+    return {"STOP": "stop", "MAX_TOKENS": "max_tokens", "OTHER": "tool_use"}.get((reason or "").upper(), "stop")
 
 
 def _parse_complete_response(raw: dict[str, Any], model: str) -> LLMResponse:
@@ -538,8 +528,7 @@ class AntigravityProvider(LLMProvider):
             return self._access_token
 
         raise RuntimeError(
-            "No valid Antigravity credentials. "
-            "Run: uv run python core/antigravity_auth.py auth account add"
+            "No valid Antigravity credentials. Run: uv run python core/antigravity_auth.py auth account add"
         )
 
     # --- Request building -------------------------------------------------- #
@@ -593,11 +582,7 @@ class AntigravityProvider(LLMProvider):
 
         token = self._ensure_token()
         body_bytes = json.dumps(body).encode("utf-8")
-        path = (
-            "/v1internal:streamGenerateContent?alt=sse"
-            if streaming
-            else "/v1internal:generateContent"
-        )
+        path = "/v1internal:streamGenerateContent?alt=sse" if streaming else "/v1internal:generateContent"
         headers = {
             **_BASE_HEADERS,
             "Authorization": f"Bearer {token}",
@@ -619,9 +604,7 @@ class AntigravityProvider(LLMProvider):
                     if result:
                         self._access_token, self._token_expires_at = result
                         headers["Authorization"] = f"Bearer {self._access_token}"
-                        req2 = urllib.request.Request(
-                            url, data=body_bytes, headers=headers, method="POST"
-                        )
+                        req2 = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
                         try:
                             return urllib.request.urlopen(req2, timeout=120)  # noqa: S310
                         except urllib.error.HTTPError as exc2:
@@ -642,9 +625,7 @@ class AntigravityProvider(LLMProvider):
                 last_exc = exc
                 continue
 
-        raise RuntimeError(
-            f"All Antigravity endpoints failed. Last error: {last_exc}"
-        ) from last_exc
+        raise RuntimeError(f"All Antigravity endpoints failed. Last error: {last_exc}") from last_exc
 
     # --- LLMProvider interface --------------------------------------------- #
 
@@ -683,9 +664,7 @@ class AntigravityProvider(LLMProvider):
             try:
                 body = self._build_body(messages, system, tools, max_tokens)
                 http_resp = self._post(body, streaming=True)
-                for event in _parse_sse_stream(
-                    http_resp, self.model, self._thought_sigs.__setitem__
-                ):
+                for event in _parse_sse_stream(http_resp, self.model, self._thought_sigs.__setitem__):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
             except Exception as exc:
                 logger.error("Antigravity stream error: %s", exc)

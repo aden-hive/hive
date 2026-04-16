@@ -80,7 +80,7 @@ def microcompact(
         msg = messages[i]
         if msg.role != "tool" or msg.is_error or msg.is_skill_content:
             continue
-        if msg.content.startswith(("[Pruned tool result", "[Old tool result")):
+        if msg.content.startswith(("Pruned tool result", "[Pruned tool result", "[Old tool result")):
             continue
         if len(msg.content) < 100:
             continue
@@ -107,9 +107,7 @@ def microcompact(
                 f"Read the complete data with read_file(path='{spillover}')."
             )
         else:
-            placeholder = (
-                f"Old tool result ({orig_len:,} chars) cleared from context."
-            )
+            placeholder = f"Old tool result ({orig_len:,} chars) cleared from context."
 
         # Mutate in-place (microcompact is synchronous, no store writes)
         conversation._messages[i] = Message(
@@ -185,8 +183,7 @@ async def compact(
     _llm_compaction_skipped = _failure_counts.get(conv_id, 0) >= MAX_CONSECUTIVE_FAILURES
     if _llm_compaction_skipped:
         logger.warning(
-            "Circuit breaker: LLM compaction disabled after %d failures — "
-            "skipping straight to emergency summary",
+            "Circuit breaker: LLM compaction disabled after %d failures — skipping straight to emergency summary",
             _failure_counts[conv_id],
         )
 
@@ -532,10 +529,7 @@ def build_llm_compaction_prompt(
         done = {k: v for k, v in acc.items() if v is not None}
         todo = [k for k, v in acc.items() if v is None]
         if done:
-            ctx_lines.append(
-                "OUTPUTS ALREADY SET:\n"
-                + "\n".join(f"  {k}: {str(v)[:150]}" for k, v in done.items())
-            )
+            ctx_lines.append("OUTPUTS ALREADY SET:\n" + "\n".join(f"  {k}: {str(v)[:150]}" for k, v in done.items()))
         if todo:
             ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(todo)}")
     elif spec.output_keys:
@@ -589,12 +583,8 @@ def build_message_inventory(conversation: NodeConversation) -> list[dict[str, An
         if message.tool_calls:
             for tool_call in message.tool_calls:
                 args = tool_call.get("function", {}).get("arguments", "")
-                tool_call_args_chars += (
-                    len(args) if isinstance(args, str) else len(json.dumps(args))
-                )
-            names = [
-                tool_call.get("function", {}).get("name", "?") for tool_call in message.tool_calls
-            ]
+                tool_call_args_chars += len(args) if isinstance(args, str) else len(json.dumps(args))
+            names = [tool_call.get("function", {}).get("name", "?") for tool_call in message.tool_calls]
             tool_name = ", ".join(names)
         elif message.role == "tool" and message.tool_use_id:
             for previous in conversation.messages:
@@ -651,14 +641,8 @@ def write_compaction_debug_log(
     lines.append("")
 
     if inventory:
-        total_chars = sum(
-            entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
-            for entry in inventory
-        )
-        lines.append(
-            "## Pre-Compaction Message Inventory "
-            f"({len(inventory)} messages, {total_chars:,} total chars)"
-        )
+        total_chars = sum(entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0) for entry in inventory)
+        lines.append(f"## Pre-Compaction Message Inventory ({len(inventory)} messages, {total_chars:,} total chars)")
         lines.append("")
         ranked = sorted(
             inventory,
@@ -677,8 +661,7 @@ def write_compaction_debug_log(
             if entry.get("phase"):
                 flags.append(f"phase={entry['phase']}")
             lines.append(
-                f"| {i} | {entry['seq']} | {entry['role']} | {tool} "
-                f"| {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
+                f"| {i} | {entry['seq']} | {entry['role']} | {tool} | {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
             )
 
         large = [entry for entry in ranked if entry.get("preview")]
@@ -686,9 +669,7 @@ def write_compaction_debug_log(
             lines.append("")
             lines.append("### Large message previews")
             for entry in large:
-                lines.append(
-                    f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):"
-                )
+                lines.append(f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):")
                 lines.append(f"```\n{entry['preview']}\n```")
     lines.append("")
 
@@ -776,10 +757,7 @@ def build_emergency_summary(
     node's known state so the LLM can continue working after
     compaction without losing track of its task and inputs.
     """
-    parts = [
-        "EMERGENCY COMPACTION — previous conversation was too large "
-        "and has been replaced with this summary.\n"
-    ]
+    parts = ["EMERGENCY COMPACTION — previous conversation was too large and has been replaced with this summary.\n"]
 
     # 1. Node identity
     spec = ctx.agent_spec
@@ -832,17 +810,13 @@ def build_emergency_summary(
                 data_files = [f for f in all_files if f not in conv_files]
 
                 if conv_files:
-                    conv_list = "\n".join(
-                        f"  - {f}  (full path: {data_dir / f})" for f in conv_files
-                    )
+                    conv_list = "\n".join(f"  - {f}  (full path: {data_dir / f})" for f in conv_files)
                     parts.append(
                         "CONVERSATION HISTORY (freeform messages saved during compaction — "
                         "use read_file('<filename>') to review earlier dialogue):\n" + conv_list
                     )
                 if data_files:
-                    file_list = "\n".join(
-                        f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
-                    )
+                    file_list = "\n".join(f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30])
                     parts.append("DATA FILES (use read_file('<filename>') to read):\n" + file_list)
                 if not all_files:
                     parts.append(
@@ -850,10 +824,7 @@ def build_emergency_summary(
                         "Use list_directory to check the data directory."
                     )
         except Exception:
-            parts.append(
-                "NOTE: Large tool results were saved to files. "
-                "Use read_file(path='<path>') to read them."
-            )
+            parts.append("NOTE: Large tool results were saved to files. Use read_file(path='<path>') to read them.")
 
     # 6. Tool call history (prevent re-calling tools)
     if conversation is not None:
@@ -861,10 +832,7 @@ def build_emergency_summary(
         if tool_history:
             parts.append(tool_history)
 
-    parts.append(
-        "\nContinue working towards setting the remaining outputs. "
-        "Use your tools and the inputs above."
-    )
+    parts.append("\nContinue working towards setting the remaining outputs. Use your tools and the inputs above.")
     return "\n\n".join(parts)
 
 

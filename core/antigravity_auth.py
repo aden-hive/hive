@@ -52,9 +52,7 @@ _DEFAULT_REDIRECT_PORT = 51121
 # This project reverse-engineered and published the public OAuth credentials
 # for Google's Antigravity/Cloud Code Assist API.
 # Source: https://github.com/NoeFabris/opencode-antigravity-auth
-_CREDENTIALS_URL = (
-    "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
-)
+_CREDENTIALS_URL = "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
 
 # Cached credentials fetched from public source
 _cached_client_id: str | None = None
@@ -68,9 +66,7 @@ def _fetch_credentials_from_public_source() -> tuple[str | None, str | None]:
         return _cached_client_id, _cached_client_secret
 
     try:
-        req = urllib.request.Request(
-            _CREDENTIALS_URL, headers={"User-Agent": "Hive-Antigravity-Auth/1.0"}
-        )
+        req = urllib.request.Request(_CREDENTIALS_URL, headers={"User-Agent": "Hive-Antigravity-Auth/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             content = resp.read().decode("utf-8")
             import re
@@ -168,10 +164,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             if "code" in query and "state" in query:
                 OAuthCallbackHandler.auth_code = query["code"][0]
                 OAuthCallbackHandler.state = query["state"][0]
-                self._send_response(
-                    "Authentication successful! You can close this window "
-                    "and return to the terminal."
-                )
+                self._send_response("Authentication successful! You can close this window and return to the terminal.")
                 return
 
         self._send_response("Waiting for authentication...")
@@ -296,8 +289,7 @@ def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_I
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.18.3"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.18.3"
         ),
         "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     }
@@ -316,9 +308,7 @@ def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_I
         return False
 
 
-def refresh_access_token(
-    refresh_token: str, client_id: str, client_secret: str | None
-) -> dict | None:
+def refresh_access_token(refresh_token: str, client_id: str, client_secret: str | None) -> dict | None:
     """Refresh the access token using the refresh token."""
     data = {
         "grant_type": "refresh_token",
@@ -361,9 +351,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
         access_token = account.get("access")
         refresh_token_str = account.get("refresh", "")
         refresh_token = refresh_token_str.split("|")[0] if refresh_token_str else None
-        project_id = (
-            refresh_token_str.split("|")[1] if "|" in refresh_token_str else _DEFAULT_PROJECT_ID
-        )
+        project_id = refresh_token_str.split("|")[1] if "|" in refresh_token_str else _DEFAULT_PROJECT_ID
         email = account.get("email", "unknown")
         expires_ms = account.get("expires", 0)
         expires_at = expires_ms / 1000.0 if expires_ms else 0.0
@@ -390,9 +378,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
                     # Update the account
                     account["access"] = new_access
                     account["expires"] = int((time.time() + expires_in) * 1000)
-                    accounts_data["last_refresh"] = time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-                    )
+                    accounts_data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     save_accounts(accounts_data)
 
                     # Validate the refreshed token

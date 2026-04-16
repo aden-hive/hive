@@ -77,9 +77,7 @@ class TestAnnotateSnapshot:
         annotated, ref_map = annotate_snapshot(snapshot)
 
         # Two "Save" buttons should have nth=0 and nth=1
-        save_entries = [
-            (rid, e) for rid, e in ref_map.items() if e.role == "button" and e.name == "Save"
-        ]
+        save_entries = [(rid, e) for rid, e in ref_map.items() if e.role == "button" and e.name == "Save"]
         assert len(save_entries) == 2
         nths = sorted(e.nth for _, e in save_entries)
         assert nths == [0, 1]

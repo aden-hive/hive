@@ -259,15 +259,11 @@ def _write_sample_session(base: Path, session_id: str):
     conv_dir = session_dir / "conversations" / "node_a" / "parts"
     conv_dir.mkdir(parents=True)
     (conv_dir / "0001.json").write_text(json.dumps({"seq": 1, "role": "user", "content": "hello"}))
-    (conv_dir / "0002.json").write_text(
-        json.dumps({"seq": 2, "role": "assistant", "content": "hi there"})
-    )
+    (conv_dir / "0002.json").write_text(json.dumps({"seq": 2, "role": "assistant", "content": "hi there"}))
 
     conv_dir_b = session_dir / "conversations" / "node_b" / "parts"
     conv_dir_b.mkdir(parents=True)
-    (conv_dir_b / "0003.json").write_text(
-        json.dumps({"seq": 3, "role": "user", "content": "continue"})
-    )
+    (conv_dir_b / "0003.json").write_text(json.dumps({"seq": 3, "role": "user", "content": "continue"}))
 
     # Logs
     logs_dir = session_dir / "logs"
@@ -291,9 +287,7 @@ def _write_sample_session(base: Path, session_id: str):
         "attention_reasons": ["retried"],
         "total_steps": 1,
     }
-    (logs_dir / "details.jsonl").write_text(
-        json.dumps(detail_a) + "\n" + json.dumps(detail_b) + "\n"
-    )
+    (logs_dir / "details.jsonl").write_text(json.dumps(detail_a) + "\n" + json.dumps(detail_b) + "\n")
 
     step_a = {"node_id": "node_a", "step_index": 0, "llm_text": "thinking..."}
     step_b = {"node_id": "node_b", "step_index": 0, "llm_text": "retrying..."}
@@ -302,9 +296,7 @@ def _write_sample_session(base: Path, session_id: str):
     return session_id, session_dir, state
 
 
-def _write_queen_session(
-    tmp_path: Path, queen_id: str, session_id: str, meta: dict | None = None
-) -> Path:
+def _write_queen_session(tmp_path: Path, queen_id: str, session_id: str, meta: dict | None = None) -> Path:
     """Create a persisted queen session directory for restore tests."""
     session_dir = tmp_path / ".hive" / "agents" / "queens" / queen_id / "sessions" / session_id
     session_dir.mkdir(parents=True)
@@ -394,9 +386,7 @@ class TestSessionCRUD:
     async def test_create_session_with_worker_forwards_session_id(self):
         app = create_app()
         manager = app["manager"]
-        manager.create_session_with_worker_colony = AsyncMock(
-            return_value=_make_session(agent_id="my-custom-session")
-        )
+        manager.create_session_with_worker_colony = AsyncMock(return_value=_make_session(agent_id="my-custom-session"))
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -600,14 +590,10 @@ class TestMessageBootstrap:
         manager.build_llm = MagicMock(return_value=MagicMock())
         manager.stop_session = AsyncMock()
         manager.create_session = AsyncMock()
-        monkeypatch.setattr(
-            routes_messages, "select_queen", AsyncMock(return_value="queen_technology")
-        )
+        monkeypatch.setattr(routes_messages, "select_queen", AsyncMock(return_value="queen_technology"))
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post(
-                "/api/messages/classify", json={"message": "Build me a scraper"}
-            )
+            resp = await client.post("/api/messages/classify", json={"message": "Build me a scraper"})
             assert resp.status == 200
             data = await resp.json()
             # Assert inside the async-with so app shutdown (which stops
@@ -623,9 +609,7 @@ class TestQueenSessionSelection:
     @pytest.mark.asyncio
     async def test_select_queen_session_rejects_foreign_session(self, monkeypatch, tmp_path):
         _patch_queen_storage(monkeypatch, tmp_path)
-        _write_queen_session(
-            tmp_path, "queen_growth", "other_session", {"queen_id": "queen_growth"}
-        )
+        _write_queen_session(tmp_path, "queen_growth", "other_session", {"queen_id": "queen_growth"})
 
         app = create_app()
         async with TestClient(TestServer(app)) as client:
@@ -663,9 +647,7 @@ class TestQueenSessionSelection:
         assert any(call.args == ("other_live",) for call in manager.stop_session.await_args_list)
 
     @pytest.mark.asyncio
-    async def test_select_queen_session_restores_specific_history_session(
-        self, monkeypatch, tmp_path
-    ):
+    async def test_select_queen_session_restores_specific_history_session(self, monkeypatch, tmp_path):
         _patch_queen_storage(monkeypatch, tmp_path)
         _write_queen_session(
             tmp_path,
@@ -1167,9 +1149,7 @@ class TestGraphNodes:
             assert data["entry_node"] == "node_a"
 
     @pytest.mark.asyncio
-    async def test_list_nodes_with_session_enrichment(
-        self, nodes_and_edges, sample_session, tmp_agent_dir
-    ):
+    async def test_list_nodes_with_session_enrichment(self, nodes_and_edges, sample_session, tmp_agent_dir):
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
         nodes, edges = nodes_and_edges
@@ -1182,9 +1162,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/graphs/primary/nodes?session_id={session_id}"
-            )
+            resp = await client.get(f"/api/sessions/test_agent/graphs/primary/nodes?session_id={session_id}")
             assert resp.status == 200
             data = await resp.json()
             node_map = {n["id"]: n for n in data["nodes"]}
@@ -1233,9 +1211,7 @@ class TestGraphNodes:
             assert resp.status == 200
             data = await resp.json()
             assert "system_prompt" in data
-            assert (
-                data["system_prompt"] == "You are a helpful assistant that produces valid results."
-            )
+            assert data["system_prompt"] == "You are a helpful assistant that produces valid results."
 
             # Node without system_prompt should return empty string
             resp2 = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_b")
@@ -1270,9 +1246,7 @@ class TestNodeCriteria:
             assert data["output_keys"] == ["result"]
 
     @pytest.mark.asyncio
-    async def test_criteria_with_log_enrichment(
-        self, nodes_and_edges, sample_session, tmp_agent_dir
-    ):
+    async def test_criteria_with_log_enrichment(self, nodes_and_edges, sample_session, tmp_agent_dir):
         """Criteria endpoint enriched with last execution from logs."""
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
@@ -1293,8 +1267,7 @@ class TestNodeCriteria:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/sessions/test_agent/graphs/primary/nodes/node_b/criteria"
-                f"?session_id={session_id}"
+                f"/api/sessions/test_agent/graphs/primary/nodes/node_b/criteria?session_id={session_id}"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1311,9 +1284,7 @@ class TestNodeCriteria:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                "/api/sessions/test_agent/graphs/primary/nodes/nonexistent/criteria"
-            )
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/nonexistent/criteria")
             assert resp.status == 404
 
 
@@ -1388,9 +1359,7 @@ class TestLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/logs?session_id={session_id}&level=summary"
-            )
+            resp = await client.get(f"/api/sessions/test_agent/logs?session_id={session_id}&level=summary")
             assert resp.status == 200
             data = await resp.json()
             assert data["run_id"] == session_id
@@ -1411,9 +1380,7 @@ class TestLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/logs?session_id={session_id}&level=details"
-            )
+            resp = await client.get(f"/api/sessions/test_agent/logs?session_id={session_id}&level=details")
             assert resp.status == 200
             data = await resp.json()
             assert data["session_id"] == session_id
@@ -1435,9 +1402,7 @@ class TestLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/logs?session_id={session_id}&level=tools"
-            )
+            resp = await client.get(f"/api/sessions/test_agent/logs?session_id={session_id}&level=tools")
             assert resp.status == 200
             data = await resp.json()
             assert data["session_id"] == session_id

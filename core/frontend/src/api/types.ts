@@ -37,6 +37,7 @@ export interface HistorySession {
   live: boolean;
   has_messages: boolean;
   created_at: number;
+  last_active_at?: number;
   agent_name?: string | null;
   agent_path?: string | null;
   queen_id?: string | null;

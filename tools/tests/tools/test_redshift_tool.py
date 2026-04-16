@@ -32,16 +32,12 @@ def tool_fns(mcp: FastMCP):
 class TestRedshiftExecuteSQL:
     def test_missing_credentials(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["redshift_execute_sql"](
-                sql="SELECT 1", database="dev", cluster_identifier="my-cluster"
-            )
+            result = tool_fns["redshift_execute_sql"](sql="SELECT 1", database="dev", cluster_identifier="my-cluster")
         assert "error" in result
 
     def test_missing_sql(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["redshift_execute_sql"](
-                sql="", database="dev", cluster_identifier="my-cluster"
-            )
+            result = tool_fns["redshift_execute_sql"](sql="", database="dev", cluster_identifier="my-cluster")
         assert "error" in result
 
     def test_missing_cluster(self, tool_fns):
@@ -174,9 +170,7 @@ class TestRedshiftListTables:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["redshift_list_tables"](
-                database="dev", cluster_identifier="my-cluster"
-            )
+            result = tool_fns["redshift_list_tables"](database="dev", cluster_identifier="my-cluster")
 
         assert result["count"] == 2
         assert result["tables"][0]["name"] == "users"

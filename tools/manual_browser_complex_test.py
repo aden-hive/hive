@@ -38,9 +38,7 @@ async def test_linkedin_profile_scroll(bridge: BeelineBridge, tab_id: int) -> di
 
     try:
         # Navigate to a LinkedIn page (public profile, no login required)
-        await bridge.navigate(
-            tab_id, "https://www.linkedin.com/in/williamhgates/", wait_until="networkidle"
-        )
+        await bridge.navigate(tab_id, "https://www.linkedin.com/in/williamhgates/", wait_until="networkidle")
         await asyncio.sleep(3)
 
         results = {"steps": []}
@@ -110,9 +108,7 @@ async def test_twitter_timeline(bridge: BeelineBridge, tab_id: int) -> dict:
         await asyncio.sleep(2)
         results["steps"].append("scrolled")
 
-        results["ok"] = (
-            data.get("pageTitle", "").lower().find("x") >= 0 or data.get("tweetCount", 0) >= 0
-        )
+        results["ok"] = data.get("pageTitle", "").lower().find("x") >= 0 or data.get("tweetCount", 0) >= 0
         print(f"  {'✓' if results['ok'] else '✗'} Twitter page loaded")
         return results
 
@@ -127,9 +123,7 @@ async def test_youtube_controls(bridge: BeelineBridge, tab_id: int) -> dict:
 
     try:
         # Navigate to a YouTube video
-        await bridge.navigate(
-            tab_id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", wait_until="networkidle"
-        )
+        await bridge.navigate(tab_id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", wait_until="networkidle")
         await asyncio.sleep(3)
 
         results = {"steps": []}
@@ -244,9 +238,7 @@ async def test_drag_drop(bridge: BeelineBridge, tab_id: int) -> dict:
 
     try:
         # Navigate to a drag-drop demo page
-        await bridge.navigate(
-            tab_id, "https://www.w3schools.com/html/html5_draganddrop.asp", wait_until="load"
-        )
+        await bridge.navigate(tab_id, "https://www.w3schools.com/html/html5_draganddrop.asp", wait_until="load")
         await asyncio.sleep(2)
 
         results = {"steps": []}

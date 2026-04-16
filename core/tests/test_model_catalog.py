@@ -84,9 +84,7 @@ def test_minimax_catalog_tracks_current_non_legacy_text_models():
     assert minimax_default == "MiniMax-M2.7"
     assert [model["id"] for model in minimax_models] == [
         "MiniMax-M2.7",
-        "MiniMax-M2.7-highspeed",
         "MiniMax-M2.5",
-        "MiniMax-M2.5-highspeed",
     ]
     assert all(model["max_context_tokens"] == 204800 for model in minimax_models)
     assert all(model["max_tokens"] == 32768 for model in minimax_models)
@@ -150,7 +148,7 @@ def test_openrouter_catalog_tracks_current_frontier_set():
         "openai/gpt-5.4",
         "anthropic/claude-sonnet-4.6",
         "anthropic/claude-opus-4.6",
-        "google/gemini-3.1-pro-preview",
+        "google/gemini-3.1-pro-preview-customtools",
         "deepseek/deepseek-v3.2",
     ]
     assert openrouter_models[0]["max_tokens"] == 128000
@@ -162,10 +160,10 @@ def test_openrouter_catalog_tracks_current_frontier_set():
 
 
 def test_find_model_any_provider_returns_provider_and_model():
-    provider_id, model = model_catalog.find_model_any_provider("google/gemini-2.5-pro")
+    provider_id, model = model_catalog.find_model_any_provider("google/gemini-3.1-pro-preview-customtools")
 
     assert provider_id == "openrouter"
-    assert model["max_context_tokens"] == 900000
+    assert model["max_context_tokens"] == 1048576
 
 
 def test_get_preset_returns_subscription_specific_limits():

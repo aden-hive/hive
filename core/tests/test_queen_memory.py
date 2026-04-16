@@ -18,6 +18,7 @@ from framework.agents.queen.recall_selector import (
     select_memories,
 )
 from framework.orchestrator.prompting import build_system_prompt_for_node_context
+from framework.server.queen_orchestrator import initialize_memory_scopes
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
 
 
@@ -226,9 +227,7 @@ async def test_select_memories_empty_dir(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_select_memories_with_files(tmp_path: Path):
     (tmp_path / "a.md").write_text("---\nname: a\ndescription: about A\ntype: profile\n---\nbody")
-    (tmp_path / "b.md").write_text(
-        "---\nname: b\ndescription: about B\ntype: preference\n---\nbody"
-    )
+    (tmp_path / "b.md").write_text("---\nname: b\ndescription: about B\ntype: preference\n---\nbody")
 
     llm = AsyncMock()
     llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": ["a.md"]}))
@@ -258,9 +257,7 @@ def test_format_recall_injection(tmp_path: Path):
 
 def test_format_recall_injection_custom_label(tmp_path: Path):
     (tmp_path / "a.md").write_text("---\nname: a\n---\nbody of a")
-    result = format_recall_injection(
-        ["a.md"], memory_dir=tmp_path, label="Queen Memories: queen_technology"
-    )
+    result = format_recall_injection(["a.md"], memory_dir=tmp_path, label="Queen Memories: queen_technology")
     assert "Queen Memories: queen_technology" in result
     assert "body of a" in result
 
@@ -336,9 +333,7 @@ async def test_short_reflection(tmp_path: Path):
     parts_dir.mkdir(parents=True)
     for i in range(3):
         role = "user" if i % 2 == 0 else "assistant"
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": role, "content": f"message {i}"})
-        )
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
 
     mem_dir = tmp_path / "global_memory"
     mem_dir.mkdir()
@@ -384,9 +379,7 @@ async def test_queen_short_reflection_writes_only_queen_scope(tmp_path: Path):
     parts_dir.mkdir(parents=True)
     for i in range(3):
         role = "user" if i % 2 == 0 else "assistant"
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": role, "content": f"message {i}"})
-        )
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
 
     global_dir = tmp_path / "global_memory"
     queen_dir = tmp_path / "queen_memory"
@@ -435,9 +428,7 @@ async def test_unified_short_reflection_can_write_both_scopes_in_one_loop(tmp_pa
     parts_dir.mkdir(parents=True)
     for i in range(3):
         role = "user" if i % 2 == 0 else "assistant"
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": role, "content": f"message {i}"})
-        )
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
 
     global_dir = tmp_path / "global_memory"
     queen_dir = tmp_path / "queen_memory"
@@ -609,13 +600,8 @@ async def test_subscribe_reflection_triggers_runs_housekeeping_for_both_scopes(
     await asyncio.sleep(0.05)
 
     assert len(sub_ids) == 2
-    assert unified_short.await_count == 5
-    unified_long.assert_awaited_once_with(
-        llm,
-        global_memory_dir=global_dir,
-        queen_memory_dir=queen_dir,
-        queen_id="queen_technology",
-    )
+    assert unified_short.await_count == 3
+    unified_long.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -626,9 +612,7 @@ async def test_shutdown_reflection_writes_global_and_queen_scope(tmp_path: Path)
     parts_dir.mkdir(parents=True)
     for i in range(3):
         role = "user" if i % 2 == 0 else "assistant"
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": role, "content": f"message {i}"})
-        )
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
 
     global_dir = tmp_path / "global_memory"
     queen_dir = tmp_path / "queen_memory"
@@ -735,9 +719,7 @@ def test_safe_path_accepted(tmp_path: Path):
 def test_build_system_prompt_injects_dynamic_memory():
     ctx = SimpleNamespace(
         identity_prompt="Identity",
-        node_spec=SimpleNamespace(
-            system_prompt="Focus", node_type="event_loop", output_keys=["out"]
-        ),
+        node_spec=SimpleNamespace(system_prompt="Focus", node_type="event_loop", output_keys=["out"]),
         narrative="Narrative",
         accounts_prompt="",
         skills_catalog_prompt="",
@@ -766,6 +748,7 @@ def test_queen_phase_state_appends_global_memory_block():
 
 def test_queen_phase_state_appends_queen_memory_block():
     phase = QueenPhaseState(
+        phase="building",
         prompt_building="base prompt",
         _cached_global_recall_block="--- Global Memories ---\nglobal stuff",
         _cached_queen_recall_block="--- Queen Memories: queen_technology ---\nqueen stuff",

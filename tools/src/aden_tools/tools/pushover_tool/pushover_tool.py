@@ -113,9 +113,7 @@ def register_tools(
             result = resp.json()
             if result.get("status") != 1:
                 errors = result.get("errors", [])
-                return {
-                    "error": f"Pushover error: {', '.join(errors) if errors else resp.text[:300]}"
-                }
+                return {"error": f"Pushover error: {', '.join(errors) if errors else resp.text[:300]}"}
             out: dict[str, Any] = {"status": "sent", "request": result.get("request", "")}
             if "receipt" in result:
                 out["receipt"] = result["receipt"]
@@ -325,9 +323,7 @@ def register_tools(
             result = resp.json()
             if result.get("status") != 1:
                 errors = result.get("errors", [])
-                return {
-                    "error": f"Glance error: {', '.join(errors) if errors else resp.text[:300]}"
-                }
+                return {"error": f"Glance error: {', '.join(errors) if errors else resp.text[:300]}"}
             return {"status": "updated", "request": result.get("request", "")}
         except httpx.TimeoutException:
             return {"error": "Glance request timed out"}

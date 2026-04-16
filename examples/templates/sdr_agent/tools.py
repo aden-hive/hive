@@ -34,10 +34,7 @@ TOOLS = {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": (
-                        "Absolute or relative path to a JSON file containing "
-                        "a list of contact objects."
-                    ),
+                    "description": ("Absolute or relative path to a JSON file containing a list of contact objects."),
                 },
             },
             "required": ["file_path"],
@@ -55,9 +52,7 @@ def _get_data_dir() -> str:
     """Get the session-scoped data_dir from ToolRegistry execution context."""
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
-        raise RuntimeError(
-            "data_dir not set in execution context. Is the tool running inside a Orchestrator?"
-        )
+        raise RuntimeError("data_dir not set in execution context. Is the tool running inside a Orchestrator?")
     return ctx["data_dir"]
 
 

@@ -50,11 +50,7 @@ class CheckpointConfig:
         Returns:
             True if should check for old checkpoints and prune them
         """
-        return (
-            self.enabled
-            and self.prune_every_n_nodes > 0
-            and nodes_executed % self.prune_every_n_nodes == 0
-        )
+        return self.enabled and self.prune_every_n_nodes > 0 and nodes_executed % self.prune_every_n_nodes == 0
 
 
 # Default configuration for most agents

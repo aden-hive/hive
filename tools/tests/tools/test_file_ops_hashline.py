@@ -18,7 +18,8 @@ def _bypass_stale_edit_guard():
     check_fresh to always return FRESH here; the cache itself is
     covered by ``tools/tests/test_file_state_cache.py``.
     """
-    from aden_tools.file_state_cache import FreshResult, Freshness
+    from aden_tools.file_state_cache import Freshness, FreshResult
+
     with patch(
         "aden_tools.file_ops.check_fresh",
         return_value=FreshResult(Freshness.FRESH),
@@ -403,9 +404,7 @@ class TestHashlineEditAutoCleanup:
 
 
 class TestHashlineEditAtomicWrite:
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permissions not supported on Windows"
-    )
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions not supported on Windows")
     def test_preserves_permissions(self, tools, tmp_path):
         """Atomic write preserves original file permissions."""
         hashline_edit = tools[0]["hashline_edit"]

@@ -24,9 +24,7 @@ from framework.loader.mcp_errors import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INDEX_URL = (
-    "https://raw.githubusercontent.com/aden-hive/hive-mcp-registry/main/registry_index.json"
-)
+DEFAULT_INDEX_URL = "https://raw.githubusercontent.com/aden-hive/hive-mcp-registry/main/registry_index.json"
 DEFAULT_REFRESH_INTERVAL_HOURS = 24
 _LAST_FETCHED_FILENAME = "last_fetched"
 _LEGACY_LAST_FETCHED_FILENAME = "last_fetched.json"
@@ -140,9 +138,7 @@ class MCPRegistry:
                 )
                 added.append(name)
             except MCPError as exc:
-                logger.warning(
-                    "MCPRegistry.ensure_defaults: failed to seed '%s': %s", name, exc
-                )
+                logger.warning("MCPRegistry.ensure_defaults: failed to seed '%s': %s", name, exc)
 
         if added:
             logger.info("MCPRegistry: seeded default local servers: %s", added)
@@ -709,8 +705,7 @@ class MCPRegistry:
                 pinned_version = versions[name]
                 if installed_version != pinned_version:
                     logger.warning(
-                        "Server '%s' version mismatch: installed=%s, pinned=%s. "
-                        "Run: hive mcp update %s",
+                        "Server '%s' version mismatch: installed=%s, pinned=%s. Run: hive mcp update %s",
                         name,
                         installed_version,
                         pinned_version,

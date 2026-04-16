@@ -332,9 +332,7 @@ class AdenCredentialClient:
                 last_error = e
                 if attempt < self.config.retry_attempts - 1:
                     delay = self.config.retry_delay * (2**attempt)
-                    logger.warning(
-                        f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {e}"
-                    )
+                    logger.warning(f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {e}")
                     time.sleep(delay)
                 else:
                     raise AdenClientError(f"Failed to connect to Aden server: {e}") from e
@@ -347,9 +345,7 @@ class AdenCredentialClient:
             ):
                 raise
 
-        raise AdenClientError(
-            f"Request failed after {self.config.retry_attempts} attempts"
-        ) from last_error
+        raise AdenClientError(f"Request failed after {self.config.retry_attempts} attempts") from last_error
 
     def list_integrations(self) -> list[AdenIntegrationInfo]:
         """

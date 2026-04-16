@@ -3,9 +3,7 @@ from aden_tools.credentials import CredentialSpec
 CLOUDFLARE_CREDENTIALS = {
     "cloudflare": CredentialSpec(
         env_var="CLOUDFLARE_API_TOKEN",
-        description=(
-            "Cloudflare API token (DNS/Zone Read-Write). Provide via env var or credential store."
-        ),
+        description=("Cloudflare API token (DNS/Zone Read-Write). Provide via env var or credential store."),
         required=True,
         help_url="https://dash.cloudflare.com/profile/api-tokens",
         credential_id="cloudflare_api_token",

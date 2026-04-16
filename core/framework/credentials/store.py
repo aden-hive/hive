@@ -124,9 +124,7 @@ class CredentialStore:
         """
         return self._providers.get(provider_id)
 
-    def get_provider_for_credential(
-        self, credential: CredentialObject
-    ) -> CredentialProvider | None:
+    def get_provider_for_credential(self, credential: CredentialObject) -> CredentialProvider | None:
         """
         Get the appropriate provider for a credential.
 
@@ -201,9 +199,7 @@ class CredentialStore:
             cached = self._get_from_cache(credential_id)
             if cached is not None:
                 if refresh_if_needed and self._should_refresh(cached):
-                    return self._refresh_credential(
-                        cached, raise_on_failure=raise_on_refresh_failure
-                    )
+                    return self._refresh_credential(cached, raise_on_failure=raise_on_refresh_failure)
                 return cached
 
             # Load from storage
@@ -213,9 +209,7 @@ class CredentialStore:
 
             # Refresh if needed
             if refresh_if_needed and self._should_refresh(credential):
-                credential = self._refresh_credential(
-                    credential, raise_on_failure=raise_on_refresh_failure
-                )
+                credential = self._refresh_credential(credential, raise_on_failure=raise_on_refresh_failure)
 
             # Cache
             self._add_to_cache(credential)
@@ -240,9 +234,7 @@ class CredentialStore:
         Returns:
             The key value or None if not found
         """
-        credential = self.get_credential(
-            credential_id, raise_on_refresh_failure=raise_on_refresh_failure
-        )
+        credential = self.get_credential(credential_id, raise_on_refresh_failure=raise_on_refresh_failure)
         if credential is None:
             return None
         return credential.get_key(key_name)
@@ -266,9 +258,7 @@ class CredentialStore:
         Returns:
             The primary key value or None
         """
-        credential = self.get_credential(
-            credential_id, raise_on_refresh_failure=raise_on_refresh_failure
-        )
+        credential = self.get_credential(credential_id, raise_on_refresh_failure=raise_on_refresh_failure)
         if credential is None:
             return None
         return credential.get_default_key()

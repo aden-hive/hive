@@ -95,9 +95,7 @@ def check_env_var_in_shell_config(
         if match:
             value = match.group(1).strip()
             # Remove surrounding quotes if present
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                 value = value[1:-1]
             return True, value
 

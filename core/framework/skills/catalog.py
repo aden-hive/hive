@@ -26,12 +26,15 @@ Before replying: scan <available_skills> <description> entries.
 - If multiple could apply: choose the most specific one, then read/follow it.
 - If none clearly apply: do not read any SKILL.md.
 Constraints: never read more than one skill up front; only read after selecting.
-- When a skill drives external API writes (Gmail, Calendar, GitHub, etc.), assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.
+- When a skill drives external API writes (Gmail, Calendar, GitHub, etc.),
+  assume rate limits: prefer fewer larger writes, avoid tight one-item loops,
+  serialize bursts when possible, and respect 429/Retry-After.
 
 
 The following skills provide specialized instructions for specific tasks.
 Use `read_file` to load a skill's SKILL.md when the task matches its description.
-When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md) and use that absolute path in tool commands."""
+When a skill file references a relative path, resolve it against the
+skill directory (parent of SKILL.md) and use that absolute path in tool commands."""
 
 _MANDATORY_HEADER_COMPACT = """## Skills (mandatory)
 Before replying: scan <available_skills> <name> entries.
@@ -39,12 +42,15 @@ Before replying: scan <available_skills> <name> entries.
 - If multiple could apply: choose the most specific one, then read/follow it.
 - If none clearly apply: do not read any SKILL.md.
 Constraints: never read more than one skill up front; only read after selecting.
-- When a skill drives external API writes (Gmail, Calendar, GitHub, etc.), assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.
+- When a skill drives external API writes (Gmail, Calendar, GitHub, etc.),
+  assume rate limits: prefer fewer larger writes, avoid tight one-item loops,
+  serialize bursts when possible, and respect 429/Retry-After.
 
 
 The following skills provide specialized instructions for specific tasks.
 Use `read_file` to load a skill's SKILL.md when the task matches its name.
-When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md) and use that absolute path in tool commands."""
+When a skill file references a relative path, resolve it against the
+skill directory (parent of SKILL.md) and use that absolute path in tool commands."""
 
 
 class SkillCatalog:

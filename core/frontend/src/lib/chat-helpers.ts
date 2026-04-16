@@ -28,6 +28,51 @@ export function formatAgentDisplayName(raw: string): string {
 }
 
 /**
+ * Format a message timestamp Slack-style: time-of-day for messages from today,
+ * date + time for older messages.
+ */
+export function formatMessageTime(createdAt: number): string {
+  const d = new Date(createdAt);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (sameDay) return time;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const date = d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+  return `${date}, ${time}`;
+}
+
+/**
+ * Format the label shown on a day-separator divider. Always absolute date + time
+ * (no "Today" / "Yesterday") so the user can see exactly when activity resumed.
+ */
+export function formatDayDividerLabel(createdAt: number): string {
+  const d = new Date(createdAt);
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const date = d.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${date}, ${time}`;
+}
+
+/**
  * Convert an SSE AgentEvent into a ChatMessage, or null if the event
  * doesn't produce a visible chat message.
  * When agentDisplayName is provided, it is used as the sender for all agent

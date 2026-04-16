@@ -274,9 +274,7 @@ async def demonstrate_correct_approach(session: BrowserSession):
     for _i in range(5):
         await page.mouse.wheel(0, 800)
         await page.wait_for_timeout(1000)  # let lazy-loaded replies appear
-    log(
-        4, "browser_scroll x5 (with 1s waits)", "scrolled 5 times to load replies", time.time() - t0
-    )
+    log(4, "browser_scroll x5 (with 1s waits)", "scrolled 5 times to load replies", time.time() - t0)
 
     # ── Turn 5: Extract all commentator links via JS ─────────────────────
     t0 = time.time()

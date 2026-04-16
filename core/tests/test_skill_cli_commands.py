@@ -99,7 +99,7 @@ class TestCmdSkillValidate:
 
 class TestCmdSkillDoctor:
     def test_defaults_pass_against_real_framework_skills(self):
-        """All 6 framework default skills should be healthy (no mocking)."""
+        """All 7 framework default skills should be healthy (no mocking)."""
         args = Namespace(defaults=True, name=None, project_dir=None)
         result = cmd_skill_doctor(args)
         assert result == 0
@@ -171,9 +171,7 @@ class TestCmdSkillInstall:
             version=None,
         )
 
-        with patch(
-            "framework.skills.installer.install_from_git", return_value=installed_path
-        ) as mock_install:
+        with patch("framework.skills.installer.install_from_git", return_value=installed_path) as mock_install:
             result = cmd_skill_install(args)
 
         mock_install.assert_called_once()
@@ -205,9 +203,7 @@ class TestCmdSkillInstall:
         sentinel.touch()
         monkeypatch.setattr("framework.skills.installer.INSTALL_NOTICE_SENTINEL", sentinel)
 
-        args = Namespace(
-            name_or_url=None, from_url=None, pack=None, install_name=None, version=None
-        )
+        args = Namespace(name_or_url=None, from_url=None, pack=None, install_name=None, version=None)
         result = cmd_skill_install(args)
         assert result == 1
 
@@ -321,9 +317,7 @@ class TestCmdSkillInfo:
 
     def test_exits_1_when_not_found_anywhere(self, tmp_path, capsys):
         with patch("framework.skills.discovery.SkillDiscovery.discover", return_value=[]):
-            with patch(
-                "framework.skills.registry.RegistryClient.get_skill_entry", return_value=None
-            ):
+            with patch("framework.skills.registry.RegistryClient.get_skill_entry", return_value=None):
                 args = Namespace(name="ghost-skill", project_dir=str(tmp_path))
                 result = cmd_skill_info(args)
 
@@ -361,7 +355,7 @@ class TestJsonFlag:
         data = json.loads(out)
         assert result == 0
         assert "skills" in data
-        assert len(data["skills"]) == 6  # 6 framework default skills
+        assert len(data["skills"]) == 7  # 7 framework default skills
         assert data["total_errors"] == 0
 
     def test_search_json_registry_unavailable_exits_1(self, capsys):
@@ -411,9 +405,7 @@ class TestCmdSkillTest:
         mock_provider = MagicMock()
         mock_provider.complete.return_value = mock_response
 
-        args = Namespace(
-            path=str(skill_dir), input_json='{"prompt": "say hello"}', model=None, json=False
-        )
+        args = Namespace(path=str(skill_dir), input_json='{"prompt": "say hello"}', model=None, json=False)
         with patch("framework.llm.anthropic.AnthropicProvider", return_value=mock_provider):
             result = cmd_skill_test(args)
 
@@ -430,13 +422,9 @@ class TestCmdSkillTest:
         from framework.llm.provider import LLMResponse
 
         mock_provider = MagicMock()
-        mock_provider.complete.return_value = LLMResponse(
-            content="response", model="claude-haiku-4-5-20251001"
-        )
+        mock_provider.complete.return_value = LLMResponse(content="response", model="claude-haiku-4-5-20251001")
 
-        args = Namespace(
-            path=str(skill_dir), input_json='{"prompt": "extracted prompt"}', model=None, json=False
-        )
+        args = Namespace(path=str(skill_dir), input_json='{"prompt": "extracted prompt"}', model=None, json=False)
         with patch("framework.llm.anthropic.AnthropicProvider", return_value=mock_provider):
             cmd_skill_test(args)
 
@@ -452,9 +440,7 @@ class TestCmdSkillTest:
             json.dumps(
                 {
                     "skill_name": "my-skill",
-                    "evals": [
-                        {"id": 1, "prompt": "Say hi.", "assertions": ["Response is a greeting"]}
-                    ],
+                    "evals": [{"id": 1, "prompt": "Say hi.", "assertions": ["Response is a greeting"]}],
                 }
             ),
             encoding="utf-8",
@@ -465,9 +451,7 @@ class TestCmdSkillTest:
         from framework.llm.provider import LLMResponse
 
         mock_provider = MagicMock()
-        mock_provider.complete.return_value = LLMResponse(
-            content="Hello!", model="claude-haiku-4-5-20251001"
-        )
+        mock_provider.complete.return_value = LLMResponse(content="Hello!", model="claude-haiku-4-5-20251001")
         mock_judge = MagicMock()
         mock_judge.evaluate.return_value = {"passes": True, "explanation": "Looks good."}
 
@@ -486,9 +470,7 @@ class TestCmdSkillTest:
             json.dumps(
                 {
                     "skill_name": "my-skill",
-                    "evals": [
-                        {"id": 1, "prompt": "Say hi.", "assertions": ["Impossible assertion"]}
-                    ],
+                    "evals": [{"id": 1, "prompt": "Say hi.", "assertions": ["Impossible assertion"]}],
                 }
             ),
             encoding="utf-8",
@@ -499,9 +481,7 @@ class TestCmdSkillTest:
         from framework.llm.provider import LLMResponse
 
         mock_provider = MagicMock()
-        mock_provider.complete.return_value = LLMResponse(
-            content="Hello!", model="claude-haiku-4-5-20251001"
-        )
+        mock_provider.complete.return_value = LLMResponse(content="Hello!", model="claude-haiku-4-5-20251001")
         mock_judge = MagicMock()
         mock_judge.evaluate.return_value = {"passes": False, "explanation": "Did not satisfy."}
 
@@ -542,9 +522,7 @@ class TestCmdSkillTest:
         from framework.llm.provider import LLMResponse
 
         mock_provider = MagicMock()
-        mock_provider.complete.return_value = LLMResponse(
-            content="Hello!", model="claude-haiku-4-5-20251001"
-        )
+        mock_provider.complete.return_value = LLMResponse(content="Hello!", model="claude-haiku-4-5-20251001")
         mock_judge = MagicMock()
         mock_judge.evaluate.return_value = {"passes": True, "explanation": "Yes."}
 

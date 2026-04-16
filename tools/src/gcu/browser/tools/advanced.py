@@ -217,9 +217,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             return {"ok": False, "error": "No active tab"}
 
         try:
-            result = await bridge.get_attribute(
-                target_tab, selector, attribute, timeout_ms=timeout_ms
-            )
+            result = await bridge.get_attribute(target_tab, selector, attribute, timeout_ms=timeout_ms)
             return result
         except Exception as e:
             return {"ok": False, "error": str(e)}

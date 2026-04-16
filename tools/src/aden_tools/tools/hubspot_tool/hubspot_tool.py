@@ -205,9 +205,7 @@ def register_tools(
             token = credentials.get("hubspot")
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('hubspot'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('hubspot'), got {type(token).__name__}")
             return token
         return os.getenv("HUBSPOT_ACCESS_TOKEN")
 
@@ -217,10 +215,7 @@ def register_tools(
         if not token:
             return {
                 "error": "HubSpot credentials not configured",
-                "help": (
-                    "Set HUBSPOT_ACCESS_TOKEN environment variable "
-                    "or configure via credential store"
-                ),
+                "help": ("Set HUBSPOT_ACCESS_TOKEN environment variable or configure via credential store"),
             }
         return _HubSpotClient(token)
 
@@ -249,9 +244,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "contacts", query, properties or ["email", "firstname", "lastname"], limit
-            )
+            return client.search_objects("contacts", query, properties or ["email", "firstname", "lastname"], limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -359,9 +352,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "companies", query, properties or ["name", "domain", "industry"], limit
-            )
+            return client.search_objects("companies", query, properties or ["name", "domain", "industry"], limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -469,9 +460,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "deals", query, properties or ["dealname", "amount", "dealstage"], limit
-            )
+            return client.search_objects("deals", query, properties or ["dealname", "amount", "dealstage"], limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -579,10 +568,7 @@ def register_tools(
             Dict with deletion status or error
         """
         if object_type not in ("contacts", "companies", "deals"):
-            return {
-                "error": f"Unsupported object_type: {object_type!r}. "
-                "Use contacts, companies, or deals."
-            }
+            return {"error": f"Unsupported object_type: {object_type!r}. Use contacts, companies, or deals."}
         client = _get_client(account)
         if isinstance(client, dict):
             return client

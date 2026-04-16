@@ -303,9 +303,7 @@ class CompetitiveIntelAgent:
             session_state=session_state,
         )
 
-    async def run(
-        self, context: dict[str, Any], session_state: dict[str, Any] | None = None
-    ) -> ExecutionResult:
+    async def run(self, context: dict[str, Any], session_state: dict[str, Any] | None = None) -> ExecutionResult:
         """
         Run the agent (convenience method for single execution).
 

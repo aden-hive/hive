@@ -22,7 +22,9 @@ export default function SidebarQueenItem({ queen }: SidebarQueenItemProps) {
       </span>
       <div className="min-w-0 flex-1 flex items-center gap-2">
         <span className="font-medium truncate">{queen.name}</span>
-        <span className="text-xs text-sidebar-muted truncate">{queen.title}</span>
+        <span className="text-xs text-sidebar-muted truncate">
+          {queen.title.replace(/^Head of\s+/i, "")}
+        </span>
       </div>
     </NavLink>
   );

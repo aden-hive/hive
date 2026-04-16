@@ -12,7 +12,9 @@ MAX_POWER_ABS_EXPONENT = 1_000
 MAX_POWER_RESULT_BITS = 4_096
 # Typical edge-condition evaluations in this repo complete well under 1ms.
 # 100ms leaves ample headroom for legitimate checks while failing fast on abuse.
-DEFAULT_TIMEOUT_MS = 100
+# On Windows (where SIGALRM is unavailable) the fallback relies on periodic
+# perf_counter polling which is less precise, so we use a wider margin.
+DEFAULT_TIMEOUT_MS = 100 if hasattr(signal, "SIGALRM") else 500
 
 
 def _safe_pow(base: Any, exp: Any) -> Any:
@@ -169,11 +171,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return tuple(self.visit(elt) for elt in node.elts)
 
     def visit_Dict(self, node: ast.Dict) -> dict:
-        return {
-            self.visit(k): self.visit(v)
-            for k, v in zip(node.keys, node.values, strict=False)
-            if k is not None
-        }
+        return {self.visit(k): self.visit(v) for k, v in zip(node.keys, node.values, strict=False) if k is not None}
 
     # --- Operations ---
     def visit_BinOp(self, node: ast.BinOp) -> Any:

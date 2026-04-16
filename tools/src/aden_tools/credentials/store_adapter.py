@@ -375,9 +375,7 @@ class CredentialStoreAdapter:
         # raise_on_refresh_failure semantics. Aliased lookups otherwise skip
         # the refresh path.
         try:
-            refreshed = self._store.get_credential(
-                cred.id, raise_on_refresh_failure=True
-            )
+            refreshed = self._store.get_credential(cred.id, raise_on_refresh_failure=True)
         except Exception as exc:
             from framework.credentials.models import CredentialExpiredError
 
@@ -617,9 +615,7 @@ class CredentialStoreAdapter:
                 return instance
 
             except Exception as e:
-                log.warning(
-                    "Aden credential sync unavailable, falling back to default storage: %s", e
-                )
+                log.warning("Aden credential sync unavailable, falling back to default storage: %s", e)
 
         # --- Default branch (no ADEN_API_KEY or Aden setup failed) ---
         try:

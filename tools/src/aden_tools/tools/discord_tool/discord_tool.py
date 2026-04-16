@@ -191,9 +191,7 @@ def register_tools(
                 return credentials.get_by_alias("discord", account)
             token = credentials.get("discord")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('discord'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('discord'), got {type(token).__name__}")
             return token
         return os.getenv("DISCORD_BOT_TOKEN")
 
@@ -203,9 +201,7 @@ def register_tools(
         if not token:
             return {
                 "error": "Discord credentials not configured",
-                "help": (
-                    "Set DISCORD_BOT_TOKEN environment variable or configure via credential store"
-                ),
+                "help": ("Set DISCORD_BOT_TOKEN environment variable or configure via credential store"),
             }
         return _DiscordClient(token)
 

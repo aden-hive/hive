@@ -23,9 +23,7 @@ class MCPError(ValueError):
         self.what = what
         self.why = why
         self.fix = fix
-        self.message = (
-            f"[{self.code.value}]\nWhat failed: {self.what}\nWhy: {self.why}\nFix: {self.fix}"
-        )
+        self.message = f"[{self.code.value}]\nWhat failed: {self.what}\nWhy: {self.why}\nFix: {self.fix}"
         super().__init__(self.message)
 
 

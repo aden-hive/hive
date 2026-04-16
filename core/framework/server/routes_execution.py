@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from datetime import UTC
 from typing import Any
 
 from aiohttp import web
@@ -117,9 +118,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if session.runner:
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(
-                None, lambda: validate_agent_credentials(session.runner.graph.nodes)
-            )
+            await loop.run_in_executor(None, lambda: validate_agent_credentials(session.runner.graph.nodes))
         except Exception as e:
             agent_path = str(session.worker_path) if session.worker_path else ""
             resp = _credential_error_response(e, agent_path)
@@ -129,9 +128,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
         # Resync MCP servers if credentials were added since the worker loaded
         # (e.g. user connected an OAuth account mid-session via Aden UI).
         try:
-            await loop.run_in_executor(
-                None, lambda: session.runner._tool_registry.resync_mcp_servers_if_needed()
-            )
+            await loop.run_in_executor(None, lambda: session.runner._tool_registry.resync_mcp_servers_if_needed())
         except Exception as e:
             logger.warning("MCP resync failed: %s", e)
 
@@ -228,23 +225,14 @@ async def handle_chat(request: web.Request) -> web.Response:
             type(queen_executor.node_registry),
             id(queen_executor.node_registry),
         )
-        logger.debug(
-            "[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys())
-        )
+        logger.debug("[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys()))
         node = queen_executor.node_registry.get("queen")
-        logger.debug(
-            "[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None
-        )
-        logger.debug(
-            "[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False
-        )
+        logger.debug("[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None)
+        logger.debug("[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False)
 
         # Race condition: executor exists but node not created yet (still initializing)
         if node is None and session.queen_task is not None and not session.queen_task.done():
-            logger.warning(
-                "[handle_chat] Queen executor exists but node"
-                " not ready yet (initializing). Waiting..."
-            )
+            logger.warning("[handle_chat] Queen executor exists but node not ready yet (initializing). Waiting...")
             # Wait a short time for initialization to progress
             import asyncio
 
@@ -302,16 +290,12 @@ async def handle_chat(request: web.Request) -> web.Response:
                 )
             else:
                 logger.error(
-                    "[handle_chat] CRITICAL: Queen node exists"
-                    " but missing inject_event!"
-                    " node_attrs=%s",
+                    "[handle_chat] CRITICAL: Queen node exists but missing inject_event! node_attrs=%s",
                     [a for a in dir(node) if not a.startswith("_")],
                 )
 
     # Queen is dead — try to revive her
-    logger.warning(
-        "[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id
-    )
+    logger.warning("[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id)
     manager: Any = request.app["manager"]
     try:
         logger.debug("[handle_chat] Calling manager.revive_queen()...")
@@ -322,9 +306,7 @@ async def handle_chat(request: web.Request) -> web.Response:
         _revived_executor = session.queen_executor
         _revived_node = _revived_executor.node_registry.get("queen") if _revived_executor else None
         if _revived_node is not None and hasattr(_revived_node, "inject_event"):
-            await _revived_node.inject_event(
-                message, is_client_input=True, image_content=image_content
-            )
+            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content)
         return web.json_response(
             {
                 "status": "queen_revived",
@@ -552,9 +534,7 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(
-                execution_id, reason="Execution stopped by user"
-            )
+            cancelled = await stream.cancel_execution(execution_id, reason="Execution stopped by user")
             if cancelled:
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:
@@ -725,14 +705,13 @@ async def fork_session_into_colony(
     import asyncio
     import json
     import shutil
-    from datetime import datetime, timezone
+    from datetime import datetime
     from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
     from framework.agent_loop.types import AgentContext, AgentSpec
     from framework.host.progress_db import ensure_progress_db, seed_tasks
     from framework.server.session_manager import _queen_session_dir
-    from framework.storage.conversation_store import FileConversationStore
 
     queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
     queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
@@ -882,11 +861,9 @@ async def fork_session_into_colony(
         "queen_id": getattr(phase_state, "queen_id", "") if phase_state else "",
         "loop_config": queen_lc_config,
         "spawned_from": session.id,
-        "spawned_at": datetime.now(timezone.utc).isoformat(),
+        "spawned_at": datetime.now(UTC).isoformat(),
     }
-    worker_config_path.write_text(
-        json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    worker_config_path.write_text(json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ── 3. Duplicate queen session into colony ───────────────────
     # Copy the queen's full session directory (conversations, events,
@@ -912,9 +889,7 @@ async def fork_session_into_colony(
     dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
 
     if source_queen_dir.exists():
-        await asyncio.to_thread(
-            shutil.copytree, source_queen_dir, dest_queen_dir, dirs_exist_ok=True
-        )
+        await asyncio.to_thread(shutil.copytree, source_queen_dir, dest_queen_dir, dirs_exist_ok=True)
         # Update the duplicated meta.json to point to the colony
         dest_meta_path = dest_queen_dir / "meta.json"
         dest_meta: dict = {}
@@ -928,9 +903,7 @@ async def fork_session_into_colony(
         dest_meta["queen_id"] = queen_name
         dest_meta["forked_from"] = session.id
         dest_meta["colony_fork"] = True  # exclude from queen DM history
-        dest_meta_path.write_text(
-            json.dumps(dest_meta, ensure_ascii=False), encoding="utf-8"
-        )
+        dest_meta_path.write_text(json.dumps(dest_meta, ensure_ascii=False), encoding="utf-8")
         logger.info(
             "Duplicated queen session %s -> %s for colony '%s'",
             session.id,
@@ -944,9 +917,7 @@ async def fork_session_into_colony(
         worker_conv_dir = worker_storage / "conversations"
         source_conv_dir = dest_queen_dir / "conversations"
         if source_conv_dir.exists():
-            await asyncio.to_thread(
-                shutil.copytree, source_conv_dir, worker_conv_dir, dirs_exist_ok=True
-            )
+            await asyncio.to_thread(shutil.copytree, source_conv_dir, worker_conv_dir, dirs_exist_ok=True)
             logger.info("Copied queen conversations to worker storage %s", worker_conv_dir)
     else:
         logger.warning(
@@ -966,12 +937,12 @@ async def fork_session_into_colony(
     metadata["queen_name"] = queen_name
     metadata["queen_session_id"] = colony_session_id
     metadata["source_session_id"] = session.id
-    metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
-    metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+    metadata.setdefault("created_at", datetime.now(UTC).isoformat())
+    metadata["updated_at"] = datetime.now(UTC).isoformat()
     metadata.setdefault("workers", {})
     metadata["workers"][worker_name] = {
         "task": worker_task[:100],
-        "spawned_at": datetime.now(timezone.utc).isoformat(),
+        "spawned_at": datetime.now(UTC).isoformat(),
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -989,9 +960,7 @@ async def fork_session_into_colony(
     qmeta["agent_name"] = colony_name.replace("_", " ").title()
     try:
         source_meta_path.parent.mkdir(parents=True, exist_ok=True)
-        source_meta_path.write_text(
-            json.dumps(qmeta, ensure_ascii=False), encoding="utf-8"
-        )
+        source_meta_path.write_text(json.dumps(qmeta, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
 
