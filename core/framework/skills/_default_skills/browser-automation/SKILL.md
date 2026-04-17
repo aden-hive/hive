@@ -42,7 +42,7 @@ Why:
 - **Keyboard dispatch follows focus** into shadow roots. After a click focuses an input (even one three shadow levels deep), `browser_press(...)` with no selector dispatches keys to `document.activeElement`'s computed focus target.
 - **Screenshots render the real layout** regardless of DOM implementation.
 
-Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(selector=...)` all use `document.querySelector` under the hood, which **stops at shadow boundaries**. They cannot see elements inside shadow roots.
+Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(selector=...)` all use `document.querySelector` under the hood, which **stops at shadow boundaries**. They cannot see elements inside shadow roots. For shadow-DOM inputs, use `browser_type_focused` after focusing via click-coordinate.
 
 ### Recommended workflow on shadow-heavy sites
 
@@ -50,25 +50,17 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 2. Identify the target visually → image pixel `(x, y)` (eyeball from the screenshot)
 3. `browser_coords(x, y)` → convert to CSS px
 4. `browser_click_coordinate(css_x, css_y)` → lands on the element via native hit testing; inputs get focused. **The response now includes `focused_element: {tag, id, role, contenteditable, rect, ...}`** — use it to verify you actually focused what you intended.
-5. `browser_type(text="...")` with **NO selector** → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Only pass a selector if you want a DIFFERENT element than the one you just focused (rare).
+5. `browser_type_focused(text="...")` → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Use `browser_type(selector, text)` instead when you have a reliable CSS selector for a light-DOM element.
 6. Verify via `browser_screenshot` OR `browser_get_attribute` on a known-reachable marker (e.g. check that the Send button's `aria-disabled` flipped to `false`).
 
 ### The click→type loop (canonical pattern)
 
-```
-resp = browser_click_coordinate(x, y)
-fe = resp.get("focused_element")
-if fe and (fe.get("contenteditable") or fe["tag"] in ("textarea", "input")):
-    browser_type(text="...")                # no selector — insertText to activeElement
-else:
-    # you clicked something that isn't editable — refine coords and retry
-    # do NOT reach for browser_evaluate + execCommand('insertText', ...)
-    # or a walk(root) shadow traversal. The problem is your click, not
-    # the typing method.
-    ...
-```
+1. Call `browser_click_coordinate(x, y)` to click the target element.
+2. Check the `focused_element` field in the response — it tells you what actually received focus (tag, id, role, contenteditable, rect).
+3. If the focused element is editable, call `browser_type_focused(text="...")` to insert text. use tools to verify the text took effect.
+4. If it is NOT editable, your click landed on the wrong thing — refine coordinates and retry. Do NOT reach for `browser_evaluate` + `execCommand('insertText')` or shadow-root traversals. The problem is the click target, not the typing method.
 
-`browser_click` (selector-based) also returns `focused_element` now, so the same check works whether you clicked by selector or coordinate.
+`browser_click` (selector-based) also returns `focused_element`, so the same check works whether you clicked by selector or coordinate.
 
 ### Empirically verified (2026-04-11)
 
@@ -78,13 +70,6 @@ document > reddit-search-large [shadow]
          > faceplate-search-input#search-input [shadow]
          > input[name="q"]
 ```
-
-- `document.querySelector('input')` → **0 visible inputs** on the page (all in shadow)
-- `browser_type('faceplate-search-input input', 'python')` → "Element not found"
-- `browser_click_coordinate(617, 28)` → focus trail: `REDDIT-SEARCH-LARGE > FACEPLATE-SEARCH-INPUT > INPUT` ✓
-- Char-by-char key dispatch after the click → `input.value === 'python'` ✓
-
-Coordinate pipeline: works perfectly. Selector pipeline: unusable without shadow-piercing syntax.
 
 ### Shadow-piercing selectors
 
@@ -103,8 +88,8 @@ Returns the element's rect in **CSS pixels** (feed directly to click tools). Rem
 
 ```
 browser_navigate(url, wait_until="load")   # "load" | "domcontentloaded" | "networkidle"
-browser_wait_for_selector("h1", timeout_ms=5000)
-browser_wait_for_text("Some text", timeout_ms=5000)
+browser_wait_for_selector("h1", timeout_ms=2000)
+browser_wait_for_text("Some text", timeout_ms=2000)
 browser_go_back()
 browser_go_forward()
 browser_reload()
@@ -122,7 +107,7 @@ All return real URLs and titles. On a fast page `navigate(wait_until="load")` re
 | x.com/twitter | 1.2–1.6 s |
 | linkedin.com (logged in) | 4–5 s |
 
-Use `timeout_ms=20000` for LinkedIn and other heavy SPAs to give them margin.
+For LinkedIn and other heavy SPAs, rely on `sleep()` after navigation to let the page hydrate.
 
 ### After navigate, always let SPA hydrate
 
@@ -131,7 +116,7 @@ Even after `wait_until="load"`, React/Vue SPAs often render their real chrome in
 ### Reading pages efficiently
 
 - **Prefer `browser_snapshot` over `browser_get_text("body")`** — returns a compact ~1–5 KB accessibility tree vs 100+ KB of raw HTML.
-- Interaction tools (`browser_click`, `browser_type`, `browser_fill`, `browser_scroll`, etc.) return a page snapshot automatically in their result. Use it to decide your next action — do NOT call `browser_snapshot` separately after every action. Only call `browser_snapshot` when you need a fresh view without performing an action, or after setting `auto_snapshot=false`.
+- Interaction tools (`browser_click`, `browser_type`, `browser_type_focused`, `browser_fill`, `browser_scroll`, etc.) return a page snapshot automatically in their result. Use it to decide your next action — do NOT call `browser_snapshot` separately after every action. Only call `browser_snapshot` when you need a fresh view without performing an action, or after setting `auto_snapshot=false`.
 - Complex pages (LinkedIn, Twitter/X, SPAs with virtual scrolling) have DOMs that don't match what's visually rendered — snapshot refs may be stale, missing, or misaligned with visible layout. On these pages, `browser_screenshot` is the only reliable way to orient yourself.
 - Only fall back to `browser_get_text` for extracting specific small elements by CSS selector.
 
@@ -151,44 +136,13 @@ The symptom is always the same: **you type, the characters appear visually, and 
 
 ### Safe "click-then-type-then-verify" pattern
 
-```
-# 1. Focus the real element via a real click (not JS .focus()).
-rect = browser_get_rect(selector)             # or browser_shadow_query for shadow sites
-browser_click_coordinate(rect.cx, rect.cy)
-sleep(0.5)                                     # let the editor open / focus settle
+1. **Focus** the real element via a real click (not JS `.focus()`). Use `browser_get_rect(selector)` (or `browser_shadow_query` for shadow sites) to get coordinates, then `browser_click_coordinate(cx, cy)`. Wait ~0.5 s for the editor to open and focus to settle.
 
-# 2. Type. browser_type now uses CDP Input.insertText by default, which is
-#    the most reliable way to insert text into rich editors (Lexical,
-#    Draft.js, ProseMirror, any React-controlled contenteditable).
-browser_type(selector, text)
-sleep(1.0)                                     # let framework state commit
+2. **Type** the text. Use `browser_type(selector, text)` for light-DOM inputs, or `browser_type_focused(text=...)` for shadow-DOM / already-focused inputs. Both use CDP `Input.insertText` by default, which is the most reliable method for rich editors (Lexical, Draft.js, ProseMirror). Wait ~500 ms for framework state to commit.
 
-# 3. BEFORE clicking send, verify the submit button is actually enabled.
-#    Don't trust that typing worked — check state.
-state = browser_evaluate("""
-    (function(){
-      const btn = document.querySelector('[data-testid="tweetButton"]');
-      if (!btn) return {exists: false};
-      return {
-        exists: true,
-        disabled: btn.disabled || btn.getAttribute('aria-disabled') === 'true',
-        text: btn.textContent.trim(),
-      };
-    })()
-""")
+3. **Verify** the submit button is enabled before clicking it. Use `browser_evaluate` to check the button's `disabled` or `aria-disabled` attribute. Do NOT trust that typing worked — always check state.
 
-# 4. Only click send if the button is enabled.
-if not state['disabled']:
-    browser_click(submit_selector)
-else:
-    # Recovery: sometimes a click-again + one extra keystroke nudges
-    # React into recomputing hasRealContent.
-    browser_click_coordinate(rect.cx, rect.cy)
-    browser_press("End")
-    browser_press(" ")
-    browser_press("Backspace")
-    # re-check state
-```
+4. **Only click send if the button is enabled.** If the button is still disabled, try the recovery dance: click the textarea again, press `End`, press a space, press `Backspace` — this forces React to recompute `hasRealContent`. Then re-check the button state.
 
 ### Why `browser_type` uses `Input.insertText` by default
 
@@ -224,7 +178,7 @@ Always include an equivalent cleanup block in any script that types into a compo
 | Site | Editor | Workaround |
 |---|---|---|
 | **X / Twitter** compose | Draft.js | Click `[data-testid='tweetTextarea_0']` first, then type with `delay_ms=20`. First 1-2 chars may be eaten — accept truncation or prepend a throwaway char. Verify `[data-testid='tweetButton']` has `disabled: false` before clicking. |
-| **LinkedIn** messaging | contenteditable (inside `#interop-outlet` shadow root) | Use `browser_shadow_query` to find the rect, click-coordinate to focus, then type via focus-based key dispatch (selector-based type can't reach shadow). Send button is `.msg-form__send-button`. |
+| **LinkedIn** messaging | contenteditable (inside `#interop-outlet` shadow root) | Use `browser_shadow_query` to find the rect, click-coordinate to focus, then `browser_type_focused(text=...)` (selector-based `browser_type` can't reach shadow). Send button is `.msg-form__send-button`. |
 | **LinkedIn** feed post composer | Quill/LinkedIn custom | Click the "Start a post" trigger first, wait 1s for modal, click the textarea, type. |
 | **Reddit** comment/post box | ProseMirror | Click the textarea, wait 0.5s for the toolbar to mount, then type. Submit is `button[slot="submit-button"]` inside a shreddit-composer. |
 | **Gmail** compose | Lexical | Click the body first. Gmail has a visible `div[contenteditable=true][aria-label*='Message Body']` after opening a compose window. |
@@ -244,7 +198,7 @@ browser_type(selector, text)
 - Fires real `keydown` / `keypress` / `input` / `keyup` events — frameworks that branch on `event.key` or `event.code` see the right values
 - Matches what Playwright and Puppeteer send
 
-Works on real `<input>`, `<textarea>`, and `contenteditable` elements. For shadow-DOM inputs, see the "shadow-heavy sites" section above — `type_text(selector=)` can't see past shadow boundaries.
+Works on real `<input>`, `<textarea>`, and `contenteditable` elements. For shadow-DOM inputs, see the "shadow-heavy sites" section above — `browser_type(selector=)` can't see past shadow boundaries; use `browser_type_focused` after click-coordinate focus.
 
 ### Keyboard shortcuts (Ctrl+A, Shift+Tab, Cmd+Enter)
 
@@ -340,7 +294,7 @@ Reddit's search input lives **two shadow levels deep** inside `reddit-search-lar
 
 1. `browser_shadow_query("reddit-search-large >>> #search-input")` → rect
 2. `browser_click_coordinate(rect.cx, rect.cy)` → click lands on the real shadow input via native hit testing; input becomes focused
-3. `browser_press(c)` for each character → dispatches to focused element
+3. `browser_type_focused(text="query")` → dispatches to focused element via `Input.insertText`
 4. Verify by reading `.value` via `browser_evaluate` walking the shadow path
 
 ### X / Twitter
@@ -413,7 +367,7 @@ Then pass the most specific selector that uniquely identifies the right input (e
 - **Calling `wait_for_selector` on a shadow element.** It'll always time out. Use `browser_shadow_query` or the screenshot + coordinate strategy.
 - **Relying on `innerHTML` in injected scripts on LinkedIn.** Silently discarded. Use `createElement` + `appendChild`.
 - **Not waiting for SPA hydration.** `wait_until="load"` fires before React/Vue rendering on many sites. Add a 2–3 s sleep before querying for chrome elements.
-- **Using `browser_type(selector)` on LinkedIn DMs or any shadow-DOM input.** Won't find the element. Fall back to click-to-focus + `browser_press` per character.
+- **Using `browser_type(selector)` on LinkedIn DMs or any shadow-DOM input.** Won't find the element. Use `browser_click_coordinate` to focus, then `browser_type_focused(text=...)` to type.
 - **Clicking a "Photo" / "Attach" / "Upload" button to pick a file.** This opens Chrome's NATIVE OS file picker, which is rendered outside the web page and cannot be interacted with via CDP. Your automation will hang staring at an unreachable dialog. ALWAYS use `browser_upload(selector, file_paths)` against the underlying `<input type='file'>` element — see the "File uploads" section above for the full pattern. This is the single most common way to wedge a browser session on compose-with-media flows (X/LinkedIn/Gmail).
 - **Keyboard shortcuts without the `code` field.** Chrome's shortcut dispatcher ignores keyboard events that lack a `code` or `windowsVirtualKeyCode`. `browser_press(..., modifiers=[...])` populates these automatically; raw `Input.dispatchKeyEvent` calls from `browser_evaluate` may not.
 - **Taking a screenshot more than 10s after the last interaction** and expecting the highlight to still be visible. The overlay fades after 10s. Take the screenshot sooner, or re-trigger the interaction.
@@ -476,9 +430,8 @@ sleep(2)
 # Shadow-pierce the nested search input
 sq = browser_shadow_query("reddit-search-large >>> #search-input")
 browser_click_coordinate(sq.rect.cx, sq.rect.cy)
-# Typing can't use selector (shadow); focused input receives raw key presses
-for c in "python":
-    browser_press(c)
+# Typing can't use selector (shadow); use browser_type_focused on the focused input
+browser_type_focused(text="python")
 browser_screenshot()
 browser_press("Escape")
 ```
@@ -486,7 +439,7 @@ browser_press("Escape")
 ### Search LinkedIn and dismiss without submitting
 
 ```
-browser_navigate("https://www.linkedin.com/feed/", wait_until="load", timeout_ms=20000)
+browser_navigate("https://www.linkedin.com/feed/", wait_until="load")
 sleep(3)
 browser_wait_for_selector("input[data-testid='typeahead-input']", timeout_ms=5000)
 rect = browser_get_rect("input[data-testid='typeahead-input']")

@@ -88,13 +88,13 @@ Find Textarea (it is hidden inside shadow DOM):
 ```
 Click that coordinate, `sleep(1)`.
 
-Inject text and Send:
+Type the message:
 Construct the message: `Hey {first_name}, thanks for the connection invite! I'm currently building a prediction market for jobs: https://honeycomb.open-hive.com/. If you could check it out and share some feedback, I'd really appreciate it.`
 
-Escape the string properly for JS injection, then run:
-```javascript
-// Replace MSG_TEXT with your actual string
-browser_evaluate("(function(){ document.execCommand('insertText', false, `MSG_TEXT`); return true; })()")
+Use `browser_type_focused` — it dispatches CDP `Input.insertText` to the already-focused composer (document.activeElement), which works through shadow DOM without JSON-escaping issues:
+```
+browser_type_focused(text=message_text)
+sleep(1.0)
 ```
 
 Find Send button (also inside shadow DOM):

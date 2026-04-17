@@ -82,8 +82,8 @@ _interaction_highlights: dict[int, dict] = {}
 
 # Compact descriptor of document.activeElement. Returned by both click()
 # and click_coordinate() so the agent can verify it focused what it
-# intended, then decide whether to follow up with browser_type(text=...,
-# no selector). Keeping this as a single shared string avoids drift
+# intended, then decide whether to follow up with browser_type_focused(text=...).
+# Keeping this as a single shared string avoids drift
 # between the two click paths.
 _FOCUSED_ELEMENT_JS = """
 (function() {

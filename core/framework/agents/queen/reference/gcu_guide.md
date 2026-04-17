@@ -18,7 +18,7 @@ Use browser nodes (with `tools: {policy: "all"}`) when:
 
 All tools are prefixed with `browser_`:
 - `browser_start`, `browser_open`, `browser_navigate` — launch/navigate
-- `browser_click`, `browser_click_coordinate`, `browser_fill`, `browser_type` — interact
+- `browser_click`, `browser_click_coordinate`, `browser_fill`, `browser_type`, `browser_type_focused` — interact
 - `browser_press` (with optional `modifiers=["ctrl"]` etc.) — keyboard shortcuts
 - `browser_snapshot` — compact accessibility-tree read (structured)
 <!-- vision-only -->
@@ -50,7 +50,8 @@ Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS pixels**, not ph
 2. For static pages (docs, forms, search results), browser_snapshot is fine.
 3. Before typing into a rich-text editor (X compose, LinkedIn DM, Gmail, Reddit),
    click the input area first with browser_click_coordinate so React / Draft.js /
-   Lexical register a native focus event. Otherwise the send button stays disabled.
+   Lexical register a native focus event, then use browser_type_focused(text=...)
+   for shadow-DOM inputs or browser_type(selector, text) for light-DOM inputs.
 4. Use browser_wait(seconds=2-3) after navigation for SPA hydration.
 5. If you hit an auth wall, call set_output with an error and move on.
 6. Keep tool calls per turn <= 10 for reliability.

@@ -70,10 +70,12 @@ ProseMirror only register input as "real" after a native pointer-
 sourced focus event; JS `.focus()` is not enough. Without a real click
 first, the editor stays empty and the send button stays disabled.
 
-`browser_type` now does this automatically — it clicks the element,
-then inserts text via CDP `Input.insertText` (IME-commit style), which
-rich editors accept cleanly. Before clicking send, verify the submit
-button's `disabled` / `aria-disabled` state via `browser_evaluate`.
+`browser_type` does this automatically when you have a selector — it
+clicks the element, then inserts text via CDP `Input.insertText`.
+For shadow-DOM inputs where selectors can't reach, use
+`browser_click_coordinate` to focus, then `browser_type_focused(text=...)`
+to type into the active element. Before clicking send, verify the
+submit button's `disabled` / `aria-disabled` state via `browser_evaluate`.
 
 ## Shadow DOM
 

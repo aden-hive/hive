@@ -13,15 +13,15 @@ metadata:
 
 LinkedIn is the hardest mainstream site to automate because it combines **shadow DOM** (`#interop-outlet` for messaging), **strict Trusted Types CSP** (silently drops `innerHTML`), **heavy React reconciliation** (injected nodes get stripped on re-render), **native `beforeunload` draft dialogs** (hang the bridge), and **aggressive spam filters**. Every one of those has bit us at least once. This skill documents what actually works.
 
-**Always activate `browser-automation` first.** This skill assumes you already know about CSS-px coordinates, `browser_type`'s click-first behavior, and `browser_shadow_query`. The guidance below is LinkedIn-specific; general browser rules are there.
+**Always activate `browser-automation` first.** This skill assumes you already know about CSS-px coordinates, `browser_type`/`browser_type_focused`, and `browser_shadow_query`. The guidance below is LinkedIn-specific; general browser rules are there.
 
 ## Timing expectations
 
-- `browser_navigate(wait_until="load", timeout_ms=20000)` — LinkedIn takes **4–5 seconds** to load the feed cold. Default 30s timeout is fine; use 20s as a floor.
+- `browser_navigate(wait_until="load")` — LinkedIn takes **4–5 seconds** to load the feed cold.
 - After navigation, **always `sleep(3)`** to let React hydrate the profile/feed chrome before querying selectors. Without the sleep `wait_for_selector` will flake on elements that exist moments later.
 - Composer modal slide-in takes **~2 seconds** after you click the Message button.
 
-## Verified selectors (2026-04-11)
+## Verified selectors
 
 | Target | Selector | Notes |
 |---|---|---|
@@ -40,8 +40,8 @@ LinkedIn changes class names aggressively. If a class-based selector breaks, fal
 
 ```
 # 1. Load the profile
-browser_navigate("https://www.linkedin.com/in/<username>/", wait_until="load", timeout_ms=20000)
-sleep(4)
+browser_navigate("https://www.linkedin.com/in/<username>/", wait_until="load")
+sleep(3)
 
 # 2. Strip onbeforeunload before any state-mutating work — prevents draft-dialog deadlock later
 browser_evaluate("""
@@ -98,17 +98,18 @@ textarea = browser_evaluate("""
 browser_click_coordinate(textarea['cx'], textarea['cy'])
 sleep(0.6)
 
-# 6. Insert text via browser_type WITHOUT a selector. This dispatches
-#    CDP Input.insertText to document.activeElement — the same underlying
+# 6. Insert text via browser_type_focused. This dispatches CDP
+#    Input.insertText to document.activeElement — the same underlying
 #    mechanism as execCommand('insertText') but with no JSON escaping,
 #    no browser_evaluate round trip, and built-in retry. The click in
 #    step 5 already focused Lexical, so insertText lands in the editor
 #    regardless of the shadow wrapping around #interop-outlet.
 #
-#    Do NOT pass a selector here. Selector-based browser_type cannot see
-#    past the #interop-outlet shadow root. No-selector mode sidesteps
-#    that entirely by routing to activeElement.
-browser_type(text=message_text)   # no selector — targets document.activeElement
+#    Use browser_type_focused (not browser_type) here — browser_type
+#    requires a selector, which cannot see past the #interop-outlet
+#    shadow root. browser_type_focused targets document.activeElement
+#    directly, sidestepping shadow boundaries entirely.
+browser_type_focused(text=message_text)
 sleep(1.0)   # let Lexical commit state + enable Send button
 
 # 7. Find the modal Send button (filter by in-viewport, reject pinned bar)
@@ -143,7 +144,7 @@ send = browser_evaluate("""
 
 # 8. ONLY click Send if it's enabled — if disabled, the insertText
 #    didn't land. DO NOT retry with a different tool; the fix is
-#    always: re-click the composer rect, re-run browser_type(text=...),
+#    always: re-click the composer rect, re-run browser_type_focused(text=...),
 #    re-check. The Send button's `disabled` state IS the ground truth —
 #    if Lexical registered your text, it enables the button. If it's
 #    still disabled, your text did not reach the editor, regardless
@@ -153,7 +154,7 @@ if send['disabled']:
     # fall back to browser_type with a selector (see anti-pattern in
     # Common Pitfalls — selector-based type can't reach the shadow-DOM
     # composer). Instead: re-click the textarea rect from step 4, wait
-    # a beat, re-run browser_type(text=message_text) (no selector) from
+    # a beat, re-run browser_type_focused(text=message_text) from
     # step 6. If that still fails after 2 retries, bail and surface —
     # the modal may have been reclaimed by a stale state or auth wall.
     raise Exception("Send button disabled after insertText — editor did not receive input")
@@ -170,7 +171,7 @@ Daily outbound pattern — accept pending connection requests and send a templat
 
 ```
 browser_navigate("https://www.linkedin.com/mynetwork/invitation-manager/received/",
-                 wait_until="load", timeout_ms=20000)
+                 wait_until="load")
 sleep(4)
 browser_evaluate("(function(){window.onbeforeunload=null;})()")
 
@@ -214,7 +215,7 @@ for card in cards[:25]:
 ## Feed post composer flow
 
 ```
-browser_navigate("https://www.linkedin.com/feed/", wait_until="load", timeout_ms=20000)
+browser_navigate("https://www.linkedin.com/feed/", wait_until="load")
 sleep(4)
 browser_evaluate("(function(){window.onbeforeunload=null;})()")
 
@@ -301,7 +302,7 @@ If the image isn't already on disk, write it first with `write_file(absolute_pat
 
 ## Rate limits and safety
 
-LinkedIn's abuse detection is aggressive. Respect these limits:
+LinkedIn's abuse detection is aggressive. Beware of the limits, let user know but dare to break them if user confirms.:
 
 | Action | Limit |
 |---|---|
@@ -309,8 +310,7 @@ LinkedIn's abuse detection is aggressive. Respect these limits:
 | Outbound messages to new 1st-degree connections | **25/day max**, 5–10s randomized delays |
 | Connection request sends | **100/week max**, spread across days, warm intros preferred |
 | Profile views | Several hundred/day is usually fine but varies by account age |
-| Post publications | 1–3/day, no URL-only posts |
-| Feed reactions | Dozens/day is fine; vary your activity mix |
+| Post publications | 1–5/day, no URL-only posts |
 
 Signals you're being throttled:
 - "Message failed to send" with no error detail
@@ -323,9 +323,8 @@ If any of those show up, **stop the run, screenshot the state, and surface the i
 ## Common pitfalls
 
 - **`innerHTML` injection is silently dropped** — LinkedIn's Trusted Types CSP discards any `innerHTML = "<...>"` from injected scripts, no console error. Always use `createElement` + `appendChild` + `setAttribute` for DOM injection. `textContent`, `style.cssText`, and `.value` assignments are fine.
-- **Do NOT pass a selector to `browser_type` on the message composer — call it with NO selector (`browser_type(text=...)`).** The Lexical contenteditable lives inside the `#interop-outlet` shadow root which `document.querySelector` (what the selector-based path uses under the hood) cannot see. Attempts to work around this with `browser_shadow_query` fail because selector-based `browser_type` doesn't support the `>>>` shadow-pierce syntax. The reliable insert path is: (1) `browser_click_coordinate` on the composer rect — the response's `focused_element` confirms Lexical received focus → (2) `browser_type(text=message_text)` with NO selector — CDP `Input.insertText` dispatches to `document.activeElement` regardless of shadow wrapping. The old `browser_evaluate` + `document.execCommand('insertText', ...)` pattern worked but had JSON-escaping pitfalls and cost ~200 chars of JS per send; `browser_type(text=...)` is the same mechanism with built-in retry.
-- **Per-char keyDown on the message composer produces empty text** — Lexical intercepts `beforeinput` and drops raw keys. Use `browser_type(text=..., use_insert_text=True)` with NO selector after click-coordinate focused the composer. The CDP `Input.insertText` method commits as if IME fired, which Lexical accepts cleanly. Do NOT pass a selector; selector-based `browser_type` can't see past `#interop-outlet`.
-- **ANTI-PATTERN: "inject a dummy `<div id='dummy-target'>` and pass it as the `selector` arg to `browser_type`".** This looks tempting but fails compoundingly: `browser_type` clicks the **dummy div's** rect (not the editor's), the click lands on the Lexical wrapper's non-editable chrome, the contenteditable never receives focus, and `Input.insertText` fires against nothing. The bridge will still return `{"ok": true, "action": "type", "length": N}` because it has no way to verify the text actually landed. Symptom: Send button stays `disabled: true` forever. Fix: `browser_click_coordinate` on the real composer rect, then `browser_type(text=message_text)` with NO selector — CDP `Input.insertText` dispatches to `document.activeElement`. (See `session_20260414_114820_08bd3c4d` for the failed dummy-div attempt.)
+- **Use `browser_type_focused` (not `browser_type`) on the message composer.** The Lexical contenteditable lives inside the `#interop-outlet` shadow root which `document.querySelector` (what `browser_type`'s selector path uses under the hood) cannot see. `browser_type` requires a selector and will fail with "Element not found". The reliable insert path is: (1) `browser_click_coordinate` on the composer rect — the response's `focused_element` confirms Lexical received focus → (2) `browser_type_focused(text=message_text)` — CDP `Input.insertText` dispatches to `document.activeElement` regardless of shadow wrapping.
+- **Per-char keyDown on the message composer produces empty text** — Lexical intercepts `beforeinput` and drops raw keys. Use `browser_type_focused(text=..., use_insert_text=True)` after click-coordinate focused the composer. The CDP `Input.insertText` method commits as if IME fired, which Lexical accepts cleanly.
 - **Multiple Send buttons on the page** — the pinned bottom-right messaging bar has its own `msg-form__send-button` that's usually below `innerHeight`. Filter by in-viewport before clicking.
 - **`window.onbeforeunload` hangs navigation/close** — after typing in a composer, any `browser_navigate` or `close_tab` can pop a native "unsent message, leave?" confirm dialog that deadlocks the bridge. Always strip `onbeforeunload` before any navigation, and wrap composer flows in a `try/finally` that runs the cleanup block:
 
@@ -346,7 +345,7 @@ browser_evaluate("""
 
 ## Auth wall detection
 
-If you see a "Log in" / "Join LinkedIn" prompt instead of the logged-in feed, **stop immediately** and surface the issue. Do NOT attempt to log in via automation — LinkedIn's bot detection will flag the account.
+If you see a "Log in" / "Join LinkedIn" prompt instead of the logged-in feed, **stop immediately** and surface the issue to user. Do NOT attempt to log in via automation — LinkedIn's bot detection will flag the account.
 
 Check via:
 ```

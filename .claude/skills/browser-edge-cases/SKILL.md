@@ -64,7 +64,7 @@ snapshot = await browser_snapshot(tab_id)
 |---------|--------------|-------|
 | Scroll doesn't move | Nested scroll container | Look for `overflow: scroll` divs |
 | Click no effect | Element covered | Check `getBoundingClientRect` vs viewport |
-| Type clears | Autocomplete/React | Check for event listeners on input |
+| Type clears | Autocomplete/React | Check for event listeners on input; try `browser_type_focused` |
 | Snapshot hangs | Huge DOM | Check node count in snapshot |
 | Snapshot stale | SPA hydration | Wait after navigation |
 
@@ -229,7 +229,7 @@ function queryShadow(selector) {
 |-------|-------------|----------|
 | Scroll not working | Find scrollable container | Mouse wheel at container center |
 | Click no effect | JavaScript click() | CDP mouse events |
-| Type clears | Add delay_ms | Use execCommand |
+| Type clears | Add delay_ms | Use `browser_type_focused` (Input.insertText) |
 | Snapshot hangs | Add timeout_s | DOM snapshot fallback |
 | Stale content | Wait for selector | Increase wait_until timeout |
 | Shadow DOM | Pierce selector | JavaScript traversal |
