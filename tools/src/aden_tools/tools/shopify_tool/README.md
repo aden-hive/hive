@@ -81,9 +81,10 @@ shopify_update_order(
 shopify_cancel_order(
     order_id="5678901234",
     reason="customer",
-    restock=True,
+    restock=False,
     email=True,
-    refund=False,
+    amount="10.00",
+    currency="USD",
 )
 ```
 

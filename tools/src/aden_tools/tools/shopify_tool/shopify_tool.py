@@ -11,6 +11,7 @@ API Reference: https://shopify.dev/docs/api/admin-rest
 from __future__ import annotations
 
 import os
+from decimal import Decimal, ROUND_HALF_UP
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -74,6 +75,17 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
             detail = resp.text
         return {"error": f"Shopify API error (HTTP {resp.status_code}): {detail}"}
     return resp.json()
+
+
+def _parse_money(value: str) -> Decimal | None:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _format_money(value: Decimal) -> str:
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def register_tools(
@@ -287,9 +299,10 @@ def register_tools(
     def shopify_cancel_order(
         order_id: str,
         reason: str = "",
-        restock: bool = True,
-        email: bool = True,
-        refund: bool = False,
+        restock: bool = False,
+        email: bool = False,
+        amount: str = "",
+        currency: str = "",
     ) -> dict:
         """
         Cancel an existing Shopify order.
@@ -297,9 +310,10 @@ def register_tools(
         Args:
             order_id: The numeric Shopify order ID (required).
             reason: Optional reason (Shopify-defined values include: "customer", "inventory", "fraud", "declined", "other").
-            restock: Whether to restock inventory for the cancelled order (default True).
-            email: Whether Shopify should email the customer (default True).
-            refund: Whether Shopify should attempt to refund the order (default False).
+            restock: Whether to restock refunded items back to inventory (deprecated by Shopify; default False).
+            email: Whether to send an email to the customer notifying them of the cancellation (default False).
+            amount: Optional amount to refund (string). When set, `currency` is required for multi-currency orders.
+            currency: Optional currency for the refund when `amount` is set.
 
         Returns:
             Dict with cancellation status.
@@ -316,19 +330,22 @@ def register_tools(
         except ValueError:
             return {"error": "order_id must be a numeric Shopify order ID"}
 
-        params: dict[str, Any] = {
-            "restock": str(restock).lower(),
-            "email": str(email).lower(),
-            "refund": str(refund).lower(),
+        payload: dict[str, Any] = {
+            "email": bool(email),
+            "restock": bool(restock),
         }
         if reason:
-            params["reason"] = reason
+            payload["reason"] = reason
+        if amount:
+            payload["amount"] = amount
+            if currency:
+                payload["currency"] = currency
 
         try:
             resp = httpx.post(
                 f"{_base_url(store)}/orders/{order_id}/cancel.json",
                 headers=_headers(token),
-                params=params,
+                json=payload,
                 timeout=30.0,
             )
             result = _handle_response(resp)
@@ -356,18 +373,23 @@ def register_tools(
         amount: str = "",
         note: str = "",
         notify: bool = False,
+        refund_shipping: bool = False,
+        restock_type: str = "no_restock",
+        location_id: str = "",
     ) -> dict:
         """
         Refund an order via the Shopify Admin REST API.
 
-        This uses the store's configured payment gateway by creating a refund transaction
-        against an existing "capture"/"sale" transaction for the order.
+        Uses Shopify's recommended flow: calculate accurate transactions, then create the refund.
 
         Args:
             order_id: The numeric Shopify order ID (required).
             amount: Refund amount as a string (optional). If empty, refunds the order's total_price.
             note: Optional internal note on the refund.
             notify: Whether to notify the customer (default False).
+            refund_shipping: Whether to refund shipping in full (default False).
+            restock_type: Restock behavior for refunded line items ("no_restock", "cancel", "return"). Default "no_restock".
+            location_id: Required when restock_type is "cancel" or "return" (Shopify location id).
 
         Returns:
             Dict with refund ID and status.
@@ -395,57 +417,109 @@ def register_tools(
                 return order_result
 
             order = order_result.get("order", {})
-            refund_amount = amount or str(order.get("total_price") or "")
             currency = order.get("currency") or ""
-            if not refund_amount:
-                return {"error": "amount is required (could not infer from order total_price)"}
             if not currency:
                 return {"error": "Could not infer currency from order"}
 
-            tx_resp = httpx.get(
-                f"{_base_url(store)}/orders/{order_id}/transactions.json",
-                headers=_headers(token),
-                timeout=30.0,
-            )
-            tx_result = _handle_response(tx_resp)
-            if "error" in tx_result:
-                return tx_result
+            valid_restock_types = {"no_restock", "cancel", "return"}
+            if restock_type not in valid_restock_types:
+                return {"error": f"restock_type must be one of: {', '.join(sorted(valid_restock_types))}"}
+            if restock_type in {"cancel", "return"} and not location_id:
+                return {"error": "location_id is required when restock_type is 'cancel' or 'return'"}
 
-            transactions = tx_result.get("transactions", []) or []
-            parent = None
-            for t in transactions:
-                if t.get("kind") in ("capture", "sale"):
-                    parent = t
-                    break
-            if not parent:
-                return {"error": "No refundable transaction found for this order"}
+            refund_line_items: list[dict[str, Any]] = []
+            for li in (order.get("line_items") or [])[:]:
+                line_item_id = li.get("id")
+                quantity = li.get("quantity")
+                if not line_item_id or not quantity:
+                    continue
+                entry: dict[str, Any] = {
+                    "line_item_id": int(line_item_id),
+                    "quantity": int(quantity),
+                    "restock_type": restock_type,
+                }
+                if restock_type in {"cancel", "return"}:
+                    entry["location_id"] = int(location_id)
+                refund_line_items.append(entry)
 
-            parent_id = parent.get("id")
-            gateway = parent.get("gateway")
-            if not parent_id or not gateway:
-                return {"error": "Refund transaction metadata missing (parent_id/gateway)"}
+            if not refund_line_items:
+                return {"error": "Could not infer refund_line_items from order"}
 
-            payload: dict[str, Any] = {
+            calc_payload: dict[str, Any] = {
                 "refund": {
                     "currency": currency,
-                    "notify": bool(notify),
-                    "transactions": [
-                        {
-                            "parent_id": parent_id,
-                            "amount": refund_amount,
-                            "kind": "refund",
-                            "gateway": gateway,
-                        }
-                    ],
+                    "refund_line_items": refund_line_items,
                 }
             }
-            if note:
-                payload["refund"]["note"] = note
+            if refund_shipping:
+                calc_payload["refund"]["shipping"] = {"full_refund": True}
+
+            calc_resp = httpx.post(
+                f"{_base_url(store)}/orders/{order_id}/refunds/calculate.json",
+                headers=_headers(token),
+                json=calc_payload,
+                timeout=30.0,
+            )
+            calc_result = _handle_response(calc_resp)
+            if "error" in calc_result:
+                return calc_result
+
+            calculated = calc_result.get("refund", {}) or {}
+            calc_txs = calculated.get("transactions") or []
+            if not isinstance(calc_txs, list) or not calc_txs:
+                return {"error": "Refund calculation did not return any transactions"}
+
+            desired_amount = _parse_money(amount) if amount else None
+            if desired_amount is not None and desired_amount <= 0:
+                return {"error": "amount must be a positive number"}
+
+            total_calc = Decimal("0")
+            parsed_amounts: list[Decimal] = []
+            for tx in calc_txs:
+                tx_amount = _parse_money(tx.get("amount"))
+                if tx_amount is None:
+                    return {"error": "Refund calculation returned invalid transaction amounts"}
+                parsed_amounts.append(tx_amount)
+                total_calc += tx_amount
+
+            if total_calc <= 0:
+                return {"error": "Refund calculation returned a non-positive total"}
+
+            updated_txs = calc_txs
+            if desired_amount is not None:
+                if desired_amount > total_calc:
+                    return {"error": f"amount exceeds refundable total ({_format_money(total_calc)} {currency})"}
+
+                ratio = (desired_amount / total_calc) if total_calc != 0 else Decimal("0")
+                scaled: list[dict[str, Any]] = []
+                running = Decimal("0")
+                for i, tx in enumerate(calc_txs):
+                    original = parsed_amounts[i]
+                    if i < len(calc_txs) - 1:
+                        new_amount = (original * ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        running += new_amount
+                    else:
+                        new_amount = (desired_amount - running).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    tx_copy = dict(tx)
+                    tx_copy["amount"] = _format_money(new_amount)
+                    scaled.append(tx_copy)
+                updated_txs = scaled
+
+            create_refund: dict[str, Any] = {
+                "currency": currency,
+                "notify": bool(notify),
+                "note": note,
+                "refund_line_items": calculated.get("refund_line_items", refund_line_items),
+                "transactions": updated_txs,
+            }
+            shipping = calculated.get("shipping")
+            if shipping:
+                create_refund["shipping"] = shipping
 
             refund_resp = httpx.post(
                 f"{_base_url(store)}/orders/{order_id}/refunds.json",
                 headers=_headers(token),
-                json=payload,
+                json={"refund": create_refund},
                 timeout=30.0,
             )
             refund_result = _handle_response(refund_resp)

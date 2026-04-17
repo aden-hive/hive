@@ -187,23 +187,25 @@ class TestShopifyCancelOrder:
                 "fulfillment_status": None,
             }
         }
+        mock_post = _mock_resp(data)
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.shopify_tool.shopify_tool.httpx.post",
-                return_value=_mock_resp(data),
-            ),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.post", return_value=mock_post) as post_mock,
         ):
             result = tool_fns["shopify_cancel_order"](
                 order_id="450789469",
                 reason="customer",
                 restock=True,
                 email=True,
-                refund=False,
+                amount="10.00",
+                currency="USD",
             )
 
         assert result["id"] == 450789469
         assert result["result"] == "cancelled"
+        assert "json" in post_mock.call_args.kwargs
+        assert "params" not in post_mock.call_args.kwargs
+        assert post_mock.call_args.kwargs["json"]["reason"] == "customer"
 
 
 class TestShopifyRefundOrder:
@@ -218,8 +220,20 @@ class TestShopifyRefundOrder:
         assert "error" in result
 
     def test_successful_refund(self, tool_fns):
-        order_data = {"order": {"id": 450789469, "total_price": "199.00", "currency": "USD"}}
-        tx_data = {"transactions": [{"id": 111, "kind": "capture", "gateway": "shopify_payments"}]}
+        order_data = {
+            "order": {
+                "id": 450789469,
+                "currency": "USD",
+                "line_items": [{"id": 518995019, "quantity": 1}],
+            }
+        }
+        calc_data = {
+            "refund": {
+                "currency": "USD",
+                "transactions": [{"parent_id": 801038806, "amount": "41.94", "kind": "refund", "gateway": "bogus"}],
+                "refund_line_items": [{"line_item_id": 518995019, "quantity": 1, "restock_type": "no_restock"}],
+            }
+        }
         refund_data = {
             "refund": {
                 "id": 222,
@@ -233,21 +247,23 @@ class TestShopifyRefundOrder:
         def _mock_get(url, *args, **kwargs):
             if url.endswith("/orders/450789469.json"):
                 return _mock_resp(order_data)
-            if url.endswith("/orders/450789469/transactions.json"):
-                return _mock_resp(tx_data)
             raise AssertionError(f"Unexpected GET URL: {url}")
+
+        def _mock_post(url, *args, **kwargs):
+            if url.endswith("/orders/450789469/refunds/calculate.json"):
+                return _mock_resp(calc_data)
+            if url.endswith("/orders/450789469/refunds.json"):
+                return _mock_resp(refund_data)
+            raise AssertionError(f"Unexpected POST URL: {url}")
 
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", side_effect=_mock_get),
-            patch(
-                "aden_tools.tools.shopify_tool.shopify_tool.httpx.post",
-                return_value=_mock_resp(refund_data),
-            ),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.post", side_effect=_mock_post) as post_mock,
         ):
             result = tool_fns["shopify_refund_order"](
                 order_id="450789469",
-                amount="199.00",
+                amount="41.94",
                 note="Customer requested refund",
                 notify=False,
             )
@@ -255,6 +271,7 @@ class TestShopifyRefundOrder:
         assert result["id"] == 222
         assert result["order_id"] == 450789469
         assert result["result"] == "refunded"
+        assert post_mock.call_count == 2
 
 
 class TestShopifySendDraftOrderInvoice:
