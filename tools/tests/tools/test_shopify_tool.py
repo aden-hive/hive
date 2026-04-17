@@ -219,6 +219,33 @@ class TestShopifyRefundOrder:
             result = tool_fns["shopify_refund_order"](order_id="bad", amount="1.00")
         assert "error" in result
 
+    def test_rejects_invalid_amount(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_refund_order"](order_id="450789469", amount="abc")
+        assert "error" in result
+
+    def test_rejects_invalid_location_id(self, tool_fns):
+        order_data = {"order": {"id": 450789469, "currency": "USD", "line_items": [{"id": 518995019, "quantity": 1}]}}
+        refunds_data = {"refunds": []}
+
+        def _mock_get(url, *args, **kwargs):
+            if url.endswith("/orders/450789469.json"):
+                return _mock_resp(order_data)
+            if url.endswith("/orders/450789469/refunds.json"):
+                return _mock_resp(refunds_data)
+            raise AssertionError(f"Unexpected GET URL: {url}")
+
+        with (
+            patch.dict("os.environ", ENV),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", side_effect=_mock_get),
+        ):
+            result = tool_fns["shopify_refund_order"](
+                order_id="450789469",
+                restock_type="cancel",
+                location_id="not-a-number",
+            )
+        assert "error" in result
+
     def test_successful_refund(self, tool_fns):
         order_data = {
             "order": {

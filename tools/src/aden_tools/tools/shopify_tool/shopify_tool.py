@@ -426,6 +426,12 @@ def register_tools(
                 return {"error": f"restock_type must be one of: {', '.join(sorted(valid_restock_types))}"}
             if restock_type in {"cancel", "return"} and not location_id:
                 return {"error": "location_id is required when restock_type is 'cancel' or 'return'"}
+            location_id_int: int | None = None
+            if restock_type in {"cancel", "return"}:
+                try:
+                    location_id_int = int(location_id)
+                except ValueError:
+                    return {"error": "location_id must be a numeric Shopify location ID"}
 
             refunds_resp = httpx.get(
                 f"{_base_url(store)}/orders/{order_id}/refunds.json",
@@ -472,7 +478,7 @@ def register_tools(
                     "restock_type": restock_type,
                 }
                 if restock_type in {"cancel", "return"}:
-                    entry["location_id"] = int(location_id)
+                    entry["location_id"] = location_id_int
                 refund_line_items.append(entry)
 
             if not refund_line_items:
@@ -503,6 +509,8 @@ def register_tools(
                 return {"error": "Refund calculation did not return any transactions"}
 
             desired_amount = _parse_money(amount) if amount else None
+            if amount and desired_amount is None:
+                return {"error": "amount must be a number (e.g. '10.00')"}
             if desired_amount is not None and desired_amount <= 0:
                 return {"error": "amount must be a positive number"}
 
