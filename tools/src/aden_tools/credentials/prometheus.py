@@ -33,7 +33,7 @@ Notes:
 - PROMETHEUS_BASE_URL is required
 - Authentication is optional (most local setups don’t need it)
 """,
-        health_check_endpoint="/api/v1/query?query=up",
+        health_check_endpoint="/-/ready",
         health_check_method="GET",
         credential_id="prometheus",
         credential_key="base_url",

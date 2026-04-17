@@ -88,7 +88,7 @@ def test_prometheus_non_200(mcp: FastMCP, monkeypatch: pytest.MonkeyPatch) -> No
     assert "error" in result
 
 
-def test_timeout(mcp: FastMCP, monkeypatch: pytest.MonkeyPatch):
+def test_timeout(mcp: FastMCP, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMETHEUS_BASE_URL", "http://fake-prometheus:9090")
     tool_fn = mcp._tool_manager._tools["prometheus_query"].fn
 
@@ -131,20 +131,23 @@ def test_missing_base_url(mcp: FastMCP, monkeypatch: pytest.MonkeyPatch) -> None
     assert "Missing required credential" in result["error"]
 
 
-def test_base_url_from_credentials_overrides_env(
-    mcp: FastMCP,
+def test_base_url_credentials_priority_over_env(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.setenv("PROMETHEUS_BASE_URL", "http://fake-prometheus:9090")
 
     class FakeCredentialStore:
         def get(self, key: str):
-            return "http://fake-prometheus:9090"
+            return "http://cred-prometheus:9090"
 
+    mcp = FastMCP("test-cred-override")
     register_tools(mcp, credentials=FakeCredentialStore())
 
-    # mock httpx.get so no real network call
-    def fake_get(*args, **kwargs):
+    called_urls = []
+
+    def fake_get(url, *args, **kwargs):
+        called_urls.append(url)
+
         class Resp:
             status_code = 200
 
@@ -153,7 +156,7 @@ def test_base_url_from_credentials_overrides_env(
 
         return Resp()
 
-    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr("aden_tools.tools.prometheus_tool.prometheus_tool.httpx.get", fake_get)
 
     tool_fn = mcp._tool_manager._tools["prometheus_query"].fn
 
@@ -161,3 +164,4 @@ def test_base_url_from_credentials_overrides_env(
 
     assert result["success"] is True
     assert result["query"] == "up"
+    assert "cred-prometheus:9090" in called_urls[0]
