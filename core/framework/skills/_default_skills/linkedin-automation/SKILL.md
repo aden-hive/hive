@@ -108,7 +108,7 @@ sleep(0.6)
 #    Do NOT pass a selector here. Selector-based browser_type cannot see
 #    past the #interop-outlet shadow root. No-selector mode sidesteps
 #    that entirely by routing to activeElement.
-browser_type(text=message_text)   # no selector — targets document.activeElement
+browser_type_focused(text=message_text)   # targets document.activeElement
 sleep(1.0)   # let Lexical commit state + enable Send button
 
 # 7. Find the modal Send button (filter by in-viewport, reject pinned bar)
@@ -143,7 +143,7 @@ send = browser_evaluate("""
 
 # 8. ONLY click Send if it's enabled — if disabled, the insertText
 #    didn't land. DO NOT retry with a different tool; the fix is
-#    always: re-click the composer rect, re-run browser_type(text=...),
+#    always: re-click the composer rect, re-run browser_type_focused(text=...),
 #    re-check. The Send button's `disabled` state IS the ground truth —
 #    if Lexical registered your text, it enables the button. If it's
 #    still disabled, your text did not reach the editor, regardless
@@ -153,7 +153,7 @@ if send['disabled']:
     # fall back to browser_type with a selector (see anti-pattern in
     # Common Pitfalls — selector-based type can't reach the shadow-DOM
     # composer). Instead: re-click the textarea rect from step 4, wait
-    # a beat, re-run browser_type(text=message_text) (no selector) from
+    # a beat, re-run browser_type_focused(text=message_text) from
     # step 6. If that still fails after 2 retries, bail and surface —
     # the modal may have been reclaimed by a stale state or auth wall.
     raise Exception("Send button disabled after insertText — editor did not receive input")
@@ -323,9 +323,9 @@ If any of those show up, **stop the run, screenshot the state, and surface the i
 ## Common pitfalls
 
 - **`innerHTML` injection is silently dropped** — LinkedIn's Trusted Types CSP discards any `innerHTML = "<...>"` from injected scripts, no console error. Always use `createElement` + `appendChild` + `setAttribute` for DOM injection. `textContent`, `style.cssText`, and `.value` assignments are fine.
-- **Do NOT pass a selector to `browser_type` on the message composer — call it with NO selector (`browser_type(text=...)`).** The Lexical contenteditable lives inside the `#interop-outlet` shadow root which `document.querySelector` (what the selector-based path uses under the hood) cannot see. Attempts to work around this with `browser_shadow_query` fail because selector-based `browser_type` doesn't support the `>>>` shadow-pierce syntax. The reliable insert path is: (1) `browser_click_coordinate` on the composer rect — the response's `focused_element` confirms Lexical received focus → (2) `browser_type(text=message_text)` with NO selector — CDP `Input.insertText` dispatches to `document.activeElement` regardless of shadow wrapping. The old `browser_evaluate` + `document.execCommand('insertText', ...)` pattern worked but had JSON-escaping pitfalls and cost ~200 chars of JS per send; `browser_type(text=...)` is the same mechanism with built-in retry.
-- **Per-char keyDown on the message composer produces empty text** — Lexical intercepts `beforeinput` and drops raw keys. Use `browser_type(text=..., use_insert_text=True)` with NO selector after click-coordinate focused the composer. The CDP `Input.insertText` method commits as if IME fired, which Lexical accepts cleanly. Do NOT pass a selector; selector-based `browser_type` can't see past `#interop-outlet`.
-- **ANTI-PATTERN: "inject a dummy `<div id='dummy-target'>` and pass it as the `selector` arg to `browser_type`".** This looks tempting but fails compoundingly: `browser_type` clicks the **dummy div's** rect (not the editor's), the click lands on the Lexical wrapper's non-editable chrome, the contenteditable never receives focus, and `Input.insertText` fires against nothing. The bridge will still return `{"ok": true, "action": "type", "length": N}` because it has no way to verify the text actually landed. Symptom: Send button stays `disabled: true` forever. Fix: `browser_click_coordinate` on the real composer rect, then `browser_type(text=message_text)` with NO selector — CDP `Input.insertText` dispatches to `document.activeElement`. (See `session_20260414_114820_08bd3c4d` for the failed dummy-div attempt.)
+- **Do NOT use selector-based `browser_type` on the message composer — use `browser_type_focused(text=...)`.** The Lexical contenteditable lives inside the `#interop-outlet` iframe/shadow wrapper which `document.querySelector` cannot see. `browser_shadow_query` can find it but selector-based `browser_type` doesn't support the `>>>` shadow-pierce syntax. The reliable insert path is: (1) `browser_click_coordinate` on the composer rect — the response's `focused_element` (which recurses into same-origin iframes) confirms what actually received focus → (2) `browser_type_focused(text=message_text)` — CDP `Input.insertText` dispatches to `document.activeElement` regardless of shadow wrapping.
+- **Per-char keyDown on the message composer produces empty text** — Lexical intercepts `beforeinput` and drops raw keys. Use `browser_type_focused(text=..., use_insert_text=True)` after click-coordinate focused the composer. The CDP `Input.insertText` method commits as if IME fired, which Lexical accepts cleanly.
+- **ANTI-PATTERN: "inject a dummy `<div id='dummy-target'>` and pass it as the `selector` arg to `browser_type`".** This fails compoundingly: `browser_type` clicks the **dummy div's** rect (not the editor's), the click lands on the Lexical wrapper's non-editable chrome, the contenteditable never receives focus, and `Input.insertText` fires against nothing. The bridge will still return `{"ok": true, "action": "type", "length": N}` because it has no way to verify the text actually landed. Symptom: Send button stays `disabled: true` forever. Fix: `browser_click_coordinate` on the real composer rect, then `browser_type_focused(text=message_text)` — CDP `Input.insertText` dispatches to `document.activeElement`.
 - **Multiple Send buttons on the page** — the pinned bottom-right messaging bar has its own `msg-form__send-button` that's usually below `innerHeight`. Filter by in-viewport before clicking.
 - **`window.onbeforeunload` hangs navigation/close** — after typing in a composer, any `browser_navigate` or `close_tab` can pop a native "unsent message, leave?" confirm dialog that deadlocks the bridge. Always strip `onbeforeunload` before any navigation, and wrap composer flows in a `try/finally` that runs the cleanup block:
 

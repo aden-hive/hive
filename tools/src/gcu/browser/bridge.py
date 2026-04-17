@@ -80,33 +80,57 @@ async def _adaptive_poll_sleep(elapsed_s: float) -> None:
 _interaction_highlights: dict[int, dict] = {}
 
 
-# Compact descriptor of document.activeElement. Returned by both click()
+# Compact descriptor of the focused element. Returned by both click()
 # and click_coordinate() so the agent can verify it focused what it
-# intended, then decide whether to follow up with browser_type(text=...,
-# no selector). Keeping this as a single shared string avoids drift
-# between the two click paths.
+# intended. When the outer document's activeElement is an <iframe>,
+# we recurse into the iframe's document (same-origin only) so the
+# response describes the real inner element — otherwise the agent
+# always sees {tag: "iframe"} and can't tell whether it hit the
+# composer or something else inside the frame (e.g. a sidebar item in
+# LinkedIn's #interop-outlet messaging overlay).
 _FOCUSED_ELEMENT_JS = """
 (function() {
+    function describe(el) {
+        var rect = el.getBoundingClientRect();
+        var attrs = {};
+        for (var i = 0; i < el.attributes.length && i < 10; i++) {
+            attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+        }
+        return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || null,
+            className: el.className || null,
+            name: el.getAttribute('name') || null,
+            type: el.getAttribute('type') || null,
+            role: el.getAttribute('role') || null,
+            contenteditable: el.getAttribute('contenteditable') || null,
+            text: (el.innerText || '').substring(0, 200),
+            value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
+            attributes: attrs,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+    }
     var el = document.activeElement;
     if (!el || el === document.body) return null;
-    var rect = el.getBoundingClientRect();
-    var attrs = {};
-    for (var i = 0; i < el.attributes.length && i < 10; i++) {
-        attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+    // Descend into same-origin iframes. Capped at 5 levels of nesting
+    // to bound cost and prevent a pathological loop. If a frame is
+    // cross-origin, contentDocument throws; catch and report the
+    // outermost iframe instead.
+    var framePath = [];
+    var depth = 0;
+    while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME') && depth < 5) {
+        framePath.push(el.id || el.getAttribute('data-testid') || el.tagName.toLowerCase());
+        var innerDoc = null;
+        try { innerDoc = el.contentDocument; } catch (e) { innerDoc = null; }
+        if (!innerDoc) break;
+        var innerActive = innerDoc.activeElement;
+        if (!innerActive || innerActive === innerDoc.body) break;
+        el = innerActive;
+        depth++;
     }
-    return {
-        tag: el.tagName.toLowerCase(),
-        id: el.id || null,
-        className: el.className || null,
-        name: el.getAttribute('name') || null,
-        type: el.getAttribute('type') || null,
-        role: el.getAttribute('role') || null,
-        contenteditable: el.getAttribute('contenteditable') || null,
-        text: (el.innerText || '').substring(0, 200),
-        value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
-        attributes: attrs,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    };
+    var out = describe(el);
+    if (framePath.length) out.inFrame = framePath;
+    return out;
 })()
 """
 

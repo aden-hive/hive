@@ -44,7 +44,7 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 1. `browser_screenshot()` → visual image (delivered at the CSS-viewport's own dimensions).
 2. Identify the target visually → pixel `(x, y)` read straight off the image.
 3. `browser_click_coordinate(x, y)` → clicks there. **The response includes `focused_element: {tag, id, role, contenteditable, rect, ...}`** — use it to verify you actually focused what you intended.
-4. `browser_type(text="...")` with **NO selector** → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Only pass a selector if you want a DIFFERENT element than the one you just focused (rare).
+4. `browser_type_focused(text="...")` → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Use `browser_type(selector, text)` only when you want to target a different element than the one you just focused.
 5. Verify via `browser_screenshot` OR `browser_get_attribute` on a known-reachable marker (e.g. check that the Send button's `aria-disabled` flipped to `false`).
 
 ### The click→type loop (canonical pattern)
@@ -53,7 +53,7 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 resp = browser_click_coordinate(x, y)       # x, y read straight off the screenshot
 fe = resp.get("focused_element")
 if fe and (fe.get("contenteditable") or fe["tag"] in ("textarea", "input")):
-    browser_type(text="...")                # no selector — insertText to activeElement
+    browser_type_focused(text="...")        # insertText to activeElement
 else:
     # you clicked something that isn't editable — refine the pixel and retry.
     # Do NOT reach for browser_evaluate + execCommand('insertText', ...)
