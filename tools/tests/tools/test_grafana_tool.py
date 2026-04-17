@@ -116,8 +116,8 @@ async def test_grafana_list_dashboards_success(mock_env):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_grafana_create_annotation(mock_env):
-    """Ensure annotation uses sanitize_for_log."""
+async def test_grafana_create_annotation(mock_env, caplog):
+    """Ensure annotation uses sanitize_for_log for logs, but raw text in payload."""
     respx.post("https://grafana.example.com/api/annotations").mock(
         return_value=httpx.Response(200, json={"message": "Annotation added", "id": 123})
     )
@@ -133,10 +133,14 @@ async def test_grafana_create_annotation(mock_env):
     import json
     data = json.loads(request.content)
     
-    # sanitize_for_log should redact "password=secret123" to something like "password=********"
-    assert "********" in data["text"]
-    assert "execution-log" in data["tags"]
+    # sanitize_for_log should redact "password=secret123" to something like "password=********" in the LOGS, not payload
+    assert "********" not in data["text"]
+    assert data["text"] == "password=secret123"
+    assert "hive-agent" in data["tags"]
     assert result["message"] == "Annotation added"
+    
+    # Check that logs were redacted correctly
+    assert "********" in caplog.text
 
 @pytest.mark.asyncio
 @respx.mock

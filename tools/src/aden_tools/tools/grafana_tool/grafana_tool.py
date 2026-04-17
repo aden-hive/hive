@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from fastmcp import FastMCP
@@ -41,7 +41,6 @@ def with_retry(max_retries: int = 3, base_delay: float = 1.0):
                         if e.response.status_code == 401:
                             raise GrafanaToolError("Unauthorized. Check your GRAFANA_API_KEY.")
                         raise GrafanaToolError(f"Grafana API error: {e}")
-            return await func(*args, **kwargs)
         return wrapper
     return decorator
 
@@ -112,7 +111,7 @@ def register_tools(
         return _client_cache[cache_key]
 
     @mcp.tool()
-    async def grafana_list_dashboards() -> List[Dict[str, Any]] | dict[str, Any]:
+    async def grafana_list_dashboards() -> list[dict[str, Any]] | dict[str, Any]:
         """Search and list all available Grafana dashboards (returns title, UID, and tags)."""
         client = _get_client()
         if isinstance(client, dict):
@@ -145,7 +144,7 @@ def register_tools(
             return {"error": str(e)}
 
     @mcp.tool()
-    async def grafana_get_dashboard(uid: str) -> Dict[str, Any]:
+    async def grafana_get_dashboard(uid: str) -> dict[str, Any]:
         """Retrieve full JSON model of a Grafana dashboard by UID."""
         client = _get_client()
         if isinstance(client, dict):
@@ -163,7 +162,7 @@ def register_tools(
         panel_id: int,
         from_time: str = "now-1h",
         to_time: str = "now",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch data from a specific panel within a dashboard using time range parameters."""
         client = _get_client()
         if isinstance(client, dict):
@@ -196,7 +195,7 @@ def register_tools(
     async def grafana_create_annotation(
         dashboard_uid: str,
         text: str,
-        tags: list[str] = [],
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a new annotation (event marker) on a Grafana dashboard."""
         client = _get_client()
@@ -216,7 +215,7 @@ def register_tools(
             "dashboardUID": dashboard_uid,
             "time": int(time.time() * 1000),
             "text": text, # ✅ Use the raw 'text' here so Grafana shows the real message
-            "tags": tags + ["hive-agent"]
+            "tags": (tags or []) + ["hive-agent"]
         }
         
         try:
@@ -225,7 +224,7 @@ def register_tools(
             return {"error": str(e)}
 
     @mcp.tool()
-    async def grafana_list_alerts() -> List[Dict[str, Any]] | Dict[str, Any]:
+    async def grafana_list_alerts() -> list[dict[str, Any]] | dict[str, Any]:
         """Fetch current status of Grafana Alert Rules."""
         client = _get_client()
         if isinstance(client, dict):
