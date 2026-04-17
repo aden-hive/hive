@@ -255,6 +255,17 @@ def register_advanced_tools(mcp: FastMCP) -> None:
 
         try:
             result = await bridge.resize(target_tab, width, height)
+            # Invalidate per-tab scale caches — CSS width changed, so the
+            # cached viewport dimensions are stale. Click / rect tools
+            # will re-query innerWidth / innerHeight on next use via
+            # _ensure_viewport_size.
+            try:
+                from .inspection import _screenshot_scales, _viewport_sizes
+
+                _viewport_sizes.pop(target_tab, None)
+                _screenshot_scales.pop(target_tab, None)
+            except Exception:
+                pass
             return result
         except Exception as e:
             return {"ok": False, "error": str(e)}

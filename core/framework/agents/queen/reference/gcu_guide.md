@@ -25,7 +25,6 @@ All tools are prefixed with `browser_`:
 - `browser_screenshot` — visual capture (annotated PNG)
 <!-- /vision-only -->
 - `browser_shadow_query`, `browser_get_rect` — locate elements (shadow-piercing via `>>>`)
-- `browser_coords` — convert image pixels to CSS pixels (always use `css_x/y`, never `physical_x/y`)
 - `browser_scroll`, `browser_wait` — navigation helpers
 - `browser_evaluate` — run JavaScript
 - `browser_close`, `browser_close_finished` — tab cleanup
@@ -38,9 +37,9 @@ All tools are prefixed with `browser_`:
 
 Neither tool is "preferred" universally — they're for different jobs. Default to snapshot on text-heavy static pages, screenshot on SPAs and anything shadow-DOM-heavy. Activate the `browser-automation` skill for the full decision tree.
 
-## Coordinate rule: always CSS pixels
+## Coordinate rule
 
-Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS pixels**, not physical pixels. After a screenshot, use `browser_coords(image_x, image_y)` and feed the returned `css_x/y` (NOT `physical_x/y`) to `browser_click_coordinate`, `browser_hover_coordinate`, `browser_press_at`. Feeding physical pixels on a HiDPI display (DPR=1.6, 2, or 3) overshoots by `DPR×` and clicks land in the wrong place. `getBoundingClientRect()` already returns CSS pixels — pass through unchanged, no DPR multiplication.
+Every browser tool that takes or returns coordinates operates in **fractions of the viewport (0..1 for both axes)**. Read a target's proportional position off `browser_screenshot` ("~35% from the left, ~20% from the top" → `(0.35, 0.20)`) and pass that to `browser_click_coordinate` / `browser_hover_coordinate` / `browser_press_at`. `browser_get_rect` and `browser_shadow_query` return `rect.cx` / `rect.cy` as fractions. The tools multiply by `cssWidth` / `cssHeight` internally — no scale awareness required. Fractions are used because every vision model (Claude, GPT-4o, Gemini, local VLMs) resizes/tiles images differently; proportions are invariant. Avoid raw `getBoundingClientRect()` via `browser_evaluate` for coord lookup; use `browser_get_rect` instead.
 
 ## System prompt tips for browser nodes
 

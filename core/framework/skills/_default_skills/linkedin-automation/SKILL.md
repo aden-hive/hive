@@ -34,7 +34,7 @@ LinkedIn is the hardest mainstream site to automate because it combines **shadow
 | Pending connection card | `.invitation-card, .invitations-card, [data-test-incoming-invitation-card]` | Filter out "invited you to follow" / "subscribe" cards |
 | Accept button | `button[aria-label*="Accept"]` within the card scope | Per-card scoping is critical — there are many Accept buttons on the page |
 
-LinkedIn changes class names aggressively. If a class-based selector breaks, fall back to **`browser_screenshot` → visual identification → `browser_coords` → `browser_click_coordinate`**. The screenshot + coord path works regardless of class-name churn and regardless of shadow DOM.
+LinkedIn changes class names aggressively. If a class-based selector breaks, fall back to **`browser_screenshot` → visual identification → `browser_click_coordinate`** with the pixel you read straight off the image (screenshots are CSS-sized, no conversion). The screenshot + coord path works regardless of class-name churn and regardless of shadow DOM.
 
 ## Profile Message flow (verified end-to-end 2026-04-11)
 
