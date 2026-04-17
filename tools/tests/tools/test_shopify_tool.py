@@ -227,6 +227,7 @@ class TestShopifyRefundOrder:
                 "line_items": [{"id": 518995019, "quantity": 1}],
             }
         }
+        refunds_data = {"refunds": []}
         calc_data = {
             "refund": {
                 "currency": "USD",
@@ -247,6 +248,8 @@ class TestShopifyRefundOrder:
         def _mock_get(url, *args, **kwargs):
             if url.endswith("/orders/450789469.json"):
                 return _mock_resp(order_data)
+            if url.endswith("/orders/450789469/refunds.json"):
+                return _mock_resp(refunds_data)
             raise AssertionError(f"Unexpected GET URL: {url}")
 
         def _mock_post(url, *args, **kwargs):
@@ -272,6 +275,56 @@ class TestShopifyRefundOrder:
         assert result["order_id"] == 450789469
         assert result["result"] == "refunded"
         assert post_mock.call_count == 2
+
+    def test_refund_subtracts_previous_refunds(self, tool_fns):
+        order_data = {
+            "order": {
+                "id": 450789469,
+                "currency": "USD",
+                "line_items": [{"id": 518995019, "quantity": 2}],
+            }
+        }
+        refunds_data = {"refunds": [{"refund_line_items": [{"line_item_id": 518995019, "quantity": 1}]}]}
+        calc_data = {
+            "refund": {
+                "currency": "USD",
+                "transactions": [{"parent_id": 801038806, "amount": "10.00", "kind": "refund", "gateway": "bogus"}],
+                "refund_line_items": [{"line_item_id": 518995019, "quantity": 1, "restock_type": "no_restock"}],
+            }
+        }
+        refund_data = {
+            "refund": {
+                "id": 223,
+                "order_id": 450789469,
+                "created_at": "2025-01-10T12:51:00-05:00",
+                "transactions": [{"id": 334, "amount": "10.00", "kind": "refund"}],
+            }
+        }
+
+        def _mock_get(url, *args, **kwargs):
+            if url.endswith("/orders/450789469.json"):
+                return _mock_resp(order_data)
+            if url.endswith("/orders/450789469/refunds.json"):
+                return _mock_resp(refunds_data)
+            raise AssertionError(f"Unexpected GET URL: {url}")
+
+        def _mock_post(url, *args, **kwargs):
+            if url.endswith("/orders/450789469/refunds/calculate.json"):
+                # quantity should be remaining (2 - 1)
+                assert kwargs["json"]["refund"]["refund_line_items"][0]["quantity"] == 1
+                return _mock_resp(calc_data)
+            if url.endswith("/orders/450789469/refunds.json"):
+                return _mock_resp(refund_data)
+            raise AssertionError(f"Unexpected POST URL: {url}")
+
+        with (
+            patch.dict("os.environ", ENV),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", side_effect=_mock_get),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.post", side_effect=_mock_post),
+        ):
+            result = tool_fns["shopify_refund_order"](order_id="450789469", amount="10.00")
+
+        assert result["id"] == 223
 
 
 class TestShopifySendDraftOrderInvoice:

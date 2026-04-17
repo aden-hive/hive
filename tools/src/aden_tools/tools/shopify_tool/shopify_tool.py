@@ -427,15 +427,48 @@ def register_tools(
             if restock_type in {"cancel", "return"} and not location_id:
                 return {"error": "location_id is required when restock_type is 'cancel' or 'return'"}
 
+            refunds_resp = httpx.get(
+                f"{_base_url(store)}/orders/{order_id}/refunds.json",
+                headers=_headers(token),
+                timeout=30.0,
+            )
+            refunds_result = _handle_response(refunds_resp)
+            if "error" in refunds_result:
+                return refunds_result
+
+            refunded_quantities: dict[int, int] = {}
+            for r in refunds_result.get("refunds", []) or []:
+                for rli in (r.get("refund_line_items") or [])[:]:
+                    li_id = rli.get("line_item_id")
+                    qty = rli.get("quantity")
+                    if not li_id or not qty:
+                        continue
+                    try:
+                        li_id_int = int(li_id)
+                        qty_int = int(qty)
+                    except (TypeError, ValueError):
+                        continue
+                    refunded_quantities[li_id_int] = refunded_quantities.get(li_id_int, 0) + qty_int
+
             refund_line_items: list[dict[str, Any]] = []
             for li in (order.get("line_items") or [])[:]:
                 line_item_id = li.get("id")
                 quantity = li.get("quantity")
                 if not line_item_id or not quantity:
                     continue
+                try:
+                    line_item_id_int = int(line_item_id)
+                    ordered_qty = int(quantity)
+                except (TypeError, ValueError):
+                    continue
+
+                remaining_qty = ordered_qty - refunded_quantities.get(line_item_id_int, 0)
+                if remaining_qty <= 0:
+                    continue
+
                 entry: dict[str, Any] = {
-                    "line_item_id": int(line_item_id),
-                    "quantity": int(quantity),
+                    "line_item_id": line_item_id_int,
+                    "quantity": remaining_qty,
                     "restock_type": restock_type,
                 }
                 if restock_type in {"cancel", "return"}:
@@ -490,6 +523,9 @@ def register_tools(
                 if desired_amount > total_calc:
                     return {"error": f"amount exceeds refundable total ({_format_money(total_calc)} {currency})"}
 
+                if desired_amount < total_calc and refund_shipping:
+                    return {"error": "amount-only refunds do not support refund_shipping; omit refund_shipping or omit amount"}
+
                 ratio = (desired_amount / total_calc) if total_calc != 0 else Decimal("0")
                 scaled: list[dict[str, Any]] = []
                 running = Decimal("0")
@@ -508,13 +544,19 @@ def register_tools(
             create_refund: dict[str, Any] = {
                 "currency": currency,
                 "notify": bool(notify),
-                "note": note,
-                "refund_line_items": calculated.get("refund_line_items", refund_line_items),
                 "transactions": updated_txs,
             }
-            shipping = calculated.get("shipping")
-            if shipping:
-                create_refund["shipping"] = shipping
+            if note:
+                create_refund["note"] = note
+
+            # If the caller provided an amount less than the calculated total, we treat
+            # this as an "amount-only" refund by omitting refund_line_items/shipping.
+            # This avoids inconsistent payloads (line items fully refunded but money partially refunded).
+            if desired_amount is None or desired_amount >= total_calc:
+                create_refund["refund_line_items"] = calculated.get("refund_line_items", refund_line_items)
+                shipping = calculated.get("shipping")
+                if shipping:
+                    create_refund["shipping"] = shipping
 
             refund_resp = httpx.post(
                 f"{_base_url(store)}/orders/{order_id}/refunds.json",

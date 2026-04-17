@@ -99,6 +99,10 @@ shopify_refund_order(
 )
 ```
 
+> Note: If `amount` is less than the calculated refundable total, the tool performs an "amount-only" refund by
+> omitting `refund_line_items` from the create-refund call (avoids marking items fully refunded while refunding
+> only part of the money).
+
 ### List active products
 
 ```python
