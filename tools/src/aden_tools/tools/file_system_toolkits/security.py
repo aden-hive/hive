@@ -33,33 +33,4 @@ def resolve_safe_path(path: str) -> str:
     )
 
 
-# Keep the old API for backward compatibility with non-CSV tools.
-# TODO: migrate remaining callers and remove.
-AGENT_SANDBOXES_DIR = os.path.expanduser("~/.hive/workdir/workspaces/default")
 
-
-def get_sandboxed_path(path: str, agent_id: str) -> str:
-    """Resolve and verify a path within an agent's sandbox directory."""
-    if not agent_id:
-        raise ValueError("agent_id is required")
-
-    agent_dir = os.path.realpath(os.path.join(AGENT_SANDBOXES_DIR, agent_id, "current"))
-    os.makedirs(agent_dir, exist_ok=True)
-
-    path = path.strip()
-
-    if os.path.isabs(path) or path.startswith(("/", "\\")):
-        rel_path = path[1:] if path and path[0] in ("/", "\\") else path
-        final_path = os.path.realpath(os.path.join(agent_dir, rel_path))
-    else:
-        final_path = os.path.realpath(os.path.join(agent_dir, path))
-
-    try:
-        common_prefix = os.path.commonpath([final_path, agent_dir])
-    except ValueError as err:
-        raise ValueError(f"Access denied: Path '{path}' is outside the agent sandbox.") from err
-
-    if common_prefix != agent_dir:
-        raise ValueError(f"Access denied: Path '{path}' is outside the agent sandbox.")
-
-    return final_path

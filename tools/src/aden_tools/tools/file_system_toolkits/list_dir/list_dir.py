@@ -2,7 +2,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from ..security import get_sandboxed_path
+from ..security import resolve_safe_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -32,7 +32,7 @@ def register_tools(mcp: FastMCP) -> None:
             Dict with directory contents and metadata, or error dict
         """
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
             if not os.path.exists(secure_path):
                 return {"error": f"Path not found: {path}"}
 

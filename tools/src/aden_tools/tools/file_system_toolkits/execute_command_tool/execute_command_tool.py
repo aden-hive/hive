@@ -24,7 +24,7 @@ import time
 from mcp.server.fastmcp import FastMCP
 
 from ..command_sanitizer import CommandBlockedError, validate_command
-from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
+from ..security import resolve_safe_path
 from .background_jobs import get as get_job
 from .background_jobs import kill as kill_job
 from .background_jobs import spawn as spawn_job
@@ -39,11 +39,9 @@ _DEFAULT_TIMEOUT = 120
 
 
 def _resolve_cwd(cwd: str | None, agent_id: str) -> str:
-    agent_root = os.path.join(AGENT_SANDBOXES_DIR, agent_id, "current")
-    os.makedirs(agent_root, exist_ok=True)
     if cwd:
-        return get_sandboxed_path(cwd, agent_id)
-    return agent_root
+        return resolve_safe_path(cwd)
+    return os.path.expanduser("~/.hive")
 
 
 def register_tools(mcp: FastMCP) -> None:

@@ -5,7 +5,7 @@ from mcp.server.fastmcp import FastMCP
 
 from aden_tools.hashline import HASHLINE_MAX_FILE_BYTES, compute_line_hash
 
-from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
+from ..security import resolve_safe_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -44,9 +44,9 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Invalid regex pattern: {e.msg}"}
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
-            # Use agent sandbox root for relative path calculations
-            agent_root = os.path.join(AGENT_SANDBOXES_DIR, agent_id, "current")
+            secure_path = resolve_safe_path(path)
+            # Use the directory of the path as root for relative paths
+            agent_root = os.path.dirname(secure_path) if os.path.isfile(secure_path) else secure_path
 
             matches = []
             skipped_large_files = []

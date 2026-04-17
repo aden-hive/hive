@@ -6,7 +6,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from ..file_system_toolkits.security import get_sandboxed_path
+from ..file_system_toolkits.security import resolve_safe_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -47,7 +47,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -172,7 +172,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -249,7 +249,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}. Use excel_write to create a new file."}
@@ -343,7 +343,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -426,7 +426,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -504,7 +504,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -663,7 +663,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}

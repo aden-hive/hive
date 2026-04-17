@@ -20,7 +20,7 @@ from aden_tools.hashline import (
 
 from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 
-from ..security import get_sandboxed_path
+from ..security import resolve_safe_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -83,7 +83,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 2. Read file
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
             if not os.path.isfile(secure_path):

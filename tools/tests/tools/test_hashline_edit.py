@@ -43,14 +43,14 @@ def mock_workspace():
 
 @pytest.fixture
 def mock_secure_path(tmp_path):
-    """Mock get_sandboxed_path to return temp directory paths."""
+    """Mock resolve_safe_path to return temp directory paths."""
 
-    def _get_sandboxed_path(path, agent_id):
+    def _resolve_safe_path(path, *args, **kwargs):
         return os.path.join(tmp_path, path)
 
     with patch(
-        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_sandboxed_path",
-        side_effect=_get_sandboxed_path,
+        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.resolve_safe_path",
+        side_effect=_resolve_safe_path,
     ):
         yield
 
