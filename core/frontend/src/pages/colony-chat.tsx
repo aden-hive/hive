@@ -4,6 +4,7 @@ import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import TriggersPanel from "@/components/TriggersPanel";
 import TriggerDetailPanel from "@/components/TriggerDetailPanel";
+import WorkersPanel from "@/components/WorkersPanel";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import CredentialsModal, {
   type Credential,
@@ -1327,6 +1328,16 @@ export default function ColonyChat() {
             supportsImages={agentState.queenSupportsImages}
           />
         </div>
+
+        {/* Workers sidebar — live list of active + recently-finished workers
+            with per-worker stop controls. Shown whenever the queen is in
+            working or reviewing phase (i.e., there's a meaningful worker
+            population to manage). */}
+        {(agentState.queenPhase === "working" || agentState.queenPhase === "reviewing") && (
+          <div className="w-[260px] flex-shrink-0">
+            <WorkersPanel sessionId={agentState.sessionId} />
+          </div>
+        )}
 
         {/* Triggers sidebar — only rendered when the colony actually has triggers */}
         {triggers.length > 0 && (

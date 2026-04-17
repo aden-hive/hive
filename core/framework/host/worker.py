@@ -145,6 +145,24 @@ class Worker:
         self.status = WorkerStatus.RUNNING
         self._started_at = time.monotonic()
 
+        # Scope browser profile (and any other CONTEXT_PARAMS) to this
+        # worker. asyncio.create_task() copies the parent's contextvars,
+        # so without this override every spawned worker inherits the
+        # queen's `profile=<queen_session_id>` and its browser_* tool
+        # calls end up driving the queen's Chrome tab group. Setting
+        # it here (inside the new Task's context) shadows the parent
+        # value without affecting the queen's ongoing calls.
+        try:
+            from framework.loader.tool_registry import ToolRegistry
+
+            ToolRegistry.set_execution_context(profile=self.id)
+        except Exception:
+            logger.debug(
+                "Worker %s: failed to scope browser profile",
+                self.id,
+                exc_info=True,
+            )
+
         try:
             result = await self._agent_loop.execute(self._context)
             duration = time.monotonic() - self._started_at
