@@ -45,18 +45,23 @@ CSS selector.
 ## Coordinates
 
 Every browser tool that takes or returns coordinates operates in
-**screenshot pixels** (the 800 px wide JPEG `browser_screenshot`
-delivers). Read a pixel off the image, pass it to
-`browser_click_coordinate` / `browser_hover_coordinate` /
-`browser_press_at`. `browser_get_rect` and `browser_shadow_query`
-return `rect.cx` / `rect.cy` in the same space. The tools handle the
-image-px → CSS-px translation internally; you do not need to know
-about CSS pixels, DPR, or any scale factor.
+**fractions of the viewport (0..1 for both axes)**. Read a target's
+proportional position off `browser_screenshot` — "this button is
+~35% from the left, ~20% from the top" → pass `(0.35, 0.20)`.
+`browser_get_rect` and `browser_shadow_query` return `rect.cx` /
+`rect.cy` as fractions in the same space. The tools handle the
+fraction → CSS-px multiplication internally; you do not need to
+track image pixels, DPR, or any scale factor.
+
+Why fractions: every vision model (Claude, GPT-4o, Gemini, local
+VLMs) resizes or tiles images differently before the model sees the
+pixels. Proportions survive every such transform; pixel coordinates
+only "work" per-model and break when you swap backends.
 
 Avoid raw `browser_evaluate` + `getBoundingClientRect()` for coord
-lookup — that returns CSS px and will be mis-scaled when fed to click
+lookup — that returns CSS px and will be wrong when fed to click
 tools. Prefer `browser_get_rect` / `browser_shadow_query`, which
-convert for you.
+return fractions.
 
 ## Rich-text editors (X, LinkedIn DMs, Gmail, Reddit, Slack, Discord)
 

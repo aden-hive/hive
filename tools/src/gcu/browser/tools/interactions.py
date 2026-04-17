@@ -108,25 +108,31 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         button: Literal["left", "right", "middle"] = "left",
     ) -> dict:
         """
-        Click at the given SCREENSHOT pixel.
+        Click at a FRACTION of the viewport (0..1, 0..1).
 
-        ``x`` and ``y`` are pixel coordinates read directly off a
-        ``browser_screenshot`` image (800 px wide JPEG). The tool
-        multiplies them by the cached image→CSS scale for the tab
-        before dispatching to Chrome — no scale awareness required on
-        the caller side. ``browser_get_rect`` / ``browser_shadow_query``
-        return coordinates in the same (screenshot) space.
+        Coordinates are **fractions of the viewport**, not pixels:
+        ``(0.5, 0.5)`` is the center, ``(0.1, 0.2)`` is 10 % from the
+        left and 20 % from the top. Read a target's proportional
+        position off ``browser_screenshot`` (or pass
+        ``rect.cx`` / ``rect.cy`` from ``browser_get_rect`` /
+        ``browser_shadow_query`` directly — they return fractions too).
+
+        Fractions are used because every vision model resizes or tiles
+        images differently (Claude ~1.15 MP target, GPT-4o 512-px
+        tiles, etc.). Proportional positions survive every such
+        transform; pixel coords do not.
 
         Args:
-            x: X coordinate in screenshot pixels.
-            y: Y coordinate in screenshot pixels.
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             button: Mouse button to click (left, right, middle)
 
         Returns:
             Dict with click result, including ``focused_element``
-            describing what the click focused.
+            describing what the click focused. ``focused_element.rect``
+            is also in fractions.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile, "button": button}
@@ -149,18 +155,33 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_click_coordinate", params, result=result)
             return result
 
-        try:
-            from .inspection import _ensure_css_scale
+        # Pixel-input guard: legitimate fractions live in [0, 1]. Allow a
+        # small overshoot tolerance for edge targets.
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport. Read the target's "
+                    "proportional position off browser_screenshot, or pass "
+                    "rect.cx / rect.cy from browser_get_rect / "
+                    "browser_shadow_query (they return fractions)."
+                ),
+            }
+            log_tool_call("browser_click_coordinate", params, result=result)
+            return result
 
-            css_scale = await _ensure_css_scale(target_tab)
-            s = css_scale if css_scale > 0 else 1.0
-            css_x = x * s
-            css_y = y * s
+        try:
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            css_x = x * cw
+            css_y = y * ch
             click_result = await bridge.click_coordinate(target_tab, css_x, css_y, button=button)
             log_tool_call(
                 "browser_click_coordinate",
                 params,
-                result={**click_result, "cssScale": round(css_scale, 4)},
+                result={**click_result, "cssWidth": cw, "cssHeight": ch},
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             return click_result
@@ -485,17 +506,16 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Hover at the given SCREENSHOT pixel.
+        Hover at a FRACTION of the viewport (0..1, 0..1).
 
         Use this instead of browser_hover when the element is in an overlay,
         shadow DOM, or virtual-rendered component that isn't in the regular DOM.
-        ``x`` / ``y`` are pixel coordinates read directly off a
-        ``browser_screenshot`` image; the tool translates to CSS px
-        internally before dispatching to Chrome.
+        ``x`` / ``y`` are fractions of the viewport (``0.5`` = center);
+        the tool converts to CSS px internally.
 
         Args:
-            x: X coordinate in screenshot pixels.
-            y: Y coordinate in screenshot pixels.
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
@@ -523,12 +543,22 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_hover_coordinate", params, result=result)
             return result
 
-        try:
-            from .inspection import _ensure_css_scale
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport."
+                ),
+            }
+            log_tool_call("browser_hover_coordinate", params, result=result)
+            return result
 
-            css_scale = await _ensure_css_scale(target_tab)
-            s = css_scale if css_scale > 0 else 1.0
-            hover_result = await bridge.hover_coordinate(target_tab, x * s, y * s)
+        try:
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            hover_result = await bridge.hover_coordinate(target_tab, x * cw, y * ch)
             log_tool_call(
                 "browser_hover_coordinate",
                 params,
@@ -555,18 +585,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Move mouse to the given SCREENSHOT pixel, then press a key.
+        Move mouse to a FRACTION of the viewport (0..1, 0..1), then press a key.
 
         Use this instead of browser_press when the focused element is in an overlay
         or virtual-rendered component. Moving the mouse first routes the key event
         through native browser hit-testing instead of the DOM focus chain.
-        ``x`` / ``y`` are pixel coordinates read directly off a
-        ``browser_screenshot`` image; the tool translates to CSS px
-        internally.
+        ``x`` / ``y`` are fractions of the viewport; the tool converts
+        to CSS px internally.
 
         Args:
-            x: X coordinate in screenshot pixels.
-            y: Y coordinate in screenshot pixels.
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             key: Key to press (e.g. 'Enter', 'Space', 'Escape', 'ArrowDown')
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
@@ -595,12 +624,22 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_press_at", params, result=result)
             return result
 
-        try:
-            from .inspection import _ensure_css_scale
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport."
+                ),
+            }
+            log_tool_call("browser_press_at", params, result=result)
+            return result
 
-            css_scale = await _ensure_css_scale(target_tab)
-            s = css_scale if css_scale > 0 else 1.0
-            press_result = await bridge.press_key_at(target_tab, x * s, y * s, key)
+        try:
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            press_result = await bridge.press_key_at(target_tab, x * cw, y * ch, key)
             log_tool_call(
                 "browser_press_at",
                 params,

@@ -256,12 +256,13 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         try:
             result = await bridge.resize(target_tab, width, height)
             # Invalidate per-tab scale caches — CSS width changed, so the
-            # cached image→CSS multiplier is stale. Click / rect tools
-            # will re-query innerWidth on next use via _ensure_css_scale.
+            # cached viewport dimensions are stale. Click / rect tools
+            # will re-query innerWidth / innerHeight on next use via
+            # _ensure_viewport_size.
             try:
-                from .inspection import _screenshot_css_scales, _screenshot_scales
+                from .inspection import _screenshot_scales, _viewport_sizes
 
-                _screenshot_css_scales.pop(target_tab, None)
+                _viewport_sizes.pop(target_tab, None)
                 _screenshot_scales.pop(target_tab, None)
             except Exception:
                 pass

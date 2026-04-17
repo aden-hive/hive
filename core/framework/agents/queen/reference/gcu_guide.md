@@ -39,7 +39,7 @@ Neither tool is "preferred" universally — they're for different jobs. Default 
 
 ## Coordinate rule
 
-Every browser tool that takes or returns coordinates operates in **screenshot pixels** (the 800 px wide JPEG `browser_screenshot` delivers). Read a pixel off the image, pass it straight to `browser_click_coordinate` / `browser_hover_coordinate` / `browser_press_at`. `browser_get_rect` and `browser_shadow_query` return `rect.cx` / `rect.cy` in the same space. The tools translate to CSS px internally — no scale awareness required. Avoid raw `getBoundingClientRect()` via `browser_evaluate` for coord lookup; use `browser_get_rect` instead.
+Every browser tool that takes or returns coordinates operates in **fractions of the viewport (0..1 for both axes)**. Read a target's proportional position off `browser_screenshot` ("~35% from the left, ~20% from the top" → `(0.35, 0.20)`) and pass that to `browser_click_coordinate` / `browser_hover_coordinate` / `browser_press_at`. `browser_get_rect` and `browser_shadow_query` return `rect.cx` / `rect.cy` as fractions. The tools multiply by `cssWidth` / `cssHeight` internally — no scale awareness required. Fractions are used because every vision model (Claude, GPT-4o, Gemini, local VLMs) resizes/tiles images differently; proportions are invariant. Avoid raw `getBoundingClientRect()` via `browser_evaluate` for coord lookup; use `browser_get_rect` instead.
 
 ## System prompt tips for browser nodes
 

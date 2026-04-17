@@ -14,18 +14,20 @@ All GCU browser tools drive a real Chrome instance through the Beeline extension
 
 ## Coordinates
 
-Every browser tool that takes or returns coordinates operates in **screenshot pixels** (the 800 px wide JPEG `browser_screenshot` delivers). Take a screenshot, read a pixel off the image, pass that number to `browser_click_coordinate` / `browser_hover_coordinate` / `browser_press_at`. Rect-returning tools (`browser_get_rect`, `browser_shadow_query`, and the `rect` inside `focused_element`) also return screenshot pixels. You do not need to convert anything, track scale factors, or know about CSS pixels or device pixel ratio — the tools translate internally before dispatching to Chrome.
+Every browser tool that takes or returns coordinates operates in **fractions of the viewport (0..1 for both axes)**. Read a target's proportional position off `browser_screenshot` — "this button is about 35% from the left and 20% from the top" → pass `(0.35, 0.20)`. Rect-returning tools (`browser_get_rect`, `browser_shadow_query`, and the `rect` inside `focused_element`) also return fractions. The tools convert to CSS pixels internally before dispatching to Chrome.
 
 ```
-browser_screenshot()                  → image (800 px wide JPEG)
-browser_click_coordinate(x, y)        → x, y are screenshot px
-browser_hover_coordinate(x, y)        → x, y are screenshot px
-browser_press_at(x, y, key)           → x, y are screenshot px
-browser_get_rect(selector) → rect     → rect.cx / rect.cy are screenshot px
+browser_screenshot()                  → image + cssWidth/cssHeight in meta
+browser_click_coordinate(x, y)        → x, y are fractions 0..1
+browser_hover_coordinate(x, y)        → fractions
+browser_press_at(x, y, key)           → fractions
+browser_get_rect(selector) → rect     → rect.cx / rect.cy are fractions
 browser_shadow_query(...)  → rect     → same
 ```
 
-**Exception for zoomed elements:** pages that use `zoom` or `transform: scale()` on a container (LinkedIn's `#interop-outlet`, some embedded iframes) render in a scaled local coordinate space. `getBoundingClientRect` there may not match CDP's hit space. Prefer `browser_shadow_query` (which handles the math) or visually pick coordinates from a screenshot. When in doubt, avoid raw `browser_evaluate` + `getBoundingClientRect()` for coord lookup — that returns CSS px and will be mis-scaled when passed to click tools.
+**Why fractions:** every vision model (Claude ~1.15 MP target, GPT-4o 512-px tiles, Gemini, local VLMs) resizes or tiles images differently before the model sees the pixels. Proportions survive every such transform; pixel coordinates only "work" per-model and silently break when you swap backends. Four-decimal precision (`0.0001` ≈ 0.17 CSS px on a 1717-wide viewport) is more than enough for the tightest targets.
+
+**Exception for zoomed elements:** pages that use `zoom` or `transform: scale()` on a container (LinkedIn's `#interop-outlet`, some embedded iframes) render in a scaled local coordinate space. `getBoundingClientRect` there may not match CDP's hit space. Prefer `browser_shadow_query` (which handles the math and returns fractions) or visually pick coordinates from a screenshot. Avoid raw `browser_evaluate` + `getBoundingClientRect()` for coord lookup — that returns CSS px and will be wrong when fed to click tools.
 
 ## Screenshot + coordinates is shadow-agnostic — prefer it on shadow-heavy sites
 
@@ -41,9 +43,9 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 
 ### Recommended workflow on shadow-heavy sites
 
-1. `browser_screenshot()` → 800 px wide JPEG.
-2. Identify the target visually → pixel `(x, y)` read straight off the image.
-3. `browser_click_coordinate(x, y)` → lands on the element via native hit testing; inputs get focused. **The response includes `focused_element: {tag, id, role, contenteditable, rect, inFrame?, ...}`** — use it to verify you actually focused what you intended. `rect` is in screenshot pixels (same space as the image). When focus is inside a same-origin iframe, the descriptor reports the inner element and adds `inFrame: [...]` breadcrumbs.
+1. `browser_screenshot()` → JPEG; meta includes `cssWidth`/`cssHeight` for reference.
+2. Identify the target visually → estimate its proportional position `(fx, fy)` where each is in `0..1`.
+3. `browser_click_coordinate(fx, fy)` → tool converts to CSS px and dispatches; CDP native hit testing focuses the element. **The response includes `focused_element: {tag, id, role, contenteditable, rect, inFrame?, ...}`** — use it to verify you actually focused what you intended. `rect` is in fractions (same space as your input). When focus is inside a same-origin iframe, the descriptor reports the inner element and adds `inFrame: [...]` breadcrumbs.
 4. `browser_type_focused(text="...")` → inserts text into `document.activeElement` (traverses into same-origin iframes automatically). Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Use `browser_type(selector, text)` instead when you have a reliable CSS selector for a light-DOM element.
 5. Verify via `browser_screenshot` OR `browser_get_attribute` on a known-reachable marker (e.g. check that the Send button's `aria-disabled` flipped to `false`).
 
@@ -74,7 +76,7 @@ browser_shadow_query("reddit-search-large >>> #search-input")
 browser_get_rect("#interop-outlet >>> #ember37 >>> p")
 ```
 
-Returns the element's rect in **screenshot pixels** (feed `rect.cx` / `rect.cy` directly to click tools). Remember: `browser_type` and `wait_for_selector` do **not** support `>>>` — only shadow_query and get_rect do.
+Returns the element's rect as **fractions of the viewport** (feed `rect.cx` / `rect.cy` directly to click tools). Remember: `browser_type` and `wait_for_selector` do **not** support `>>>` — only shadow_query and get_rect do.
 
 ## Navigation and waiting
 
@@ -215,11 +217,11 @@ Recognized without modifiers: `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `
 
 ```
 browser_screenshot()                    # viewport, 800 px wide JPEG
-browser_screenshot(full_page=True)      # full scrollable page
+browser_screenshot(full_page=True)      # full scrollable page (overview only — don't click off a full-page shot)
 browser_screenshot(selector="#header")  # clip to element's rect
 ```
 
-Returns a JPEG (quality 75, ~50–120 KB) fixed at **800 px wide** — well below the vision-API resize threshold, so the model sees the exact pixels we emit. Metadata includes `imageWidth` (800), `cssWidth` (the page's real viewport width), `cssScale` (for debug only), and `physicalScale`. The image is annotated with a highlight rectangle/dot showing the last interaction (click, hover, type) if one happened on this tab.
+Returns a JPEG (quality 75, ~50–120 KB) at 800 px wide. The pixel width is purely a bandwidth choice; all tool coordinates are fractions of the viewport and are invariant to image size. Metadata includes `imageWidth` (800), `cssWidth`, `cssHeight` (for reference), and `physicalScale`. The image is annotated with a highlight rectangle/dot showing the last interaction (click, hover, type) if one happened on this tab.
 
 The highlight overlay stays visible on the page for **10 seconds** after each interaction, then fades. Before a screenshot is likely, make sure your click / hover / type happens <10 s before the screenshot.
 
@@ -347,7 +349,8 @@ Then pass the most specific selector that uniquely identifies the right input (e
 - **Typing into a rich-text editor without clicking first → send button stays disabled.** Draft.js (X), Lexical (Gmail, LinkedIn DMs), ProseMirror (Reddit), and React-controlled `contenteditable` elements only register input as "real" when the element received a native focus event — JS-sourced `.focus()` is not enough. `browser_type` now does this automatically via a real CDP pointer click before inserting text, but always verify the submit button's `disabled` state before clicking send. See the "ALWAYS click before typing" section above.
 - **Using per-character `keyDown` on Lexical / Draft.js editors → keys dispatch but text never appears.** Those editors intercept `beforeinput` and route insertion through their own state machine; raw keyDown events are silently dropped. `browser_type` now uses `Input.insertText` by default (the CDP IME-commit method) which these editors accept cleanly. Only set `use_insert_text=False` when you explicitly need per-keystroke dispatch.
 - **Leaving a composer with text then trying to navigate → `beforeunload` dialog hangs the bridge.** LinkedIn and several other sites pop a native "unsent message" confirm. `browser_navigate` and `close_tab` both time out against this. Always strip `window.onbeforeunload = null` via `browser_evaluate` before any navigation after typing in a composer, or wrap your logic in a `try/finally` that runs the cleanup block.
-- **Click landed in the wrong region (sidebar / header instead of target).** Check `focused_element` in the click response — it's ground truth for what actually got focused, including the `inFrame` breadcrumb when focus ends up inside a same-origin iframe. If it isn't the target (e.g. `className: "msg-conversation-listitem__link"` when you meant to hit a composer), adjust the pixel and retry. Coordinates you pass are screenshot pixels; the tool translates to CSS px internally, so a wrong result means you picked the wrong pixel off the image — not that any scale went sideways.
+- **Click landed in the wrong region (sidebar / header instead of target).** Check `focused_element` in the click response — it's ground truth for what actually got focused, including the `inFrame` breadcrumb when focus ends up inside a same-origin iframe. If it isn't the target (e.g. `className: "msg-conversation-listitem__link"` when you meant to hit a composer), adjust the fraction and retry. Coordinates you pass are fractions of the viewport; the tool multiplies by `cssWidth` / `cssHeight` internally, so a wrong result means your estimated proportion was off — not that any scale went sideways.
+- **Accidentally passing pixels to click / hover / press_at.** The tools reject any coord outside `[-0.1, 1.5]` with a clear error. If you see that error, you passed a pixel (like 815) instead of a fraction (like 0.475). Use `browser_get_rect` to get exact fractional cx/cy, or read proportions off `browser_screenshot`.
 - **Calling `wait_for_selector` on a shadow element.** It'll always time out. Use `browser_shadow_query` or the screenshot + coordinate strategy.
 - **Relying on `innerHTML` in injected scripts on LinkedIn.** Silently discarded. Use `createElement` + `appendChild`.
 - **Not waiting for SPA hydration.** `wait_until="load"` fires before React/Vue rendering on many sites. Add a 2–3 s sleep before querying for chrome elements.

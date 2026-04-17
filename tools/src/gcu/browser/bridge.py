@@ -962,9 +962,9 @@ class BeelineBridge:
         """Read document.activeElement and return a compact descriptor.
 
         The JS returns ``rect`` fields in CSS px (they come straight
-        from ``getBoundingClientRect``). We scale them to screenshot
-        pixels here so the agent sees a rect in the same coord space
-        it passed to click / hover / press_at.
+        from ``getBoundingClientRect``). We convert them to fractions
+        of the viewport here so the agent sees a rect in the same
+        coord space it passed to click / hover / press_at.
 
         Returns None on any failure — never raises.
         """
@@ -973,20 +973,23 @@ class BeelineBridge:
             result = await self.evaluate(tab_id, _FOCUSED_ELEMENT_JS)
             info = (result or {}).get("result")
             if info and isinstance(info, dict) and isinstance(info.get("rect"), dict):
-                # Convert CSS px rect → screenshot px using the cached
-                # scale. Fall back to 1.0 if no screenshot has been
-                # taken yet on this tab.
-                from .tools.inspection import _screenshot_css_scales
+                from .tools.inspection import _viewport_sizes
 
-                scale = _screenshot_css_scales.get(tab_id, 1.0) or 1.0
-                if scale > 0 and scale != 1.0:
+                vp = _viewport_sizes.get(tab_id)
+                if vp and vp[0] > 0 and vp[1] > 0:
+                    cw, ch = float(vp[0]), float(vp[1])
                     r = info["rect"]
                     info["rect"] = {
-                        "x": round(r.get("x", 0) / scale, 1),
-                        "y": round(r.get("y", 0) / scale, 1),
-                        "width": round(r.get("width", 0) / scale, 1),
-                        "height": round(r.get("height", 0) / scale, 1),
+                        "x": round(r.get("x", 0) / cw, 4),
+                        "y": round(r.get("y", 0) / ch, 4),
+                        "width": round(r.get("width", 0) / cw, 4),
+                        "height": round(r.get("height", 0) / ch, 4),
                     }
+                else:
+                    # Degraded: cache missing (no screenshot taken
+                    # yet). Leave rect in CSS px and flag it so the
+                    # agent can tell.
+                    info["rectSpace"] = "css"
             return info
         except Exception:
             return None
