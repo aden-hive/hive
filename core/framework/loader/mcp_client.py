@@ -81,8 +81,10 @@ class MCPClient:
 
         _cb_conf = getattr(config, "circuit_breaker", None)
         if _cb_conf is not None and getattr(_cb_conf, "enabled", False):
+            # Normalize breaker name: lowercase, no spaces (matches registry logic)
+            normalized_name = config.name.lower().strip().replace(" ", "-")
             self._breaker: CircuitBreaker | None = CircuitBreaker(
-                name=f"mcp:{config.name}",
+                name=f"mcp:{normalized_name}",
                 failure_threshold=getattr(_cb_conf, "failure_threshold", 3),
                 recovery_timeout=getattr(_cb_conf, "recovery_timeout_seconds", 30.0),
                 expected_exceptions=(

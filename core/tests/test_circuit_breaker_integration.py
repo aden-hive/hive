@@ -1,9 +1,15 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from framework.llm.litellm import LiteLLMProvider, _LLM_CIRCUIT_BREAKERS
-from framework.loader.mcp_client import MCPClient, MCPServerConfig, _MCP_CIRCUIT_BREAKERS
+from framework.llm.litellm import LiteLLMProvider
+from framework.loader.mcp_client import MCPClient, MCPServerConfig
 from framework.utils.circuit_breaker import CircuitOpenError, CircuitState, CircuitBreaker
 import httpx
+
+class MockCBConfig:
+    def __init__(self, enabled=True, failure_threshold=5, recovery_timeout_seconds=60.0):
+        self.enabled = enabled
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout_seconds = recovery_timeout_seconds
 
 try:
     import litellm
@@ -21,11 +27,7 @@ except ImportError:
     ServiceUnavailableError = type("ServiceUnavailableError", (MockLiteLLMException,), {})
     litellm = MagicMock()
 
-@pytest.fixture(autouse=True)
-def clear_breakers():
-    """Clear global breaker registries before each test."""
-    _LLM_CIRCUIT_BREAKERS.clear()
-    _MCP_CIRCUIT_BREAKERS.clear()
+
 
 class TestLiteLLMIntegration:
     @patch("framework.llm.litellm.litellm")
@@ -34,16 +36,16 @@ class TestLiteLLMIntegration:
         # Use ConnectionError as it's always in _get_transient_types()
         mock_litellm.completion.side_effect = ConnectionError("Connection reset by peer")
         
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test")
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test", circuit_breaker=MockCBConfig())
         
         # Default failure_threshold is 5
         for _ in range(5):
             with pytest.raises(ConnectionError):
-                provider.complete(messages=[{"role": "user", "content": "hi"}])
+                provider.complete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
         
         # 6th call should fail immediately with CircuitOpenError
         with pytest.raises(CircuitOpenError) as excinfo:
-            provider.complete(messages=[{"role": "user", "content": "hi"}])
+            provider.complete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
         
         assert excinfo.value.breaker_name == "llm:gpt-4o-mini"
         assert mock_litellm.completion.call_count == 5
@@ -54,16 +56,16 @@ class TestLiteLLMIntegration:
         # ValueError is not in (TimeoutError, ConnectionError, OSError) when litellm is missing
         mock_litellm.completion.side_effect = ValueError("Invalid prompt")
         
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test")
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test", circuit_breaker=MockCBConfig())
         
         # 10 failures should NOT trip it
         for _ in range(10):
             with pytest.raises(ValueError):
-                provider.complete(messages=[{"role": "user", "content": "hi"}])
+                provider.complete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
         
         # 11th call still reaches litellm (mock_litellm.completion)
         with pytest.raises(ValueError):
-            provider.complete(messages=[{"role": "user", "content": "hi"}])
+            provider.complete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
         
         assert mock_litellm.completion.call_count == 11
 
@@ -73,19 +75,20 @@ class TestLiteLLMIntegration:
         """Verify async acompletion also trips the breaker."""
         mock_litellm.acompletion = AsyncMock(side_effect=TimeoutError("Request timed out"))
         
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test")
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test", circuit_breaker=MockCBConfig())
         
         for _ in range(5):
             with pytest.raises(TimeoutError):
-                await provider.acomplete(messages=[{"role": "user", "content": "hi"}])
+                await provider.acomplete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
                 
         with pytest.raises(CircuitOpenError):
-            await provider.acomplete(messages=[{"role": "user", "content": "hi"}])
+            await provider.acomplete(messages=[{"role": "user", "content": "hi"}], max_retries=0)
 
 class TestMCPIntegration:
     def test_mcp_client_trips_breaker(self):
         """Verify MCPClient trips its breaker on transport errors."""
         config = MCPServerConfig(name="MockServer", transport="stdio", command="node")
+        setattr(config, "circuit_breaker", MockCBConfig())
         client = MCPClient(config)
         client._connected = True
         # Mock tool list
@@ -109,7 +112,9 @@ class TestMCPIntegration:
     def test_mcp_client_different_servers_separate_breakers(self):
         """Verify each MCP server has its own isolated breaker."""
         c1 = MCPServerConfig(name="ServerA", transport="stdio", command="node")
+        setattr(c1, "circuit_breaker", MockCBConfig())
         c2 = MCPServerConfig(name="ServerB", transport="stdio", command="node")
+        setattr(c2, "circuit_breaker", MockCBConfig())
         
         client1 = MCPClient(c1)
         client1._connected = True
