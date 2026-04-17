@@ -53,7 +53,7 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 
 1. Call `browser_click_coordinate(x, y)` to click the target element.
 2. Check the `focused_element` field in the response — it tells you what actually received focus (tag, id, role, contenteditable, rect).
-3. If the focused element is editable, call `browser_type_focused(text="...")` to insert text. use tools to verify the text took effect.
+3. If the focused element is editable, call `browser_type_focused(text="...")` to insert text. Use tools to verify the text took effect — prefer checking the underlying `.value` / `innerText` via `browser_evaluate` or confirming the submit button enabled. A screenshot alone can mislead: narrow input boxes visually clip long text, so only a portion may appear on screen even though the full string was accepted.
 4. If it is NOT editable, your click landed on the wrong thing — refine coordinates and retry. Do NOT reach for `browser_evaluate` + `execCommand('insertText')` or shadow-root traversals. The problem is the click target, not the typing method.
 
 `browser_click` (selector-based) also returns `focused_element`, so the same check works whether you clicked by selector or coordinate.
@@ -138,6 +138,8 @@ The symptom is always the same: **you type, the characters appear visually, and 
 2. **Type** the text. Use `browser_type(selector, text)` for light-DOM inputs, or `browser_type_focused(text=...)` for shadow-DOM / already-focused inputs. Both use CDP `Input.insertText` by default, which is the most reliable method for rich editors (Lexical, Draft.js, ProseMirror). Wait ~500 ms for framework state to commit.
 
 3. **Verify** the submit button is enabled before clicking it. Use `browser_evaluate` to check the button's `disabled` or `aria-disabled` attribute. Do NOT trust that typing worked — always check state.
+
+   **Partial visibility is fine.** Small single-line inputs, chat boxes with fixed width, and search fields commonly clip or truncate long text visually — only the tail or head may be shown on screen. Don't treat that as failure. What matters is that the framework accepted the input: the submit button enabled, or `element.value` / `innerText` read via `browser_evaluate` contains the full string. If the visible pixels don't match what you typed but the button is enabled and the underlying value is correct, typing succeeded — proceed.
 
 4. **Only click send if the button is enabled.** If the button is still disabled, try the recovery dance: click the textarea again, press `End`, press a space, press `Backspace` — this forces React to recompute `hasRealContent`. Then re-check the button state.
 
