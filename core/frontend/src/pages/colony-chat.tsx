@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "react-router-dom";
-import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
+import { Loader2, WifiOff, KeyRound, FolderOpen, X, Users } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import TriggersPanel from "@/components/TriggersPanel";
 import TriggerDetailPanel from "@/components/TriggerDetailPanel";
@@ -22,6 +22,7 @@ import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
+import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 import { agentSlug, getQueenForAgent } from "@/lib/colony-registry";
 import BrowserStatusBadge from "@/components/BrowserStatusBadge";
 
@@ -195,6 +196,7 @@ export default function ColonyChat() {
   const location = useLocation();
   const { colonies, markVisited, refresh: refreshColonies } = useColony();
   const { setActions } = useHeaderActions();
+  const { openColonyWorkers } = useColonyWorkers();
 
   // Route state from home page (new chat flow)
   const routeState = (location.state || {}) as {
@@ -264,11 +266,21 @@ export default function ColonyChat() {
             Data
           </button>
         )}
+        {agentState.sessionId && (
+          <button
+            onClick={() => openColonyWorkers(agentState.sessionId!)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
+            title="Show workers in this colony"
+          >
+            <Users className="w-3.5 h-3.5" />
+            Workers
+          </button>
+        )}
         <BrowserStatusBadge />
       </>,
     );
     return () => setActions(null);
-  }, [agentState.sessionId, setActions]);
+  }, [agentState.sessionId, setActions, openColonyWorkers]);
 
   // Refs for SSE callback stability
   const messagesRef = useRef(messages);

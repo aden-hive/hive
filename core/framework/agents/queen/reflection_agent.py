@@ -823,8 +823,8 @@ async def run_shutdown_reflection(
 # ---------------------------------------------------------------------------
 
 _LONG_REFLECT_INTERVAL = 5
-_SHORT_REFLECT_TURN_INTERVAL = 2
-_SHORT_REFLECT_COOLDOWN_SEC = 120.0
+_SHORT_REFLECT_TURN_INTERVAL = 3
+_SHORT_REFLECT_COOLDOWN_SEC = 300.0
 
 
 async def subscribe_reflection_triggers(
