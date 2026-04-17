@@ -55,7 +55,9 @@
       "mcp__gcu-tools__browser_click_coordinate",
       "mcp__gcu-tools__browser_get_rect",
       "mcp__gcu-tools__browser_type_focused",
-      "mcp__gcu-tools__browser_wait"
+      "mcp__gcu-tools__browser_wait",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 scripts/debug_queen_prompt.py independent)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

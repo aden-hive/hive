@@ -111,6 +111,15 @@ class EventType(StrEnum):
     # Retry tracking
     NODE_RETRY = "node_retry"
 
+    # Stream-health observability. Split from NODE_RETRY so the UI can
+    # distinguish "slow TTFT on a huge context" (healthy, just slow) from
+    # "stream went silent mid-generation" (probable stall) from "we nudged
+    # the model to continue" (recovery), which NODE_RETRY used to conflate.
+    STREAM_TTFT_EXCEEDED = "stream_ttft_exceeded"
+    STREAM_INACTIVE = "stream_inactive"
+    STREAM_NUDGE_SENT = "stream_nudge_sent"
+    TOOL_CALL_REPLAY_DETECTED = "tool_call_replay_detected"
+
     # Worker agent lifecycle
     WORKER_COMPLETED = "worker_completed"
     WORKER_FAILED = "worker_failed"
@@ -1057,6 +1066,94 @@ class EventBus:
                     "retry_count": retry_count,
                     "max_retries": max_retries,
                     "error": error,
+                },
+            )
+        )
+
+    async def emit_stream_ttft_exceeded(
+        self,
+        stream_id: str,
+        node_id: str,
+        ttft_seconds: float,
+        limit_seconds: float,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit when a stream stayed silent past the TTFT budget (no first event)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.STREAM_TTFT_EXCEEDED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "ttft_seconds": ttft_seconds,
+                    "limit_seconds": limit_seconds,
+                },
+            )
+        )
+
+    async def emit_stream_inactive(
+        self,
+        stream_id: str,
+        node_id: str,
+        idle_seconds: float,
+        limit_seconds: float,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit when a stream that had produced events went silent past budget."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.STREAM_INACTIVE,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "idle_seconds": idle_seconds,
+                    "limit_seconds": limit_seconds,
+                },
+            )
+        )
+
+    async def emit_stream_nudge_sent(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str,
+        nudge_count: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit when the continue-nudge was injected (recovery, not retry)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.STREAM_NUDGE_SENT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "reason": reason,
+                    "nudge_count": nudge_count,
+                },
+            )
+        )
+
+    async def emit_tool_call_replay_detected(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_name: str,
+        prior_seq: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit when the model is about to re-execute a prior successful call."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.TOOL_CALL_REPLAY_DETECTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "tool_name": tool_name,
+                    "prior_seq": prior_seq,
                 },
             )
         )

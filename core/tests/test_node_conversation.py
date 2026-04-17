@@ -24,6 +24,7 @@ class MockConversationStore:
 
     def __init__(self) -> None:
         self._parts: dict[int, dict] = {}
+        self._partials: dict[int, dict] = {}
         self._meta: dict | None = None
         self._cursor: dict | None = None
 
@@ -47,6 +48,18 @@ class MockConversationStore:
 
     async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         self._parts = {k: v for k, v in self._parts.items() if k >= seq}
+
+    async def write_partial(self, seq: int, data: dict[str, Any]) -> None:
+        self._partials[seq] = data
+
+    async def read_partial(self, seq: int) -> dict[str, Any] | None:
+        return self._partials.get(seq)
+
+    async def read_all_partials(self) -> list[dict[str, Any]]:
+        return [self._partials[k] for k in sorted(self._partials)]
+
+    async def clear_partial(self, seq: int) -> None:
+        self._partials.pop(seq, None)
 
     async def close(self) -> None:
         pass
@@ -749,6 +762,33 @@ class TestFileConversationStore:
         assert (base / "cursor.json").exists()
         assert (base / "parts" / "0000000000.json").exists()
         assert (base / "parts" / "0000000001.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_partials_separate_from_parts(self, tmp_path):
+        """Partial checkpoints must not pollute read_parts() and vice versa."""
+        store = FileConversationStore(tmp_path / "conv")
+        await store.write_part(0, {"seq": 0, "content": "real"})
+        await store.write_partial(1, {"seq": 1, "content": "inflight", "truncated": True})
+        parts = await store.read_parts()
+        assert [p["seq"] for p in parts] == [0]
+        partials = await store.read_all_partials()
+        assert [p["seq"] for p in partials] == [1]
+        assert partials[0]["content"] == "inflight"
+        assert (await store.read_partial(1))["content"] == "inflight"
+        assert await store.read_partial(99) is None
+        await store.clear_partial(1)
+        assert await store.read_all_partials() == []
+
+    @pytest.mark.asyncio
+    async def test_partials_dir_does_not_break_parts_glob(self, tmp_path):
+        """delete_parts_before parses stems as int — partial files must not trip it."""
+        store = FileConversationStore(tmp_path / "conv")
+        for i in range(3):
+            await store.write_part(i, {"seq": i})
+            await store.write_partial(i + 100, {"seq": i + 100})
+        await store.delete_parts_before(2)
+        assert [p["seq"] for p in await store.read_parts()] == [2]
+        assert [p["seq"] for p in await store.read_all_partials()] == [100, 101, 102]
 
 
 # ===================================================================
@@ -1646,3 +1686,169 @@ class TestRepairOrphanedToolCalls:
         roles = [m["role"] for m in repaired]
         assert roles == ["user", "assistant", "tool", "user"]
         assert repaired[2]["tool_call_id"] == "tc_2"
+
+
+# ===================================================================
+# Continue-nudge + replay-detector helpers (DS-14)
+# ===================================================================
+
+
+def _mk_assistant_with_tool_call(seq: int, tc_id: str, name: str, args: dict) -> Message:
+    return Message(
+        seq=seq,
+        role="assistant",
+        content="",
+        tool_calls=[
+            {
+                "id": tc_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }
+        ],
+    )
+
+
+class TestFindCompletedToolCall:
+    def test_returns_match_when_prior_non_error_result_exists(self):
+        conv = NodeConversation(system_prompt="s")
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_setup", {}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        match = conv.find_completed_tool_call("browser_setup", {})
+        assert match is not None
+        assert match.seq == 1
+
+    def test_ignores_error_result(self):
+        conv = NodeConversation(system_prompt="s")
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_navigate", {"url": "x"}),
+            Message(seq=2, role="tool", content="boom", tool_use_id="tc_a", is_error=True),
+        ]
+        assert conv.find_completed_tool_call("browser_navigate", {"url": "x"}) is None
+
+    def test_canonicalizes_json_args_regardless_of_key_order(self):
+        conv = NodeConversation(system_prompt="s")
+        # Prior args written in one order, new call re-emits in different order.
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "fetch", {"b": 2, "a": 1}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        assert conv.find_completed_tool_call("fetch", {"a": 1, "b": 2}) is not None
+        # Different args should NOT match.
+        assert conv.find_completed_tool_call("fetch", {"a": 1, "b": 3}) is None
+
+    def test_respects_within_last_turns_window(self):
+        conv = NodeConversation(system_prompt="s")
+        # Prior successful call, then 4 newer assistant turns of noise.
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_setup", {}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        # 4 newer assistant turns (no tool calls that match)
+        for i in range(3, 7):
+            conv._messages.append(
+                Message(seq=i, role="assistant", content=f"noise {i}")
+            )
+        # Window=3 → prior assistant with browser_setup is at turn index 5
+        # backwards (noise, noise, noise, noise, setup) — skipped.
+        assert (
+            conv.find_completed_tool_call("browser_setup", {}, within_last_turns=3)
+            is None
+        )
+        # Window=10 → found.
+        assert (
+            conv.find_completed_tool_call("browser_setup", {}, within_last_turns=10)
+            is not None
+        )
+
+
+class TestPartialCheckpoint:
+    @pytest.mark.asyncio
+    async def test_checkpoint_is_cleared_when_real_part_lands(self, tmp_path):
+        """A partial for seq N is wiped once add_assistant_message(seq=N) persists."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        # Seed a partial for the would-be next assistant seq.
+        await conv.checkpoint_partial_assistant("half-written...")
+        partials = await store.read_all_partials()
+        assert len(partials) == 1
+        assert partials[0]["content"] == "half-written..."
+        # Commit the real assistant turn — partial should be swept.
+        await conv.add_assistant_message("fully written")
+        assert await store.read_all_partials() == []
+
+    @pytest.mark.asyncio
+    async def test_restore_surfaces_partial_as_truncated_message(self, tmp_path):
+        """A partial left behind by a crashed stream is resurrected on restore."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        # Simulate a stream that produced some text + a tool call, then died
+        # before finishing. The checkpoint captures both.
+        await conv.checkpoint_partial_assistant(
+            "I was working on this when the stream died",
+            tool_calls=[
+                {
+                    "id": "tc_x",
+                    "type": "function",
+                    "function": {"name": "browser_click", "arguments": "{}"},
+                }
+            ],
+        )
+        # Fresh process — restore from disk.
+        fresh = await NodeConversation.restore(store)
+        assert fresh is not None
+        # The user message is there, plus the truncated assistant resurrected
+        # from the partial.
+        roles = [m.role for m in fresh.messages]
+        assert roles == ["user", "assistant"]
+        last = fresh.messages[-1]
+        assert last.truncated is True
+        assert last.content == "I was working on this when the stream died"
+        assert last.tool_calls and last.tool_calls[0]["function"]["name"] == "browser_click"
+
+    @pytest.mark.asyncio
+    async def test_restore_cleans_stale_partials(self, tmp_path):
+        """A partial whose seq was already committed as a real part is discarded."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        await conv.add_assistant_message("real")  # seq=1
+        # Manually plant a stale partial at seq=1 (already committed).
+        await store.write_partial(
+            1, {"seq": 1, "role": "assistant", "content": "stale", "truncated": True}
+        )
+        fresh = await NodeConversation.restore(store)
+        assert fresh is not None
+        assert [m.content for m in fresh.messages] == ["hi", "real"]
+        # Stale partial swept by restore.
+        assert await store.read_all_partials() == []
+
+
+class TestMessageFlags:
+    def test_is_system_nudge_roundtrip(self):
+        m = Message(seq=0, role="user", content="nudge", is_system_nudge=True)
+        d = m.to_storage_dict()
+        assert d.get("is_system_nudge") is True
+        r = Message.from_storage_dict(d)
+        assert r.is_system_nudge is True
+        assert r.role == "user"
+
+    def test_truncated_roundtrip(self):
+        m = Message(seq=0, role="assistant", content="half", truncated=True)
+        d = m.to_storage_dict()
+        assert d.get("truncated") is True
+        r = Message.from_storage_dict(d)
+        assert r.truncated is True
+
+    def test_defaults_omit_flags_from_storage(self):
+        m = Message(seq=0, role="user", content="plain")
+        d = m.to_storage_dict()
+        assert "is_system_nudge" not in d
+        assert "truncated" not in d

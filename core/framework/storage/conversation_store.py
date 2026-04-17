@@ -43,6 +43,10 @@ class FileConversationStore:
     def __init__(self, base_path: str | Path) -> None:
         self._base = Path(base_path)
         self._parts_dir = self._base / "parts"
+        # Partial checkpoints for in-flight assistant turns. Written on every
+        # stream event, deleted atomically when the final part lands. Kept
+        # in a sibling dir so the parts/ glob doesn't pick them up.
+        self._partials_dir = self._base / "partials"
 
     # --- sync helpers --------------------------------------------------------
 
@@ -99,6 +103,44 @@ class FileConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return await self._run(self._read_json, self._base / "cursor.json")
 
+    async def write_partial(self, seq: int, data: dict[str, Any]) -> None:
+        """Checkpoint an in-flight assistant turn. Overwrites any prior partial
+        for the same seq. Caller is expected to clear_partial() once the real
+        part is written via write_part().
+        """
+        path = self._partials_dir / f"{seq:010d}.json"
+        await self._run(self._write_json, path, data)
+
+    async def read_partial(self, seq: int) -> dict[str, Any] | None:
+        path = self._partials_dir / f"{seq:010d}.json"
+        return await self._run(self._read_json, path)
+
+    async def read_all_partials(self) -> list[dict[str, Any]]:
+        """Return all partial checkpoints, sorted by seq. Used during restore
+        to surface any in-flight turn that the last process didn't finish.
+        """
+
+        def _read_all() -> list[dict[str, Any]]:
+            if not self._partials_dir.exists():
+                return []
+            files = sorted(self._partials_dir.glob("*.json"))
+            partials: list[dict[str, Any]] = []
+            for f in files:
+                data = self._read_json(f)
+                if data is not None:
+                    partials.append(data)
+            return partials
+
+        return await self._run(_read_all)
+
+    async def clear_partial(self, seq: int) -> None:
+        def _clear() -> None:
+            path = self._partials_dir / f"{seq:010d}.json"
+            if path.exists():
+                path.unlink()
+
+        await self._run(_clear)
+
     async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
             if not self._parts_dir.exists():
@@ -124,6 +166,10 @@ class FileConversationStore:
             # Clear all parts
             if self._parts_dir.exists():
                 for f in self._parts_dir.glob("*.json"):
+                    f.unlink()
+            # Clear partial checkpoints
+            if self._partials_dir.exists():
+                for f in self._partials_dir.glob("*.json"):
                     f.unlink()
             # Clear cursor
             cursor_path = self._base / "cursor.json"

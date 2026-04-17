@@ -131,13 +131,38 @@ class LoopConfig:
     # Per-tool-call timeout.
     tool_call_timeout_seconds: float = 60.0
 
-    # LLM stream inactivity watchdog. If no stream event (delta, tool call,
-    # finish) arrives within this many seconds, the stream task is cancelled
-    # and a transient error is raised so the retry loop can back off and
-    # reconnect. Prevents agents from hanging forever on a silently dead
-    # HTTP connection (no provider heartbeat, no exception, just silence).
-    # Set to 0 to disable.
+    # LLM stream inactivity watchdog. Split into two budgets so legitimate
+    # slow TTFT on large contexts doesn't get mistaken for a dead connection.
+    # - ttft: stream open -> first event. Large-context local models can
+    #   legitimately take minutes before the first token arrives.
+    # - inter_event: last event -> now, ONLY after the first event. A stream
+    #   that started producing and then went silent is a real stall.
+    # Whichever fires first cancels the stream. Set to 0 to disable that
+    # individual budget; set both to 0 to fully disable the watchdog.
+    llm_stream_ttft_timeout_seconds: float = 600.0
+    llm_stream_inter_event_idle_seconds: float = 120.0
+    # Deprecated alias — kept so existing configs keep working. If set to a
+    # non-default value it overrides inter_event_idle (historical behavior).
     llm_stream_inactivity_timeout_seconds: float = 120.0
+
+    # Continue-nudge recovery. When the idle watchdog fires on a live but
+    # stuck stream, cancel the stream and append a short continuation
+    # hint to the conversation instead of raising a ConnectionError and
+    # re-running the whole turn. Preserves any partial text/tool-calls the
+    # stream emitted before the stall.
+    continue_nudge_enabled: bool = True
+    # Cap so a truly dead endpoint eventually falls back to the error path
+    # instead of nudging forever.
+    continue_nudge_max_per_turn: int = 3
+
+    # Tool-call replay detector. When the model emits a tool call whose
+    # (name + canonical-args) matches a prior successful call in the last
+    # K assistant turns, emit telemetry and prepend a short steer onto the
+    # tool result — but still execute. Weaker models legitimately repeat
+    # read-only calls (screenshot, evaluate), so silent skipping would
+    # cause surprising behavior.
+    replay_detector_enabled: bool = True
+    replay_detector_within_last_turns: int = 3
 
     # Subagent delegation timeout (wall-clock max).
     subagent_timeout_seconds: float = 3600.0

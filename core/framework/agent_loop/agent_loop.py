@@ -2335,6 +2335,11 @@ class AgentLoop(AgentProtocol):
             execution_id,
         )
 
+        # Continue-nudge counter: how many times we've re-streamed within this
+        # _run_single_turn because the idle/TTFT watchdog fired. Caps to avoid
+        # nudging forever when the endpoint is genuinely dead.
+        _nudge_count_this_turn = 0
+
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
             # Pre-send guard: if context is at or over budget, compact before
@@ -2423,7 +2428,16 @@ class AgentLoop(AgentProtocol):
             # Capture loop-scoped variables as defaults to satisfy B023.
             # _stream_last_event_at is bumped on every event; the watchdog
             # below uses it to detect silently hung HTTP connections.
-            _stream_last_event_at = time.monotonic()
+            _stream_start_at = time.monotonic()
+            _stream_last_event_at = _stream_start_at
+            # None until the first event arrives. Before first event, the
+            # watchdog uses the (much looser) TTFT budget — large-context
+            # local models legitimately take minutes to first token. Once
+            # any event has been observed, tight inter-event idle applies.
+            _first_event_at: float | None = None
+            # Partial tool_calls accumulated so far, as OpenAI-format dicts
+            # ready for persistence if the stream is cut short.
+            _partial_tc_dicts: list[dict[str, Any]] = []
 
             async def _do_stream(
                 _msgs: list = messages,  # noqa: B006
@@ -2432,8 +2446,10 @@ class AgentLoop(AgentProtocol):
                 _safe_names: set = _early_safe_names,  # noqa: B006,B008
                 _tasks: dict = _early_tasks,  # noqa: B006,B008
                 _exec_fn=_timed_execute,
+                _partial_dicts: list[dict[str, Any]] = _partial_tc_dicts,  # noqa: B006,B008
             ) -> None:
                 nonlocal accumulated_text, _stream_error, _stream_last_event_at
+                nonlocal _first_event_at
                 _clean_snapshot = ""  # visible-only text for the frontend
 
                 async for event in ctx.llm.stream(
@@ -2443,6 +2459,8 @@ class AgentLoop(AgentProtocol):
                     max_tokens=ctx.max_tokens,
                 ):
                     _stream_last_event_at = time.monotonic()
+                    if _first_event_at is None:
+                        _first_event_at = _stream_last_event_at
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
                         # Strip internal reasoning tags from the full
@@ -2462,9 +2480,46 @@ class AgentLoop(AgentProtocol):
                                 iteration=iteration,
                                 inner_turn=inner_turn,
                             )
+                        # Checkpoint partial state so a watchdog cancel or
+                        # crash doesn't discard whatever the model has
+                        # produced so far. Cheap — one atomic file write.
+                        try:
+                            await conversation.checkpoint_partial_assistant(
+                                accumulated_text,
+                                _partial_dicts or None,
+                            )
+                        except Exception as _cp_err:  # noqa: BLE001
+                            logger.debug(
+                                "[_run_single_turn] partial checkpoint failed: %s",
+                                _cp_err,
+                            )
 
                     elif isinstance(event, ToolCallEvent):
                         _tc.append(event)
+                        _partial_dicts.append(
+                            {
+                                "id": event.tool_use_id,
+                                "type": "function",
+                                "function": {
+                                    "name": event.tool_name,
+                                    "arguments": json.dumps(event.tool_input),
+                                },
+                            }
+                        )
+                        # Checkpoint now that a tool call has landed —
+                        # this is the important one: if the stream dies
+                        # right after a tool call but before FinishEvent,
+                        # we still have the intent recorded.
+                        try:
+                            await conversation.checkpoint_partial_assistant(
+                                accumulated_text,
+                                _partial_dicts or None,
+                            )
+                        except Exception as _cp_err:  # noqa: BLE001
+                            logger.debug(
+                                "[_run_single_turn] partial checkpoint failed: %s",
+                                _cp_err,
+                            )
                         # Gap 1: start concurrency-safe tools immediately
                         # while the rest of the stream is still arriving,
                         # so read-heavy turns don't stall after the last
@@ -2492,55 +2547,99 @@ class AgentLoop(AgentProtocol):
             _llm_stream_t0 = time.monotonic()
             self._stream_task = asyncio.create_task(_do_stream())
             logger.debug("[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn)
-            _inactivity_limit = self._config.llm_stream_inactivity_timeout_seconds
+
+            # Watchdog budgets — see LoopConfig docstring for rationale.
+            _ttft_limit = self._config.llm_stream_ttft_timeout_seconds
+            _inter_event_limit = self._config.llm_stream_inter_event_idle_seconds
+            # Back-compat: if the legacy inactivity knob was overridden to
+            # a value below the new default, respect it as the inter-event
+            # budget (historic behaviour) so existing configs don't regress.
+            _legacy = self._config.llm_stream_inactivity_timeout_seconds
+            if _legacy and _legacy > 0 and _legacy < _inter_event_limit:
+                _inter_event_limit = _legacy
+            _watchdog_active = (_ttft_limit and _ttft_limit > 0) or (
+                _inter_event_limit and _inter_event_limit > 0
+            )
+            # Result of the watchdog: "ok" (stream finished), "ttft" (no first
+            # event in budget), "inactive" (silence after first event).
+            _watchdog_verdict: str = "ok"
+            _watchdog_elapsed: float = 0.0
+            _watchdog_limit: float = 0.0
+
             try:
-                if _inactivity_limit and _inactivity_limit > 0:
-                    # Heartbeat-aware wait: poll the task and cancel it if
-                    # no stream event has been observed within the window.
-                    # A silently dead HTTP connection otherwise hangs here
-                    # forever — no exception, no delta, no timeout.
-                    #
-                    # Must use asyncio.wait (not wait_for) so we can tell
-                    # "poll interval elapsed" apart from "task raised a
-                    # TimeoutError of its own" — wait_for conflates them.
-                    _check_interval = min(5.0, _inactivity_limit / 2)
+                if _watchdog_active:
+                    # Poll cheapest-valid interval: at most every 5s, at least
+                    # half the tighter budget. Must use asyncio.wait (not
+                    # wait_for) so "poll interval elapsed" and "task raised
+                    # TimeoutError of its own" stay distinguishable.
+                    _tight = min(
+                        _ttft_limit or float("inf"),
+                        _inter_event_limit or float("inf"),
+                    )
+                    _check_interval = max(1.0, min(5.0, _tight / 2))
                     while True:
-                        done, _pending = await asyncio.wait({self._stream_task}, timeout=_check_interval)
+                        done, _pending = await asyncio.wait(
+                            {self._stream_task}, timeout=_check_interval
+                        )
                         if self._stream_task in done:
-                            # Let any exception the task raised propagate
-                            # naturally via the outer ``await`` below.
                             break
-                        idle = time.monotonic() - _stream_last_event_at
-                        if idle >= _inactivity_limit:
-                            logger.warning(
-                                "[_run_single_turn] inner_turn=%d: "
-                                "stream inactivity %.0fs >= %.0fs — "
-                                "cancelling stream task",
-                                inner_turn,
-                                idle,
-                                _inactivity_limit,
-                            )
-                            self._bump("stream_inactivity_watchdog")
-                            self._stream_task.cancel()
-                            try:
-                                await self._stream_task
-                            except BaseException:
-                                pass
-                            raise ConnectionError(
-                                f"LLM stream idle for {idle:.0f}s "
-                                f"(inactivity limit {_inactivity_limit:.0f}s) — "
-                                "connection presumed dead"
-                            ) from None
+                        now = time.monotonic()
+                        if _first_event_at is None:
+                            # TTFT phase — stream open but silent. Use the
+                            # looser budget; don't confuse slow models with
+                            # dead connections.
+                            elapsed = now - _stream_start_at
+                            if _ttft_limit and _ttft_limit > 0 and elapsed >= _ttft_limit:
+                                _watchdog_verdict = "ttft"
+                                _watchdog_elapsed = elapsed
+                                _watchdog_limit = _ttft_limit
+                                break
+                        else:
+                            # Post-first-event silence. A stream that produced
+                            # events and then went quiet is a real stall.
+                            idle = now - _stream_last_event_at
+                            if (
+                                _inter_event_limit
+                                and _inter_event_limit > 0
+                                and idle >= _inter_event_limit
+                            ):
+                                _watchdog_verdict = "inactive"
+                                _watchdog_elapsed = idle
+                                _watchdog_limit = _inter_event_limit
+                                break
                         # Still active — keep polling.
-                # Re-raise any exception the stream task stored. When the
-                # watchdog loop exited via ``break`` the task is done, and
-                # ``await`` is the cheapest way to surface its exception.
-                await self._stream_task
-                logger.debug("[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn)
+
+                if _watchdog_verdict != "ok":
+                    logger.warning(
+                        "[_run_single_turn] inner_turn=%d: watchdog=%s %.0fs >= %.0fs — cancelling stream",
+                        inner_turn,
+                        _watchdog_verdict,
+                        _watchdog_elapsed,
+                        _watchdog_limit,
+                    )
+                    self._bump(f"stream_watchdog_{_watchdog_verdict}")
+                    self._stream_task.cancel()
+                    try:
+                        await self._stream_task
+                    except BaseException:
+                        pass
+                else:
+                    # Re-raise any exception the stream task stored. When the
+                    # watchdog loop exited via ``break`` the task is done, and
+                    # ``await`` is the cheapest way to surface its exception.
+                    await self._stream_task
+                    logger.debug(
+                        "[_run_single_turn] inner_turn=%d: Stream task completed normally",
+                        inner_turn,
+                    )
             except asyncio.CancelledError:
                 logger.debug("[_run_single_turn] inner_turn=%d: Stream task cancelled", inner_turn)
-                if accumulated_text:
-                    await conversation.add_assistant_message(content=accumulated_text)
+                if accumulated_text or _partial_tc_dicts:
+                    await conversation.add_assistant_message(
+                        content=accumulated_text,
+                        tool_calls=_partial_tc_dicts or None,
+                        truncated=True,
+                    )
                 # Gap 1: kill any early-dispatched tool tasks too.
                 # Without this, a safe tool started during streaming
                 # would leak past cancellation and keep running.
@@ -2568,6 +2667,100 @@ class AgentLoop(AgentProtocol):
                 raise
             finally:
                 self._stream_task = None
+
+            # Continue-nudge recovery path. Runs AFTER the stream task is
+            # cleaned up so all state is consistent. We persist whatever
+            # partial text + tool-calls the model produced (as a truncated
+            # message so the model can see its own in-flight work on the
+            # next turn), cancel early tool tasks, append a terse
+            # continuation hint, and restart the stream.
+            if _watchdog_verdict != "ok":
+                # Kill any safe-tool tasks the stream dispatched early —
+                # their results would have had nowhere to land anyway
+                # because the assistant message was incomplete.
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
+                # Promote whatever we captured into a real truncated
+                # message. The partial checkpoint for this seq is cleared
+                # automatically when add_assistant_message persists.
+                if accumulated_text or _partial_tc_dicts:
+                    await conversation.add_assistant_message(
+                        content=accumulated_text,
+                        tool_calls=_partial_tc_dicts or None,
+                        truncated=True,
+                    )
+
+                reason_label = (
+                    "no tokens before TTFT budget"
+                    if _watchdog_verdict == "ttft"
+                    else "stream went silent after producing events"
+                )
+                if self._event_bus:
+                    if _watchdog_verdict == "ttft":
+                        await self._event_bus.emit_stream_ttft_exceeded(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            ttft_seconds=_watchdog_elapsed,
+                            limit_seconds=_watchdog_limit,
+                            execution_id=execution_id,
+                        )
+                    else:
+                        await self._event_bus.emit_stream_inactive(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            idle_seconds=_watchdog_elapsed,
+                            limit_seconds=_watchdog_limit,
+                            execution_id=execution_id,
+                        )
+
+                nudge_enabled = self._config.continue_nudge_enabled
+                nudge_cap = self._config.continue_nudge_max_per_turn
+                if nudge_enabled and _nudge_count_this_turn < nudge_cap:
+                    _nudge_count_this_turn += 1
+                    nudge_msg = (
+                        f"[System: the previous stream stalled ({reason_label}, "
+                        f"{_watchdog_elapsed:.0f}s). Continue from the last tool "
+                        "result already in this conversation. Do NOT repeat tool "
+                        "calls whose results are visible above — reuse them and "
+                        "move to the next step.]"
+                    )
+                    await conversation.add_user_message(
+                        nudge_msg,
+                        is_system_nudge=True,
+                    )
+                    if self._event_bus:
+                        await self._event_bus.emit_stream_nudge_sent(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            reason=_watchdog_verdict,
+                            nudge_count=_nudge_count_this_turn,
+                            execution_id=execution_id,
+                        )
+                    logger.info(
+                        "[%s] continue-nudge sent (count=%d/%d, reason=%s)",
+                        node_id,
+                        _nudge_count_this_turn,
+                        nudge_cap,
+                        _watchdog_verdict,
+                    )
+                    # Reset the outer _turn_t0 timer so the "LLM done in
+                    # Xms" log line reflects real work not the nudge cycle.
+                    _llm_stream_ms = int((time.monotonic() - _llm_stream_t0) * 1000)
+                    logger.debug(
+                        "[_run_single_turn] inner_turn=%d: nudge restart after %dms",
+                        inner_turn,
+                        _llm_stream_ms,
+                    )
+                    continue  # restart the inner loop, re-fetches messages
+                # Nudge disabled or cap exhausted — fall back to the
+                # existing retry path so a truly dead endpoint eventually
+                # surfaces as an error.
+                raise ConnectionError(
+                    f"LLM stream {_watchdog_verdict} for {_watchdog_elapsed:.0f}s "
+                    f"(limit {_watchdog_limit:.0f}s) — nudge cap reached"
+                )
+
             _llm_stream_ms = int((time.monotonic() - _llm_stream_t0) * 1000)
 
             # If a recoverable stream error produced an empty response,
@@ -2667,6 +2860,12 @@ class AgentLoop(AgentProtocol):
             results_by_id: dict[str, ToolResult] = {}
             timing_by_id: dict[str, dict[str, Any]] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
+            # Replay detector: per-turn map from tool_use_id -> steer prefix.
+            # Populated below when we detect that the model is re-emitting a
+            # tool call whose (name + canonical args) matches a prior success.
+            # Applied to the stored tool result content so the model sees the
+            # nudge on its next turn without losing the real execution output.
+            replay_prefixes_by_id: dict[str, str] = {}
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -2939,6 +3138,39 @@ class AgentLoop(AgentProtocol):
                         )
                         results_by_id[tc.tool_use_id] = result
                     else:
+                        # Replay detector: flag re-executions of recent
+                        # successful calls. We still run the tool (some
+                        # are legitimately repeated, e.g. screenshots and
+                        # read-only evaluates) but prepend a terse steer
+                        # onto the stored result so the model sees the
+                        # signal on its next turn.
+                        if self._config.replay_detector_enabled:
+                            prior = conversation.find_completed_tool_call(
+                                tc.tool_name,
+                                tc.tool_input,
+                                within_last_turns=self._config.replay_detector_within_last_turns,
+                            )
+                            if prior is not None:
+                                logger.warning(
+                                    "[%s] replay detected: %s matches prior seq=%d — executing anyway",
+                                    node_id,
+                                    tc.tool_name,
+                                    prior.seq,
+                                )
+                                self._bump("tool_call_replay_detected")
+                                if self._event_bus:
+                                    await self._event_bus.emit_tool_call_replay_detected(
+                                        stream_id=stream_id,
+                                        node_id=node_id,
+                                        tool_name=tc.tool_name,
+                                        prior_seq=prior.seq,
+                                        execution_id=execution_id,
+                                    )
+                                replay_prefixes_by_id[tc.tool_use_id] = (
+                                    f"[Replay detected: {tc.tool_name} matches "
+                                    f"seq={prior.seq}. Result still produced below — "
+                                    "consider whether the retry was necessary.]\n"
+                                )
                         pending_real.append(tc)
 
             # Phase 2a: partition real tools by concurrency safety.
@@ -3136,9 +3368,18 @@ class AgentLoop(AgentProtocol):
                     )
                     image_content = None
 
+                # Apply replay-detector steer prefix if this call matched a
+                # recent successful invocation. Only applies to non-error
+                # results — an error already breaks the replay chain.
+                stored_content = result.content
+                if not result.is_error:
+                    _prefix = replay_prefixes_by_id.get(tc.tool_use_id)
+                    if _prefix:
+                        stored_content = f"{_prefix}{stored_content or ''}"
+
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
-                    content=result.content,
+                    content=stored_content,
                     is_error=result.is_error,
                     image_content=image_content,
                     is_skill_content=result.is_skill_content,

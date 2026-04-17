@@ -48,6 +48,14 @@ class Message:
     is_skill_content: bool = False
     # Logical worker run identifier for shared-session persistence
     run_id: str | None = None
+    # True when this is a framework-injected continuation hint (continue-nudge
+    # on stream stall). Stored as a user message for API compatibility, but
+    # the UI should render it as a compact system notice, not user speech.
+    is_system_nudge: bool = False
+    # True when this message is a partial/truncated assistant turn reconstructed
+    # from a crashed or watchdog-cancelled stream. Signals that the original
+    # turn never finished — the model may or may not choose to redo it.
+    truncated: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -109,6 +117,10 @@ class Message:
             d["image_content"] = self.image_content
         if self.run_id is not None:
             d["run_id"] = self.run_id
+        if self.is_system_nudge:
+            d["is_system_nudge"] = self.is_system_nudge
+        if self.truncated:
+            d["truncated"] = self.truncated
         return d
 
     @classmethod
@@ -126,6 +138,8 @@ class Message:
             is_client_input=data.get("is_client_input", False),
             image_content=data.get("image_content"),
             run_id=data.get("run_id"),
+            is_system_nudge=data.get("is_system_nudge", False),
+            truncated=data.get("truncated", False),
         )
 
 
@@ -317,6 +331,14 @@ class ConversationStore(Protocol):
 
     async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None: ...
 
+    async def write_partial(self, seq: int, data: dict[str, Any]) -> None: ...
+
+    async def read_partial(self, seq: int) -> dict[str, Any] | None: ...
+
+    async def read_all_partials(self) -> list[dict[str, Any]]: ...
+
+    async def clear_partial(self, seq: int) -> None: ...
+
     async def close(self) -> None: ...
 
     async def destroy(self) -> None: ...
@@ -462,6 +484,7 @@ class NodeConversation:
         is_transition_marker: bool = False,
         is_client_input: bool = False,
         image_content: list[dict[str, Any]] | None = None,
+        is_system_nudge: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -472,6 +495,7 @@ class NodeConversation:
             is_transition_marker=is_transition_marker,
             is_client_input=is_client_input,
             image_content=image_content,
+            is_system_nudge=is_system_nudge,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -485,6 +509,8 @@ class NodeConversation:
         self,
         content: str,
         tool_calls: list[dict[str, Any]] | None = None,
+        *,
+        truncated: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -493,6 +519,7 @@ class NodeConversation:
             tool_calls=tool_calls,
             phase_id=self._current_phase,
             run_id=self._run_id,
+            truncated=truncated,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -547,6 +574,59 @@ class NodeConversation:
         return msg
 
     # --- Query -------------------------------------------------------------
+
+    def find_completed_tool_call(
+        self,
+        name: str,
+        tool_input: dict[str, Any],
+        within_last_turns: int = 3,
+    ) -> Message | None:
+        """Return the most recent assistant message that issued a tool call
+        with the same (name + canonical-json args) AND received a non-error
+        tool result, within the last ``within_last_turns`` assistant turns.
+
+        Used by the replay detector to flag when the model is about to redo
+        a successful call — we prepend a steer onto the upcoming result but
+        still execute, so tools like browser_screenshot that are legitimately
+        repeated are not silently skipped.
+        """
+        try:
+            target_canonical = json.dumps(tool_input, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            target_canonical = str(tool_input)
+
+        # Walk backwards over recent assistant messages
+        assistant_turns_seen = 0
+        for idx in range(len(self._messages) - 1, -1, -1):
+            m = self._messages[idx]
+            if m.role != "assistant":
+                continue
+            assistant_turns_seen += 1
+            if assistant_turns_seen > within_last_turns:
+                break
+            if not m.tool_calls:
+                continue
+            for tc in m.tool_calls:
+                func = tc.get("function", {}) if isinstance(tc, dict) else {}
+                tc_name = func.get("name")
+                if tc_name != name:
+                    continue
+                args_str = func.get("arguments", "")
+                try:
+                    parsed = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    canonical = json.dumps(parsed, sort_keys=True, default=str)
+                except (TypeError, ValueError):
+                    canonical = str(args_str)
+                if canonical != target_canonical:
+                    continue
+                # Found a match — now verify its result was not an error.
+                tc_id = tc.get("id")
+                for later in self._messages[idx + 1 :]:
+                    if later.role == "tool" and later.tool_use_id == tc_id:
+                        if not later.is_error:
+                            return m
+                        break
+        return None
 
     def to_llm_messages(self) -> list[dict[str, Any]]:
         """Return messages as OpenAI-format dicts (system prompt excluded).
@@ -1365,6 +1445,45 @@ class NodeConversation:
             await self._persist_meta()
         await self._store.write_part(message.seq, message.to_storage_dict())
         await self._write_next_seq()
+        # Any partial checkpoint for this seq is now superseded by the real
+        # part — clear it so a future restore doesn't resurrect stale text.
+        try:
+            await self._store.clear_partial(message.seq)
+        except AttributeError:
+            # Older stores may not implement partials; ignore.
+            pass
+
+    async def checkpoint_partial_assistant(
+        self,
+        accumulated_text: str,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Write an in-flight assistant turn's state to disk under the next seq.
+
+        Called from the stream event loop. Safe to call repeatedly — each call
+        overwrites the prior checkpoint. Persisted via ``write_partial`` so it
+        does NOT appear in ``read_parts()`` and cannot be double-loaded. Cleared
+        automatically when ``add_assistant_message`` for this seq lands.
+        """
+        if self._store is None:
+            return
+        if not self._meta_persisted:
+            await self._persist_meta()
+        payload: dict[str, Any] = {
+            "seq": self._next_seq,
+            "role": "assistant",
+            "content": accumulated_text,
+            "phase_id": self._current_phase,
+            "run_id": self._run_id,
+            "truncated": True,
+        }
+        if tool_calls:
+            payload["tool_calls"] = tool_calls
+        try:
+            await self._store.write_partial(self._next_seq, payload)
+        except AttributeError:
+            # Older stores may not implement partials; ignore.
+            pass
 
     async def _persist_meta(self) -> None:
         """Lazily write conversation metadata to the store (called once).
@@ -1460,5 +1579,46 @@ class NodeConversation:
             conv._next_seq = next_seq
         elif conv._messages:
             conv._next_seq = conv._messages[-1].seq + 1
+
+        # Surface any leftover partial checkpoints as truncated messages so
+        # the next turn sees what the interrupted stream was in the middle
+        # of producing. Only partials whose seq is >= next_seq are meaningful;
+        # anything lower was already superseded by a real part.
+        try:
+            partials = await store.read_all_partials()
+        except AttributeError:
+            partials = []
+        for p in partials:
+            pseq = p.get("seq", -1)
+            if pseq < conv._next_seq:
+                # Stale — clean it up.
+                try:
+                    await store.clear_partial(pseq)
+                except AttributeError:
+                    pass
+                continue
+            # Only resurrect partials relevant to this run / phase.
+            if run_id and not is_legacy_run_id(run_id) and p.get("run_id") != run_id:
+                continue
+            if phase_id and p.get("phase_id") is not None and p.get("phase_id") != phase_id:
+                continue
+            # Reconstruct as a truncated assistant message.
+            msg = Message(
+                seq=pseq,
+                role="assistant",
+                content=p.get("content", "") or "",
+                tool_calls=p.get("tool_calls"),
+                phase_id=p.get("phase_id"),
+                run_id=p.get("run_id"),
+                truncated=True,
+            )
+            conv._messages.append(msg)
+            conv._next_seq = max(conv._next_seq, pseq + 1)
+            logger.info(
+                "restore: resurrected truncated partial seq=%d (text=%d chars, tool_calls=%d)",
+                pseq,
+                len(msg.content),
+                len(msg.tool_calls or []),
+            )
 
         return conv

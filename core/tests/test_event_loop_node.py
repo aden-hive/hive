@@ -2109,3 +2109,137 @@ class TestToolConcurrencyPartition:
 
         # Both tools must have run: soft errors don't cascade.
         assert executed == ["call_1", "call_2"]
+
+
+# ===========================================================================
+# Replay detector (warn + execute)
+# ===========================================================================
+
+
+class TestReplayDetector:
+    @pytest.mark.asyncio
+    async def test_replay_emits_event_and_prefixes_result(
+        self, tmp_path, runtime, node_spec, buffer
+    ):
+        """Re-emitting a tool call whose prior result succeeded fires the
+        TOOL_CALL_REPLAY_DETECTED event and prepends a steer onto the stored
+        result, but still executes the call (warn + execute)."""
+        node_spec.output_keys = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=f"fresh result for {tool_use.id}",
+                is_error=False,
+            )
+
+        # Turn 1: model calls browser_setup with id=call_1
+        # Turn 2: model calls browser_setup AGAIN with id=call_2 (the replay)
+        # Turn 3: text stop
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("browser_setup", {}, tool_use_id="call_1"),
+                tool_call_scenario("browser_setup", {}, tool_use_id="call_2"),
+                text_scenario("done"),
+            ]
+        )
+
+        tools = [Tool(name="browser_setup", description="", parameters={})]
+
+        # Capture events from the bus.
+        captured: list[Any] = []
+        bus = EventBus()
+
+        async def _collect(evt):
+            captured.append(evt)
+
+        bus.subscribe([EventType.TOOL_CALL_REPLAY_DETECTED], _collect)
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        store = FileConversationStore(tmp_path / "conv")
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            conversation_store=store,
+            event_bus=bus,
+            config=LoopConfig(max_iterations=5),
+        )
+        await node.execute(ctx)
+
+        # Exactly one replay-detected event fired for the second call.
+        assert len(captured) == 1
+        assert captured[0].data["tool_name"] == "browser_setup"
+
+        # The stored tool result for the replay carries the steer prefix,
+        # and the real execution output is preserved.
+        parts = await store.read_parts()
+        tool_msgs = [
+            p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_2"
+        ]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["content"].startswith("[Replay detected: browser_setup")
+        assert "fresh result for call_2" in tool_msgs[0]["content"]
+
+        # The first call's result is untouched.
+        first = [
+            p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_1"
+        ]
+        assert first[0]["content"] == "fresh result for call_1"
+
+    @pytest.mark.asyncio
+    async def test_replay_with_error_prior_does_not_fire(
+        self, tmp_path, runtime, node_spec, buffer
+    ):
+        """A prior call that errored does not count as a successful completion,
+        so re-emitting it is legitimate (not a replay)."""
+        node_spec.output_keys = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            is_err = tool_use.id == "call_1"
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=("boom" if is_err else "ok"),
+                is_error=is_err,
+            )
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("flaky", {}, tool_use_id="call_1"),
+                tool_call_scenario("flaky", {}, tool_use_id="call_2"),
+                text_scenario("recovered"),
+            ]
+        )
+        tools = [Tool(name="flaky", description="", parameters={})]
+
+        captured: list[Any] = []
+        bus = EventBus()
+
+        async def _collect(evt):
+            captured.append(evt)
+
+        bus.subscribe([EventType.TOOL_CALL_REPLAY_DETECTED], _collect)
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        store = FileConversationStore(tmp_path / "conv")
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            conversation_store=store,
+            event_bus=bus,
+            config=LoopConfig(max_iterations=5),
+        )
+        await node.execute(ctx)
+
+        assert captured == []
