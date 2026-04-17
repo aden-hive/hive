@@ -38,7 +38,7 @@ _MAX_TIMEOUT = 600
 _DEFAULT_TIMEOUT = 120
 
 
-def _resolve_cwd(cwd: str | None, agent_id: str) -> str:
+def _resolve_cwd(cwd: str | None) -> str:
     if cwd:
         return resolve_safe_path(cwd)
     return os.path.expanduser("~/.hive")

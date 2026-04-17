@@ -17,8 +17,11 @@ class TestResolveSafePath:
         result = resolve_safe_path(valid_path)
         assert result == valid_path
 
-    def test_relative_path_rejected(self):
+    def test_relative_path_rejected(self, tmp_path_factory, monkeypatch):
         # We assume CWD is not tmp_dir
+        # Ensure CWD is outside the allowed roots
+        outside = tmp_path_factory.mktemp("outside")
+        monkeypatch.chdir(outside)
         with pytest.raises(ValueError, match="Access denied"):
             resolve_safe_path("test.txt")
 
