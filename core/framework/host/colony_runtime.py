@@ -1100,6 +1100,89 @@ class ColonyRuntime:
             return True
         return False
 
+    def watch_batch_timeouts(
+        self,
+        worker_ids: list[str],
+        *,
+        soft_timeout: float,
+        hard_timeout: float,
+        warning_message: str | None = None,
+    ) -> asyncio.Task:
+        """Schedule a background task that enforces soft + hard timeouts.
+
+        Semantics:
+          * At ``t = soft_timeout`` every worker in ``worker_ids`` that is
+            still active AND hasn't already filed an ``_explicit_report``
+            receives ``warning_message`` via ``send_to_worker`` — the inject
+            appears as a user turn at the next agent-loop boundary, so the
+            worker's LLM can see it and call ``report_to_parent`` with
+            partial results.
+          * At ``t = hard_timeout`` any worker still active is force-stopped
+            via ``stop_worker``. ``Worker.run`` still emits its
+            ``SUBAGENT_REPORT`` on cancel (the explicit report survives,
+            if the worker reported just before the stop) so the queen
+            always sees a terminal inject for every spawned worker.
+
+        Returns the scheduled task so callers can await or cancel it.
+        Non-blocking for the caller — the watcher runs on the event loop
+        independently.
+        """
+        if warning_message is None:
+            grace = max(0.0, hard_timeout - soft_timeout)
+            warning_message = (
+                f"[SOFT TIMEOUT] You've been running for {soft_timeout:.0f}s. "
+                "Wrap up now: call report_to_parent with whatever partial "
+                "results you have. You have "
+                f"~{grace:.0f}s more before a hard stop — anything not "
+                "reported by then will be lost."
+            )
+
+        async def _watch() -> None:
+            try:
+                await asyncio.sleep(soft_timeout)
+                for wid in worker_ids:
+                    worker = self._workers.get(wid)
+                    if worker is None or not worker.is_active:
+                        continue
+                    if getattr(worker, "_explicit_report", None) is not None:
+                        continue
+                    try:
+                        await self.send_to_worker(wid, warning_message)
+                    except Exception:
+                        logger.warning(
+                            "watch_batch_timeouts: soft-timeout inject failed for %s",
+                            wid,
+                            exc_info=True,
+                        )
+
+                remaining = hard_timeout - soft_timeout
+                if remaining <= 0:
+                    return
+                await asyncio.sleep(remaining)
+                for wid in worker_ids:
+                    worker = self._workers.get(wid)
+                    if worker is None or not worker.is_active:
+                        continue
+                    try:
+                        await self.stop_worker(wid)
+                        logger.info(
+                            "watch_batch_timeouts: hard-stopped %s after %ss (no report)",
+                            wid,
+                            hard_timeout,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "watch_batch_timeouts: hard-stop failed for %s",
+                            wid,
+                            exc_info=True,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("watch_batch_timeouts: watcher crashed")
+
+        return asyncio.create_task(_watch(), name=f"batch-timeout:{worker_ids[0] if worker_ids else '?'}")
+
     # ── Status & Query ──────────────────────────────────────────
 
     def list_workers(self) -> list[WorkerInfo]:

@@ -1,15 +1,19 @@
-"""Phase 4 test: run_parallel_workers tool fans out through session.colony.
+"""Coverage of the run_parallel_workers tool (fire-and-forget contract).
 
-End-to-end coverage of the queen-side parallel-worker tool:
+The tool spawns workers and returns immediately with worker_ids. Each
+worker's completion arrives on the event bus as SUBAGENT_REPORT, which
+the queen orchestrator's _on_worker_report bridge turns into a
+[WORKER_REPORT] user inject. These tests verify:
 
-1. Build a real ``ColonyRuntime`` (the Phase 1 + 2 unified runtime).
-2. Stand up the queen lifecycle tools registered against a fake session
-   that exposes ``session.colony``.
-3. Invoke the ``run_parallel_workers`` tool with three task specs whose
-   workers each call ``report_to_parent`` with structured payloads.
-4. Assert that the tool returns aggregated reports in the same order as
-   the input tasks and that all workers ran in parallel under
-   ``{storage}/workers/{worker_id}/``.
+1. The tool returns immediately with status="started" and the list of
+   worker_ids, not with aggregated reports.
+2. SUBAGENT_REPORT events are emitted for every spawned worker with
+   the expected payload (status, summary, data).
+3. Soft-timeout inject reaches still-active workers that haven't
+   filed an explicit report; workers that finished early are not
+   disturbed.
+4. Hard cutoff force-stops workers that ignored the warning, but
+   preserves any explicit report filed right before the stop.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ import pytest
 
 from framework.agent_loop.types import AgentSpec
 from framework.host.colony_runtime import ColonyRuntime
-from framework.host.event_bus import EventBus
+from framework.host.event_bus import AgentEvent, EventBus, EventType
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
 from framework.loader.tool_registry import ToolRegistry
@@ -112,9 +116,11 @@ class _FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_run_parallel_workers_tool_fans_out_and_aggregates(
+async def test_run_parallel_workers_tool_returns_immediately_and_emits_reports(
     tmp_path: Path,
 ) -> None:
+    """Contract: tool returns status='started' right away; SUBAGENT_REPORT
+    events for every spawned worker arrive asynchronously on the bus."""
     bus = EventBus()
     llm = _ByTaskMockLLM(
         by_task={
@@ -128,7 +134,7 @@ async def test_run_parallel_workers_tool_fans_out_and_aggregates(
         agent_spec=AgentSpec(
             id="test_colony",
             name="Test Colony",
-            description="Phase 4 test colony.",
+            description="async-spawn test colony.",
             system_prompt="You are a test agent.",
             agent_type="event_loop",
             output_keys=[],
@@ -140,21 +146,27 @@ async def test_run_parallel_workers_tool_fans_out_and_aggregates(
         tools=[],
         tool_executor=_stub_executor,
         event_bus=bus,
-        colony_id="phase4_test",
+        colony_id="async_test",
         pipeline_stages=[],
     )
     await colony.start()
 
-    session = _FakeSession(colony, "phase4_test")
+    # Collect SUBAGENT_REPORT events as they arrive.
+    collected_reports: list[dict] = []
+
+    async def _on_report(event: AgentEvent) -> None:
+        collected_reports.append(event.data or {})
+
+    bus.subscribe(event_types=[EventType.SUBAGENT_REPORT], handler=_on_report)
+
+    session = _FakeSession(colony, "async_test")
     registry = ToolRegistry()
     register_queen_lifecycle_tools(registry, session=session, session_id=session.id)
 
     try:
-        # Tool exists in the registry
         tools = registry.get_tools()
         assert "run_parallel_workers" in tools
 
-        # Invoke it via the registered executor
         executor = registry.get_executor()
         tool_use = ToolUse(
             id="tu_run_parallel",
@@ -165,23 +177,41 @@ async def test_run_parallel_workers_tool_fans_out_and_aggregates(
                     {"task": "fetch-B"},
                     {"task": "fetch-C"},
                 ],
-                "timeout": 10.0,
+                "timeout": 30.0,
             },
         )
-        result = executor(tool_use)
-        if asyncio.iscoroutine(result):
-            result = await result
+
+        # The tool must return quickly — well before workers finish.
+        async def _invoke() -> Any:
+            r = executor(tool_use)
+            if asyncio.iscoroutine(r):
+                r = await r
+            return r
+
+        result = await asyncio.wait_for(_invoke(), timeout=5.0)
 
         assert not result.is_error, f"Tool errored: {result.content}"
         payload = json.loads(result.content)
+        assert payload["status"] == "started"
         assert payload["worker_count"] == 3
-        reports = payload["reports"]
-        assert len(reports) == 3
+        assert len(payload["worker_ids"]) == 3
+        assert payload["soft_timeout_seconds"] == 30.0
+        assert payload["hard_timeout_seconds"] >= 30.0 + 60.0  # at least 60s grace
+        assert "[WORKER_REPORT]" in payload["message"]
+        assert "reports" not in payload  # fire-and-forget — no aggregated reports
 
-        # Reports come back in the same order as the input tasks
-        statuses = [r["status"] for r in reports]
-        summaries = [r["summary"] for r in reports]
-        assert statuses == ["success", "success", "failed"]
+        # Now wait for workers to finish and SUBAGENT_REPORT to fire.
+        for _ in range(40):
+            if len(collected_reports) >= 3:
+                break
+            await asyncio.sleep(0.1)
+
+        assert len(collected_reports) == 3, (
+            f"Expected 3 SUBAGENT_REPORT events, got {len(collected_reports)}"
+        )
+        statuses = sorted(r["status"] for r in collected_reports)
+        summaries = sorted(r["summary"] for r in collected_reports)
+        assert statuses == ["failed", "success", "success"]
         assert summaries == ["A done", "B done", "C broke"]
 
         # Each worker landed under {storage}/workers/{worker_id}/
@@ -266,5 +296,177 @@ async def test_run_parallel_workers_validates_tasks_input() -> None:
         assert "error" in await _call({"tasks": []})
         # Missing task string
         assert "error" in await _call({"tasks": [{"data": {}}]})
+    finally:
+        await colony.stop()
+
+
+# ---------------------------------------------------------------------------
+# Soft-timeout inject reaches slow workers; explicit-report preservation
+# ---------------------------------------------------------------------------
+
+
+class _SlowLLM(LLMProvider):
+    """Mock LLM that stalls on _await_user_input by never yielding a finish.
+
+    Each call to ``stream`` awaits the ``stall_event`` before emitting any
+    tokens — tests drive it via ``release()``. When the worker's LLM is
+    stuck waiting, the watcher's inject message arrives at ``_input_queue``
+    but the LLM turn doesn't see it until the current stream finishes.
+    We simulate "worker is stuck mid-turn" by holding the stall until the
+    test explicitly releases it.
+    """
+
+    model: str = "mock-slow"
+
+    def __init__(self) -> None:
+        self.stall_event = asyncio.Event()
+        self.release_after_inject: bool = False
+        self.report_on_release: tuple[str, str, dict] | None = None
+        self.inject_seen = asyncio.Event()
+        self._turn_count = 0
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator:
+        self._turn_count += 1
+        # On the second call (after the watcher's inject), check whether the
+        # SOFT TIMEOUT message arrived in the conversation.
+        if self._turn_count >= 2:
+            for m in messages:
+                content = m.get("content", "")
+                if isinstance(content, str) and "[SOFT TIMEOUT]" in content:
+                    self.inject_seen.set()
+            if self.report_on_release:
+                st, summary, data = self.report_on_release
+                yield ToolCallEvent(
+                    tool_use_id=f"tu_report_{self._turn_count}",
+                    tool_name="report_to_parent",
+                    tool_input={"status": st, "summary": summary, "data": data},
+                )
+                yield FinishEvent(stop_reason="tool_calls", input_tokens=1, output_tokens=1, model="mock-slow")
+                return
+            # Otherwise loop forever (ignore warning).
+            await self.stall_event.wait()
+            yield FinishEvent(stop_reason="stop", input_tokens=1, output_tokens=1, model="mock-slow")
+            return
+
+        # First turn: stall until released.
+        await self.stall_event.wait()
+        yield TextDeltaEvent(content="thinking...", snapshot="thinking...")
+        yield FinishEvent(stop_reason="stop", input_tokens=1, output_tokens=1, model="mock-slow")
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(content="", model="mock-slow", stop_reason="stop")
+
+
+async def _build_colony(tmp_path: Path, llm: LLMProvider, colony_id: str) -> ColonyRuntime:
+    bus = EventBus()
+    colony = ColonyRuntime(
+        agent_spec=AgentSpec(
+            id="t",
+            name="t",
+            description="t",
+            system_prompt="t",
+            agent_type="event_loop",
+            tool_access_policy="all",
+        ),
+        goal=Goal(id="g", name="g", description="g"),
+        storage_path=tmp_path / colony_id,
+        llm=llm,
+        tools=[],
+        tool_executor=_stub_executor,
+        event_bus=bus,
+        colony_id=colony_id,
+        pipeline_stages=[],
+    )
+    await colony.start()
+    return colony
+
+
+@pytest.mark.asyncio
+async def test_watch_batch_timeouts_soft_inject_only_hits_stragglers(
+    tmp_path: Path,
+) -> None:
+    """Workers that already filed an explicit report must NOT receive the
+    SOFT TIMEOUT warning inject."""
+    fast_llm = _ByTaskMockLLM(by_task={"fast": _report("success", "fast done", {})})
+    colony = await _build_colony(tmp_path, fast_llm, "soft_fast")
+
+    try:
+        ids = await colony.spawn_batch([{"task": "fast"}])
+        worker = colony._workers[ids[0]]
+
+        # Wait for the worker to finish naturally.
+        for _ in range(50):
+            if not worker.is_active:
+                break
+            await asyncio.sleep(0.05)
+        assert not worker.is_active
+        assert worker._explicit_report is not None  # it did call report_to_parent
+
+        # Snapshot input-queue depth, then schedule watcher with short soft.
+        before = worker._input_queue.qsize()
+        task = colony.watch_batch_timeouts(
+            ids,
+            soft_timeout=0.1,
+            hard_timeout=0.2,
+        )
+        await task
+        # Worker already finished + reported — watcher must skip the inject.
+        assert worker._input_queue.qsize() == before
+    finally:
+        await colony.stop()
+
+
+@pytest.mark.asyncio
+async def test_explicit_report_survives_cancel(tmp_path: Path) -> None:
+    """A worker that set _explicit_report right before being cancelled must
+    emit a SUBAGENT_REPORT carrying the explicit payload, not the canned
+    'Worker was cancelled' stub."""
+    llm = _ByTaskMockLLM(
+        by_task={"cancel-me": _report("success", "partial wrap-up", {"items_done": 3})}
+    )
+    colony = await _build_colony(tmp_path, llm, "cancel_survives")
+
+    collected: list[dict] = []
+
+    async def _on_report(event: AgentEvent) -> None:
+        collected.append(event.data or {})
+
+    colony.event_bus.subscribe(event_types=[EventType.SUBAGENT_REPORT], handler=_on_report)
+
+    try:
+        ids = await colony.spawn_batch([{"task": "cancel-me"}])
+        worker = colony._workers[ids[0]]
+
+        # Let worker finish first turn so _explicit_report is set,
+        # then cancel it.
+        for _ in range(50):
+            if worker._explicit_report is not None:
+                break
+            await asyncio.sleep(0.05)
+        assert worker._explicit_report is not None, (
+            "Worker never set _explicit_report — test precondition not met"
+        )
+
+        # Cancel the already-reported worker.
+        await colony.stop_worker(ids[0])
+
+        # Drain any pending events.
+        for _ in range(20):
+            if collected:
+                break
+            await asyncio.sleep(0.05)
+
+        # The report we receive should be the explicit one.
+        assert collected, "No SUBAGENT_REPORT emitted"
+        # Find the cancel-survives worker's report (there should only be one).
+        report = collected[0]
+        assert report.get("summary") == "partial wrap-up", report
+        assert report.get("data", {}).get("items_done") == 3, report
     finally:
         await colony.stop()

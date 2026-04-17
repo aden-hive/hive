@@ -304,16 +304,22 @@ export default function ColonyChat() {
           );
         }
         if (options?.reconcileOptimisticUser && chatMsg.type === "user" && prev.length > 0) {
-          const lastIdx = prev.length - 1;
-          const lastMsg = prev[lastIdx];
+          // Match by content + timestamp across the whole list (not just
+          // the last slot) so a queued user message still reconciles
+          // even when the queen's previous reply slotted in between.
+          // Also drops the "queued" indicator since the backend has
+          // now confirmed receipt.
           const incomingTs = chatMsg.createdAt ?? Date.now();
-          const lastTs = lastMsg.createdAt ?? incomingTs;
-          if (
-            lastMsg.type === "user" &&
-            lastMsg.content === chatMsg.content &&
-            Math.abs(incomingTs - lastTs) <= 15000
-          ) {
-            return prev.map((m, i) => (i === lastIdx ? { ...m, id: chatMsg.id } : m));
+          const matchIdx = prev.findIndex(
+            (m) =>
+              m.type === "user" &&
+              m.content === chatMsg.content &&
+              Math.abs(incomingTs - (m.createdAt ?? incomingTs)) <= 15000,
+          );
+          if (matchIdx !== -1) {
+            return prev.map((m, i) =>
+              i === matchIdx ? { ...m, id: chatMsg.id, queued: undefined } : m,
+            );
           }
         }
         // Insert in sorted position by createdAt so tool pills and queen

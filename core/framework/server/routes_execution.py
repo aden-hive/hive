@@ -53,9 +53,21 @@ _WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
 
 # Queen-lifecycle tools that are registered into the queen's tool registry
 # but NOT listed in any _QUEEN_*_TOOLS phase list (they're reachable only via
-# explicit registration, not phase-based gating). These must still be stripped
-# from forked worker configs.
-_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset()
+# explicit registration or as frontend-visible helpers, not phase-based
+# gating). These must still be stripped from forked / parallel-spawned
+# worker tool inventories.
+_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
+    {
+        # Phase-transition wrappers (method variants are on QueenPhaseState
+        # but the queen also sees them as tools).
+        "switch_to_reviewing",
+        "switch_to_independent",
+        # Frontend helpers that live outside phase lists.
+        "list_credentials",
+        "get_worker_health_summary",
+        "enqueue_task",
+    }
+)
 
 
 def _resolve_queen_only_tools() -> frozenset[str]:

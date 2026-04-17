@@ -515,17 +515,21 @@ export default function QueenDM() {
           );
           if (chatMsg) {
             setMessages((prev) => {
-              // Reconcile optimistic user message
+              // Reconcile optimistic user message. A matching echo from
+              // the backend means the queen has now received this
+              // message, so drop the "queued" indicator (it was set when
+              // the user sent while the queen was still busy).
               if (chatMsg.type === "user" && prev.length > 0) {
-                const last = prev[prev.length - 1];
-                if (
-                  last.type === "user" &&
-                  last.content === chatMsg.content &&
-                  Math.abs((chatMsg.createdAt ?? 0) - (last.createdAt ?? 0)) <=
-                    15000
-                ) {
+                const idx = prev.findIndex(
+                  (m) =>
+                    m.type === "user" &&
+                    m.content === chatMsg.content &&
+                    Math.abs((chatMsg.createdAt ?? 0) - (m.createdAt ?? 0)) <=
+                      15000,
+                );
+                if (idx !== -1) {
                   return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, id: chatMsg.id } : m,
+                    i === idx ? { ...m, id: chatMsg.id, queued: undefined } : m,
                   );
                 }
               }

@@ -170,13 +170,28 @@ class Worker:
         except asyncio.CancelledError:
             self.status = WorkerStatus.STOPPED
             duration = time.monotonic() - self._started_at
-            self._result = WorkerResult(
-                error="Worker stopped by queen",
-                duration_seconds=duration,
-                status="stopped",
-                summary="Worker was cancelled before completion.",
-            )
-            await self._emit_terminal_events(None, force_status="stopped")
+            # Preserve any explicit report the worker's LLM already filed
+            # via ``report_to_parent`` before being cancelled — the caller
+            # cares about that payload even on a hard stop. Only fall back
+            # to the canned "stopped" message when no explicit report exists.
+            explicit = self._explicit_report
+            if explicit is not None:
+                self._result = WorkerResult(
+                    error="Worker stopped by queen after reporting",
+                    duration_seconds=duration,
+                    status=explicit["status"],
+                    summary=explicit["summary"],
+                    data=explicit["data"],
+                )
+                await self._emit_terminal_events(None, force_status=explicit["status"])
+            else:
+                self._result = WorkerResult(
+                    error="Worker stopped by queen",
+                    duration_seconds=duration,
+                    status="stopped",
+                    summary="Worker was cancelled before completion.",
+                )
+                await self._emit_terminal_events(None, force_status="stopped")
             return self._result
 
         except Exception as exc:

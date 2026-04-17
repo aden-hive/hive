@@ -728,22 +728,33 @@ def register_queen_lifecycle_tools(
 
     # --- run_parallel_workers --------------------------------------------------
     #
-    # Phase 4 fan-out tool. Reads the unified ColonyRuntime from
-    # ``session.colony`` (built by SessionManager._start_unified_colony_runtime),
-    # spawns one Worker per task spec via spawn_batch, then blocks on
-    # wait_for_worker_reports until every worker has reported (or the
-    # timeout fires and stragglers are force-stopped). Returns a JSON
-    # array of structured reports {worker_id, status, summary, data,
-    # error, duration_seconds, tokens_used} that the queen reads on its
-    # next turn and aggregates into a user-facing summary.
+    # Fire-and-forget fan-out tool. Spawns one Worker per task spec via
+    # ``colony.spawn_batch`` and returns IMMEDIATELY with the worker ids
+    # and schedule info. The tool no longer blocks on
+    # ``wait_for_worker_reports`` — workers run in the background and
+    # each emits a ``SUBAGENT_REPORT`` event when it terminates.
+    # ``queen_orchestrator._on_worker_report`` subscribes to that event
+    # and injects a ``[WORKER_REPORT]`` user turn into the queen's
+    # conversation, so the queen sees each result as a normal inbound
+    # message and can react without being blocked by the spawn call.
     #
-    # Worker SUBAGENT_REPORT events flow through session.event_bus, so
-    # the existing SSE pipeline surfaces them automatically. Workers'
-    # individual LLM deltas / tool calls also publish to the same bus
-    # under stream_id="worker:{worker_id}"; SSE filtering for those is
-    # Phase 5 — for now they reach the queen DM channel.
+    # Soft + hard timeouts are enforced by
+    # ``ColonyRuntime.watch_batch_timeouts``: at soft-timeout, every
+    # still-active worker that hasn't already filed an explicit report
+    # receives a SOFT TIMEOUT inject telling it to call report_to_parent
+    # now; at hard-timeout, any remaining worker is force-stopped
+    # (and its SUBAGENT_REPORT still fires — explicit reports set right
+    # before the stop are preserved).
 
-    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # 10 minutes per batch
+    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0       # soft timeout (10 min)
+    _RUN_PARALLEL_HARD_TIMEOUT_CAP = 3600.0     # absolute safety-net cap (1 hour)
+
+    def _compute_hard_timeout(soft: float) -> float:
+        """Default hard cutoff: max(4× soft, soft + 600), capped at 3600s."""
+        return min(
+            _RUN_PARALLEL_HARD_TIMEOUT_CAP,
+            max(soft * 4.0, soft + 600.0),
+        )
 
     def _get_unified_colony():
         """Read the unified ColonyRuntime (Phase 2 wiring) from session."""
@@ -753,11 +764,21 @@ def register_queen_lifecycle_tools(
         *,
         tasks: list[dict],
         timeout: float | None = None,
+        hard_timeout: float | None = None,
     ) -> str:
-        """Spawn N parallel workers and wait for all reports.
+        """Spawn N parallel workers and return immediately.
 
         Each task is a dict ``{"task": str, "data": dict | None}``.
-        Returns a JSON array of structured reports in input order.
+        Workers run in the background; each one emits a ``SUBAGENT_REPORT``
+        when it finishes, which the queen sees as a ``[WORKER_REPORT]``
+        user turn. The queen stays unblocked for other work.
+
+        ``timeout`` is a **soft** deadline (default 600s). When it
+        expires, each still-active worker without an explicit report
+        gets a SOFT TIMEOUT inject telling it to call ``report_to_parent``
+        now. Workers ignoring the warning are force-stopped at the
+        ``hard_timeout`` (default: derived from ``timeout``, capped at
+        3600s).
         """
         colony = _get_unified_colony()
         if colony is None:
@@ -847,17 +868,26 @@ def register_queen_lifecycle_tools(
                     )
                 return json.dumps(error_payload)
 
-            if unavailable_tools_parallel:
-                colony_tools = list(getattr(colony, "_tools", []) or [])
-                before = len(colony_tools)
-                tools_override_parallel = [
-                    t
-                    for t in colony_tools
-                    if getattr(t, "name", None) not in unavailable_tools_parallel
-                ]
+            # Always filter queen-lifecycle tools + any tools with missing
+            # credentials. Without the queen-only strip the spawned worker
+            # inherits run_parallel_workers / create_colony / switch_to_*,
+            # which lets it recurse or flip the parent queen's phase.
+            from framework.server.routes_execution import _resolve_queen_only_tools
+
+            queen_only = _resolve_queen_only_tools()
+            colony_tools = list(getattr(colony, "_tools", []) or [])
+            before = len(colony_tools)
+            tools_override_parallel = [
+                t
+                for t in colony_tools
+                if getattr(t, "name", None) not in queen_only
+                and getattr(t, "name", None) not in unavailable_tools_parallel
+            ]
+            dropped = before - len(tools_override_parallel)
+            if dropped:
                 logger.info(
-                    "run_parallel_workers: dropped %d tool object(s) from spawn_tools (unavailable credentials)",
-                    before - len(tools_override_parallel),
+                    "run_parallel_workers: stripped %d queen/unavailable tool(s) from spawn_tools",
+                    dropped,
                 )
 
         # Colony progress tracker wiring: if the session's loaded
@@ -956,11 +986,9 @@ def register_queen_lifecycle_tools(
         except Exception as e:
             return json.dumps({"error": f"spawn_batch failed: {e}"})
 
-        # Phase transition — with the batch now spawned, the queen is
-        # semantically "working" until wait_for_worker_reports returns,
-        # so phase-gated working tools (inject_message, reply_to_worker,
-        # ...) should be available. Worker-finish auto-transitions the
-        # queen to "reviewing" (see queen_orchestrator._on_worker_done).
+        # Phase transition — workers are now live, queen is in "working"
+        # phase. Worker-finish auto-transitions back to "reviewing" once
+        # every worker has reported (see queen_orchestrator._on_worker_report).
         if phase_state is not None:
             try:
                 await phase_state.switch_to_working()
@@ -973,33 +1001,50 @@ def register_queen_lifecycle_tools(
                     exc,
                 )
 
+        # Soft + hard timeout watcher runs in the background. At soft,
+        # it injects a "wrap up" message to every still-active worker
+        # without an explicit report; at hard, it force-stops the stragglers.
+        soft_timeout = timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT
+        hard_timeout_effective = (
+            hard_timeout if hard_timeout is not None else _compute_hard_timeout(soft_timeout)
+        )
+        if hard_timeout_effective <= soft_timeout:
+            hard_timeout_effective = soft_timeout + 60.0  # enforce at least a 60s grace
         try:
-            reports = await colony.wait_for_worker_reports(
+            colony.watch_batch_timeouts(
                 worker_ids,
-                timeout=timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT,
+                soft_timeout=soft_timeout,
+                hard_timeout=hard_timeout_effective,
             )
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": f"wait_for_worker_reports failed: {e}",
-                    "worker_ids": worker_ids,
-                }
+        except Exception as exc:
+            logger.warning(
+                "run_parallel_workers: failed to schedule timeout watcher (non-fatal): %s",
+                exc,
             )
 
         return json.dumps(
             {
-                "worker_count": len(reports),
-                "reports": reports,
+                "status": "started",
+                "worker_count": len(worker_ids),
+                "worker_ids": worker_ids,
+                "soft_timeout_seconds": soft_timeout,
+                "hard_timeout_seconds": hard_timeout_effective,
+                "message": (
+                    "Workers running in the background. Each will report via "
+                    "[WORKER_REPORT] as it finishes. Reply to the user naturally "
+                    "in the meantime; you do not need to poll."
+                ),
             }
         )
 
     _run_parallel_tool = Tool(
         name="run_parallel_workers",
         description=(
-            "Fan out a batch of tasks to parallel workers and wait for all "
-            "reports. Use this when you can split the work into independent "
-            "subtasks that can run concurrently (e.g. fetching N batches "
-            "from an API, processing M files, comparing K candidates).\n\n"
+            "Fan out a batch of tasks to parallel workers and RETURN "
+            "IMMEDIATELY. Workers run in the background; each one reports "
+            "back to you as a [WORKER_REPORT] user turn when it finishes, "
+            "so you stay unblocked and can chat with the user, kick off "
+            "more work, or do anything else in the meantime.\n\n"
             "CRITICAL: each worker is a FRESH process with NO memory of "
             "your conversation. Every task string must be FULLY "
             "self-contained — include the API endpoint, the exact "
@@ -1008,14 +1053,20 @@ def register_queen_lifecycle_tools(
             "questions and cannot see your chat history. Write each "
             "task as if handing it to a stranger.\n\n"
             "Each worker runs in isolation with its own AgentLoop and "
-            "reports back via the report_to_parent tool. The call "
-            "blocks until every worker has reported or the timeout "
-            "fires. Returns a JSON object with a 'reports' array; each "
-            "report has worker_id, status "
-            "(success|partial|failed|timeout|stopped), summary, data, "
-            "error, duration_seconds, and tokens_used. Read the "
-            "summaries on your next turn and synthesize a user-facing "
-            "result. Default timeout is 600 seconds (10 minutes)."
+            "reports back via the report_to_parent tool. The tool "
+            "returns a JSON object with status='started' and the list "
+            "of worker_ids you just spawned. Each worker's completion "
+            "arrives later as a [WORKER_REPORT] message containing "
+            "worker_id, status (success|partial|failed|timeout|stopped), "
+            "summary, data, error, duration. Read those messages as "
+            "they arrive and respond to the user naturally.\n\n"
+            "TIMEOUT — 'timeout' is a SOFT deadline (default 600s). "
+            "When it expires, every still-active worker that hasn't "
+            "reported gets a [SOFT TIMEOUT] message telling it to "
+            "call report_to_parent now. It has until 'hard_timeout' "
+            "(default derived from timeout, capped at 3600s) to "
+            "wrap up before being force-stopped. Explicit reports "
+            "filed during the warning window ARE preserved."
         ),
         parameters={
             "type": "object",
@@ -1049,9 +1100,17 @@ def register_queen_lifecycle_tools(
                 "timeout": {
                     "type": "number",
                     "description": (
-                        "Per-batch timeout in seconds. Workers still "
-                        "running when the timeout fires are force-stopped "
-                        "and reported as status='timeout'. Default 600."
+                        "SOFT deadline in seconds. Workers still running "
+                        "at this point are messaged to call report_to_parent. "
+                        "Default 600 (10 minutes)."
+                    ),
+                },
+                "hard_timeout": {
+                    "type": "number",
+                    "description": (
+                        "Absolute cutoff in seconds. Workers still active "
+                        "at this point are force-stopped. Defaults to "
+                        "max(timeout × 4, timeout + 600), capped at 3600s."
                     ),
                 },
             },

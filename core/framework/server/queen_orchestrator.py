@@ -722,47 +722,71 @@ async def create_queen(
 
             phase_state.inject_notification = _inject_phase_notification
 
-            async def _on_worker_done(event):
+            async def _on_worker_report(event):
+                """Inject [WORKER_REPORT] into queen as each worker finishes.
+
+                Subscribes to SUBAGENT_REPORT events which carry the worker's
+                real summary/data (preferring any explicit ``report_to_parent``
+                call). Every spawned worker emits exactly one — success,
+                partial, failed, timeout, or stopped. The queen sees the
+                report as the next user turn and can react (reply to user,
+                kick off follow-up work, etc.) without being blocked by the
+                spawn call itself.
+                """
                 if event.stream_id == "queen":
                     return
-                # "working" is the 3-phase target; "running" is the
-                # legacy 6-phase equivalent — accept both until the
-                # legacy lifecycle is deleted in Commit 2.
-                if phase_state.phase in ("working", "running"):
-                    if event.type == EventType.EXECUTION_COMPLETED:
-                        session.worker_configured = True
-                        output = event.data.get("output", {})
-                        output_summary = ""
-                        if output:
-                            for key, value in output.items():
-                                val_str = str(value)
-                                if len(val_str) > 200:
-                                    val_str = val_str[:200] + "..."
-                                output_summary += f"\n  {key}: {val_str}"
-                        _out = output_summary or " (no output keys set)"
-                        notification = (
-                            "[WORKER_TERMINAL] Worker finished successfully.\n"
-                            f"Output:{_out}\n"
-                            "Report this to the user. "
-                            "Ask if they want to re-run with different input "
-                            "or tweak the configuration."
-                        )
-                    else:
-                        error = event.data.get("error", "Unknown error")
-                        notification = (
-                            "[WORKER_TERMINAL] Worker failed.\n"
-                            f"Error: {error}\n"
-                            "Report this to the user and help them troubleshoot. "
-                            "You can re-run with different input or escalate to "
-                            "building/planning if code changes are needed."
-                        )
+                data = event.data or {}
+                worker_id = data.get("worker_id", event.node_id or "unknown")
+                status = data.get("status", "unknown")
+                summary = data.get("summary") or "(no summary)"
+                err = data.get("error")
+                payload_data = data.get("data") or {}
+                duration = data.get("duration_seconds")
 
-                    await agent_loop.inject_event(notification)
+                lines = ["[WORKER_REPORT]", f"worker_id: {worker_id}", f"status: {status}"]
+                if duration is not None:
+                    try:
+                        lines.append(f"duration: {float(duration):.1f}s")
+                    except (TypeError, ValueError):
+                        pass
+                lines.append(f"summary: {summary}")
+                if err:
+                    lines.append(f"error: {err}")
+                if payload_data:
+                    # Compact JSON so the queen sees all keys without the
+                    # indentation blowing up the turn's token count.
+                    try:
+                        import json as _json
+
+                        lines.append("data: " + _json.dumps(payload_data, ensure_ascii=False, default=str))
+                    except Exception:
+                        lines.append(f"data: {payload_data!r}")
+                notification = "\n".join(lines)
+
+                await agent_loop.inject_event(notification)
+                session.worker_configured = True
+
+                # Only transition to reviewing once the batch has quieted —
+                # if other workers from a parallel spawn are still live, stay
+                # in working so the queen's tool access (run_parallel_workers,
+                # inject_message, stop_worker) remains available.
+                colony_runtime = getattr(session, "colony_runtime", None)
+                still_active = 0
+                if colony_runtime is not None:
+                    try:
+                        still_active = sum(
+                            1
+                            for w in colony_runtime._workers.values()  # type: ignore[attr-defined]
+                            if getattr(w, "is_active", False)
+                        )
+                    except Exception:
+                        still_active = 0
+                if still_active == 0 and phase_state.phase in ("working", "running"):
                     await phase_state.switch_to_reviewing(source="auto")
 
             session.event_bus.subscribe(
-                event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
-                handler=_on_worker_done,
+                event_types=[EventType.SUBAGENT_REPORT],
+                handler=_on_worker_report,
             )
 
             # ---- Colony-scoped worker escalation routing ----
