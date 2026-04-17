@@ -2,38 +2,34 @@ import { useState, useEffect } from "react";
 
 type BridgeStatus = "checking" | "connected" | "disconnected" | "offline";
 
-const BRIDGE_STATUS_URL = "/api/browser/status";
-const POLL_INTERVAL_MS = 3000;
+const BRIDGE_STATUS_STREAM_URL = "/api/browser/status/stream";
 
 export default function BrowserStatusBadge() {
   const [status, setStatus] = useState<BridgeStatus>("checking");
 
   useEffect(() => {
-    let cancelled = false;
+    const es = new EventSource(BRIDGE_STATUS_STREAM_URL);
 
-    const check = async () => {
+    es.addEventListener("status", (e) => {
       try {
-        const res = await fetch(BRIDGE_STATUS_URL, {
-          signal: AbortSignal.timeout(2000),
-        });
-        if (cancelled) return;
-        if (res.ok) {
-          const data = await res.json();
-          setStatus(data.connected ? "connected" : "disconnected");
-        } else {
-          setStatus("offline");
-        }
+        const data = JSON.parse((e as MessageEvent).data) as {
+          bridge: boolean;
+          connected: boolean;
+        };
+        if (!data.bridge) setStatus("offline");
+        else setStatus(data.connected ? "connected" : "disconnected");
       } catch {
-        if (!cancelled) setStatus("offline");
+        setStatus("offline");
       }
-    };
+    });
 
-    check();
-    const timer = setInterval(check, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    // EventSource auto-reconnects on transient errors; the next
+    // successful ``status`` event will overwrite this. We only flip
+    // to "offline" so the badge doesn't get stuck on "connected"
+    // after a backend restart.
+    es.onerror = () => setStatus("offline");
+
+    return () => es.close();
   }, []);
 
   if (status === "checking") return null;

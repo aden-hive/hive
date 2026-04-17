@@ -173,11 +173,12 @@ async def handle_health(request: web.Request) -> web.Response:
     )
 
 
-async def handle_browser_status(request: web.Request) -> web.Response:
-    """GET /api/browser/status — proxy the GCU bridge status check server-side.
+async def _probe_browser_bridge() -> dict:
+    """Probe the local GCU bridge and return ``{bridge, connected}``.
 
-    Checks http://127.0.0.1:9230/status so the browser never makes a
-    cross-origin request that would log ERR_CONNECTION_REFUSED in the console.
+    Shared by the one-shot ``GET /api/browser/status`` handler and the
+    ``/api/browser/status/stream`` SSE feed so both see the same data
+    source.
     """
     import asyncio
 
@@ -185,22 +186,73 @@ async def handle_browser_status(request: web.Request) -> web.Response:
     status_port = bridge_port + 1
 
     try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", status_port), timeout=0.5)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", status_port), timeout=0.5
+        )
         writer.write(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         await writer.drain()
         raw = await asyncio.wait_for(reader.read(512), timeout=0.5)
         writer.close()
-        # Parse JSON body after the blank line
         if b"\r\n\r\n" in raw:
             body = raw.split(b"\r\n\r\n", 1)[1]
-            import json
+            import json as _json
 
-            data = json.loads(body)
-            return web.json_response({"bridge": True, "connected": data.get("connected", False)})
+            data = _json.loads(body)
+            return {"bridge": True, "connected": bool(data.get("connected", False))}
     except Exception:
         pass
+    return {"bridge": False, "connected": False}
 
-    return web.json_response({"bridge": False, "connected": False})
+
+async def handle_browser_status(request: web.Request) -> web.Response:
+    """GET /api/browser/status — proxy the GCU bridge status check server-side.
+
+    Checks http://127.0.0.1:9230/status so the browser never makes a
+    cross-origin request that would log ERR_CONNECTION_REFUSED in the console.
+    """
+    return web.json_response(await _probe_browser_bridge())
+
+
+async def handle_browser_status_stream(request: web.Request) -> web.StreamResponse:
+    """GET /api/browser/status/stream — SSE feed of bridge status.
+
+    Emits a ``status`` event immediately, then again only when the
+    probe result changes. Polls the local bridge every 3s; that's the
+    same cadence the frontend used before, but we absorb it
+    server-side instead of the browser burning a request.
+    """
+    import asyncio
+    import json as _json
+
+    resp = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await resp.prepare(request)
+
+    async def _send(event: str, data: dict) -> None:
+        payload = f"event: {event}\ndata: {_json.dumps(data)}\n\n"
+        await resp.write(payload.encode("utf-8"))
+
+    last: tuple | None = None
+    try:
+        while True:
+            status = await _probe_browser_bridge()
+            signature = (status["bridge"], status["connected"])
+            if signature != last:
+                await _send("status", status)
+                last = signature
+            await asyncio.sleep(3.0)
+    except (asyncio.CancelledError, ConnectionResetError):
+        raise
+    except Exception as exc:
+        logger.warning("browser status stream error: %s", exc, exc_info=True)
+    return resp
 
 
 def create_app(model: str | None = None) -> web.Application:
@@ -284,6 +336,7 @@ def create_app(model: str | None = None) -> web.Application:
     # Health check
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/browser/status", handle_browser_status)
+    app.router.add_get("/api/browser/status/stream", handle_browser_status_stream)
 
     # Register route modules
     from framework.server.routes_config import register_routes as register_config_routes

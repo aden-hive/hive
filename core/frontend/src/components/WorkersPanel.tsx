@@ -4,8 +4,6 @@ import { workersApi, type LiveWorker } from "@/api/workers";
 
 interface WorkersPanelProps {
   sessionId: string | null;
-  // Refresh the panel every this many ms. 0 disables polling.
-  pollMs?: number;
 }
 
 function statusClassName(w: LiveWorker): string {
@@ -34,31 +32,43 @@ function formatDuration(seconds: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-export default function WorkersPanel({ sessionId, pollMs = 2000 }: WorkersPanelProps) {
+export default function WorkersPanel({ sessionId }: WorkersPanelProps) {
   const [workers, setWorkers] = useState<LiveWorker[]>([]);
   const [loading, setLoading] = useState(false);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [stoppingAll, setStoppingAll] = useState(false);
 
-  const fetchWorkers = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      const res = await workersApi.listLive(sessionId);
-      setWorkers(res.workers || []);
-    } catch {
-      // Backend down or 404 — clear rather than crash.
-      setWorkers([]);
-    }
-  }, [sessionId]);
-
+  // SSE stream — the backend polls the runtime internally and only
+  // emits on change, so this is both live and cheap. ``loading`` is
+  // true until the first snapshot arrives.
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setWorkers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    fetchWorkers().finally(() => setLoading(false));
-    if (pollMs <= 0) return;
-    const id = setInterval(fetchWorkers, pollMs);
-    return () => clearInterval(id);
-  }, [sessionId, pollMs, fetchWorkers]);
+    const es = new EventSource(`/api/sessions/${sessionId}/workers/stream`);
+
+    es.addEventListener("snapshot", (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as { workers: LiveWorker[] };
+        setWorkers(data.workers || []);
+        setLoading(false);
+      } catch {
+        /* ignore malformed frame */
+      }
+    });
+
+    es.onerror = () => {
+      // EventSource auto-reconnects. Flip loading off so the UI
+      // shows "no workers" rather than a perpetual loader during a
+      // backend blip.
+      setLoading(false);
+    };
+
+    return () => es.close();
+  }, [sessionId]);
 
   const stopOne = useCallback(
     async (workerId: string) => {
@@ -67,13 +77,12 @@ export default function WorkersPanel({ sessionId, pollMs = 2000 }: WorkersPanelP
       try {
         await workersApi.stopLive(sessionId, workerId);
       } catch {
-        // Non-fatal — the next poll will reflect the true state.
+        // Non-fatal — the SSE stream will reflect the true state.
       } finally {
         setStoppingId(null);
-        fetchWorkers();
       }
     },
-    [sessionId, fetchWorkers],
+    [sessionId],
   );
 
   const stopAll = useCallback(async () => {
@@ -85,9 +94,8 @@ export default function WorkersPanel({ sessionId, pollMs = 2000 }: WorkersPanelP
       // ignore
     } finally {
       setStoppingAll(false);
-      fetchWorkers();
     }
-  }, [sessionId, fetchWorkers]);
+  }, [sessionId]);
 
   const activeCount = workers.filter((w) => w.is_active).length;
 

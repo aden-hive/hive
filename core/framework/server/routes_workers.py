@@ -252,25 +252,17 @@ def _active_colony(session):
     return getattr(session, "colony", None)
 
 
-async def handle_list_live_workers(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/workers — list live workers.
+def _build_live_workers_payload(colony) -> list[dict]:
+    """Serialize the colony's current worker registry.
 
-    Returns an array of ``{worker_id, task, status, started_at, duration_seconds,
-    is_active}`` objects. Active workers come first. The queen overseer
-    (persistent worker) is included because the frontend should know it
-    exists, but the stop action on it is a session-level kill — the UI
-    should treat it differently (not offered here).
+    Extracted so both the one-shot ``GET /workers`` handler and the SSE
+    ``/workers/stream`` handler render the exact same shape.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    colony = _active_colony(session)
     if colony is None:
-        return web.json_response({"workers": []})
+        return []
 
     now = time.monotonic()
-    payload = []
+    payload: list[dict] = []
     try:
         workers = list(colony._workers.values())  # type: ignore[attr-defined]
     except Exception:
@@ -295,7 +287,93 @@ async def handle_list_live_workers(request: web.Request) -> web.Response:
 
     # Active workers first, then terminated, newest-started first within group.
     payload.sort(key=lambda r: (not r["is_active"], -(r["duration_seconds"] or 0)))
+    return payload
+
+
+def _payload_change_signature(payload: list[dict]) -> tuple:
+    """Cheap fingerprint for change detection on the SSE stream.
+
+    We intentionally exclude ``duration_seconds`` — it ticks every call
+    and would make every poll look like a change, defeating the "only
+    emit on change" optimisation. Everything else (status, result,
+    explicit_report) actually reflects worker state transitions.
+    """
+    return tuple(
+        (
+            w["worker_id"],
+            w["status"],
+            w["is_active"],
+            w["result_status"],
+            w["result_summary"],
+            bool(w["explicit_report"]),
+        )
+        for w in payload
+    )
+
+
+async def handle_list_live_workers(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/workers — list live workers.
+
+    Returns an array of ``{worker_id, task, status, started_at, duration_seconds,
+    is_active}`` objects. Active workers come first. The queen overseer
+    (persistent worker) is included because the frontend should know it
+    exists, but the stop action on it is a session-level kill — the UI
+    should treat it differently (not offered here).
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    colony = _active_colony(session)
+    payload = _build_live_workers_payload(colony)
     return web.json_response({"workers": payload})
+
+
+async def handle_live_workers_stream(request: web.Request) -> web.StreamResponse:
+    """GET /api/sessions/{session_id}/workers/stream — SSE feed.
+
+    Emits a ``snapshot`` event immediately, then re-emits every time
+    the worker registry changes (status transitions, new spawns, new
+    reports). Polls the runtime every 2s internally — the colony's
+    ``_workers`` dict is not observable otherwise. Clients disconnecting
+    bubbles up as ConnectionResetError from ``resp.write``.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    import asyncio
+
+    resp = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await resp.prepare(request)
+
+    async def _send(event: str, data) -> None:
+        payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
+        await resp.write(payload.encode("utf-8"))
+
+    last_signature: tuple | None = None
+    try:
+        while True:
+            colony = _active_colony(session)
+            workers = _build_live_workers_payload(colony)
+            signature = _payload_change_signature(workers)
+            if signature != last_signature:
+                await _send("snapshot", {"workers": workers})
+                last_signature = signature
+            await asyncio.sleep(2.0)
+    except (asyncio.CancelledError, ConnectionResetError):
+        raise
+    except Exception as exc:
+        logger.warning("live workers stream error: %s", exc, exc_info=True)
+    return resp
 
 
 async def handle_stop_live_worker(request: web.Request) -> web.Response:
@@ -401,6 +479,9 @@ def register_routes(app: web.Application) -> None:
     )
     # Live worker control
     app.router.add_get("/api/sessions/{session_id}/workers", handle_list_live_workers)
+    app.router.add_get(
+        "/api/sessions/{session_id}/workers/stream", handle_live_workers_stream
+    )
     app.router.add_post(
         "/api/sessions/{session_id}/workers/stop-all",
         handle_stop_all_live_workers,
