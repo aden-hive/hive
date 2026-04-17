@@ -240,22 +240,16 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
     assert "removable-webhook" not in session.active_webhook_subs
 
 
-def test_run_agent_with_input_in_running_tools() -> None:
-    """run_agent_with_input must be available to the queen in RUNNING phase."""
-    from framework.agents.queen.nodes import _QUEEN_RUNNING_TOOLS
+def test_run_parallel_workers_in_working_tools() -> None:
+    """run_parallel_workers must be available to the queen in WORKING phase."""
+    from framework.agents.queen.nodes import _QUEEN_WORKING_TOOLS
 
-    assert "run_agent_with_input" in _QUEEN_RUNNING_TOOLS
+    assert "run_parallel_workers" in _QUEEN_WORKING_TOOLS
 
 
-def test_system_prompt_uses_correct_tool_name() -> None:
-    """Trigger handling rules must reference run_agent_with_input, not start_graph()."""
-    from framework.agents.queen.nodes import (
-        _queen_behavior_running,
-        _queen_behavior_staging,
-    )
+def test_working_tools_include_monitoring() -> None:
+    """WORKING-phase queen must be able to monitor and reply to escalations."""
+    from framework.agents.queen.nodes import _QUEEN_WORKING_TOOLS
 
-    assert "run_agent_with_input" in _queen_behavior_running
-    assert "start_graph()" not in _queen_behavior_running
-
-    assert "run_agent_with_input" in _queen_behavior_staging
-    assert "start_graph()" not in _queen_behavior_staging
+    for required in ("get_worker_status", "inject_message", "reply_to_worker"):
+        assert required in _QUEEN_WORKING_TOOLS, f"{required} missing from working tools"

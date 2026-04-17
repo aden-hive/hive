@@ -4,6 +4,7 @@ description: Proactively extract critical values from tool results into working 
 metadata:
   author: hive
   type: default-skill
+  visibility: [worker]
 ---
 
 ## Operational Protocol: Context Preservation

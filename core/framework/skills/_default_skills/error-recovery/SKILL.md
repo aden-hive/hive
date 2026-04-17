@@ -4,6 +4,7 @@ description: Follow a structured recovery decision tree when tool calls fail ins
 metadata:
   author: hive
   type: default-skill
+  visibility: [worker]
 ---
 
 ## Operational Protocol: Error Recovery

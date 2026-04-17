@@ -44,7 +44,7 @@ function truncate(s: string, max: number): string {
 
 type SessionRestoreResult = {
   messages: ChatMessage[];
-  restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null;
+  restoredPhase: "independent" | "working" | "reviewing" | null;
   truncated: boolean;
   droppedCount: number;
 };
@@ -73,7 +73,7 @@ async function restoreSessionMessages(
             : evt.type === "node_loop_iteration"
               ? (evt.data?.phase as string | undefined)
               : undefined;
-        if (p && ["planning", "building", "staging", "running"].includes(p)) {
+        if (p && ["independent", "working", "reviewing"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
         }
       }
@@ -129,7 +129,7 @@ interface AgentState {
   displayName: string | null;
   awaitingInput: boolean;
   workerInputMessageId: string | null;
-  queenPhase: "planning" | "building" | "staging" | "running" | "independent";
+  queenPhase: "independent" | "working" | "reviewing";
   agentPath: string | null;
   currentRunId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -167,7 +167,7 @@ function defaultAgentState(): AgentState {
     displayName: null,
     awaitingInput: false,
     workerInputMessageId: null,
-    queenPhase: "planning",
+    queenPhase: "independent",
     agentPath: null,
     currentRunId: null,
     nodeLogs: {},
@@ -283,7 +283,7 @@ export default function ColonyChat() {
   const toolUseToPillRef = useRef<
     Record<string, { msgId: string; name: string }>
   >({});
-  const queenPhaseRef = useRef<string>("planning");
+  const queenPhaseRef = useRef<string>("independent");
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const suppressIntroRef = useRef(false);
   const loadingRef = useRef(false);
@@ -383,7 +383,7 @@ export default function ColonyChat() {
         updateState({
           sessionId: session.session_id,
           displayName: "New Chat",
-          queenPhase: "planning",
+          queenPhase: "independent",
           loading: false,
           ready: true,
         });
@@ -428,7 +428,7 @@ export default function ColonyChat() {
         }
       }
 
-      let restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null = null;
+      let restoredPhase: "independent" | "working" | "reviewing" | null = null;
 
       if (!liveSession) {
         // Pre-fetch messages from cold session
@@ -456,7 +456,7 @@ export default function ColonyChat() {
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.colony_name || agentPath);
       const initialPhase =
-        restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
+        restoredPhase || session.queen_phase || (session.has_worker ? "working" : "reviewing");
       queenPhaseRef.current = initialPhase;
 
       updateState({
@@ -514,7 +514,7 @@ export default function ColonyChat() {
       setAgentState(defaultAgentState());
       turnCounterRef.current = {};
       toolUseToPillRef.current = {};
-      queenPhaseRef.current = "planning";
+      queenPhaseRef.current = "independent";
       queenIterTextRef.current = {};
       suppressIntroRef.current = false;
       loadingRef.current = false;
@@ -986,15 +986,11 @@ export default function ColonyChat() {
           const rawPhase = event.data?.phase as string;
           const eventAgentPath = (event.data?.agent_path as string) || null;
           const newPhase: AgentState["queenPhase"] =
-            rawPhase === "independent"
-              ? "independent"
-              : rawPhase === "running"
-              ? "running"
-              : rawPhase === "staging"
-              ? "staging"
-              : rawPhase === "planning"
-              ? "planning"
-              : "building";
+            rawPhase === "working"
+              ? "working"
+              : rawPhase === "reviewing"
+                ? "reviewing"
+                : "independent";
           queenPhaseRef.current = newPhase;
           updateState({
             queenPhase: newPhase,

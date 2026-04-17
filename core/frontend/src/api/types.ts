@@ -12,8 +12,8 @@ export interface LiveSession {
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
-  /** Queen operating phase — "planning", "building", "staging", or "running" */
-  queen_phase?: "planning" | "building" | "staging" | "running" | "independent";
+  /** Queen operating phase — "independent" (DM), "working" (workers running), or "reviewing" (workers done) */
+  queen_phase?: "independent" | "working" | "reviewing";
   /** Whether the queen's LLM supports image content in messages */
   queen_supports_images?: boolean;
   /** Selected queen identity ID (e.g. "queen_technology") */

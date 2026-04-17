@@ -4,6 +4,7 @@ description: Maintain a free-form scratchpad of decisions, extracted values, and
 metadata:
   author: hive
   type: default-skill
+  visibility: [worker]
 ---
 
 ## Operational Protocol: Structured Note-Taking

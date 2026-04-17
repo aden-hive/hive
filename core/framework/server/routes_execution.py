@@ -55,12 +55,7 @@ _WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
 # but NOT listed in any _QUEEN_*_TOOLS phase list (they're reachable only via
 # explicit registration, not phase-based gating). These must still be stripped
 # from forked worker configs.
-_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
-    {
-        "stop_worker_and_plan",
-        "stop_worker_and_review",
-    }
-)
+_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset()
 
 
 def _resolve_queen_only_tools() -> frozenset[str]:
@@ -78,22 +73,16 @@ def _resolve_queen_only_tools() -> frozenset[str]:
     nodes package is loaded.
     """
     from framework.agents.queen.nodes import (
-        _QUEEN_BUILDING_TOOLS,
-        _QUEEN_EDITING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
-        _QUEEN_PLANNING_TOOLS,
-        _QUEEN_RUNNING_TOOLS,
-        _QUEEN_STAGING_TOOLS,
+        _QUEEN_REVIEWING_TOOLS,
+        _QUEEN_WORKING_TOOLS,
     )
 
     union: set[str] = set()
     for tool_list in (
-        _QUEEN_PLANNING_TOOLS,
-        _QUEEN_BUILDING_TOOLS,
-        _QUEEN_STAGING_TOOLS,
-        _QUEEN_RUNNING_TOOLS,
-        _QUEEN_EDITING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
+        _QUEEN_WORKING_TOOLS,
+        _QUEEN_REVIEWING_TOOLS,
     ):
         union.update(tool_list)
     derived = union - _WORKER_INHERITED_TOOLS
@@ -153,9 +142,9 @@ async def handle_trigger(request: web.Request) -> web.Response:
         if node and hasattr(node, "cancel_current_turn"):
             node.cancel_current_turn()
 
-    # Switch queen to running phase (mirrors run_agent_with_input tool behavior)
+    # Switch queen to working phase — workers just started from the UI.
     if session.phase_state is not None:
-        await session.phase_state.switch_to_running(source="frontend")
+        await session.phase_state.switch_to_working(source="frontend")
 
     return web.json_response({"execution_id": execution_id})
 
@@ -490,9 +479,10 @@ async def handle_pause(request: web.Request) -> web.Response:
     # Pause timers so the next tick doesn't restart execution
     runtime.pause_timers()
 
-    # Switch to staging (agent still loaded, ready to re-run)
+    # Switch to reviewing — workers stopped, queen now helps the user
+    # interpret whatever they produced and decide next steps.
     if session.phase_state is not None:
-        await session.phase_state.switch_to_staging(source="frontend")
+        await session.phase_state.switch_to_reviewing(source="frontend")
 
     return web.json_response(
         {
@@ -542,9 +532,10 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if node and hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-                # Switch to staging (agent still loaded, ready to re-run)
+                # Switch to reviewing — worker stopped, queen helps the user
+                # interpret what happened and decide next steps.
                 if session.phase_state is not None:
-                    await session.phase_state.switch_to_staging(source="frontend")
+                    await session.phase_state.switch_to_reviewing(source="frontend")
 
                 return web.json_response(
                     {

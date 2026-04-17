@@ -1401,34 +1401,24 @@ class SessionManager:
             )
 
         # Auto-load worker on cold restore — the queen's conversation expects
-        # the agent to be loaded, but the new session has no worker.
+        # the colony to be loaded, but the new session has no worker.
         if session.queen_resume_from and not session.colony_runtime:
             meta_path = queen_dir / "meta.json"
             if meta_path.exists():
                 try:
                     _meta = json.loads(meta_path.read_text(encoding="utf-8"))
                     _agent_path = _meta.get("agent_path")
-                    _phase = _meta.get("phase")
 
                     if _agent_path and Path(_agent_path).exists():
-                        if _phase in ("staging", "running", None):
-                            # Agent fully built — load worker and resume
-                            await self.load_colony(session.id, _agent_path)
-                            if session.phase_state:
-                                await session.phase_state.switch_to_staging(source="auto")
-                            logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
-                        elif _phase == "building":
-                            # Agent folder exists but incomplete — resume building
-                            if session.phase_state:
-                                session.phase_state.agent_path = _agent_path
-                                await session.phase_state.switch_to_building(source="auto")
-                            logger.info("Cold restore: resumed BUILDING phase for %s", _agent_path)
-                        elif _phase == "planning":
-                            if session.phase_state:
-                                session.phase_state.agent_path = _agent_path
-                            logger.info("Cold restore: PLANNING phase for %s", _agent_path)
+                        await self.load_colony(session.id, _agent_path)
+                        if session.phase_state:
+                            # Restored colony session lands in reviewing — the
+                            # queen summarises whatever the last run produced
+                            # before the user decides what to do next.
+                            await session.phase_state.switch_to_reviewing(source="auto")
+                        logger.info("Cold restore: auto-loaded colony from %s", _agent_path)
                 except Exception:
-                    logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
+                    logger.warning("Cold restore: failed to auto-load colony", exc_info=True)
 
     # ------------------------------------------------------------------
     # Phase 2: unified ColonyRuntime construction

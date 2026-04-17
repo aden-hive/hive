@@ -57,7 +57,7 @@ export interface ChatMessage {
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
   /** Queen phase active when this message was created */
-  phase?: "planning" | "building" | "staging" | "running" | "independent";
+  phase?: "independent" | "working" | "reviewing";
   /** Images attached to a user message */
   images?: ImageContent[];
   /** Backend node_id that produced this message — used for subagent grouping */
@@ -104,7 +104,7 @@ interface ChatPanelProps {
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
-  queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+  queenPhase?: "independent" | "working" | "reviewing";
   /** When false, queen messages omit the phase badge */
   showQueenPhaseBadge?: boolean;
   /** Context window usage for queen and workers */
@@ -319,7 +319,7 @@ function InlineAskUserBubble({
     thread: string,
     images?: ImageContent[],
   ) => void;
-  queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+  queenPhase?: "independent" | "working" | "reviewing";
   showQueenPhaseBadge?: boolean;
 }) {
   const [state, setState] = useState<"pending" | "submitted" | "dismissed">(
@@ -409,15 +409,11 @@ function InlineAskUserBubble({
               }`}
             >
               {isQueen
-                ? (msg.phase ?? queenPhase) === "independent"
-                  ? "independent"
-                  : (msg.phase ?? queenPhase) === "running"
-                    ? "running"
-                    : (msg.phase ?? queenPhase) === "staging"
-                      ? "staging"
-                      : (msg.phase ?? queenPhase) === "planning"
-                        ? "planning"
-                        : "building"
+                ? (msg.phase ?? queenPhase) === "working"
+                  ? "working"
+                  : (msg.phase ?? queenPhase) === "reviewing"
+                    ? "reviewing"
+                    : "independent"
                 : "Worker"}
             </span>
           )}
@@ -450,7 +446,7 @@ const MessageBubble = memo(
     showQueenPhaseBadge = true,
   }: {
     msg: ChatMessage;
-    queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+    queenPhase?: "independent" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
   }) {
     const isUser = msg.type === "user";
@@ -600,15 +596,11 @@ const MessageBubble = memo(
                 }`}
               >
                 {isQueen
-                  ? (msg.phase ?? queenPhase) === "independent"
-                    ? "independent"
-                    : (msg.phase ?? queenPhase) === "running"
-                      ? "running"
-                      : (msg.phase ?? queenPhase) === "staging"
-                        ? "staging"
-                        : (msg.phase ?? queenPhase) === "planning"
-                          ? "planning"
-                          : "building"
+                  ? (msg.phase ?? queenPhase) === "working"
+                    ? "working"
+                    : (msg.phase ?? queenPhase) === "reviewing"
+                      ? "reviewing"
+                      : "independent"
                   : "Worker"}
               </span>
             )}

@@ -4,6 +4,7 @@ description: Claim tasks, record step progress, and verify SOP gates in the colo
 metadata:
   author: hive
   type: default-skill
+  visibility: [worker]
 ---
 
 ## Operational Protocol: Colony Progress Tracker

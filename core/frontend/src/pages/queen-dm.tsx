@@ -69,7 +69,7 @@ export default function QueenDM() {
   >({});
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const [queenPhase, setQueenPhase] = useState<
-    "planning" | "building" | "staging" | "running" | "independent"
+    "independent" | "working" | "reviewing"
   >("independent");
 
   const resetViewState = useCallback(() => {
@@ -539,10 +539,8 @@ export default function QueenDM() {
           const rawPhase = event.data?.phase as string;
           if (
             rawPhase === "independent" ||
-            rawPhase === "planning" ||
-            rawPhase === "building" ||
-            rawPhase === "staging" ||
-            rawPhase === "running"
+            rawPhase === "working" ||
+            rawPhase === "reviewing"
           ) {
             setQueenPhase(rawPhase);
           }

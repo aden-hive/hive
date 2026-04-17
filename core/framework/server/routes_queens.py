@@ -318,7 +318,9 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
 
     meta = _read_queen_session_meta(queen_id, target_session_id)
     agent_path = meta.get("agent_path")
-    initial_phase = None if agent_path else "independent"
+    # Colony resume (agent loaded) → "working" (3-phase target).
+    # Standalone queen resume → "independent" (DM mode).
+    initial_phase = "working" if agent_path else "independent"
     session = await _create_bound_queen_session(
         manager,
         queen_id,

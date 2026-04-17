@@ -4,6 +4,7 @@ description: Periodically self-assess output quality to catch degradation before
 metadata:
   author: hive
   type: default-skill
+  visibility: [worker]
 ---
 
 ## Operational Protocol: Quality Self-Assessment
