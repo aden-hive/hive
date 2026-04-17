@@ -1194,7 +1194,7 @@ class BeelineBridge:
             )
             rect = (rect_result or {}).get("result")
             if rect:
-                await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label="active element")
+                await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label="active element", border_style="dashed")
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     # CDP Input.dispatchKeyEvent modifiers bitmask.
@@ -1564,6 +1564,7 @@ class BeelineBridge:
         h: float,
         label: str = "",
         color: dict | None = None,
+        border_style: str = "solid",
     ) -> None:
         """Inject a visible highlight overlay into the page DOM.
 
@@ -1592,7 +1593,7 @@ class BeelineBridge:
           box.id = '__hive_hl';
           box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
             + 'left:{int(x)}px;top:{int(y)}px;width:{max(1, int(w))}px;height:{max(1, int(h))}px;'
-            + 'border:2px solid {border_rgb};background:{bg_rgba};'
+            + 'border:2px {border_style} {border_rgb};background:{bg_rgba};'
             + 'border-radius:3px;transition:opacity 0.4s ease;opacity:1;'
             + 'box-shadow:0 0 8px {bg_rgba};';
 
