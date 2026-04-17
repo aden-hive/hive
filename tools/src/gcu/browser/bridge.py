@@ -1177,10 +1177,18 @@ class BeelineBridge:
             if rect:
                 await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
         else:
-            # Highlight the active element when no selector was provided
+            # Highlight the active element when no selector was provided.
+            # Drill into same-origin iframes to find the real focused
+            # element — the top-level activeElement may be a full-screen
+            # iframe whose rect covers the entire viewport.
             rect_result = await self.evaluate(
                 tab_id,
-                "(function(){const el=document.activeElement;if(!el)return null;"
+                "(function(){"
+                "var el=document.activeElement;"
+                "try{while(el&&el.tagName==='IFRAME'&&el.contentDocument){"
+                "el=el.contentDocument.activeElement;"
+                "}}catch(e){}"
+                "if(!el||el===document.body||el===document.documentElement)return null;"
                 "const r=el.getBoundingClientRect();"
                 "return{x:r.left,y:r.top,w:r.width,h:r.height};})()",
             )
@@ -1927,7 +1935,7 @@ class BeelineBridge:
             "result": value,
         }
 
-    async def snapshot(self, tab_id: int, timeout_s: float = 30.0) -> dict:
+    async def snapshot(self, tab_id: int, timeout_s: float = 30.0, mode: str = "default") -> dict:
         """Get an accessibility snapshot of the page.
 
         Uses a hybrid approach:
@@ -1938,6 +1946,7 @@ class BeelineBridge:
         Args:
             tab_id: The tab ID to snapshot
             timeout_s: Maximum time to spend building snapshot (default 10s)
+            mode: Filtering mode — "default", "simple", or "interactive"
         """
         try:
             async with asyncio.timeout(timeout_s):
@@ -1969,8 +1978,11 @@ class BeelineBridge:
                 )
                 return await self._dom_snapshot(tab_id)
 
+            # Clean redundant InlineTextBox children before formatting
+            nodes = self._clean_inline_text_boxes(nodes)
+
             # Format the accessibility tree (with node limit)
-            snapshot = self._format_ax_tree(nodes, max_nodes=2000)
+            snapshot = self._format_ax_tree(nodes, max_nodes=2000, mode=mode)
 
             # Get URL
             url_result = await self._cdp(
@@ -2104,13 +2116,78 @@ class BeelineBridge:
             "tree": "\n".join(lines),
         }
 
-    def _format_ax_tree(self, nodes: list[dict], max_nodes: int = 2000) -> str:
+    @staticmethod
+    def _clean_inline_text_boxes(nodes: list[dict]) -> list[dict]:
+        """Remove redundant InlineTextBox children from StaticText nodes.
+
+        If a StaticText node has 3+ InlineTextBox children and ALL their
+        text is already contained in the StaticText's name, remove all
+        the InlineTextBox children (they add no information).
+        """
+        by_id = {n["nodeId"]: n for n in nodes}
+        children_map: dict[str, list[str]] = {}
+        for n in nodes:
+            for child_id in n.get("childIds", []):
+                children_map.setdefault(n["nodeId"], []).append(child_id)
+
+        ids_to_remove: set[str] = set()
+
+        for n in nodes:
+            role_info = n.get("role", {})
+            role = role_info.get("value", "") if isinstance(role_info, dict) else str(role_info)
+            if role != "StaticText":
+                continue
+
+            child_ids = children_map.get(n["nodeId"], [])
+            if len(child_ids) < 3:
+                continue
+
+            name_info = n.get("name", {})
+            parent_name = name_info.get("value", "") if isinstance(name_info, dict) else str(name_info)
+            if not parent_name:
+                continue
+
+            all_inline = True
+            for cid in child_ids:
+                child = by_id.get(cid)
+                if not child:
+                    all_inline = False
+                    break
+                child_role_info = child.get("role", {})
+                child_role = (
+                    child_role_info.get("value", "") if isinstance(child_role_info, dict) else str(child_role_info)
+                )
+                if child_role != "InlineTextBox":
+                    all_inline = False
+                    break
+                child_name_info = child.get("name", {})
+                child_name = (
+                    child_name_info.get("value", "") if isinstance(child_name_info, dict) else str(child_name_info)
+                )
+                if child_name and child_name not in parent_name:
+                    all_inline = False
+                    break
+
+            if all_inline:
+                ids_to_remove.update(child_ids)
+                n["childIds"] = []
+
+        if not ids_to_remove:
+            return nodes
+
+        return [n for n in nodes if n["nodeId"] not in ids_to_remove]
+
+    def _format_ax_tree(self, nodes: list[dict], max_nodes: int = 2000, mode: str = "default") -> str:
         """Format a CDP Accessibility.getFullAXTree result.
 
         Args:
             nodes: List of accessibility tree nodes
             max_nodes: Maximum number of nodes to process (prevents hangs on huge trees)
+            mode: Filtering mode — "default" (full tree), "simple" (interactive +
+                  content, skip unnamed structural), "interactive" (interactive only)
         """
+        from .refs import INTERACTIVE_ROLES, STRUCTURAL_ROLES
+
         if not nodes:
             return "(empty tree)"
 
@@ -2150,10 +2227,20 @@ class BeelineBridge:
                     _walk(cid, depth)
                 return
 
-            node_counter[0] += 1
-
             name_info = node.get("name", {})
             name = name_info.get("value", "") if isinstance(name_info, dict) else str(name_info)
+
+            # Mode-based filtering — skip node but walk children at same depth
+            if mode == "interactive" and role not in INTERACTIVE_ROLES:
+                for cid in children_map.get(node_id, []):
+                    _walk(cid, depth)
+                return
+            if mode == "simple" and role in STRUCTURAL_ROLES and not name:
+                for cid in children_map.get(node_id, []):
+                    _walk(cid, depth)
+                return
+
+            node_counter[0] += 1
 
             # Build property annotations
             props: list[str] = []
@@ -2171,18 +2258,7 @@ class BeelineBridge:
             label = f"- {role}"
 
             # Add ref for interactive elements
-            interactive_roles = {
-                "button",
-                "link",
-                "textbox",
-                "checkbox",
-                "radio",
-                "combobox",
-                "menuitem",
-                "tab",
-                "searchbox",
-            }
-            if role in interactive_roles or name:
+            if role in INTERACTIVE_ROLES or name:
                 ref_counter[0] += 1
                 ref_id = f"e{ref_counter[0]}"
                 ref_map[ref_id] = f"[{role}]{name}"

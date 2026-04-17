@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .session import BrowserSession
 
-# Role sets for interactive elements
+"""Shared ARIA role classification sets.
+
+Keep these in sync across snapshot paths — divergence causes different
+drivers to produce different snapshot output for the same page.
+"""
+
+# Roles that represent user-interactive elements and always get a ref.
 INTERACTIVE_ROLES: frozenset[str] = frozenset(
     {
         "button",
@@ -26,7 +32,6 @@ INTERACTIVE_ROLES: frozenset[str] = frozenset(
         "menuitemradio",
         "option",
         "radio",
-        "scrollbar",
         "searchbox",
         "slider",
         "spinbutton",
@@ -37,11 +42,44 @@ INTERACTIVE_ROLES: frozenset[str] = frozenset(
     }
 )
 
-NAMED_CONTENT_ROLES: frozenset[str] = frozenset(
+# Roles that carry meaningful content and get a ref when named.
+CONTENT_ROLES: frozenset[str] = frozenset(
     {
+        "article",
         "cell",
+        "columnheader",
+        "gridcell",
         "heading",
-        "img",
+        "listitem",
+        "main",
+        "navigation",
+        "region",
+        "rowheader",
+    }
+)
+
+# Structural/container roles — typically skipped in compact mode.
+STRUCTURAL_ROLES: frozenset[str] = frozenset(
+    {
+        "application",
+        "directory",
+        "document",
+        "generic",
+        "grid",
+        "group",
+        "ignored",
+        "list",
+        "menu",
+        "menubar",
+        "none",
+        "presentation",
+        "row",
+        "rowgroup",
+        "table",
+        "tablist",
+        "toolbar",
+        "tree",
+        "treegrid",
     }
 )
 
@@ -81,7 +119,7 @@ def annotate_snapshot(snapshot: str) -> tuple[str, RefMap]:
         role = m.group(2)
         name = m.group(3)
 
-        if role in INTERACTIVE_ROLES or (role in NAMED_CONTENT_ROLES and name):
+        if role in INTERACTIVE_ROLES or (role in CONTENT_ROLES and name):
             candidates.append((i, role, name))
 
     ref_map: RefMap = {}

@@ -547,6 +547,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     async def browser_snapshot(
         tab_id: int | None = None,
         profile: str | None = None,
+        mode: Literal["default", "simple", "interactive"] = "default",
     ) -> dict:
         """
         Get an accessibility snapshot of the page.
@@ -565,12 +566,16 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Args:
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
+            mode: Snapshot filtering mode (default: "default")
+                - "default": full accessibility tree
+                - "simple": interactive + content nodes, skip unnamed structural nodes
+                - "interactive": only interactive nodes (buttons, links, inputs, etc.)
 
         Returns:
             Dict with the snapshot text tree, URL, and tab ID
         """
         start = time.perf_counter()
-        params = {"tab_id": tab_id, "profile": profile}
+        params = {"tab_id": tab_id, "profile": profile, "mode": mode}
 
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
@@ -591,7 +596,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            snapshot_result = await bridge.snapshot(target_tab)
+            snapshot_result = await bridge.snapshot(target_tab, mode=mode)
             log_tool_call(
                 "browser_snapshot",
                 params,
