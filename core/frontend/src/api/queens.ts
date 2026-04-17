@@ -31,6 +31,13 @@ export const queensApi = {
   updateProfile: (queenId: string, updates: Partial<QueenProfile>) =>
     api.patch<QueenProfile>(`/queen/${queenId}/profile`, updates),
 
+  /** Upload queen avatar image. */
+  uploadAvatar: (queenId: string, file: File) => {
+    const fd = new FormData();
+    fd.append("avatar", file);
+    return api.upload<{ avatar_url: string }>(`/queen/${queenId}/avatar`, fd);
+  },
+
   /** Get or create a persistent session for a queen. */
   getOrCreateSession: (queenId: string, initialPrompt?: string, initialPhase?: string) =>
     api.post<QueenSessionResult>(`/queen/${queenId}/session`, {

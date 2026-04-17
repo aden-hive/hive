@@ -3,6 +3,8 @@
 - GET    /api/queen/profiles                -- list all queen profiles (id, name, title)
 - GET    /api/queen/{queen_id}/profile      -- get full queen profile
 - PATCH  /api/queen/{queen_id}/profile      -- update queen profile fields
+- POST   /api/queen/{queen_id}/avatar       -- upload queen avatar image
+- GET    /api/queen/{queen_id}/avatar       -- serve queen avatar image
 - POST   /api/queen/{queen_id}/session      -- get or create a persistent session for a queen
 - POST   /api/queen/{queen_id}/session/select -- resume a specific session for a queen
 - POST   /api/queen/{queen_id}/session/new  -- create a fresh session for a queen
@@ -10,6 +12,7 @@
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -177,6 +180,34 @@ async def handle_get_profile(request: web.Request) -> web.Response:
     return web.json_response({"id": queen_id, **api_profile})
 
 
+def _reverse_transform_for_yaml(body: dict) -> dict:
+    """Map API-format fields back to YAML profile fields.
+
+    The API exposes a simplified view (summary, skills, signature_achievement)
+    that maps onto the underlying YAML structure (core_traits, hidden_background,
+    psychological_profile, world_lore, etc.).
+    """
+    yaml_updates: dict[str, Any] = {}
+
+    if "name" in body:
+        yaml_updates["name"] = body["name"]
+    if "title" in body:
+        yaml_updates["title"] = body["title"]
+
+    if "summary" in body:
+        # Summary is displayed as core_traits + anti_stereotype joined by \n\n.
+        # Store the full text in core_traits for simplicity.
+        yaml_updates["core_traits"] = body["summary"]
+
+    if "skills" in body:
+        yaml_updates["skills"] = body["skills"]
+
+    if "signature_achievement" in body:
+        yaml_updates.setdefault("world_lore", {})["habitat"] = body["signature_achievement"]
+
+    return yaml_updates
+
+
 async def handle_update_profile(request: web.Request) -> web.Response:
     """PATCH /api/queen/{queen_id}/profile — update queen profile fields."""
     queen_id = request.match_info["queen_id"]
@@ -186,11 +217,18 @@ async def handle_update_profile(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "Body must be a JSON object"}, status=400)
+
+    yaml_updates = _reverse_transform_for_yaml(body)
+    if not yaml_updates:
+        return web.json_response({"error": "No valid fields to update"}, status=400)
+
     try:
-        updated = update_queen_profile(queen_id, body)
+        updated = update_queen_profile(queen_id, yaml_updates)
     except FileNotFoundError:
         return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
-    return web.json_response({"id": queen_id, **updated})
+
+    api_profile = _transform_profile_for_api(updated)
+    return web.json_response({"id": queen_id, **api_profile})
 
 
 async def handle_queen_session(request: web.Request) -> web.Response:
@@ -382,11 +420,98 @@ async def handle_new_queen_session(request: web.Request) -> web.Response:
     )
 
 
+MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB max after compression
+_ALLOWED_AVATAR_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+async def handle_upload_avatar(request: web.Request) -> web.Response:
+    """POST /api/queen/{queen_id}/avatar — upload queen avatar image.
+
+    Accepts multipart/form-data with a single file field named 'avatar'.
+    Stores as avatar.{ext} in the queen's profile directory.
+    """
+    from framework.config import QUEENS_DIR
+
+    queen_id = request.match_info["queen_id"]
+    queen_dir = QUEENS_DIR / queen_id
+    if not (queen_dir / "profile.yaml").exists():
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+
+    reader = await request.multipart()
+    field = await reader.next()
+    if field is None or field.name != "avatar":
+        return web.json_response({"error": "Expected a file field named 'avatar'"}, status=400)
+
+    content_type = field.headers.get("Content-Type", "application/octet-stream")
+    # Also check by content_type from the field
+    if hasattr(field, "content_type"):
+        content_type = field.content_type or content_type
+
+    ext = _ALLOWED_AVATAR_TYPES.get(content_type)
+    if not ext:
+        return web.json_response(
+            {"error": f"Unsupported image type: {content_type}. Use JPEG, PNG, or WebP."},
+            status=400,
+        )
+
+    # Read the file data with size limit
+    data = bytearray()
+    while True:
+        chunk = await field.read_chunk(8192)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > MAX_AVATAR_BYTES:
+            return web.json_response(
+                {"error": f"Image too large. Maximum size is {MAX_AVATAR_BYTES // 1024 // 1024} MB."},
+                status=400,
+            )
+
+    if not data:
+        return web.json_response({"error": "Empty file"}, status=400)
+
+    # Remove any existing avatar files
+    for existing in queen_dir.glob("avatar.*"):
+        existing.unlink(missing_ok=True)
+
+    # Write the new avatar
+    avatar_path = queen_dir / f"avatar{ext}"
+    avatar_path.write_bytes(data)
+
+    logger.info("Avatar uploaded for queen %s: %s (%d bytes)", queen_id, avatar_path.name, len(data))
+    return web.json_response({"avatar_url": f"/api/queen/{queen_id}/avatar"})
+
+
+async def handle_get_avatar(request: web.Request) -> web.Response:
+    """GET /api/queen/{queen_id}/avatar — serve queen avatar image."""
+    from framework.config import QUEENS_DIR
+
+    queen_id = request.match_info["queen_id"]
+    queen_dir = QUEENS_DIR / queen_id
+
+    # Find avatar file with any supported extension
+    for ext in _ALLOWED_AVATAR_TYPES.values():
+        avatar_path = queen_dir / f"avatar{ext}"
+        if avatar_path.exists():
+            return web.FileResponse(
+                avatar_path,
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
+    return web.json_response({"error": "No avatar found"}, status=404)
+
+
 def register_routes(app: web.Application) -> None:
     """Register queen profile routes."""
     app.router.add_get("/api/queen/profiles", handle_list_profiles)
     app.router.add_get("/api/queen/{queen_id}/profile", handle_get_profile)
     app.router.add_patch("/api/queen/{queen_id}/profile", handle_update_profile)
+    app.router.add_post("/api/queen/{queen_id}/avatar", handle_upload_avatar)
+    app.router.add_get("/api/queen/{queen_id}/avatar", handle_get_avatar)
     app.router.add_post("/api/queen/{queen_id}/session", handle_queen_session)
     app.router.add_post("/api/queen/{queen_id}/session/select", handle_select_queen_session)
     app.router.add_post("/api/queen/{queen_id}/session/new", handle_new_queen_session)
