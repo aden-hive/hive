@@ -101,6 +101,8 @@ interface ChatPanelProps {
   contextUsage?: Record<string, ContextUsageEntry>;
   /** One-shot composer prefill. Applied to the textarea whenever the value changes. */
   initialDraft?: string | null;
+  /** Queen ID — used to display the queen's avatar photo in messages */
+  queenId?: string;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -300,10 +302,12 @@ function InlineAskUserBubble({
   onSend,
   queenPhase,
   showQueenPhaseBadge = true,
+  queenAvatarUrl,
 }: {
   msg: ChatMessage;
   payload: AskUserInlinePayload;
   activeThread: string;
+  queenAvatarUrl?: string | null;
   onSend: (
     message: string,
     thread: string,
@@ -328,6 +332,7 @@ function InlineAskUserBubble({
         msg={msg}
         queenPhase={queenPhase}
         showQueenPhaseBadge={showQueenPhaseBadge}
+        queenAvatarUrl={queenAvatarUrl}
       />
     );
   }
@@ -355,15 +360,15 @@ function InlineAskUserBubble({
   return (
     <div className="flex gap-3">
       <div
-        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
-        style={{
+        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center overflow-hidden`}
+        style={isQueen && queenAvatarUrl ? undefined : {
           backgroundColor: `${color}18`,
           border: `1.5px solid ${color}35`,
           boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
         }}
       >
         {isQueen ? (
-          <Crown className="w-4 h-4" style={{ color }} />
+          <QueenAvatarIcon url={queenAvatarUrl ?? null} size={9} />
         ) : (
           <Cpu className="w-3.5 h-3.5" style={{ color }} />
         )}
@@ -421,15 +426,26 @@ function InlineAskUserBubble({
   );
 }
 
+function QueenAvatarIcon({ url, size }: { url: string | null; size: number }) {
+  const [ok, setOk] = useState(!!url);
+  const dim = size === 9 ? "w-9 h-9" : "w-7 h-7";
+  if (ok && url) {
+    return <img src={url} alt="" className={`${dim} rounded-xl object-cover`} onError={() => setOk(false)} />;
+  }
+  return <Crown className={size === 9 ? "w-4 h-4" : "w-3.5 h-3.5"} style={{ color: queenColor }} />;
+}
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
     queenPhase,
     showQueenPhaseBadge = true,
+    queenAvatarUrl,
   }: {
     msg: ChatMessage;
     queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
     showQueenPhaseBadge?: boolean;
+    queenAvatarUrl?: string | null;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
@@ -532,15 +548,15 @@ const MessageBubble = memo(
     return (
       <div className="flex gap-3">
         <div
-          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
-          style={{
+          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center overflow-hidden`}
+          style={isQueen && queenAvatarUrl ? undefined : {
             backgroundColor: `${color}18`,
             border: `1.5px solid ${color}35`,
             boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
           }}
         >
           {isQueen ? (
-            <Crown className="w-4 h-4" style={{ color }} />
+            <QueenAvatarIcon url={queenAvatarUrl ?? null} size={9} />
           ) : (
             <Cpu className="w-3.5 h-3.5" style={{ color }} />
           )}
@@ -621,6 +637,7 @@ export default function ChatPanel({
   contextUsage,
   supportsImages = true,
   initialDraft,
+  queenId,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -631,6 +648,7 @@ export default function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastAppliedDraftRef = useRef<string | null | undefined>(undefined);
+  const queenAvatarUrl = queenId ? `/api/queen/${queenId}/avatar` : null;
 
   useEffect(() => {
     if (!initialDraft || initialDraft === lastAppliedDraftRef.current) return;
@@ -892,6 +910,7 @@ export default function ChatPanel({
                   onSend={onSend}
                   queenPhase={queenPhase}
                   showQueenPhaseBadge={showQueenPhaseBadge}
+                  queenAvatarUrl={queenAvatarUrl}
                 />
               </div>
             );
@@ -902,6 +921,7 @@ export default function ChatPanel({
                 msg={msg}
                 queenPhase={queenPhase}
                 showQueenPhaseBadge={showQueenPhaseBadge}
+                queenAvatarUrl={queenAvatarUrl}
               />
             </div>
           );
@@ -911,14 +931,14 @@ export default function ChatPanel({
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
           <div className="flex gap-3">
             <div
-              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{
+              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+              style={queenAvatarUrl ? undefined : {
                 backgroundColor: `${queenColor}18`,
                 border: `1.5px solid ${queenColor}35`,
                 boxShadow: `0 0 12px ${queenColor}20`,
               }}
             >
-              <Crown className="w-4 h-4" style={{ color: queenColor }} />
+              <QueenAvatarIcon url={queenAvatarUrl} size={9} />
             </div>
             <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">

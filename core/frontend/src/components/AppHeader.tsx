@@ -1,11 +1,31 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
+import { useModel } from "@/context/ModelContext";
 import { getQueenForAgent } from "@/lib/colony-registry";
-import { Crown, KeyRound, Network } from "lucide-react";
+import { Crown, KeyRound, Network, ChevronDown } from "lucide-react";
 import SettingsModal from "@/components/SettingsModal";
-import ModelSwitcher from "@/components/ModelSwitcher";
+
+function UserAvatarButton({ initials, onClick, avatarVersion }: { initials: string; onClick: () => void; avatarVersion: number }) {
+  const [hasAvatar, setHasAvatar] = useState(true);
+  const url = `/api/config/profile/avatar?v=${avatarVersion}`;
+  // Reset hasAvatar when version changes (new upload)
+  useEffect(() => setHasAvatar(true), [avatarVersion]);
+  return (
+    <button
+      onClick={onClick}
+      className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center hover:bg-primary/25 transition-colors overflow-hidden"
+      title="Profile settings"
+    >
+      {hasAvatar ? (
+        <img src={url} alt="" className="w-full h-full object-cover" onError={() => setHasAvatar(false)} />
+      ) : (
+        <span className="text-[10px] font-bold text-primary">{initials || "U"}</span>
+      )}
+    </button>
+  );
+}
 
 interface AppHeaderProps {
   onOpenQueenProfile?: (queenId: string) => void;
@@ -13,10 +33,22 @@ interface AppHeaderProps {
 
 export default function AppHeader({ onOpenQueenProfile }: AppHeaderProps) {
   const location = useLocation();
-  const { colonies, queens, queenProfiles, userProfile } = useColony();
+  const { colonies, queens, queenProfiles, userProfile, userAvatarVersion } = useColony();
   const { actions } = useHeaderActions();
+  const { currentModel, currentProvider, availableModels, activeSubscription, subscriptions } = useModel();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"profile" | "byok">("profile");
+
+  // Derive active model display label
+  const activeSubInfo = activeSubscription
+    ? subscriptions.find((s) => s.id === activeSubscription)
+    : null;
+  const modelsProvider = activeSubInfo?.provider || currentProvider;
+  const models = availableModels[modelsProvider] || [];
+  const currentModelInfo = models.find((m) => m.id === currentModel);
+  const modelLabel = currentModelInfo
+    ? currentModelInfo.label.split(" - ")[0]
+    : currentModel || "No model";
 
   // Derive page title + icon from current route
   const colonyMatch = location.pathname.match(/^\/colony\/(.+)/);
@@ -86,24 +118,24 @@ export default function AppHeader({ onOpenQueenProfile }: AppHeaderProps) {
         )}
         <div className="flex items-center gap-2">
           {actions}
-          <ModelSwitcher
-            onOpenSettings={() => {
+          <button
+            onClick={() => {
               setSettingsSection("byok");
               setSettingsOpen(true);
             }}
-          />
-          <button
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border border-transparent hover:border-border/40"
+          >
+            <span className="max-w-[120px] truncate">{modelLabel}</span>
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          <UserAvatarButton
+            initials={initials}
+            avatarVersion={userAvatarVersion}
             onClick={() => {
               setSettingsSection("profile");
               setSettingsOpen(true);
             }}
-            className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center hover:bg-primary/25 transition-colors"
-            title="Profile settings"
-          >
-            <span className="text-[10px] font-bold text-primary">
-              {initials || "U"}
-            </span>
-          </button>
+          />
         </div>
       </div>
 

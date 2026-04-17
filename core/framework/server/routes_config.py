@@ -6,6 +6,7 @@ Routes:
 - GET  /api/config/models        — curated provider→models list
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -301,6 +302,59 @@ def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | Non
     return swapped
 
 
+async def _validate_provider_key(
+    provider: str,
+    api_key: str,
+    api_base: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Validate an API key against the provider. Returns {"valid": bool, "message": str}.
+
+    Runs the check in a thread pool to avoid blocking the event loop.
+    """
+    from scripts.check_llm_key import PROVIDERS as CHECK_PROVIDERS
+    from scripts.check_llm_key import (
+        check_anthropic_compatible,
+        check_minimax,
+        check_openai_compatible,
+        check_openrouter,
+        check_openrouter_model,
+    )
+
+    def _check() -> dict:
+        pid = provider.lower()
+        try:
+            # Subscription providers with custom api_base
+            if pid == "openrouter" and model:
+                return check_openrouter_model(
+                    api_key, model=model, api_base=api_base or "https://openrouter.ai/api/v1"
+                )
+            if api_base and pid == "minimax":
+                return check_minimax(api_key, api_base)
+            if api_base and pid == "openrouter":
+                return check_openrouter(api_key, api_base)
+            if api_base and pid == "kimi":
+                return check_anthropic_compatible(
+                    api_key, api_base.rstrip("/") + "/v1/messages", "Kimi"
+                )
+            if api_base and pid == "hive":
+                return check_anthropic_compatible(
+                    api_key, api_base.rstrip("/") + "/v1/messages", "Hive"
+                )
+            if api_base:
+                endpoint = api_base.rstrip("/") + "/models"
+                name = {"zai": "ZAI"}.get(pid, "Custom provider")
+                return check_openai_compatible(api_key, endpoint, name)
+            if pid in CHECK_PROVIDERS:
+                return CHECK_PROVIDERS[pid](api_key)
+            # No check available — assume valid
+            return {"valid": True, "message": f"No health check for {pid}"}
+        except Exception as exc:
+            return {"valid": None, "message": f"Validation error: {exc}"}
+
+    return await asyncio.get_event_loop().run_in_executor(None, _check)
+
+
 # ------------------------------------------------------------------
 # Handlers
 # ------------------------------------------------------------------
@@ -324,9 +378,12 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
         if _resolve_api_key(pid, request) is not None:
             connected.append(pid)
 
-    # Subscription detection
+    # Subscription detection — only include subscriptions whose tokens exist
     active_subscription = _get_active_subscription(llm)
-    detected_subscriptions = _detect_subscriptions()
+    detected_subscriptions = [
+        sid for sid in _detect_subscriptions()
+        if _get_subscription_token(sid)
+    ]
 
     return web.json_response(
         {
@@ -369,6 +426,21 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         provider = sub["provider"]
         api_base = sub.get("api_base")
 
+        # Validate the subscription token before committing
+        token = _get_subscription_token(subscription_id)
+        if not token:
+            return web.json_response(
+                {"error": f"No credential found for {sub['name']}. Please check your subscription or API key."},
+                status=400,
+            )
+
+        check = await _validate_provider_key(provider, token, api_base=api_base)
+        if check.get("valid") is False:
+            return web.json_response(
+                {"error": f"{sub['name']} key validation failed: {check.get('message', 'unknown error')}"},
+                status=400,
+            )
+
         # Look up token limits from preset
         max_tokens: int | None = None
         max_context_tokens: int | None = None
@@ -399,8 +471,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         _write_config_atomic(config)
 
-        # Hot-swap with subscription token
-        token = _get_subscription_token(subscription_id)
+        # Hot-swap with subscription token (already validated above)
         full_model = f"{provider}/{model}"
         swapped = _hot_swap_sessions(request, full_model, api_key=token, api_base=api_base)
 
@@ -430,14 +501,35 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         if not provider or not model:
             return web.json_response({"error": "Both 'provider' and 'model' are required"}, status=400)
 
-        # Look up token limits from catalogue
+        # Verify model exists in the catalogue
         model_info = _find_model_info(provider, model)
-        max_tokens = model_info["max_tokens"] if model_info else 8192
-        max_context_tokens = model_info["max_context_tokens"] if model_info else 120000
+        if not model_info:
+            return web.json_response(
+                {"error": f"Model '{model}' is not available for provider '{provider}'."},
+                status=400,
+            )
+
+        max_tokens = model_info["max_tokens"]
+        max_context_tokens = model_info["max_context_tokens"]
 
         # Determine env var and api_base
         env_var = PROVIDER_ENV_VARS.get(provider.lower(), "")
         api_base = _get_api_base_for_provider(provider)
+
+        # Validate the API key before committing
+        api_key = _resolve_api_key(provider, request)
+        if not api_key:
+            return web.json_response(
+                {"error": f"No API key found for {provider}. Please add one in Manage Keys."},
+                status=400,
+            )
+
+        check = await _validate_provider_key(provider, api_key, api_base=api_base, model=model)
+        if check.get("valid") is False:
+            return web.json_response(
+                {"error": f"API key validation failed for {provider}: {check.get('message', 'unknown error')}"},
+                status=400,
+            )
 
         # Update ~/.hive/configuration.json
         config = get_hive_config()
@@ -458,8 +550,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         _write_config_atomic(config)
 
-        # Hot-swap all running sessions
-        api_key = _resolve_api_key(provider, request)
+        # Hot-swap all running sessions (api_key already validated above)
         full_model = f"{provider}/{model}"
         swapped = _hot_swap_sessions(request, full_model, api_key=api_key, api_base=api_base)
 
@@ -595,6 +686,64 @@ async def handle_get_models(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------
+# User avatar
+# ------------------------------------------------------------------
+
+MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB
+_ALLOWED_AVATAR_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+async def handle_upload_user_avatar(request: web.Request) -> web.Response:
+    """POST /api/config/profile/avatar — upload user profile picture."""
+    reader = await request.multipart()
+    field = await reader.next()
+    if field is None or field.name != "avatar":
+        return web.json_response({"error": "Expected a file field named 'avatar'"}, status=400)
+
+    content_type = getattr(field, "content_type", None) or field.headers.get("Content-Type", "")
+    ext = _ALLOWED_AVATAR_TYPES.get(content_type)
+    if not ext:
+        return web.json_response(
+            {"error": f"Unsupported image type: {content_type}. Use JPEG, PNG, or WebP."},
+            status=400,
+        )
+
+    data = bytearray()
+    while True:
+        chunk = await field.read_chunk(8192)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > MAX_AVATAR_BYTES:
+            return web.json_response({"error": "Image too large. Maximum size is 2 MB."}, status=400)
+
+    if not data:
+        return web.json_response({"error": "Empty file"}, status=400)
+
+    # Remove existing avatar files
+    for existing in HIVE_CONFIG_FILE.parent.glob("avatar.*"):
+        existing.unlink(missing_ok=True)
+
+    avatar_path = HIVE_CONFIG_FILE.parent / f"avatar{ext}"
+    avatar_path.write_bytes(data)
+    logger.info("User avatar uploaded: %s (%d bytes)", avatar_path.name, len(data))
+    return web.json_response({"avatar_url": "/api/config/profile/avatar"})
+
+
+async def handle_get_user_avatar(request: web.Request) -> web.Response:
+    """GET /api/config/profile/avatar — serve user profile picture."""
+    for ext in _ALLOWED_AVATAR_TYPES.values():
+        avatar_path = HIVE_CONFIG_FILE.parent / f"avatar{ext}"
+        if avatar_path.exists():
+            return web.FileResponse(avatar_path, headers={"Cache-Control": "public, max-age=3600"})
+    return web.json_response({"error": "No avatar found"}, status=404)
+
+
+# ------------------------------------------------------------------
 # Route registration
 # ------------------------------------------------------------------
 
@@ -606,3 +755,5 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/config/models", handle_get_models)
     app.router.add_get("/api/config/profile", handle_get_profile)
     app.router.add_put("/api/config/profile", handle_update_profile)
+    app.router.add_post("/api/config/profile/avatar", handle_upload_user_avatar)
+    app.router.add_get("/api/config/profile/avatar", handle_get_user_avatar)
