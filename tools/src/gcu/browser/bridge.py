@@ -80,6 +80,19 @@ async def _adaptive_poll_sleep(elapsed_s: float) -> None:
 _interaction_highlights: dict[int, dict] = {}
 
 
+def clear_tab_highlights(tab_ids) -> None:
+    """Drop cached interaction highlights for the given tab_ids.
+
+    Called when a profile's context is destroyed so stale highlight
+    rects can't reappear on a later tab that Chrome happens to assign
+    the same id. Accepts a single id or any iterable.
+    """
+    if isinstance(tab_ids, int):
+        tab_ids = (tab_ids,)
+    for tid in tab_ids:
+        _interaction_highlights.pop(tid, None)
+
+
 # Compact descriptor of document.activeElement. Returned by both click()
 # and click_coordinate() so the agent can verify it focused what it
 # intended, then decide whether to follow up with browser_type_focused(text=...).
@@ -464,11 +477,14 @@ class BeelineBridge:
         """Close a tab by ID."""
         result = await self._send("tab.close", tabId=tab_id)
         # Drop per-tab state — the id may be reused by Chrome much
-        # later, and carrying a stale highlight or "attached" flag
-        # forward would misannotate screenshots or skip a needed
-        # reattach on the reused id.
+        # later, and carrying a stale highlight, scale, or "attached"
+        # flag forward would misannotate screenshots, misalign click
+        # coordinates, or skip a needed reattach on the reused id.
         self._cdp_attached.discard(tab_id)
         _interaction_highlights.pop(tab_id, None)
+        from .tools.inspection import clear_tab_state
+
+        clear_tab_state(tab_id)
         return result
 
     async def list_tabs(self, group_id: int | None = None) -> dict:
@@ -1113,7 +1129,9 @@ class BeelineBridge:
             # element (e.g. via browser_click_coordinate). Just clear the
             # active element if requested, then insert text directly.
             if clear_first:
-                await self.evaluate(tab_id, """
+                await self.evaluate(
+                    tab_id,
+                    """
                     (function() {
                         const el = document.activeElement;
                         if (!el) return;
@@ -1125,7 +1143,8 @@ class BeelineBridge:
                             el.dispatchEvent(new Event('input', {bubbles: true}));
                         }
                     })();
-                """)
+                """,
+                )
 
         if use_insert_text and delay_ms <= 0:
             # CDP Input.insertText is the most reliable way to insert
@@ -1194,7 +1213,9 @@ class BeelineBridge:
             )
             rect = (rect_result or {}).get("result")
             if rect:
-                await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label="active element", border_style="dashed")
+                await self.highlight_rect(
+                    tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label="active element", border_style="dashed"
+                )
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     # CDP Input.dispatchKeyEvent modifiers bitmask.

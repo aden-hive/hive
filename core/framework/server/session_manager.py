@@ -671,8 +671,21 @@ class SessionManager:
             event_bus=session.event_bus,
         )
 
-        # Start the worker's agent loop in the background
-        session.queen_task = asyncio.create_task(session.queen_executor.run(initial_message=initial_prompt))
+        # Start the worker's agent loop in the background.
+        # Scope browser profile per-session so parallel sessions drive
+        # independent Chrome tab groups. Browser tools live in an MCP
+        # subprocess; we inject `profile` via the ToolRegistry execution
+        # context (a CONTEXT_PARAM) so it flows into every tool call.
+        async def _run_worker():
+            try:
+                from framework.loader.tool_registry import ToolRegistry
+
+                ToolRegistry.set_execution_context(profile=session.id)
+            except Exception:
+                logger.debug("Worker: failed to set browser profile", exc_info=True)
+            await session.queen_executor.run(initial_message=initial_prompt)
+
+        session.queen_task = asyncio.create_task(_run_worker())
 
         # Set up event persistence
         if session.event_bus and queen_dir:

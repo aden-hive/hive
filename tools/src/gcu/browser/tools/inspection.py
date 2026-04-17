@@ -32,6 +32,20 @@ _screenshot_scales: dict[int, float] = {}
 _screenshot_css_scales: dict[int, float] = {}
 
 
+def clear_tab_state(tab_ids) -> None:
+    """Drop cached screenshot scales for the given tab_ids.
+
+    Called when a tab closes or a profile's context is destroyed so stale
+    scale values can't bleed into a later tab that Chrome happens to assign
+    the same id. Accepts a single id or any iterable.
+    """
+    if isinstance(tab_ids, int):
+        tab_ids = (tab_ids,)
+    for tid in tab_ids:
+        _screenshot_scales.pop(tid, None)
+        _screenshot_css_scales.pop(tid, None)
+
+
 def _resize_and_annotate(
     data: str,
     css_width: int,

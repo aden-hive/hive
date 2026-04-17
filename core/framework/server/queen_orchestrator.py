@@ -743,6 +743,18 @@ async def create_queen(
 
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
+        # Scope the browser profile to this session so parallel queens each
+        # drive their own Chrome tab group instead of fighting over "default".
+        # Browser tools run in a stdio MCP subprocess, so we can't set a
+        # contextvar across processes — instead we inject `profile` as a
+        # CONTEXT_PARAM that ToolRegistry passes into every MCP call. The
+        # token stays local to this task.
+        try:
+            from framework.loader.tool_registry import ToolRegistry
+
+            ToolRegistry.set_execution_context(profile=session.id)
+        except Exception:
+            logger.debug("Queen: failed to set browser profile for session %s", session.id, exc_info=True)
         try:
             lc = _queen_loop_config
             queen_loop_config = LoopConfig(
