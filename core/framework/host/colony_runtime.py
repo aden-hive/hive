@@ -238,6 +238,13 @@ class ColonyRuntime:
         self._timer_tasks: list[asyncio.Task] = []
         self._timer_next_fire: dict[str, float] = {}
         self._webhook_server: Any = None
+        # Background tasks owned by the runtime that aren't timers —
+        # e.g. the per-spawn soft/hard timeout watchers kicked off by
+        # run_parallel_workers. We hold strong references so asyncio
+        # does not garbage-collect them mid-sleep (Python's asyncio
+        # docs explicitly warn that create_task() needs a referenced
+        # handle).
+        self._background_tasks: set[asyncio.Task] = set()
 
         # Idempotency
         self._idempotency_keys: OrderedDict[str, str] = OrderedDict()
@@ -1181,7 +1188,14 @@ class ColonyRuntime:
             except Exception:
                 logger.exception("watch_batch_timeouts: watcher crashed")
 
-        return asyncio.create_task(_watch(), name=f"batch-timeout:{worker_ids[0] if worker_ids else '?'}")
+        task = asyncio.create_task(_watch(), name=f"batch-timeout:{worker_ids[0] if worker_ids else '?'}")
+        # Hold a strong reference until completion. Without this the
+        # task can be garbage-collected during `await asyncio.sleep`,
+        # silently swallowing the soft-timeout inject (the exact bug
+        # surfaced by workers never seeing [SOFT TIMEOUT]).
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     # ── Status & Query ──────────────────────────────────────────
 
