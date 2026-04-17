@@ -56,7 +56,6 @@ def clear_tab_state(tab_ids) -> None:
         tab_ids = (tab_ids,)
     for tid in tab_ids:
         _screenshot_scales.pop(tid, None)
-        _screenshot_css_scales.pop(tid, None)
 
 
 def _resize_and_annotate(
