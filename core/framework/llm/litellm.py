@@ -45,9 +45,6 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from framework.utils.circuit_breaker import CircuitBreaker
 
-_LLM_CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
-_CIRCUIT_BREAKER_LOCK = threading.Lock()
-
 
 def _patch_litellm_anthropic_oauth() -> None:
     """Patch litellm's Anthropic header construction to fix OAuth token handling.
@@ -595,18 +592,6 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
     return isinstance(exc, _get_transient_types())
 
 
-def _get_llm_circuit_breaker(model_name: str) -> CircuitBreaker:
-    with _CIRCUIT_BREAKER_LOCK:
-        if model_name not in _LLM_CIRCUIT_BREAKERS:
-            _LLM_CIRCUIT_BREAKERS[model_name] = CircuitBreaker(
-                name=f"llm:{model_name}",
-                failure_threshold=5,
-                recovery_timeout=60.0,
-                expected_exceptions=_get_transient_types()
-            )
-        return _LLM_CIRCUIT_BREAKERS[model_name]
-
-
 def _extract_text_tool_calls(
     text: str,
 ) -> tuple[list, str]:
@@ -755,6 +740,17 @@ class LiteLLMProvider(LLMProvider):
             self.api_key = api_key or (api_keys[0] if api_keys else None)
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
         self.extra_kwargs = kwargs
+        
+        _cb_conf = self.extra_kwargs.pop("circuit_breaker", None)
+        if _cb_conf is not None and getattr(_cb_conf, "enabled", False):
+            self._breaker: CircuitBreaker | None = CircuitBreaker(
+                name=f"llm:{self.model}",
+                failure_threshold=getattr(_cb_conf, "failure_threshold", 5),
+                recovery_timeout=getattr(_cb_conf, "recovery_timeout_seconds", 60.0),
+                expected_exceptions=_get_transient_types()
+            )
+        else:
+            self._breaker = None
         # Detect Claude Code OAuth subscription by checking the api_key prefix.
         self._claude_code_oauth = bool(self.api_key and self.api_key.startswith("sk-ant-oat"))
         if self._claude_code_oauth:
@@ -834,8 +830,10 @@ class LiteLLMProvider(LLMProvider):
                 current_key = self._key_pool.get_key()
                 kwargs["api_key"] = current_key
             try:
-                breaker = _get_llm_circuit_breaker(model)
-                response = breaker.call(litellm.completion, **kwargs)  # type: ignore[union-attr]
+                if self._breaker is not None:
+                    response = self._breaker.call(litellm.completion, **kwargs)  # type: ignore[union-attr]
+                else:
+                    response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
                 # Some providers (e.g. Gemini) return 200 with empty content on
                 # rate limit / quota exhaustion instead of a proper 429.  Treat
@@ -1068,8 +1066,10 @@ class LiteLLMProvider(LLMProvider):
                 current_key = self._key_pool.get_key()
                 kwargs["api_key"] = current_key
             try:
-                breaker = _get_llm_circuit_breaker(model)
-                response = await breaker.acall(litellm.acompletion, **kwargs)  # type: ignore[union-attr]
+                if self._breaker is not None:
+                    response = await self._breaker.acall(litellm.acompletion, **kwargs)  # type: ignore[union-attr]
+                else:
+                    response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
                 content = response.choices[0].message.content if response.choices else None
                 has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)

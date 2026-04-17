@@ -20,33 +20,6 @@ logger = logging.getLogger(__name__)
 
 from framework.utils.circuit_breaker import CircuitBreaker
 
-_MCP_CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
-_MCP_BREAKER_LOCK = threading.Lock()
-
-
-def _get_mcp_circuit_breaker(server_name: str) -> CircuitBreaker:
-    """Get or create a circuit breaker for the given MCP server."""
-    # Normalize server name: lowercase, no spaces
-    normalized_name = server_name.lower().strip().replace(" ", "-")
-    with _MCP_BREAKER_LOCK:
-        if normalized_name not in _MCP_CIRCUIT_BREAKERS:
-            # MCP failures are usually connection issues or server errors.
-            # 4xx equivalent (like "tool not found") should NOT trip the breaker.
-            # We treat TimeoutError, ConnectionError, BrokenPipeError, etc. as monitored.
-            _MCP_CIRCUIT_BREAKERS[normalized_name] = CircuitBreaker(
-                name=f"mcp:{normalized_name}",
-                failure_threshold=5,
-                recovery_timeout=60.0,
-                expected_exceptions=(
-                    ConnectionError,
-                    TimeoutError,
-                    BrokenPipeError,
-                    RuntimeError,  # MCP SDK often wraps transport errors in RuntimeError
-                    httpx.NetworkError,
-                ),
-            )
-        return _MCP_CIRCUIT_BREAKERS[normalized_name]
-
 
 @dataclass
 class MCPServerConfig:
@@ -105,6 +78,23 @@ class MCPClient:
         self._http_client: httpx.Client | None = None
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
+
+        _cb_conf = getattr(config, "circuit_breaker", None)
+        if _cb_conf is not None and getattr(_cb_conf, "enabled", False):
+            self._breaker: CircuitBreaker | None = CircuitBreaker(
+                name=f"mcp:{config.name}",
+                failure_threshold=getattr(_cb_conf, "failure_threshold", 3),
+                recovery_timeout=getattr(_cb_conf, "recovery_timeout_seconds", 30.0),
+                expected_exceptions=(
+                    ConnectionError,
+                    TimeoutError,
+                    BrokenPipeError,
+                    RuntimeError,
+                    httpx.NetworkError,
+                ),
+            )
+        else:
+            self._breaker = None
 
         # Background event loop for persistent STDIO connection
         self._loop = None
@@ -547,8 +537,6 @@ class MCPClient:
 
         Wrapped with CircuitBreaker to fail fast during outages.
         """
-        breaker = _get_mcp_circuit_breaker(self.config.name)
-
         def _wrapped_call() -> Any:
             if self.config.transport == "stdio":
                 try:
@@ -595,7 +583,7 @@ class MCPClient:
         # Execute through breaker. Note: MCP tool calls can be sync or async
         # but in this client they are treated as sync due to the _run_async wrapper
         # in call_tool.
-        return breaker.call(_wrapped_call)
+        return self._breaker.call(_wrapped_call) if self._breaker is not None else _wrapped_call()
 
     async def _call_tool_stdio_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call tool via STDIO protocol using persistent session."""
