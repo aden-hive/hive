@@ -18,6 +18,35 @@ from framework.loader.mcp_errors import MCPToolNotFoundError
 
 logger = logging.getLogger(__name__)
 
+from framework.utils.circuit_breaker import CircuitBreaker
+
+_MCP_CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
+_MCP_BREAKER_LOCK = threading.Lock()
+
+
+def _get_mcp_circuit_breaker(server_name: str) -> CircuitBreaker:
+    """Get or create a circuit breaker for the given MCP server."""
+    # Normalize server name: lowercase, no spaces
+    normalized_name = server_name.lower().strip().replace(" ", "-")
+    with _MCP_BREAKER_LOCK:
+        if normalized_name not in _MCP_CIRCUIT_BREAKERS:
+            # MCP failures are usually connection issues or server errors.
+            # 4xx equivalent (like "tool not found") should NOT trip the breaker.
+            # We treat TimeoutError, ConnectionError, BrokenPipeError, etc. as monitored.
+            _MCP_CIRCUIT_BREAKERS[normalized_name] = CircuitBreaker(
+                name=f"mcp:{normalized_name}",
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                expected_exceptions=(
+                    ConnectionError,
+                    TimeoutError,
+                    BrokenPipeError,
+                    RuntimeError,  # MCP SDK often wraps transport errors in RuntimeError
+                    httpx.NetworkError,
+                ),
+            )
+        return _MCP_CIRCUIT_BREAKERS[normalized_name]
+
 
 @dataclass
 class MCPServerConfig:
@@ -515,48 +544,58 @@ class MCPClient:
           session not initialized), tear it down and start a fresh one.
         - **sse / unix / http** (httpx-backed): same treatment for
           ``httpx.ConnectError`` / ``httpx.ReadTimeout``.
+
+        Wrapped with CircuitBreaker to fail fast during outages.
         """
-        if self.config.transport == "stdio":
+        breaker = _get_mcp_circuit_breaker(self.config.name)
+
+        def _wrapped_call() -> Any:
+            if self.config.transport == "stdio":
+                try:
+                    return call()
+                except BaseException as original_error:
+                    if not self._is_stdio_dead_session_error(original_error):
+                        raise
+                    logger.warning(
+                        "Retrying MCP STDIO tool call after dead-session signal from '%s': %s",
+                        self.config.name,
+                        original_error,
+                    )
+                    try:
+                        self._reconnect()
+                    except Exception as reconnect_error:
+                        logger.warning(
+                            "Reconnect failed for MCP STDIO server '%s': %s",
+                            self.config.name,
+                            reconnect_error,
+                        )
+                        raise original_error from reconnect_error
+                    try:
+                        return call()
+                    except BaseException as retry_error:
+                        raise original_error from retry_error
+
+            if self.config.transport not in {"unix", "sse"}:
+                return call()
+
             try:
                 return call()
-            except BaseException as original_error:
-                if not self._is_stdio_dead_session_error(original_error):
-                    raise
+            except (httpx.ConnectError, httpx.ReadTimeout) as original_error:
                 logger.warning(
-                    "Retrying MCP STDIO tool call after dead-session signal from '%s': %s",
+                    "Retrying MCP tool call after transport error from '%s': %s",
                     self.config.name,
                     original_error,
                 )
-                try:
-                    self._reconnect()
-                except Exception as reconnect_error:
-                    logger.warning(
-                        "Reconnect failed for MCP STDIO server '%s': %s",
-                        self.config.name,
-                        reconnect_error,
-                    )
-                    raise original_error from reconnect_error
+                self._reconnect()
                 try:
                     return call()
-                except BaseException as retry_error:
+                except (httpx.ConnectError, httpx.ReadTimeout) as retry_error:
                     raise original_error from retry_error
 
-        if self.config.transport not in {"unix", "sse"}:
-            return call()
-
-        try:
-            return call()
-        except (httpx.ConnectError, httpx.ReadTimeout) as original_error:
-            logger.warning(
-                "Retrying MCP tool call after transport error from '%s': %s",
-                self.config.name,
-                original_error,
-            )
-            self._reconnect()
-            try:
-                return call()
-            except (httpx.ConnectError, httpx.ReadTimeout) as retry_error:
-                raise original_error from retry_error
+        # Execute through breaker. Note: MCP tool calls can be sync or async
+        # but in this client they are treated as sync due to the _run_async wrapper
+        # in call_tool.
+        return breaker.call(_wrapped_call)
 
     async def _call_tool_stdio_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call tool via STDIO protocol using persistent session."""

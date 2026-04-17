@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -41,6 +42,11 @@ logger = logging.getLogger(__name__)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+from framework.utils.circuit_breaker import CircuitBreaker
+
+_LLM_CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
+_CIRCUIT_BREAKER_LOCK = threading.Lock()
 
 
 def _patch_litellm_anthropic_oauth() -> None:
@@ -550,6 +556,31 @@ def _compute_retry_delay(
     return min(delay, max_delay)
 
 
+import functools
+
+@functools.lru_cache(maxsize=1)
+def _get_transient_types() -> tuple[type[BaseException], ...]:
+    try:
+        from litellm.exceptions import (
+            APIConnectionError,
+            BadGatewayError,
+            InternalServerError,
+            ServiceUnavailableError,
+        )
+
+        return (
+            APIConnectionError,
+            InternalServerError,
+            BadGatewayError,
+            ServiceUnavailableError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        )
+    except ImportError:
+        return (TimeoutError, ConnectionError, OSError)
+
+
 def _is_stream_transient_error(exc: BaseException) -> bool:
     """Classify whether a streaming exception is transient (recoverable).
 
@@ -561,27 +592,19 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
     same malformed output.  This error is handled at the EventLoopNode level
     where the conversation can be modified before retrying.
     """
-    try:
-        from litellm.exceptions import (
-            APIConnectionError,
-            BadGatewayError,
-            InternalServerError,
-            ServiceUnavailableError,
-        )
+    return isinstance(exc, _get_transient_types())
 
-        transient_types: tuple[type[BaseException], ...] = (
-            APIConnectionError,
-            InternalServerError,
-            BadGatewayError,
-            ServiceUnavailableError,
-            TimeoutError,
-            ConnectionError,
-            OSError,
-        )
-    except ImportError:
-        transient_types = (TimeoutError, ConnectionError, OSError)
 
-    return isinstance(exc, transient_types)
+def _get_llm_circuit_breaker(model_name: str) -> CircuitBreaker:
+    with _CIRCUIT_BREAKER_LOCK:
+        if model_name not in _LLM_CIRCUIT_BREAKERS:
+            _LLM_CIRCUIT_BREAKERS[model_name] = CircuitBreaker(
+                name=f"llm:{model_name}",
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                expected_exceptions=_get_transient_types()
+            )
+        return _LLM_CIRCUIT_BREAKERS[model_name]
 
 
 def _extract_text_tool_calls(
@@ -811,7 +834,8 @@ class LiteLLMProvider(LLMProvider):
                 current_key = self._key_pool.get_key()
                 kwargs["api_key"] = current_key
             try:
-                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+                breaker = _get_llm_circuit_breaker(model)
+                response = breaker.call(litellm.completion, **kwargs)  # type: ignore[union-attr]
 
                 # Some providers (e.g. Gemini) return 200 with empty content on
                 # rate limit / quota exhaustion instead of a proper 429.  Treat
@@ -1044,7 +1068,8 @@ class LiteLLMProvider(LLMProvider):
                 current_key = self._key_pool.get_key()
                 kwargs["api_key"] = current_key
             try:
-                response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+                breaker = _get_llm_circuit_breaker(model)
+                response = await breaker.acall(litellm.acompletion, **kwargs)  # type: ignore[union-attr]
 
                 content = response.choices[0].message.content if response.choices else None
                 has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
