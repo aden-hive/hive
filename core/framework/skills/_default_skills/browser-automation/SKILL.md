@@ -1,6 +1,6 @@
 ---
 name: hive.browser-automation
-description: Required before any browser_* tool call. Teaches the screenshot + browser_click_coordinate workflow that reaches shadow-DOM inputs selectors can't see, the CSS-pixel coordinate rule (not physical px), rich-text editor quirks ("send button stays disabled" failures), and CSP gotchas. Covers Chrome via CDP through the GCU Beeline extension. Skipping this causes repeated failures on LinkedIn / Reddit / X. Verified against real production sites 2026-04-11.
+description: Required before any browser_* tool call. Teaches the screenshot + browser_click_coordinate workflow that reaches shadow-DOM inputs selectors can't see, rich-text editor quirks ("send button stays disabled" failures), and CSP gotchas. Covers Chrome via CDP through the GCU Beeline extension. Skipping this causes repeated failures on LinkedIn / Reddit / X. Verified against real production sites 2026-04-11.
 metadata:
   author: hive
   type: default-skill
@@ -12,51 +12,20 @@ metadata:
 
 All GCU browser tools drive a real Chrome instance through the Beeline extension and Chrome DevTools Protocol (CDP). That means clicks, keystrokes, and screenshots are processed by the actual browser's native hit testing, focus, and layout engines — **not** a synthetic event layer. Understanding this unlocks strategies that make hard sites easy.
 
-## Coordinates: image-px vs CSS-px — pick the right tool
+## Coordinates
 
-Screenshots are downscaled (800 px wide by default) while the real viewport is typically 1500–1900 CSS px wide on a modern display. So the pixel you read off a screenshot image is **not** the CSS coordinate you pass to CDP — feeding an 800-scale number to a 1717-scale API lands your click ~40% to the left of where you meant.
-
-**The fix is a separate verb for each coord space. You should almost never need to do the math yourself.**
+Screenshots are delivered at the CSS viewport's own dimensions. A pixel you see in the screenshot is the same coordinate `browser_click_coordinate` expects — no conversion, no scale factors.
 
 ```
-browser_screenshot()                      → image (downscaled to ~800 px wide)
-browser_click_image(img_x, img_y)         ← PREFERRED after a screenshot
-                                            Reads image pixels straight from
-                                            the PNG; the tool auto-converts
-                                            to CSS using the cached scale.
-                                            Response includes converted_css_x/y
-                                            and the cssScale used.
-
-browser_click_coordinate(css_x, css_y)    ← CSS pixels only. Use when you
-                                            already have CSS coords from
-                                            getBoundingClientRect / browser_get_rect.
-browser_hover_coordinate(css_x, css_y)    ← CSS pixels
-browser_press_at(css_x, css_y, key)       ← CSS pixels
+browser_screenshot()                  → image at CSS-viewport size (JPEG)
+browser_click_coordinate(x, y)        → same (x, y)
+browser_hover_coordinate(x, y)        → same (x, y)
+browser_press_at(x, y, key)           → same (x, y)
+browser_get_rect(selector) → rect.css → pass rect.css.cx, rect.css.cy to any of the above
+browser_shadow_query(...)  → sq.css   → same
 ```
 
-`browser_coords(img_x, img_y)` is still available if you want to *see* the conversion (it returns `{css_x, css_y, physical_x, physical_y}`) — but for ordinary screenshot-then-click work, `browser_click_image` does the whole pipeline in one call and logs the conversion in its response.
-
-Never feed `physical_x/y` to any click tool. On a DPR=1.6 display, physical coords overshoot by 60%. The ratio between `physicalScale` and `cssScale` tells you the effective DPR.
-
-`getBoundingClientRect()` already returns CSS pixels — feed those straight into `browser_click_coordinate` (not `browser_click_image`) without any scaling.
-
-### The naming convention
-
-Every coord-returning tool (`browser_coords`, `browser_get_rect`, `browser_shadow_query`) returns parallel blocks — one per coord space. Match the block name to the click tool suffix:
-
-```
-rect = browser_get_rect(selector)
-# rect.image  → browser_click_image     ← preferred after a screenshot (scale cached)
-# rect.css    → browser_click_coordinate  (hover_coordinate / press_at)
-# rect.physical  → DO NOT click — debug only
-
-browser_click_image(rect.image.cx, rect.image.cy)
-browser_click_coordinate(rect.css.cx, rect.css.cy)
-```
-
-Same shape from `browser_shadow_query` (`sq.image`, `sq.css`, `sq.physical`) and `browser_coords` (`image_x/image_y`, `css_x/css_y`, `physical_x/physical_y`). If the block prefix and the tool suffix don't match, you're about to click the wrong place.
-
-**Exception for zoomed elements:** pages that use `zoom` or `transform: scale()` on a container (LinkedIn's `#interop-outlet`, some embedded iframes) render in a scaled local coordinate space. `getBoundingClientRect` there may not match CDP's hit space. Use `browser_shadow_query` which handles the math, or fall back to visually picking coordinates from a screenshot.
+**Exception for zoomed elements:** pages that use `zoom` or `transform: scale()` on a container (LinkedIn's `#interop-outlet`, some embedded iframes) render in a scaled local coordinate space. `getBoundingClientRect` there may not match CDP's hit space. Use `browser_shadow_query` which handles the math, or visually pick coordinates from a screenshot.
 
 ## Screenshot + coordinates is shadow-agnostic — prefer it on shadow-heavy sites
 
@@ -72,33 +41,28 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 
 ### Recommended workflow on shadow-heavy sites
 
-1. `browser_screenshot()` → visual image (also caches the image→CSS scale for this tab)
-2. Identify the target visually → image pixel `(x, y)` (eyeball from the screenshot)
-3. `browser_click_image(x, y)` → auto-converts image px → CSS px using the cached scale, then clicks. **The response includes `focused_element: {tag, id, role, contenteditable, rect, ...}`** — use it to verify you actually focused what you intended, plus `converted_css_x/y` and `cssScale` so you can see what the conversion did.
+1. `browser_screenshot()` → visual image (delivered at the CSS-viewport's own dimensions).
+2. Identify the target visually → pixel `(x, y)` read straight off the image.
+3. `browser_click_coordinate(x, y)` → clicks there. **The response includes `focused_element: {tag, id, role, contenteditable, rect, ...}`** — use it to verify you actually focused what you intended.
 4. `browser_type(text="...")` with **NO selector** → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Only pass a selector if you want a DIFFERENT element than the one you just focused (rare).
 5. Verify via `browser_screenshot` OR `browser_get_attribute` on a known-reachable marker (e.g. check that the Send button's `aria-disabled` flipped to `false`).
-
-Do **not** pass image pixels to `browser_click_coordinate`. It expects CSS pixels and does no conversion — a common failure mode is eyeballing `(490, 680)` off an 800-wide screenshot, passing it to `browser_click_coordinate`, and landing in the sidebar at CSS-x=490 of a 1717-wide viewport.
 
 ### The click→type loop (canonical pattern)
 
 ```
-resp = browser_click_image(x, y)            # x, y are raw image pixels
+resp = browser_click_coordinate(x, y)       # x, y read straight off the screenshot
 fe = resp.get("focused_element")
 if fe and (fe.get("contenteditable") or fe["tag"] in ("textarea", "input")):
     browser_type(text="...")                # no selector — insertText to activeElement
 else:
     # you clicked something that isn't editable — refine the pixel and retry.
-    # Check resp["converted_css_x"] / ["converted_css_y"] in the response to
-    # see where the click actually landed; if it's clearly off, your image
-    # pixel was wrong, not the conversion.
     # Do NOT reach for browser_evaluate + execCommand('insertText', ...)
     # or a walk(root) shadow traversal. The problem is your click, not
     # the typing method.
     ...
 ```
 
-`browser_click` (selector-based) also returns `focused_element`, so the same check works whether you clicked by selector, image pixel, or CSS coordinate.
+`browser_click` (selector-based) also returns `focused_element`, so the same check works whether you clicked by selector or by coordinate.
 
 ### Empirically verified (2026-04-11)
 
@@ -296,24 +260,14 @@ Recognized without modifiers: `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `
 ## Screenshots
 
 ```
-browser_screenshot()                    # viewport, 900 px wide by default
+browser_screenshot()                    # viewport, CSS-sized JPEG
 browser_screenshot(full_page=True)      # full scrollable page
 browser_screenshot(selector="#header")  # clip to element's rect
 ```
 
-Returns a PNG with automatic downscaling to a target width (default 900 px) plus a JSON metadata block containing `cssWidth`, `devicePixelRatio`, `physicalScale`, `cssScale`, and a `scaleHint` string. The image is also annotated with a highlight rectangle/dot showing the last interaction (click, hover, type) if one happened on this tab.
+Returns a JPEG (quality 75, ~150–250 KB for a typical UI) at the CSS viewport's own dimensions, plus a JSON metadata block containing `cssWidth`, `devicePixelRatio`, `imageWidth` (= `cssWidth`), and a `scaleHint` confirming image-px == CSS-px. The image is annotated with a highlight rectangle/dot showing the last interaction (click, hover, type) if one happened on this tab.
 
 The highlight overlay stays visible on the page for **10 seconds** after each interaction, then fades. Before a screenshot is likely, make sure your click / hover / type happens <10 s before the screenshot.
-
-### Anatomy of the scale fields
-
-- `cssWidth` = `window.innerWidth` (CSS px)
-- `devicePixelRatio` = `window.devicePixelRatio` (often 1.6, 2, or 3 on modern displays)
-- `physicalScale = png_width / image_width` (how many physical-px per image-px)
-- `cssScale = cssWidth / image_width` (how many CSS-px per image-px)
-- Effective DPR = `physicalScale / cssScale` (should match `devicePixelRatio`)
-
-When converting image coordinates for clicks, always use `cssScale`. The `physicalScale` field is there for debugging HiDPI displays, not for inputs.
 
 ## Scrolling
 
@@ -439,8 +393,7 @@ Then pass the most specific selector that uniquely identifies the right input (e
 - **Typing into a rich-text editor without clicking first → send button stays disabled.** Draft.js (X), Lexical (Gmail, LinkedIn DMs), ProseMirror (Reddit), and React-controlled `contenteditable` elements only register input as "real" when the element received a native focus event — JS-sourced `.focus()` is not enough. `browser_type` now does this automatically via a real CDP pointer click before inserting text, but always verify the submit button's `disabled` state before clicking send. See the "ALWAYS click before typing" section above.
 - **Using per-character `keyDown` on Lexical / Draft.js editors → keys dispatch but text never appears.** Those editors intercept `beforeinput` and route insertion through their own state machine; raw keyDown events are silently dropped. `browser_type` now uses `Input.insertText` by default (the CDP IME-commit method) which these editors accept cleanly. Only set `use_insert_text=False` when you explicitly need per-keystroke dispatch.
 - **Leaving a composer with text then trying to navigate → `beforeunload` dialog hangs the bridge.** LinkedIn and several other sites pop a native "unsent message" confirm. `browser_navigate` and `close_tab` both time out against this. Always strip `window.onbeforeunload = null` via `browser_evaluate` before any navigation after typing in a composer, or wrap your logic in a `try/finally` that runs the cleanup block.
-- **Passing image pixels to `browser_click_coordinate`.** The tool expects CSS pixels and does no conversion. If you eyeballed a target pixel off the screenshot PNG, use `browser_click_image(x, y)` instead — it auto-converts using the cached image→CSS scale. Symptom when you get this wrong: click lands in a sidebar / left rail because an 800-scale number was interpreted as a 1717-scale CSS coordinate. The response of a mis-aimed click will usually show a `focused_element` that isn't the target (e.g. `tag: "div", className: "msg-conversation-listitem__link"`) — branch on that and retry with the right tool.
-- **Clicking at physical pixels.** CDP uses CSS px. `browser_coords` returns both for debugging, but always feed `css_x/y` to `browser_click_coordinate` — or pass the raw image pixel straight into `browser_click_image`.
+- **Click landed in the wrong region (sidebar / header instead of target).** The `focused_element` in the click response shows what actually got focused (e.g. `className: "msg-conversation-listitem__link"` means you hit the messaging sidebar). Treat it as ground truth — if it isn't the target, adjust the pixel and retry. Screenshot pixels equal CSS pixels, so the number you passed is the number CDP clicked; a wrong result means you picked the wrong pixel, not that any conversion went sideways.
 - **Calling `wait_for_selector` on a shadow element.** It'll always time out. Use `browser_shadow_query` or the screenshot + coordinate strategy.
 - **Relying on `innerHTML` in injected scripts on LinkedIn.** Silently discarded. Use `createElement` + `appendChild`.
 - **Not waiting for SPA hydration.** `wait_until="load"` fires before React/Vue rendering on many sites. Add a 2–3 s sleep before querying for chrome elements.

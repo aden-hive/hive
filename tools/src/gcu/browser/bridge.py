@@ -959,18 +959,11 @@ class BeelineBridge:
         button_map = {"left": "left", "right": "right", "middle": "middle"}
         cdp_button = button_map.get(button, "left")
 
-        from .tools.inspection import _screenshot_css_scales, _screenshot_scales
-
-        phys_scale = _screenshot_scales.get(tab_id, "unset")
-        css_scale = _screenshot_css_scales.get(tab_id, "unset")
         logger.info(
-            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent. "
-            "stored_scales: physicalScale=%s, cssScale=%s",
+            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent",
             tab_id,
             x,
             y,
-            phys_scale,
-            css_scale,
         )
 
         await self._cdp(
