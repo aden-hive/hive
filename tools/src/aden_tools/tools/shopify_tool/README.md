@@ -8,6 +8,9 @@ Order, product, and customer management via the Shopify Admin REST API.
 |------|-------------|
 | `shopify_list_orders` | List orders with optional status and fulfillment filters |
 | `shopify_get_order` | Get full details of a specific order by ID |
+| `shopify_update_order` | Update order tags or internal note |
+| `shopify_cancel_order` | Cancel an order (optional restock/email/refund) |
+| `shopify_refund_order` | Refund an order via the store payment gateway |
 | `shopify_list_products` | List products with optional status, type, and vendor filters |
 | `shopify_get_product` | Get full product details including variants and images |
 | `shopify_update_product` | Update title, body_html, status, tags, or vendor of a product |
@@ -15,6 +18,7 @@ Order, product, and customer management via the Shopify Admin REST API.
 | `shopify_get_customer` | Get full customer details including addresses and order stats |
 | `shopify_search_customers` | Search customers by email, name, or other fields |
 | `shopify_create_draft_order` | Create a draft order with line items |
+| `shopify_send_draft_order_invoice` | Send a draft order invoice email to collect payment |
 
 ## Setup
 
@@ -59,6 +63,39 @@ shopify_list_orders(
 
 ```python
 shopify_get_order(order_id="5678901234")
+```
+
+### Update an order's tags / note
+
+```python
+shopify_update_order(
+    order_id="5678901234",
+    tags="vip,needs_followup",
+    note="Customer requested delivery window 2-4pm",
+)
+```
+
+### Cancel an order
+
+```python
+shopify_cancel_order(
+    order_id="5678901234",
+    reason="customer",
+    restock=True,
+    email=True,
+    refund=False,
+)
+```
+
+### Refund an order
+
+```python
+shopify_refund_order(
+    order_id="5678901234",
+    amount="199.00",
+    note="Customer requested refund",
+    notify=False,
+)
 ```
 
 ### List active products
@@ -110,6 +147,16 @@ shopify_create_draft_order(
     customer_id="987654321",
     note="VIP order",
     tags="manual,vip",
+)
+```
+
+### Send draft order invoice email (collect payment)
+
+```python
+shopify_send_draft_order_invoice(
+    draft_order_id="123456789",
+    subject="Invoice for your order",
+    custom_message="Thanks! Please complete payment using the link in this invoice.",
 )
 ```
 

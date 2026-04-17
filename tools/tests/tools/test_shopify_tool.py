@@ -121,6 +121,171 @@ class TestShopifyGetOrder:
         assert result["customer"]["first_name"] == "Bob"
 
 
+class TestShopifyUpdateOrder:
+    def test_missing_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_update_order"](order_id="")
+        assert "error" in result
+
+    def test_requires_numeric_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_update_order"](order_id="not-a-number", tags="vip")
+        assert "error" in result
+
+    def test_requires_fields(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_update_order"](order_id="450789469")
+        assert "error" in result
+
+    def test_successful_update(self, tool_fns):
+        data = {
+            "order": {
+                "id": 450789469,
+                "name": "#1001",
+                "updated_at": "2025-01-10T12:30:00-05:00",
+                "tags": "vip,needs_followup",
+                "note": "Call customer before shipping",
+            }
+        }
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.put",
+                return_value=_mock_resp(data),
+            ),
+        ):
+            result = tool_fns["shopify_update_order"](
+                order_id="450789469",
+                tags="vip,needs_followup",
+                note="Call customer before shipping",
+            )
+
+        assert result["id"] == 450789469
+        assert result["tags"] == "vip,needs_followup"
+        assert result["result"] == "updated"
+
+
+class TestShopifyCancelOrder:
+    def test_missing_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_cancel_order"](order_id="")
+        assert "error" in result
+
+    def test_requires_numeric_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_cancel_order"](order_id="bad")
+        assert "error" in result
+
+    def test_successful_cancel(self, tool_fns):
+        data = {
+            "order": {
+                "id": 450789469,
+                "name": "#1001",
+                "cancelled_at": "2025-01-10T12:40:00-05:00",
+                "cancel_reason": "customer",
+                "financial_status": "refunded",
+                "fulfillment_status": None,
+            }
+        }
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
+        ):
+            result = tool_fns["shopify_cancel_order"](
+                order_id="450789469",
+                reason="customer",
+                restock=True,
+                email=True,
+                refund=False,
+            )
+
+        assert result["id"] == 450789469
+        assert result["result"] == "cancelled"
+
+
+class TestShopifyRefundOrder:
+    def test_missing_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_refund_order"](order_id="")
+        assert "error" in result
+
+    def test_requires_numeric_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_refund_order"](order_id="bad", amount="1.00")
+        assert "error" in result
+
+    def test_successful_refund(self, tool_fns):
+        order_data = {"order": {"id": 450789469, "total_price": "199.00", "currency": "USD"}}
+        tx_data = {"transactions": [{"id": 111, "kind": "capture", "gateway": "shopify_payments"}]}
+        refund_data = {
+            "refund": {
+                "id": 222,
+                "order_id": 450789469,
+                "created_at": "2025-01-10T12:50:00-05:00",
+                "note": "Customer requested refund",
+                "transactions": [{"id": 333, "amount": "199.00", "kind": "refund"}],
+            }
+        }
+
+        def _mock_get(url, *args, **kwargs):
+            if url.endswith("/orders/450789469.json"):
+                return _mock_resp(order_data)
+            if url.endswith("/orders/450789469/transactions.json"):
+                return _mock_resp(tx_data)
+            raise AssertionError(f"Unexpected GET URL: {url}")
+
+        with (
+            patch.dict("os.environ", ENV),
+            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", side_effect=_mock_get),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.post",
+                return_value=_mock_resp(refund_data),
+            ),
+        ):
+            result = tool_fns["shopify_refund_order"](
+                order_id="450789469",
+                amount="199.00",
+                note="Customer requested refund",
+                notify=False,
+            )
+
+        assert result["id"] == 222
+        assert result["order_id"] == 450789469
+        assert result["result"] == "refunded"
+
+
+class TestShopifySendDraftOrderInvoice:
+    def test_missing_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_send_draft_order_invoice"](draft_order_id="")
+        assert "error" in result
+
+    def test_requires_numeric_id(self, tool_fns):
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["shopify_send_draft_order_invoice"](draft_order_id="bad")
+        assert "error" in result
+
+    def test_successful_send(self, tool_fns):
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.post",
+                return_value=_mock_resp({}),
+            ),
+        ):
+            result = tool_fns["shopify_send_draft_order_invoice"](
+                draft_order_id="123456789",
+                subject="Invoice",
+                custom_message="Please pay",
+            )
+
+        assert result["draft_order_id"] == 123456789
+        assert result["result"] == "invoice_sent"
+
+
 class TestShopifyListProducts:
     def test_successful_list(self, tool_fns):
         data = {

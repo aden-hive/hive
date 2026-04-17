@@ -220,6 +220,253 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
+    def shopify_update_order(
+        order_id: str,
+        tags: str = "",
+        note: str = "",
+    ) -> dict:
+        """
+        Update an existing Shopify order (tags / note).
+
+        Args:
+            order_id: The numeric Shopify order ID (required).
+            tags: Comma-separated tags to replace existing tags (optional).
+            note: Internal order note (optional).
+
+        Returns:
+            Dict with updated order fields.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not order_id:
+            return {"error": "order_id is required"}
+
+        try:
+            order_id_int = int(order_id)
+        except ValueError:
+            return {"error": "order_id must be a numeric Shopify order ID"}
+
+        order: dict[str, Any] = {"id": order_id_int}
+        if tags:
+            order["tags"] = tags
+        if note:
+            order["note"] = note
+
+        if set(order.keys()) == {"id"}:
+            return {"error": "At least one field to update is required"}
+
+        try:
+            resp = httpx.put(
+                f"{_base_url(store)}/orders/{order_id}.json",
+                headers=_headers(token),
+                json={"order": order},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            o = result.get("order", {})
+            return {
+                "id": o.get("id"),
+                "name": o.get("name"),
+                "updated_at": o.get("updated_at"),
+                "tags": o.get("tags"),
+                "note": o.get("note"),
+                "result": "updated",
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_cancel_order(
+        order_id: str,
+        reason: str = "",
+        restock: bool = True,
+        email: bool = True,
+        refund: bool = False,
+    ) -> dict:
+        """
+        Cancel an existing Shopify order.
+
+        Args:
+            order_id: The numeric Shopify order ID (required).
+            reason: Optional reason (Shopify-defined values include: "customer", "inventory", "fraud", "declined", "other").
+            restock: Whether to restock inventory for the cancelled order (default True).
+            email: Whether Shopify should email the customer (default True).
+            refund: Whether Shopify should attempt to refund the order (default False).
+
+        Returns:
+            Dict with cancellation status.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not order_id:
+            return {"error": "order_id is required"}
+        try:
+            int(order_id)
+        except ValueError:
+            return {"error": "order_id must be a numeric Shopify order ID"}
+
+        params: dict[str, Any] = {
+            "restock": str(restock).lower(),
+            "email": str(email).lower(),
+            "refund": str(refund).lower(),
+        }
+        if reason:
+            params["reason"] = reason
+
+        try:
+            resp = httpx.post(
+                f"{_base_url(store)}/orders/{order_id}/cancel.json",
+                headers=_headers(token),
+                params=params,
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            o = result.get("order", {})
+            return {
+                "id": o.get("id"),
+                "name": o.get("name"),
+                "cancelled_at": o.get("cancelled_at"),
+                "cancel_reason": o.get("cancel_reason"),
+                "financial_status": o.get("financial_status"),
+                "fulfillment_status": o.get("fulfillment_status"),
+                "result": "cancelled",
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_refund_order(
+        order_id: str,
+        amount: str = "",
+        note: str = "",
+        notify: bool = False,
+    ) -> dict:
+        """
+        Refund an order via the Shopify Admin REST API.
+
+        This uses the store's configured payment gateway by creating a refund transaction
+        against an existing "capture"/"sale" transaction for the order.
+
+        Args:
+            order_id: The numeric Shopify order ID (required).
+            amount: Refund amount as a string (optional). If empty, refunds the order's total_price.
+            note: Optional internal note on the refund.
+            notify: Whether to notify the customer (default False).
+
+        Returns:
+            Dict with refund ID and status.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not order_id:
+            return {"error": "order_id is required"}
+        try:
+            int(order_id)
+        except ValueError:
+            return {"error": "order_id must be a numeric Shopify order ID"}
+
+        try:
+            order_resp = httpx.get(
+                f"{_base_url(store)}/orders/{order_id}.json",
+                headers=_headers(token),
+                timeout=30.0,
+            )
+            order_result = _handle_response(order_resp)
+            if "error" in order_result:
+                return order_result
+
+            order = order_result.get("order", {})
+            refund_amount = amount or str(order.get("total_price") or "")
+            currency = order.get("currency") or ""
+            if not refund_amount:
+                return {"error": "amount is required (could not infer from order total_price)"}
+            if not currency:
+                return {"error": "Could not infer currency from order"}
+
+            tx_resp = httpx.get(
+                f"{_base_url(store)}/orders/{order_id}/transactions.json",
+                headers=_headers(token),
+                timeout=30.0,
+            )
+            tx_result = _handle_response(tx_resp)
+            if "error" in tx_result:
+                return tx_result
+
+            transactions = tx_result.get("transactions", []) or []
+            parent = None
+            for t in transactions:
+                if t.get("kind") in ("capture", "sale"):
+                    parent = t
+                    break
+            if not parent:
+                return {"error": "No refundable transaction found for this order"}
+
+            parent_id = parent.get("id")
+            gateway = parent.get("gateway")
+            if not parent_id or not gateway:
+                return {"error": "Refund transaction metadata missing (parent_id/gateway)"}
+
+            payload: dict[str, Any] = {
+                "refund": {
+                    "currency": currency,
+                    "notify": bool(notify),
+                    "transactions": [
+                        {
+                            "parent_id": parent_id,
+                            "amount": refund_amount,
+                            "kind": "refund",
+                            "gateway": gateway,
+                        }
+                    ],
+                }
+            }
+            if note:
+                payload["refund"]["note"] = note
+
+            refund_resp = httpx.post(
+                f"{_base_url(store)}/orders/{order_id}/refunds.json",
+                headers=_headers(token),
+                json=payload,
+                timeout=30.0,
+            )
+            refund_result = _handle_response(refund_resp)
+            if "error" in refund_result:
+                return refund_result
+
+            r = refund_result.get("refund", {})
+            return {
+                "id": r.get("id"),
+                "order_id": r.get("order_id"),
+                "created_at": r.get("created_at"),
+                "note": r.get("note"),
+                "transactions": r.get("transactions"),
+                "result": "refunded",
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
     def shopify_list_products(
         status: str = "",
         product_type: str = "",
@@ -675,6 +922,69 @@ def register_tools(
                 "line_item_count": len(d.get("line_items", [])),
                 "result": "created",
             }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_send_draft_order_invoice(
+        draft_order_id: str,
+        to: str = "",
+        subject: str = "",
+        custom_message: str = "",
+        bcc: str = "",
+        from_email: str = "",
+    ) -> dict:
+        """
+        Send a Shopify draft order invoice email to collect payment.
+
+        Args:
+            draft_order_id: The numeric Shopify draft order ID (required).
+            to: Recipient email override (optional). Defaults to Shopify's customer email on the draft order.
+            subject: Email subject override (optional).
+            custom_message: Custom message to include in the invoice email (optional).
+            bcc: BCC email address (optional).
+            from_email: From email override (optional). Must be configured/allowed in Shopify.
+
+        Returns:
+            Dict with result status.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not draft_order_id:
+            return {"error": "draft_order_id is required"}
+        try:
+            int(draft_order_id)
+        except ValueError:
+            return {"error": "draft_order_id must be a numeric Shopify draft order ID"}
+
+        invoice: dict[str, Any] = {}
+        if to:
+            invoice["to"] = to
+        if subject:
+            invoice["subject"] = subject
+        if custom_message:
+            invoice["custom_message"] = custom_message
+        if bcc:
+            invoice["bcc"] = bcc
+        if from_email:
+            invoice["from"] = from_email
+
+        try:
+            resp = httpx.post(
+                f"{_base_url(store)}/draft_orders/{draft_order_id}/send_invoice.json",
+                headers=_headers(token),
+                json={"draft_order_invoice": invoice},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+            return {"draft_order_id": int(draft_order_id), "result": "invoice_sent"}
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
