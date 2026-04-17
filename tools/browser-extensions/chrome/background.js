@@ -1,7 +1,7 @@
 /**
- * Hive Browser Bridge - service worker
+ * Hive Browser Bridge - background script (Firefox compatible)
  *
- * Commands from Hive (via WebSocket through offscreen.js):
+ * Commands from Hive (via WebSocket directly):
  *
  *   context.create  { agentId }           → { groupId, tabId }
  *   context.destroy { groupId }           → { ok, closedTabs }
@@ -17,32 +17,61 @@
  */
 
 // ---------------------------------------------------------------------------
-// Offscreen document (persistent WebSocket host)
+// WebSocket connection logic (Integrated from offscreen.js for Firefox MV3)
 // ---------------------------------------------------------------------------
 
-async function ensureOffscreen() {
-  const contexts = await chrome.runtime.getContexts({
-    contextTypes: ["OFFSCREEN_DOCUMENT"],
-  });
-  if (contexts.length === 0) {
-    await chrome.offscreen.createDocument({
-      url: "offscreen.html",
-      reasons: ["WORKERS"],
-      justification: "Persistent WebSocket connection to Hive GCU server",
-    });
+const HIVE_WS_URL = "ws://127.0.0.1:9229/bridge";
+let ws = null;
+const RETRY_INTERVAL = 2000;
+
+async function setConnected(value) {
+  // Use session storage to persist state across background page suspensions/reloads
+  await chrome.storage.session.set({ wsConnected: value });
+}
+
+function connect() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return;
+  }
+
+  try {
+    ws = new WebSocket(HIVE_WS_URL);
+
+    ws.onopen = () => {
+      console.log("[Beeline] WebSocket connected to Hive");
+      setConnected(true);
+      wsSend({ type: "hello", version: "1.0" });
+    };
+
+    ws.onmessage = (event) => {
+      handleCommand(JSON.parse(event.data));
+    };
+
+    ws.onclose = (event) => {
+      console.log(`[Beeline] WebSocket closed: code=${event.code}, reason=${event.reason}`);
+      setConnected(false);
+      ws = null;
+      setTimeout(connect, RETRY_INTERVAL);
+    };
+
+    ws.onerror = () => {
+      console.warn(`[Beeline] WebSocket connection failed (server may not be running)`);
+    };
+  } catch (error) {
+    console.error("[Beeline] Failed to create WebSocket:", error.message);
+    setConnected(false);
+    ws = null;
+    setTimeout(connect, RETRY_INTERVAL);
   }
 }
 
 function wsSend(obj) {
-  chrome.runtime.sendMessage({ _beeline: true, type: "ws_send", data: JSON.stringify(obj) });
-}
-
-// ---------------------------------------------------------------------------
-// Connection state (shared with popup via storage.session)
-// ---------------------------------------------------------------------------
-
-async function setConnected(value) {
-  await chrome.storage.session.set({ wsConnected: value });
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  } else {
+    console.warn("[Beeline] Cannot send - WebSocket not connected (state: %s)",
+      ws ? ws.readyState : "null");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,19 +98,32 @@ async function dispatch(type, params) {
   switch (type) {
     // ── Context (tab group) management ────────────────────────────────────
     case "context.create": {
-      // Create a blank tab then group it so we have a groupId to return.
+      // Create a blank tab. In Firefox, tabGroups are not supported natively.
       const tab = await chrome.tabs.create({ url: "about:blank", active: false });
-      const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-      await chrome.tabGroups.update(groupId, {
-        title: params.agentId ?? "Hive Agent",
-        color: pickColor(groupId),
-        collapsed: false,
-      });
+      let groupId = tab.windowId; // Fallback to windowId in Firefox
+      
+      if (chrome.tabs.group) {
+        groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+        if (chrome.tabGroups && chrome.tabGroups.update) {
+            await chrome.tabGroups.update(groupId, {
+              title: params.agentId ?? "Hive Agent",
+              color: pickColor(groupId),
+              collapsed: false,
+            });
+        }
+      }
       return { groupId, tabId: tab.id };
     }
 
     case "context.destroy": {
-      const tabs = await chrome.tabs.query({ groupId: params.groupId });
+      let tabs = [];
+      if (chrome.tabs.group) {
+        tabs = await chrome.tabs.query({ groupId: params.groupId });
+      } else {
+        // Fallback for Firefox (uses windowId as groupId substitute)
+        tabs = await chrome.tabs.query({ windowId: params.groupId });
+      }
+      
       if (tabs.length > 0) {
         // Detach debugger from all tabs before closing them.
         await Promise.allSettled(
@@ -99,7 +141,12 @@ async function dispatch(type, params) {
         active: false,
       });
       if (params.groupId != null) {
-        await chrome.tabs.group({ tabIds: [tab.id], groupId: params.groupId });
+        if (chrome.tabs.group) {
+          await chrome.tabs.group({ tabIds: [tab.id], groupId: params.groupId });
+        } else {
+          // Firefox fallback
+          await chrome.tabs.move(tab.id, { windowId: params.groupId, index: -1 });
+        }
       }
       return { tabId: tab.id };
     }
@@ -111,10 +158,17 @@ async function dispatch(type, params) {
     }
 
     case "tab.list": {
-      const query = params.groupId != null ? { groupId: params.groupId } : {};
+      let query = {};
+      if (params.groupId != null) {
+        if (chrome.tabs.group) {
+          query = { groupId: params.groupId };
+        } else {
+          query = { windowId: params.groupId };
+        }
+      }
       const tabs = await chrome.tabs.query(query);
       return {
-        tabs: tabs.map((t) => ({ id: t.id, url: t.url, title: t.title, groupId: t.groupId })),
+        tabs: tabs.map((t) => ({ id: t.id, url: t.url, title: t.title, groupId: chrome.tabs.group ? t.groupId : t.windowId })),
       };
     }
 
@@ -124,11 +178,16 @@ async function dispatch(type, params) {
     }
 
     case "tab.group_by_target": {
-      // Resolve a CDP target ID to a Chrome tabId, then move it into the group.
+      // Resolve a CDP target ID to a Chrome/Firefox tabId, then move it into the group.
       const targets = await new Promise((resolve) => chrome.debugger.getTargets(resolve));
       const target = targets.find((t) => t.tabId != null && t.id === params.targetId);
       if (!target) throw new Error(`CDP target not found: ${params.targetId}`);
-      await chrome.tabs.group({ tabIds: [target.tabId], groupId: params.groupId });
+      
+      if (chrome.tabs.group) {
+        await chrome.tabs.group({ tabIds: [target.tabId], groupId: params.groupId });
+      } else {
+        await chrome.tabs.move(target.tabId, { windowId: params.groupId, index: -1 });
+      }
       return { ok: true, tabId: target.tabId };
     }
 
@@ -179,22 +238,6 @@ async function dispatch(type, params) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg._beeline) return;
 
-  if (msg.type === "ws_open") {
-    setConnected(true);
-    wsSend({ type: "hello", version: "1.0" });
-    return;
-  }
-
-  if (msg.type === "ws_close") {
-    setConnected(false);
-    return;
-  }
-
-  if (msg.type === "ws_message") {
-    handleCommand(JSON.parse(msg.data));
-    return;
-  }
-
   // Popup asking for live status
   if (msg.type === "status") {
     chrome.storage.session.get(["wsConnected"]).then((data) => {
@@ -208,12 +251,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-chrome.runtime.onInstalled.addListener(ensureOffscreen);
-chrome.runtime.onStartup.addListener(ensureOffscreen);
+chrome.runtime.onInstalled.addListener(connect);
+chrome.runtime.onStartup.addListener(connect);
 
-// Periodic alarm keeps the service worker from being garbage-collected and
-// recreates the offscreen document if it was evicted.
+// Periodic alarm keeps the background script active or reconnects if necessary
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "keepAlive") ensureOffscreen();
+  if (alarm.name === "keepAlive") {
+    connect();
+  }
 });
+
+// Start connection immediately
+connect();

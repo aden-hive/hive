@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "name": "Hive Browser Bridge",
+  "version": "1.0.0",
+  "description": "Connects Hive AI subagents to your existing browser via isolated tab groups",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "hive-browser-bridge@hive.ai",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Hive Browser Bridge"
+  }
+}
