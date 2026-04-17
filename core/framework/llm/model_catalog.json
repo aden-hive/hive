@@ -395,6 +395,12 @@
       "max_tokens": 8192,
       "max_context_tokens": 16384,
       "api_base": "http://localhost:11434"
+    },
+    "llamacpp": {
+      "provider": "openai",
+      "max_tokens": 8192,
+      "max_context_tokens": 16384,
+      "api_base": "http://localhost:8080"
     }
   }
 }

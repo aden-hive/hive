@@ -436,6 +436,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="Mistral"
         ["TOGETHER_API_KEY"]="Together AI"
         ["DEEPSEEK_API_KEY"]="DeepSeek"
+        ["LLAMACPP_API_KEY"]="Llama.cpp"
     )
 
     declare -A PROVIDER_IDS=(
@@ -450,6 +451,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="mistral"
         ["TOGETHER_API_KEY"]="together"
         ["DEEPSEEK_API_KEY"]="deepseek"
+        ["LLAMACPP_API_KEY"]="llamacpp"
     )
 
     # Helper functions for Bash 4+
@@ -462,9 +464,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY LLAMACPP_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek" "Llama.cpp")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek llamacpp)
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -1071,6 +1073,11 @@ if ollama list >/dev/null 2>&1; then
     OLLAMA_DETECTED=true
 fi
 
+LLAMACPP_DETECTED=false
+if curl -s http://localhost:8080/v1/models >/dev/null 2>&1; then
+    LLAMACPP_DETECTED=true
+fi
+
 if ! load_model_catalog_rows; then
     echo -e "${RED}Failed to load core/framework/llm/model_catalog.json.${NC}"
     echo -e "${YELLOW}Please ensure your Python environment is set up, then rerun quickstart.${NC}"
@@ -1112,6 +1119,8 @@ try:
     prov = llm.get("provider", "")
     mod = llm.get("model", "")
     env = llm.get("api_key_env_var", "")
+    if llm.get("provider", "") == "openai" and llm.get("api_base", "") != "":
+      prov = "llamacpp"
     print(f"PREV_PROVIDER='{prov}'")
     print(f"PREV_MODEL='{mod}'")
     print(f"PREV_ENV_VAR='{env}'")
@@ -1178,10 +1187,11 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 groq)      DEFAULT_CHOICE=11 ;;
                 cerebras)  DEFAULT_CHOICE=12 ;;
                 openrouter) DEFAULT_CHOICE=13 ;;
-                ollama)    DEFAULT_CHOICE=14 ;;
+                ollama)    DEFAULT_CHOICE=15 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
+                llamacpp)  DEFAULT_CHOICE=14 ;;
             esac
         fi
     fi
@@ -1280,14 +1290,21 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-# 14) Local (Ollama) — no API key needed
-if [ "$OLLAMA_DETECTED" = true ]; then
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+# 14) Local (Llama.cpp or custom OpenAI API endpoint) — no API key needed
+if [ "$LLAMACPP_DETECTED" = true ]; then
+    echo -e "  ${CYAN}14)${NC} Custom OpenAI API endpoint (such as Llama.cpp) ${GREEN}(Detected running in this machine)${NC}"
 else
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed"
+    echo -e "  ${CYAN}14)${NC} Custom OpenAI API endpoint (such as Llama.cpp)"
 fi
 
-SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]} + 1))
+# 15) Local (Ollama) — no API key needed
+if [ "$OLLAMA_DETECTED" = true ]; then
+    echo -e "  ${CYAN}15)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+else
+    echo -e "  ${CYAN}15)${NC} Local (Ollama) - No API key needed"
+fi
+
+SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]} + 1 + 1))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1493,6 +1510,60 @@ case $choice in
         SIGNUP_URL="https://openrouter.ai/keys"
         ;;
     14)
+        SELECTED_ENV_VAR="LLAMACPP_API_KEY"
+        SELECTED_PROVIDER_ID="llamacpp"
+        PROVIDER_NAME="Llama.cpp"
+        LLAMACPP_MODELS=()
+        DEFAULT_API="http://localhost:8080"
+        echo ""
+        echo -e "  ${GREEN}⬢${NC} API endpoint: ${DIM}$DEFAULT_API${NC}"
+        read -r -p "  Press Enter to keep, or paste a new endpoint to replace: " SELECTED_API_BASE
+        if [ -z "$SELECTED_API_BASE" ]; then
+            #user clicked "enter"
+            SELECTED_API_BASE="$DEFAULT_API"
+        else
+            echo -e "  ${GREEN}If your endpoint is running on another machine, remember to set the application to listen on 0.0.0.0 (--host 0.0.0.0 in llama-server), otherwise connection will fail!${NC}"
+        fi
+        if ! command -v curl &> /dev/null; then
+            echo -e "  ${YELLOW}Warning: curl is not installed (needed to install get model list from llama.cpp)${NC}"
+            echo -e "  ${RED}Please install curl to use Llama.cpp endpoint!"
+            exit 1
+        else
+            while IFS= read -r line; do
+                [ -n "$line" ] && LLAMACPP_MODELS+=("$line")
+            done < <(curl -s "$SELECTED_API_BASE"/v1/models | grep -oP '"id":"\K[^"]+')
+            if [ ${#LLAMACPP_MODELS[@]} -gt 0 ]; then
+                echo ""
+                echo -e "${BOLD}Select a Llama.cpp model:${NC}"
+                echo ""
+                for idx in "${!LLAMACPP_MODELS[@]}"; do
+                    num=$((idx + 1))
+                    echo -e "  ${CYAN}$num)${NC} ${LLAMACPP_MODELS[$idx]}"
+                done
+                echo ""
+                while true; do
+                    read -r -p "Enter choice (1-${#LLAMACPP_MODELS[@]}): " model_choice
+                    if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#LLAMACPP_MODELS[@]} ]; then
+                        SELECTED_MODEL="${LLAMACPP_MODELS[$((model_choice - 1))]}"
+                        break
+                    fi
+                    echo -e "${RED}Invalid choice. Please enter 1-${#LLAMACPP_MODELS[@]}${NC}"
+                done
+            else
+                echo -e "${YELLOW}Warning: Llama.cpp is running, but no model is found! $SELECTED_API_BASE${NC}"
+                echo -e "  Please open another terminal, run ${CYAN}llama-server -hf ggml-org/gemma-4-E4B-it-GGUF${NC} (or another model)."
+                echo -e "  Once a model is downloaded, you can also run ${CYAN}llama-server${NC} without parameters."
+                echo -e "  If llama-server is running in another machine, rerun this script providing a different endpoint when asked."
+                exit 1
+            fi
+        fi
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Llama.cpp with model ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "${YELLOW}  ⚠ Note: The framework uses a ~9,500 token system prompt and requires strong tool use.${NC}"
+        echo -e "${YELLOW}    For best results, use models like qwen2.5:72b+ or mistral-large.${NC}"
+        echo ""
+        ;;
+    15)
         # Local (Ollama) — no API key; pick model from ollama list
         if [ "$OLLAMA_DETECTED" != true ]; then
             echo ""
@@ -1565,11 +1636,19 @@ if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] ||
             echo -e "  ${GREEN}⬢${NC} Current key: ${DIM}$MASKED_KEY${NC}"
             read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
         else
-            # No key — prompt for one
-            echo ""
-            echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
-            echo ""
-            read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+            if [ "$SELECTED_ENV_VAR" = "LLAMACPP_API_KEY" ]; then
+              echo ""
+              read -r -p "Paste your custom endpoint API key, if you're using Llama.cpp just press Enter: " API_KEY
+              if [ -z "$API_KEY" ]; then
+                API_KEY="llamacpp"
+              fi
+            else
+              # No key — prompt for one
+              echo ""
+              echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+              echo ""
+              read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+            fi
         fi
 
         if [ -n "$API_KEY" ]; then
@@ -1716,6 +1795,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
         # to the local Ollama server instead of trying to reach a remote endpoint.
         save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "llamacpp" ]; then
+        save_configuration "openai" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     fi

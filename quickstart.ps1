@@ -166,49 +166,49 @@ function Test-DefenderExclusions {
         Hashtable with DefenderEnabled, MissingPaths, and optional Error
     #>
     param([string[]]$Paths)
-    
+
     # Security: Define safe path prefixes (project + user directories only)
     $safePrefixes = @(
         $ScriptDir,         # Project directory
         $env:LOCALAPPDATA,  # User local appdata
         $env:APPDATA        # User roaming appdata
     )
-    
+
     # Normalize and filter null/empty values
     $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
         try { [System.IO.Path]::GetFullPath($_) } catch { $null }
     } | Where-Object { $_ }
-    
+
     try {
         # Check if Defender cmdlets are available (may not exist on older Windows)
         $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
         if (-not $mpModule) {
-            return @{ 
+            return @{
                 DefenderEnabled = $false
                 Error = "Windows Defender module not available"
             }
         }
-        
+
         # Check if Defender is running
         $status = Get-MpComputerStatus -ErrorAction Stop
         if (-not $status.RealTimeProtectionEnabled) {
-            return @{ 
+            return @{
                 DefenderEnabled = $false
                 Reason = "Real-time protection is disabled"
             }
         }
-        
+
         # Get current exclusions
         $prefs = Get-MpPreference -ErrorAction Stop
         $existing = $prefs.ExclusionPath
         if (-not $existing) { $existing = @() }
-        
+
         # Normalize existing paths for comparison (some may contain wildcards
         # or env vars that GetFullPath rejects — skip those gracefully)
         $existing = $existing | Where-Object { $_ } | ForEach-Object {
             try { [System.IO.Path]::GetFullPath($_) } catch { $_ }
         }
-        
+
         # Normalize paths and find missing exclusions
         $missing = @()
         foreach ($path in $Paths) {
@@ -217,7 +217,7 @@ function Test-DefenderExclusions {
             } catch {
                 continue  # Skip paths with unsupported format
             }
-            
+
             # Security: Ensure path is within safe boundaries
             $isSafe = $false
             foreach ($prefix in $safePrefixes) {
@@ -226,17 +226,17 @@ function Test-DefenderExclusions {
                     break
                 }
             }
-            
+
             if (-not $isSafe) {
                 Write-Warn "Security: Refusing to exclude path outside safe boundaries: $normalized"
                 continue
             }
-            
+
             # Info: Warn if path doesn't exist yet (but still process it)
             if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
                 Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
             }
-            
+
             # Check if path is already excluded (or is a child of an excluded path)
             $alreadyExcluded = $false
             foreach ($excluded in $existing) {
@@ -245,19 +245,19 @@ function Test-DefenderExclusions {
                     break
                 }
             }
-            
+
             if (-not $alreadyExcluded) {
                 $missing += $normalized
             }
         }
-        
+
         return @{
             DefenderEnabled = $true
             MissingPaths = $missing
             ExistingPaths = $existing
         }
     } catch {
-        return @{ 
+        return @{
             DefenderEnabled = $false
             Error = $_.Exception.Message
         }
@@ -276,7 +276,7 @@ function Test-IsDefenderEnabled {
         if (-not $mpModule) {
             return $false
         }
-        
+
         $status = Get-MpComputerStatus -ErrorAction Stop
         return $status.RealTimeProtectionEnabled
     } catch {
@@ -295,10 +295,10 @@ function Add-DefenderExclusions {
         Hashtable with Added and Failed arrays
     #>
     param([string[]]$Paths)
-    
+
     $added = @()
     $failed = @()
-    
+
     foreach ($path in $Paths) {
         try {
             try {
@@ -309,14 +309,14 @@ function Add-DefenderExclusions {
             Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
             $added += $normalized
         } catch {
-            $failed += @{ 
+            $failed += @{
                 Path = $path
                 Error = $_.Exception.Message
             }
         }
     }
-    
-    return @{ 
+
+    return @{
         Added = $added
         Failed = $failed
     }
@@ -657,37 +657,37 @@ if (-not $checkResult.DefenderEnabled) {
         Write-Color -Text "  - $path" -Color Cyan
     }
     Write-Host ""
-    
+
     # Security notice
     Write-Color -Text "⚠️  Security Trade-off:" -Color Yellow
     Write-Host "Adding exclusions improves performance but reduces real-time protection."
     Write-Host "Only proceed if you trust this project and its dependencies."
     Write-Host ""
-    
+
     # Prompt for consent (default = No for security)
     if (Prompt-YesNo "Add these Defender exclusions?" "n") {
         Write-Host ""
-        
+
         # Check admin privileges
         if (-not (Test-IsAdmin)) {
             Write-Warn "Administrator privileges required to modify Defender settings."
             Write-Host ""
             Write-Color -Text "To add exclusions manually, run PowerShell as Administrator and paste:" -Color White
             Write-Host ""
-            
+
             foreach ($path in $checkResult.MissingPaths) {
                 $cmd = "Add-MpPreference -ExclusionPath '$path'"
                 Write-Color -Text "  $cmd" -Color Cyan
             }
-            
+
             Write-Host ""
             Write-Color -Text "Or copy all commands to clipboard? [y/N]" -Color White
             $copyChoice = Read-Host
             if ($copyChoice -match "^[Yy]") {
-                $commands = ($checkResult.MissingPaths | ForEach-Object { 
-                    "Add-MpPreference -ExclusionPath '$_'" 
+                $commands = ($checkResult.MissingPaths | ForEach-Object {
+                    "Add-MpPreference -ExclusionPath '$_'"
                 }) -join "`r`n"
-                
+
                 try {
                     Set-Clipboard -Value $commands
                     Write-Ok "Commands copied to clipboard"
@@ -704,7 +704,7 @@ if (-not $checkResult.DefenderEnabled) {
             } else {
                 # Add exclusions
                 Write-Host "  Adding exclusions... " -NoNewline
-                
+
                 # Re-check paths in case something changed
                 $freshCheck = Test-DefenderExclusions -Paths $pathsToExclude
                 if ($freshCheck.MissingPaths.Count -eq 0) {
@@ -712,17 +712,17 @@ if (-not $checkResult.DefenderEnabled) {
                     Write-Host "  (Exclusions were added by another process)"
                 } else {
                     $result = Add-DefenderExclusions -Paths $freshCheck.MissingPaths
-                    
+
                     if ($result.Added.Count -gt 0) {
                         Write-Ok "done"
                         foreach ($path in $result.Added) {
                             Write-Ok "Excluded: $path"
                         }
                     }
-                    
+
                     if ($result.Failed.Count -gt 0) {
                         Write-Host ""
-                        
+
                         # Calculate and show success rate
                         $totalPaths = $result.Added.Count + $result.Failed.Count
                         if ($totalPaths -gt 0) {
@@ -731,7 +731,7 @@ if (-not $checkResult.DefenderEnabled) {
                             Write-Host "Performance benefit may be reduced."
                             Write-Host ""
                         }
-                        
+
                         Write-Warn "Failed exclusions:"
                         foreach ($failure in $result.Failed) {
                             Write-Warn "  $($failure.Path): $($failure.Error)"
@@ -769,7 +769,7 @@ $modulesToCheck = @("framework", "aden_tools", "litellm")
 try {
     $checkOutput = & $UvCmd run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
     $resultJson = $null
-    
+
     # Try to parse JSON result
     try {
         $resultJson = $checkOutput | ConvertFrom-Json
@@ -778,12 +778,12 @@ try {
         Write-Host $checkOutput
         exit 1
     }
-    
+
     # Display results for each module
     foreach ($imp in $imports) {
         Write-Host "  $($imp.Label)... " -NoNewline
         $status = $resultJson.$($imp.Module)
-        
+
         if ($status -eq "ok") {
             Write-Ok "ok"
         } elseif ($imp.Required) {
@@ -827,6 +827,7 @@ $ProviderMap = [ordered]@{
     MISTRAL_API_KEY   = @{ Name = "Mistral";             Id = "mistral" }
     TOGETHER_API_KEY  = @{ Name = "Together AI";         Id = "together" }
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
+    LLAMACPP_API_KEY  = @{ Name = "Llama.cpp";            Id = "llamacpp" }
 }
 
 $ModelCatalogPath = Join-Path $ScriptDir "core\framework\llm\model_catalog.json"
@@ -1094,22 +1095,29 @@ $antigravityAuthPath = Join-Path $env:USERPROFILE ".hive\antigravity-accounts.js
 if (Test-Path $antigravityAuthPath) { $AntigravityCredDetected = $true }
 
 # Detect API key providers
-$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
-$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
-$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter")
+$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY", "LLAMACPP_API_KEY")
+$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model", "Llama.cpp")
+$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter", "llamacpp")
 $ProviderMenuUrls     = @(
     "https://console.anthropic.com/settings/keys",
     "https://platform.openai.com/api-keys",
     "https://aistudio.google.com/apikey",
     "https://console.groq.com/keys",
     "https://cloud.cerebras.ai/",
-    "https://openrouter.ai/keys"
+    "https://openrouter.ai/keys",
+    ""
 )
 
 $OllamaDetected = $false
 try {
     $null = & ollama list 2>$null
     if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
+} catch { }
+
+$LlamaCppDetected = $false
+try {
+    $response = Invoke-RestMethod -Uri "http://localhost:8080/v1/models" -ErrorAction SilentlyContinue
+    if ($response) { $LlamaCppDetected = $true }
 } catch { }
 
 if (-not (Initialize-ModelCatalog)) {
@@ -1132,7 +1140,12 @@ if (Test-Path $HiveConfigFile) {
             $PrevProvider = if ($prevLlm.provider) { $prevLlm.provider } else { "" }
             $PrevModel = if ($prevLlm.model) { $prevLlm.model } else { "" }
             $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
-            if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
+            if ($prevLlm.provider -eq "openai" -and ($prevLlm.api_base -and $prevLlm.api_base -ne "")) {
+                $PrevProvider = "llamacpp"
+                $PrevSubMode = "llamacpp"
+            }
+            Write-Hosst "PROVIDER OLD $PrevProvider"
+            elseif ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.use_antigravity_subscription) { $PrevSubMode = "antigravity" }
@@ -1184,7 +1197,8 @@ if ($PrevSubMode -or $PrevProvider) {
                 "groq"      { $DefaultChoice = "11" }
                 "cerebras"  { $DefaultChoice = "12" }
                 "openrouter" { $DefaultChoice = "13" }
-                "ollama"     { $DefaultChoice = "14" }
+                "llamacpp"   { $DefaultChoice = "14" }
+                "ollama"     { $DefaultChoice = "15" }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
                 "hive"      { $DefaultChoice = "6" }
@@ -1264,7 +1278,7 @@ Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
 # 8-13) API key providers
-for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
+for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count - 1; $idx++) {
     $num = $idx + 8
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
@@ -1274,9 +1288,20 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-# 14) Local (Ollama) - no API key needed
+# 14) Local (Llama.cpp or custom OpenAI API endpoint) — no API key needed
 Write-Host "  " -NoNewline
 Write-Color -Text "14" -Color Cyan -NoNewline
+if ($LlamaCppDetected) {
+    Write-Host ") Custom OpenAI API endpoint (such as Llama.cpp)  " -NoNewline
+    Write-Color -Text "(Detected running in this machine)" -Color Green
+} else {
+    Write-Host ") Custom OpenAI API endpoint (such as Llama.cpp)"
+}
+
+
+# 15) Local (Ollama) - no API key needed
+Write-Host "  " -NoNewline
+Write-Color -Text "15" -Color Cyan -NoNewline
 if ($OllamaDetected) {
     Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
     Write-Color -Text "(ollama detected)" -Color Green
@@ -1452,7 +1477,159 @@ switch ($num) {
             Write-Color -Text "  Model: gemini-3-flash | Direct OAuth (no proxy required)" -Color DarkGray
         }
     }
-    { $_ -ge 8 -and $_ -le 13 } {
+    14 {
+        $SelectedEnvVar = "LLAMACPP_API_KEY"
+        $SelectedProviderId = "llamacpp"
+        $ProviderName = "Llama.cpp"
+        $DefaultApi = "http://localhost:8080"
+        $llamacppModels = @()
+        Write-Host ""
+        Write-Color -Text "  $([char]0x2B22) API endpoint: " -Color Green -NoNewline
+        Write-Color -Text $DefaultApi -Color DarkGray
+
+        $SelectedApiBase = Read-Host "  Press Enter to keep, or paste a new endpoint to replace"
+        if ([string]::IsNullOrWhiteSpace($SelectedApiBase)) {
+            $SelectedApiBase = $DefaultApi
+        } else {
+            Write-Color -Text "  If your endpoint is running on another machine, remember to set the application to listen on 0.0.0.0 (--host 0.0.0.0 in llama-server), otherwise connection will fail!" -Color Green
+        }
+
+        # Fetch available models
+        try {
+            $response = Invoke-RestMethod -Uri "$SelectedApiBase/v1/models" -ErrorAction Stop
+            if ($response -and $response.data) {
+                foreach ($model in $response.data) {
+                    $llamacppModels += $model.id
+                }
+            }
+        } catch { }
+
+        if ($llamacppModels.Count -eq 0) {
+            Write-Warn "Llama.cpp is running, but no model is found! $SelectedApiBase"
+            Write-Host "  Please open another terminal, run 'llama-server -hf ggml-org/gemma-4-E4B-it-GGUF' (or another model)."
+            Write-Host "  Once a model is downloaded, you can also run 'llama-server' without parameters."
+            Write-Host "  If llama-server is running in another machine, rerun this script providing a different endpoint when asked."
+            Write-Host ""
+            exit 1
+        }
+
+        # Show model picker
+        Write-Host "  Select a Llama.cpp model:"
+        Write-Host ""
+        $defaultIdx = "1"
+        for ($i = 0; $i -lt $llamacppModels.Count; $i++) {
+            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
+            Write-Host ") $($llamacppModels[$i])"
+            if ($PrevProvider -eq "llamacpp" -and $PrevModel -eq $llamacppModels[$i]) {
+                $defaultIdx = [string]($i + 1)
+            }
+        }
+        Write-Host ""
+
+        while ($true) {
+            $raw = Read-Host "Enter choice (1-$($llamacppModels.Count)) [$defaultIdx]"
+            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
+            if ($raw -match '^\d+$') {
+                $choice = [int]$raw
+                if ($choice -ge 1 -and $choice -le $llamacppModels.Count) {
+                    $SelectedModel = $llamacppModels[$choice - 1]
+                    Write-Host ""
+                    Write-Ok "Model: $SelectedModel"
+                    $SelectedMaxTokens = 8192
+                    $SelectedMaxContextTokens = 16384
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($llamacppModels.Count)" -Color Red
+        }
+
+        Write-Host ""
+        Write-Ok "Using Llama.cpp with model $SelectedModel"
+        Write-Warn "  Note: The framework uses a ~9,500 token system prompt and requires strong tool use."
+        Write-Color -Text "    For best results, use models like qwen2.5:72b+ or mistral-large." -Color Yellow
+        Write-Host ""
+    }
+    15 {
+        # Local (Ollama)
+        if (-not $OllamaDetected) {
+            Write-Host ""
+            Write-Warn "Ollama depends on a local Ollama server, but 'ollama list' failed."
+            Write-Host "  Please install Ollama (https://ollama.com) and start the server,"
+            Write-Host "  then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+        $SelectedProviderId = "ollama"
+        Write-Host ""
+        Write-Ok "Using Local (Ollama)"
+        Write-Host ""
+
+        # Fetch available models
+        $ollamaModels = @()
+        try {
+            $listOutput = & ollama list 2>$null
+            if ($listOutput.Count -gt 1) {
+                for ($i = 1; $i -lt $listOutput.Count; $i++) {
+                    $line = $listOutput[$i].Trim()
+                    if ($line) {
+                        $mName = ($line -split '\s+')[0]
+                        if ($mName) { $ollamaModels += $mName }
+                    }
+                }
+            }
+        } catch { }
+
+        if ($ollamaModels.Count -eq 0) {
+            Write-Warn "No Ollama models found."
+            Write-Host "  Please open another terminal, run 'ollama run <model>' (e.g. 'ollama run llama3'),"
+            Write-Host "  and then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+
+        # Show model picker
+        Write-Host "  Select an Ollama model:"
+        Write-Host ""
+        $defaultIdx = "1"
+        for ($i = 0; $i -lt $ollamaModels.Count; $i++) {
+            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
+            Write-Host ") $($ollamaModels[$i])"
+            if ($PrevProvider -eq "ollama" -and $PrevModel -eq $ollamaModels[$i]) {
+                $defaultIdx = [string]($i + 1)
+            }
+        }
+        Write-Host ""
+
+        while ($true) {
+            $raw = Read-Host "Enter choice (1-$($ollamaModels.Count)) [$defaultIdx]"
+            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
+            if ($raw -match '^\d+$') {
+                $num = [int]$raw
+                if ($num -ge 1 -and $num -le $ollamaModels.Count) {
+                    $SelectedModel = $ollamaModels[$num - 1]
+                    Write-Host ""
+                    Write-Ok "Model: $SelectedModel"
+                    $ollamaPreset = Get-PresetConfig "ollama_local"
+                    $SelectedMaxTokens = [int]$ollamaPreset.max_tokens
+                    $SelectedMaxContextTokens = [int]$ollamaPreset.max_context_tokens
+                    $SelectedApiBase = [string]$ollamaPreset.api_base
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($ollamaModels.Count)" -Color Red
+        }
+    }
+    { $_ -eq $SkipChoice } {
+        Write-Host ""
+        Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
+        Write-Host "  Add your API key later by running:"
+        Write-Host ""
+        Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'your-key', 'User')" -Color Cyan
+        Write-Host ""
+        $SelectedEnvVar     = ""
+        $SelectedProviderId = ""
+    }
+    { $_ -ge 8 -and $_ -le 14 } {
         # API key providers
         $provIdx = $num - 8
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
@@ -1461,8 +1638,6 @@ switch ($num) {
         $signupUrl          = $ProviderMenuUrls[$provIdx]
         if ($SelectedProviderId -eq "openrouter") {
             $SelectedApiBase = "https://openrouter.ai/api/v1"
-        } else {
-            $SelectedApiBase = ""
         }
 
         # Prompt for key (allow replacement if already set) with verification + retry
@@ -1476,11 +1651,20 @@ switch ($num) {
                 Write-Color -Text "  $([char]0x2B22) Current key: $masked" -Color Green
                 $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
             } else {
-                Write-Host ""
-                Write-Host "Get your API key from: " -NoNewline
-                Write-Color -Text $signupUrl -Color Cyan
-                Write-Host ""
-                $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+                if ($SelectedEnvVar -eq "LLAMACPP_API_KEY") {
+                    Write-Host ""
+                    $apiKey = Read-Host "Paste your custom endpoint API key, if you're using Llama.cpp just press Enter"
+                    if (-not $apiKey) {
+                        $apiKey = "llamacpp"
+                    }
+                }
+                else {
+                    Write-Host ""
+                    Write-Host "Get your API key from: " -NoNewline
+                    Write-Color -Text $signupUrl -Color Cyan
+                    Write-Host ""
+                    $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+                }
             }
 
             if ($apiKey) {
@@ -1533,86 +1717,6 @@ switch ($num) {
                 break
             }
         }
-    }
-    14 {
-        # Local (Ollama)
-        if (-not $OllamaDetected) {
-            Write-Host ""
-            Write-Warn "Ollama depends on a local Ollama server, but 'ollama list' failed."
-            Write-Host "  Please install Ollama (https://ollama.com) and start the server,"
-            Write-Host "  then run this quickstart again."
-            Write-Host ""
-            exit 1
-        }
-        $SelectedProviderId = "ollama"
-        Write-Host ""
-        Write-Ok "Using Local (Ollama)"
-        Write-Host ""
-
-        # Fetch available models
-        $ollamaModels = @()
-        try {
-            $listOutput = & ollama list 2>$null
-            if ($listOutput.Count -gt 1) {
-                for ($i = 1; $i -lt $listOutput.Count; $i++) {
-                    $line = $listOutput[$i].Trim()
-                    if ($line) {
-                        $mName = ($line -split '\s+')[0]
-                        if ($mName) { $ollamaModels += $mName }
-                    }
-                }
-            }
-        } catch { }
-
-        if ($ollamaModels.Count -eq 0) {
-            Write-Warn "No Ollama models found."
-            Write-Host "  Please open another terminal, run 'ollama run <model>' (e.g. 'ollama run llama3'),"
-            Write-Host "  and then run this quickstart again."
-            Write-Host ""
-            exit 1
-        }
-
-        # Show model picker
-        Write-Host "  Select an Ollama model:"
-        Write-Host ""
-        $defaultIdx = "1"
-        for ($i = 0; $i -lt $ollamaModels.Count; $i++) {
-            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
-            Write-Host ") $($ollamaModels[$i])"
-            if ($PrevProvider -eq "ollama" -and $PrevModel -eq $ollamaModels[$i]) {
-                $defaultIdx = [string]($i + 1)
-            }
-        }
-        Write-Host ""
-        
-        while ($true) {
-            $raw = Read-Host "Enter choice (1-$($ollamaModels.Count)) [$defaultIdx]"
-            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
-            if ($raw -match '^\d+$') {
-                $num = [int]$raw
-                if ($num -ge 1 -and $num -le $ollamaModels.Count) {
-                    $SelectedModel = $ollamaModels[$num - 1]
-                    Write-Host ""
-                    Write-Ok "Model: $SelectedModel"
-                    $ollamaPreset = Get-PresetConfig "ollama_local"
-                    $SelectedMaxTokens = [int]$ollamaPreset.max_tokens
-                    $SelectedMaxContextTokens = [int]$ollamaPreset.max_context_tokens
-                    $SelectedApiBase = [string]$ollamaPreset.api_base
-                    break
-                }
-            }
-            Write-Color -Text "Invalid choice. Please enter 1-$($ollamaModels.Count)" -Color Red
-        }
-    }
-    { $_ -eq $SkipChoice } {
-        Write-Host ""
-        Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
-        Write-Host "  Add your API key later by running:"
-        Write-Host ""
-        Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'your-key', 'User')" -Color Cyan
-        Write-Host ""
-        $SelectedEnvVar     = ""
-        $SelectedProviderId = ""
     }
 }
 
@@ -1928,6 +2032,10 @@ if ($SelectedProviderId) {
     } elseif ($SelectedProviderId -eq "ollama") {
         $config.llm["api_base"] = $SelectedApiBase
         $config.llm.Remove("api_key_env_var")
+    } elseif ($SelectedProviderId -eq "llamacpp") {
+        $config.llm["provider"] = "openai"
+        $config.llm["api_base"] = $SelectedApiBase
+        $config.llm["api_key_env_var"] = "llamacpp"
     } elseif ($SelectedEnvVar) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
@@ -2078,7 +2186,7 @@ $verifyModules = @("framework", "aden_tools")
 try {
     $verifyOutput = & $UvCmd run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
     $verifyJson = $null
-    
+
     try {
         $verifyJson = $verifyOutput | ConvertFrom-Json
     } catch {
@@ -2091,12 +2199,12 @@ try {
             else { Write-Fail "failed"; $verifyErrors++ }
         }
     }
-    
+
     if ($verifyJson) {
         Write-Host "  $([char]0x2B21) framework... " -NoNewline
         if ($verifyJson.framework -eq "ok") { Write-Ok "ok" }
         else { Write-Fail "failed"; $verifyErrors++ }
-        
+
         Write-Host "  $([char]0x2B21) aden_tools... " -NoNewline
         if ($verifyJson.aden_tools -eq "ok") { Write-Ok "ok" }
         else { Write-Fail "failed"; $verifyErrors++ }
