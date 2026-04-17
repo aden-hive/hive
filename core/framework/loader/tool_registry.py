@@ -497,12 +497,22 @@ class ToolRegistry:
             config["cwd"] = str(resolved_cwd)
             return config
 
-        # For coder_tools_server, inject --project-root so writes go to the expected workspace
+        # For coder_tools_server, inject --project-root so reads land
+        # in the expected workspace (hive repo, for framework skills
+        # and docs), and inject --write-root so writes land under
+        # ~/.hive/workspace/ instead of polluting the git checkout
+        # with queen-authored skills, ledgers, and scripts. Without
+        # the split, every ``write_file`` call from the queen landed
+        # in the hive repo root.
         if script_name and "coder_tools" in script_name:
             project_root = str(resolved_cwd.parent.resolve())
             args = list(args)
             if "--project-root" not in args:
                 args.extend(["--project-root", project_root])
+            if "--write-root" not in args:
+                _write_root = Path.home() / ".hive" / "workspace"
+                _write_root.mkdir(parents=True, exist_ok=True)
+                args.extend(["--write-root", str(_write_root)])
             config["args"] = args
 
         if os.name == "nt":

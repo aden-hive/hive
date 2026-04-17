@@ -184,8 +184,16 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "search_files",
     "run_command",
     "undo_changes",
-    # Parallel fan-out (Phase 4 unified ColonyRuntime)
-    "run_parallel_workers",
+    # NOTE (2026-04-16): ``run_parallel_workers`` was removed from the
+    # independent phase. The queen's pure DM mode is for conversation
+    # with the user; spawning workers from here puts their activity
+    # into a chat surface that's supposed to stay queen↔user only.
+    # Users who want to fan out parallel work should (a) use
+    # ``create_colony`` to fork into a persistent colony (where
+    # worker activity has its own page), or (b) load an agent via
+    # build/stage and use ``run_parallel_workers`` in the running
+    # phase where a worker context already exists.
+    #
     # Fork this session into a persistent colony for headless /
     # recurring / background work that needs to keep running in
     # parallel to (or after) this chat.

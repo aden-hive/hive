@@ -644,6 +644,7 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
     body = await request.json()
     colony_name = body.get("colony_name", "").strip()
     task = body.get("task", "").strip()
+    tasks = body.get("tasks")
 
     if not colony_name:
         return web.json_response({"error": "colony_name is required"}, status=400)
@@ -661,6 +662,7 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
             session=session,
             colony_name=colony_name,
             task=task,
+            tasks=tasks if isinstance(tasks, list) else None,
         )
     except Exception as e:
         logger.exception("colony_spawn fork failed")
@@ -674,6 +676,7 @@ async def fork_session_into_colony(
     session: Any,
     colony_name: str,
     task: str,
+    tasks: list[dict] | None = None,
 ) -> dict:
     """Fork a queen session into a colony directory.
 
@@ -690,8 +693,14 @@ async def fork_session_into_colony(
        the colony resumes with the queen's entire conversation history.
     3. Multiple independent sessions can be created against the same colony,
        giving parallel execution capacity without separate worker configs.
+    4. Initializes (or ensures) ``data/progress.db`` — the colony's SQLite
+       task queue + progress ledger. When *tasks* is provided, the queen-
+       authored task batch is seeded into the queue in one transaction.
+       The absolute DB path is threaded into the worker's ``input_data``
+       so spawned workers see it in their first user message.
 
-    Returns ``{"colony_path", "colony_name", "queen_session_id", "is_new"}``.
+    Returns ``{"colony_path", "colony_name", "queen_session_id", "is_new",
+              "db_path", "task_ids"}``.
     """
     import asyncio
     import json
@@ -700,7 +709,8 @@ async def fork_session_into_colony(
     from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
-    from framework.agent_loop.types import AgentContext
+    from framework.agent_loop.types import AgentContext, AgentSpec
+    from framework.host.progress_db import ensure_progress_db, seed_tasks
     from framework.server.session_manager import _queen_session_dir
 
     queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
@@ -710,6 +720,49 @@ async def fork_session_into_colony(
     is_new = not colony_dir.exists()
     colony_dir.mkdir(parents=True, exist_ok=True)
     (colony_dir / "data").mkdir(exist_ok=True)
+
+    # ── 0. Ensure the colony's progress DB exists and seed tasks ──
+    # Runs before worker.json is written so the DB path can be threaded
+    # into input_data. Idempotent on reruns of the same colony name.
+    db_path = await asyncio.to_thread(ensure_progress_db, colony_dir)
+    seeded_task_ids: list[str] = []
+    if tasks:
+        seeded_task_ids = await asyncio.to_thread(
+            seed_tasks, db_path, tasks, source="queen_create"
+        )
+        logger.info(
+            "progress_db: seeded %d task(s) into colony '%s'",
+            len(seeded_task_ids),
+            colony_name,
+        )
+    elif task and task.strip():
+        # Phase 2 auto-seed: when the queen uses the simple single-task
+        # form of create_colony (no explicit ``tasks=[{...}]`` list),
+        # insert exactly one row so the first worker spawned into this
+        # colony has something to claim. Without this the queue is
+        # empty and the worker falls back to executing from the chat
+        # spawn message, defeating the cross-run durability the tracker
+        # exists for.
+        try:
+            seeded_task_ids = await asyncio.to_thread(
+                seed_tasks,
+                db_path,
+                [{"goal": task.strip()}],
+                source="create_colony_auto",
+            )
+            logger.info(
+                "progress_db: auto-seeded 1 task into colony '%s' "
+                "(task_id=%s, from single-task create_colony form)",
+                colony_name,
+                seeded_task_ids[0] if seeded_task_ids else "?",
+            )
+        except Exception as exc:
+            logger.warning(
+                "progress_db: auto-seed failed for colony '%s' (continuing "
+                "without a pre-seeded row): %s",
+                colony_name,
+                exc,
+            )
 
     # Fixed worker name -- sessions are the unit of parallelism, not workers
     worker_name = "worker"
@@ -772,10 +825,26 @@ async def fork_session_into_colony(
     # worker is not Charlotte / Alexandra / etc., it is a task executor.
     # Inheriting the queen's persona made the worker greet the user in
     # first person with no memory of the task it was actually given.
+    # Thread the first seeded task_id into input_data so the worker's
+    # first claim pins to a specific row (skill's assigned-task-id
+    # branch). When multiple tasks were seeded we only pin the first —
+    # subsequent workers (via run_agent_with_input or parallel spawns)
+    # get their own task_id assigned at spawn time.
+    _worker_input_data: dict[str, Any] = {
+        "db_path": str(db_path),
+        "colony_id": colony_name,
+    }
+    if seeded_task_ids:
+        _worker_input_data["task_id"] = seeded_task_ids[0]
+
     worker_meta = {
         "name": worker_name,
         "version": "1.0.0",
         "description": f"Worker clone from queen session {session.id}",
+        # Colony progress tracker: worker sees these in its first user
+        # message via _format_spawn_task_message.  The colony-progress-
+        # tracker default skill teaches the worker how to use them.
+        "input_data": _worker_input_data,
         "goal": {
             "description": worker_task,
             "success_criteria": [],
@@ -907,6 +976,8 @@ async def fork_session_into_colony(
         "colony_name": colony_name,
         "queen_session_id": colony_session_id,
         "is_new": is_new,
+        "db_path": str(db_path),
+        "task_ids": seeded_task_ids,
     }
 
 

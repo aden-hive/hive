@@ -141,7 +141,7 @@ class TestSkillDiscovery:
         framework_skills = [s for s in skills if s.source_scope == "framework"]
         names = {s.name for s in framework_skills}
         assert "hive.note-taking" in names
-        assert "hive.batch-ledger" in names
+        assert "hive.colony-progress-tracker" in names
 
     def test_max_depth_limit(self, tmp_path):
         # Create a skill nested beyond max_depth

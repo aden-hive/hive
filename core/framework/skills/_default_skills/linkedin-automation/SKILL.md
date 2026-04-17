@@ -15,6 +15,28 @@ LinkedIn is the hardest mainstream site to automate because it combines **shadow
 
 **Always activate `browser-automation` first.** This skill assumes you already know about CSS-px coordinates, `browser_type`/`browser_type_focused`, and `browser_shadow_query`. The guidance below is LinkedIn-specific; general browser rules are there.
 
+## Rule #0: screenshot + coordinates, not selectors
+
+LinkedIn changes class names aggressively and hides composers inside shadow roots AND iframes. **Selectors break constantly.** Your default strategy on every LinkedIn page should be:
+
+1. `browser_screenshot()` — see the page visually
+2. Pick the target's position from the image
+3. `browser_coords(image_x, image_y)` → get CSS pixels
+4. `browser_click_coordinate(css_x, css_y)` — reaches shadow DOM, iframes, and React elements indifferently
+5. `browser_type(use_insert_text=True, text=...)` — types into whatever is focused, including Lexical composers
+
+**If `browser_evaluate(...querySelectorAll...)` returns `[]` even once, do not try a different selector.** Stop, screenshot, and click. The "what if I try `.artdeco-list__item` next" instinct has burned ~50 tool calls in real sessions before the agent pivoted. Don't fall into that loop.
+
+The selectors in the table below are **only** for when you already know the target is in the light DOM and you want a faster path than screenshot+coord. **When in doubt, default to coordinates.**
+
+## Invitation manager — inline message button path is BROKEN
+
+If the user asks to message a connection request **from the invitation manager page without accepting first**, the inline "Message" button opens a composer inside a nested **iframe overlay** (not a shadow root). The iframe's `contentDocument` is either cross-origin-blocked or not hydrated at access time. This path is **not reliably automatable today.**
+
+**Redirect:** click the person's name/profile link on the card, go to the profile page, and use the standard Profile Message flow below. The profile flow is battle-tested; the inline-iframe flow isn't.
+
+If you end up writing `document.activeElement.tagName === 'IFRAME'` inside a `browser_evaluate`, you've hit this trap. Stop and go to the profile page.
+
 ## Timing expectations
 
 - `browser_navigate(wait_until="load")` — LinkedIn takes **4–5 seconds** to load the feed cold.

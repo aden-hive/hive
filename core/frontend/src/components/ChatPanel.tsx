@@ -10,6 +10,8 @@ import {
   Paperclip,
   X,
 } from "lucide-react";
+import WorkerRunBubble from "@/components/WorkerRunBubble";
+import type { WorkerRunGroup } from "@/components/WorkerRunBubble";
 
 export interface ImageContent {
   type: "image_url";
@@ -25,6 +27,8 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import { useColony } from "@/context/ColonyContext";
+import { useQueenProfile } from "@/context/QueenProfileContext";
 import ParallelSubagentBubble, {
   type SubagentGroup,
 } from "@/components/ParallelSubagentBubble";
@@ -60,6 +64,12 @@ export interface ChatMessage {
   nodeId?: string;
   /** Backend execution_id for this message */
   executionId?: string;
+  /** Backend stream_id — the per-worker identity used for grouping
+   *  parallel-spawn workers into their own stacked WorkerRunBubble.
+   *  "queen" for queen messages, "worker" for the single loaded
+   *  worker (run_agent_with_input), or "worker:{uuid}" for each
+   *  parallel worker spawned via run_parallel_workers. */
+  streamId?: string;
   /** True when the message was sent while the queen was still processing */
   queued?: boolean;
 }
@@ -124,14 +134,14 @@ const TOOL_HEX = [
   "#e5a820", // sunflower
 ];
 
-function toolHex(name: string): string {
+export function toolHex(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++)
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return TOOL_HEX[Math.abs(hash) % TOOL_HEX.length];
 }
 
-function ToolActivityRow({ content }: { content: string }) {
+export function ToolActivityRow({ content }: { content: string }) {
   let tools: { name: string; done: boolean }[] = [];
   try {
     const parsed = JSON.parse(content);
@@ -336,6 +346,15 @@ function InlineAskUserBubble({
   const color = getColor(msg.agent, msg.role);
   const thread = msg.thread || activeThread;
 
+  const { queenProfiles } = useColony();
+  const { openQueenProfile } = useQueenProfile();
+  const queenProfileId = isQueen
+    ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
+    : null;
+  const handleQueenClick = queenProfileId
+    ? () => openQueenProfile(queenProfileId)
+    : undefined;
+
   const handleSingle = (answer: string) => {
     setState("submitted");
     onSend(answer, thread);
@@ -355,12 +374,14 @@ function InlineAskUserBubble({
   return (
     <div className="flex gap-3">
       <div
-        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
         style={{
           backgroundColor: `${color}18`,
           border: `1.5px solid ${color}35`,
           boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
         }}
+        onClick={handleQueenClick}
+        title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
       >
         {isQueen ? (
           <Crown className="w-4 h-4" style={{ color }} />
@@ -373,8 +394,9 @@ function InlineAskUserBubble({
       >
         <div className="flex items-center gap-2 mb-1">
           <span
-            className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+            className={`font-medium ${isQueen ? "text-sm" : "text-xs"}${handleQueenClick ? " cursor-pointer hover:underline" : ""}`}
             style={{ color }}
+            onClick={handleQueenClick}
           >
             {msg.agent}
           </span>
@@ -434,6 +456,13 @@ const MessageBubble = memo(
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
     const color = getColor(msg.agent, msg.role);
+
+    // Resolve queen profile ID so clicking avatar/name opens the profile panel
+    const { queenProfiles } = useColony();
+    const { openQueenProfile } = useQueenProfile();
+    const queenProfileId = isQueen
+      ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
+      : null;
 
     if (msg.type === "run_divider") {
       return (
@@ -529,15 +558,21 @@ const MessageBubble = memo(
       );
     }
 
+    const handleQueenClick = queenProfileId
+      ? () => openQueenProfile(queenProfileId)
+      : undefined;
+
     return (
       <div className="flex gap-3">
         <div
-          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
           style={{
             backgroundColor: `${color}18`,
             border: `1.5px solid ${color}35`,
             boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
           }}
+          onClick={handleQueenClick}
+          title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
         >
           {isQueen ? (
             <Crown className="w-4 h-4" style={{ color }} />
@@ -550,8 +585,9 @@ const MessageBubble = memo(
         >
           <div className="flex items-center gap-2 mb-1">
             <span
-              className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+              className={`font-medium ${isQueen ? "text-sm" : "text-xs"}${handleQueenClick ? " cursor-pointer hover:underline" : ""}`}
               style={{ color }}
+              onClick={handleQueenClick}
             >
               {msg.agent}
             </span>
@@ -665,7 +701,35 @@ export default function ChatPanel({
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
+    | {
+        kind: "worker_run";
+        runId: string;
+        group: WorkerRunGroup;
+        /** Optional short label shown next to the "Worker" badge.
+         *  Only set when there are multiple parallel workers in the
+         *  same run span (so users can tell them apart). */
+        label?: string;
+      }
     | { kind: "day_divider"; key: string; createdAt: number };
+
+  /** Derive a short label from a parallel-worker stream id.
+   *  `worker:abcdef12-3456-...` → `abcdef12` (first 8 chars of the
+   *  uuid after the `worker:` prefix). Falls back to the first
+   *  message's nodeId when the streamId isn't the expected shape. */
+  function deriveWorkerLabel(
+    streamKey: string,
+    msgs: ChatMessage[],
+  ): string {
+    if (streamKey.startsWith("worker:")) {
+      const suffix = streamKey.slice("worker:".length);
+      // sessions are `session_YYYYMMDD_HHMMSS_<8-hex>` — show the
+      // trailing hex if present, else first 8 chars of the suffix.
+      const tail = suffix.match(/_[0-9a-f]{6,}$/i)?.[0]?.slice(1);
+      return tail ? tail.slice(0, 8) : suffix.slice(0, 8);
+    }
+    const nid = msgs.find((m) => m.nodeId)?.nodeId;
+    return nid || streamKey;
+  }
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -673,6 +737,121 @@ export default function ChatPanel({
     while (i < threadMessages.length) {
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
+
+      // Worker run grouping: collect consecutive WORKER-role
+      // messages (and worker tool_status pills) into a collapsible
+      // card. Queen tool_status pills (``role === "queen"``) are
+      // deliberately excluded — the queen's own tool calls are part
+      // of the queen↔user conversation and should render inline as
+      // ToolActivityRows, not fold into a "Worker" bubble. Without
+      // this guard, every queen run_command / read_file / etc. shows
+      // up under a misleading "Worker" label in the DM.
+      const isWorkerCandidate =
+        msg.role === "worker" ||
+        (msg.type === "tool_status" && msg.role !== "queen");
+      if (
+        !isSubagent &&
+        isWorkerCandidate &&
+        msg.type !== "user" &&
+        msg.type !== "run_divider"
+      ) {
+        const workerMsgs: ChatMessage[] = [];
+        const firstWorkerMsg = msg;
+
+        while (i < threadMessages.length) {
+          const m = threadMessages[i];
+
+          // Hard boundary — stop the worker run group
+          if (m.type === "user" || m.type === "run_divider") break;
+          // Queen message with real text — boundary (queen is talking
+          // to the user, not just emitting a tool)
+          if (m.role === "queen" && m.content?.trim() && !m.type) break;
+          // Queen tool_status — NOT a worker activity, don't bucket
+          // it. Break so the grouping stops and the queen pill
+          // renders inline.
+          if (m.type === "tool_status" && m.role === "queen") break;
+          // Subagent message — different group type, stop here
+          if (m.nodeId?.includes(":subagent:")) break;
+
+          // Worker text messages and worker tool_status belong to the run
+          if (
+            m.role === "worker" ||
+            (m.type === "tool_status" && m.role !== "queen")
+          ) {
+            workerMsgs.push(m);
+            i++;
+            continue;
+          }
+
+          // System message or other — include in the worker run
+          // group to preserve ordering (they'll render inside the
+          // expanded view)
+          workerMsgs.push(m);
+          i++;
+        }
+
+        if (workerMsgs.length > 0) {
+          // Parallel fan-out detection: if any message in this span
+          // is tagged with a parallel-worker streamId (``worker:{uuid}``),
+          // split the span by streamId and emit one ``worker_run``
+          // per worker — they render as stacked independent
+          // ``WorkerRunBubble``s. Un-tagged legacy messages and the
+          // single-worker ``streamId="worker"`` case fall through to
+          // the existing single-bubble behavior.
+          const hasParallel = workerMsgs.some(
+            (m) => !!m.streamId && /^worker:./.test(m.streamId),
+          );
+
+          if (hasParallel) {
+            const buckets = new Map<
+              string,
+              { messages: ChatMessage[]; firstAt: number }
+            >();
+            // Messages with no streamId (system notes, orphans from
+            // old restore) attach to the most-recent keyed message's
+            // bucket so chronology is preserved.
+            let currentKey: string | null = null;
+            for (const m of workerMsgs) {
+              const key =
+                m.streamId && m.streamId.length > 0
+                  ? m.streamId
+                  : currentKey;
+              if (!key) continue;
+              if (m.streamId && m.streamId.length > 0) currentKey = m.streamId;
+              let bucket = buckets.get(key);
+              if (!bucket) {
+                bucket = { messages: [], firstAt: m.createdAt ?? 0 };
+                buckets.set(key, bucket);
+              }
+              bucket.messages.push(m);
+              bucket.firstAt = Math.min(
+                bucket.firstAt,
+                m.createdAt ?? Number.POSITIVE_INFINITY,
+              );
+            }
+
+            const sorted = Array.from(buckets.entries()).sort(
+              ([, a], [, b]) => a.firstAt - b.firstAt,
+            );
+            for (const [streamKey, { messages: bucketMsgs }] of sorted) {
+              items.push({
+                kind: "worker_run",
+                runId: `wrun-${firstWorkerMsg.id}-${streamKey}`,
+                group: { messages: bucketMsgs },
+                label: deriveWorkerLabel(streamKey, bucketMsgs),
+              });
+            }
+          } else {
+            items.push({
+              kind: "worker_run",
+              runId: `wrun-${firstWorkerMsg.id}`,
+              group: { messages: workerMsgs },
+            });
+          }
+        }
+        continue;
+      }
+
       if (!isSubagent) {
         items.push({ kind: "message", msg });
         i++;
@@ -868,6 +1047,17 @@ export default function ChatPanel({
                 <ParallelSubagentBubble
                   groupId={item.groupId}
                   groups={item.groups}
+                />
+              </div>
+            );
+          }
+          if (item.kind === "worker_run") {
+            return (
+              <div key={item.runId}>
+                <WorkerRunBubble
+                  runId={item.runId}
+                  group={item.group}
+                  label={item.label}
                 />
               </div>
             );

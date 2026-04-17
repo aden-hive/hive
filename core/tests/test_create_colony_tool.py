@@ -72,13 +72,28 @@ def patched_fork(monkeypatch):
     """Stub out fork_session_into_colony so we don't need a real queen."""
     calls: list[dict] = []
 
-    async def _stub_fork(*, session: Any, colony_name: str, task: str) -> dict:
-        calls.append({"session": session, "colony_name": colony_name, "task": task})
+    async def _stub_fork(
+        *,
+        session: Any,
+        colony_name: str,
+        task: str,
+        tasks: list[dict] | None = None,
+    ) -> dict:
+        calls.append(
+            {
+                "session": session,
+                "colony_name": colony_name,
+                "task": task,
+                "tasks": tasks,
+            }
+        )
         return {
             "colony_path": f"/tmp/fake_colonies/{colony_name}",
             "colony_name": colony_name,
             "queen_session_id": "session_fake_fork_id",
             "is_new": True,
+            "db_path": f"/tmp/fake_colonies/{colony_name}/data/progress.db",
+            "task_ids": [],
         }
 
     monkeypatch.setattr(

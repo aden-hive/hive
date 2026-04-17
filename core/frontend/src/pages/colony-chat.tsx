@@ -13,7 +13,11 @@ import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent } from "@/api/types";
-import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import {
+  sseEventToChatMessage,
+  formatAgentDisplayName,
+  replayEventsToMessages,
+} from "@/lib/chat-helpers";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
@@ -41,6 +45,8 @@ function truncate(s: string, max: number): string {
 type SessionRestoreResult = {
   messages: ChatMessage[];
   restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null;
+  truncated: boolean;
+  droppedCount: number;
 };
 
 async function restoreSessionMessages(
@@ -49,34 +55,67 @@ async function restoreSessionMessages(
   agentDisplayName: string,
 ): Promise<SessionRestoreResult> {
   try {
-    const { events } = await sessionsApi.eventsHistory(sessionId);
+    const { events, truncated, total, returned } =
+      await sessionsApi.eventsHistory(sessionId);
     if (events.length > 0) {
-      const messages: ChatMessage[] = [];
+      // Walk events twice:
+      //   1. Extract the trailing queen phase (unchanged logic).
+      //   2. Run the full state-machine replay so tool_status pills
+      //      are synthesized just like the live SSE handler does.
+      // Without (2), refreshed sessions showed zero tool activity
+      // because tool_call_started/completed events are ignored by
+      // the stateless converter.
       let runningPhase: ChatMessage["phase"] = undefined;
       for (const evt of events) {
         const p =
           evt.type === "queen_phase_changed"
             ? (evt.data?.phase as string)
             : evt.type === "node_loop_iteration"
-            ? (evt.data?.phase as string | undefined)
-            : undefined;
+              ? (evt.data?.phase as string | undefined)
+              : undefined;
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
         }
-        const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
-        if (!msg) continue;
-        if (evt.stream_id === "queen") {
-          msg.role = "queen";
-          msg.phase = runningPhase;
-        }
-        messages.push(msg);
       }
-      return { messages, restoredPhase: runningPhase ?? null };
+
+      const messages = replayEventsToMessages(events, thread, agentDisplayName);
+      // Stamp the latest phase on every queen message so the UI's
+      // phase-badge rendering matches what the live path would have
+      // displayed at the time of the refresh.
+      if (runningPhase) {
+        for (const m of messages) {
+          if (m.role === "queen") m.phase = runningPhase;
+        }
+      }
+
+      // Prepend a run_divider banner when the server truncated older
+      // events so the user knows how many are hidden.
+      const droppedCount = Math.max(0, total - returned);
+      if (truncated && droppedCount > 0) {
+        const firstTs = events[0]?.timestamp;
+        const bannerCreatedAt = firstTs ? new Date(firstTs).getTime() - 1 : 0;
+        messages.unshift({
+          id: `restore-truncated-${sessionId}`,
+          agent: "System",
+          agentColor: "",
+          type: "run_divider",
+          content: `${droppedCount.toLocaleString()} older event${droppedCount === 1 ? "" : "s"} not shown (showing last ${returned.toLocaleString()})`,
+          timestamp: firstTs ?? new Date().toISOString(),
+          thread,
+          createdAt: bannerCreatedAt,
+        });
+      }
+      return {
+        messages,
+        restoredPhase: runningPhase ?? null,
+        truncated,
+        droppedCount,
+      };
     }
   } catch {
     // Event log not available
   }
-  return { messages: [], restoredPhase: null };
+  return { messages: [], restoredPhase: null, truncated: false, droppedCount: 0 };
 }
 
 // ── Agent backend state ──────────────────────────────────────────────────────
@@ -816,6 +855,7 @@ export default function ColonyChat() {
                 createdAt: eventCreatedAt,
                 nodeId: event.node_id || undefined,
                 executionId: event.execution_id || undefined,
+                streamId: sid || undefined,
               });
               return { ...prev, isStreaming: false, activeToolCalls: newActive };
             });

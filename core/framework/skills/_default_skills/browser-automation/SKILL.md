@@ -61,6 +61,7 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 ### Empirically verified (2026-04-11)
 
 Tested against `https://www.reddit.com/r/programming/` whose search input lives at:
+
 ```
 document > reddit-search-large [shadow]
          > faceplate-search-input#search-input [shadow]
@@ -95,13 +96,13 @@ All return real URLs and titles. On a fast page `navigate(wait_until="load")` re
 
 ### Timing expectations (measured against real sites)
 
-| Site | Navigate load time |
-|---|---|
-| example.com | 100–400 ms |
-| wikipedia.org | 200–500 ms |
-| reddit.com | 1.5–2 s |
-| x.com/twitter | 1.2–1.6 s |
-| linkedin.com (logged in) | 4–5 s |
+| Site                     | Navigate load time |
+| ------------------------ | ------------------ |
+| example.com              | 100–400 ms         |
+| wikipedia.org            | 200–500 ms         |
+| reddit.com               | 1.5–2 s            |
+| x.com/twitter            | 1.2–1.6 s          |
+| linkedin.com (logged in) | 4–5 s              |
 
 For LinkedIn and other heavy SPAs, rely on `sleep()` after navigation to let the page hydrate.
 
@@ -124,7 +125,7 @@ Even after `wait_until="load"`, React/Vue SPAs often render their real chrome in
 
 Why this is necessary:
 
-- **React / Vue controlled components** don't trust JS-sourced `.focus()`. React uses event delegation and watches for *native* pointer/focus events — a `click` dispatched via CDP fires the real `pointerdown`/`pointerup`/`click`/`focus` sequence that React listens to, and updates its internal state. A JS-only `.focus()` sets `document.activeElement` but the framework's controlled state doesn't see it.
+- **React / Vue controlled components** don't trust JS-sourced `.focus()`. React uses event delegation and watches for _native_ pointer/focus events — a `click` dispatched via CDP fires the real `pointerdown`/`pointerup`/`click`/`focus` sequence that React listens to, and updates its internal state. A JS-only `.focus()` sets `document.activeElement` but the framework's controlled state doesn't see it.
 - **Draft.js** (X/Twitter compose) and **Lexical** (Gmail, LinkedIn DMs) use contenteditable divs with immutable editor state. They only enter "edit mode" after a real click on the editor surface. Typing at them without clicking routes keys to `document.body` or gets silently discarded.
 - **Send/submit buttons are bound to framework state**, not DOM state. They're typically `disabled={!hasRealContent}` where `hasRealContent` is computed from React/Vue/Svelte state. The input field can have characters in the DOM but the button stays disabled because the framework never saw a real input event.
 
@@ -171,16 +172,16 @@ Always include an equivalent cleanup block in any script that types into a compo
 
 ### Verified site-specific quirks
 
-| Site | Editor | Workaround |
-|---|---|---|
-| **X / Twitter** compose | Draft.js | Click `[data-testid='tweetTextarea_0']` first, then type with `delay_ms=20`. First 1-2 chars may be eaten — accept truncation or prepend a throwaway char. Verify `[data-testid='tweetButton']` has `disabled: false` before clicking. |
-| **LinkedIn** messaging | contenteditable (inside `#interop-outlet` shadow root) | Use `browser_shadow_query` to find the rect, click-coordinate to focus, then `browser_type_focused(text=...)` (selector-based `browser_type` can't reach shadow). Send button is `.msg-form__send-button`. |
-| **LinkedIn** feed post composer | Quill/LinkedIn custom | Click the "Start a post" trigger first, wait 1s for modal, click the textarea, type. |
-| **Reddit** comment/post box | ProseMirror | Click the textarea, wait 0.5s for the toolbar to mount, then type. Submit is `button[slot="submit-button"]` inside a shreddit-composer. |
-| **Gmail** compose | Lexical | Click the body first. Gmail has a visible `div[contenteditable=true][aria-label*='Message Body']` after opening a compose window. |
-| **Slack** message box | contenteditable | Click first, then type. Send is a paper-plane button with `data-qa='texty_send_button'`. |
-| **Discord** | Slate | Click first. Discord's send is implicit on Enter (no button), so just press Enter after typing. |
-| **Monaco** editors (GitHub code review, CodeSandbox) | Monaco | Click first, type with `delay_ms=10`. Monaco listens for `textarea` input events on a hidden textarea — requires focus to be on that textarea. |
+| Site                                                 | Editor                                                 | Workaround                                                                                                                                                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **X / Twitter** compose                              | Draft.js                                               | Click `[data-testid='tweetTextarea_0']` first, then type with `delay_ms=20`. First 1-2 chars may be eaten — accept truncation or prepend a throwaway char. Verify `[data-testid='tweetButton']` has `disabled: false` before clicking. |
+| **LinkedIn** messaging                               | contenteditable (inside `#interop-outlet` shadow root) | Use `browser_shadow_query` to find the rect, click-coordinate to focus, then `browser_type_focused(text=...)` (selector-based `browser_type` can't reach shadow). Send button is `.msg-form__send-button`.                             |
+| **LinkedIn** feed post composer                      | Quill/LinkedIn custom                                  | Click the "Start a post" trigger first, wait 1s for modal, click the textarea, type.                                                                                                                                                   |
+| **Reddit** comment/post box                          | ProseMirror                                            | Click the textarea, wait 0.5s for the toolbar to mount, then type. Submit is `button[slot="submit-button"]` inside a shreddit-composer.                                                                                                |
+| **Gmail** compose                                    | Lexical                                                | Click the body first. Gmail has a visible `div[contenteditable=true][aria-label*='Message Body']` after opening a compose window.                                                                                                      |
+| **Slack** message box                                | contenteditable                                        | Click first, then type. Send is a paper-plane button with `data-qa='texty_send_button'`.                                                                                                                                               |
+| **Discord**                                          | Slate                                                  | Click first. Discord's send is implicit on Enter (no button), so just press Enter after typing.                                                                                                                                        |
+| **Monaco** editors (GitHub code review, CodeSandbox) | Monaco                                                 | Click first, type with `delay_ms=10`. Monaco listens for `textarea` input events on a hidden textarea — requires focus to be on that textarea.                                                                                         |
 
 ### Plain text into a real input
 
@@ -247,6 +248,7 @@ The highlight overlay stays visible on the page for **10 seconds** after each in
 - Popup appeared that you didn't need? Close it immediately
 
 `browser_tabs` returns an `origin` field for each tab:
+
 - `"agent"` — you opened it; you own it; close it when done
 - `"popup"` — opened by a link or script; close after extracting what you need
 - `"startup"` or `"user"` — leave these alone unless the task requires it
@@ -259,22 +261,22 @@ The bridge automatically evicts per-tab state (`_cdp_attached`, `_interaction_hi
 
 ### LinkedIn
 
-| Target | Selector |
-|---|---|
-| Global search input | `input[data-testid='typeahead-input']` |
-| Own profile link | `a[href*='linkedin.com/in/']` |
-| Messaging overlay | `#interop-outlet >>> [aria-label]` (use shadow_query) |
+| Target              | Selector                                              |
+| ------------------- | ----------------------------------------------------- |
+| Global search input | `input[data-testid='typeahead-input']`                |
+| Own profile link    | `a[href*='linkedin.com/in/']`                         |
+| Messaging overlay   | `#interop-outlet >>> [aria-label]` (use shadow_query) |
 
 LinkedIn enforces **strict Trusted Types CSP**. Any script you inject via `browser_evaluate` that uses `innerHTML = "<...>"` will be **silently dropped** — the wrapper element gets added but its content is empty, no console error. Always use `createElement` + `appendChild` + `setAttribute` for DOM injection on LinkedIn. `style.cssText`, `textContent`, and `.value` assignments are fine (they don't go through the Trusted Types sink).
 
 ### Reddit (new reddit / shreddit)
 
-| Target | Selector |
-|---|---|
+| Target                | Selector                                                                     |
+| --------------------- | ---------------------------------------------------------------------------- |
 | Search input (shadow) | `reddit-search-large >>> #search-input` (rect only; type via click-to-focus) |
-| Reddit logo (home) | `#reddit-logo` |
-| Subreddit posts | `shreddit-post` custom elements |
-| Create post button | `a[href*='/submit']` |
+| Reddit logo (home)    | `#reddit-logo`                                                               |
+| Subreddit posts       | `shreddit-post` custom elements                                              |
+| Create post button    | `a[href*='/submit']`                                                         |
 
 Reddit's search input lives **two shadow levels deep** inside `reddit-search-large > faceplate-search-input`. You cannot reach it with `browser_type(selector=)`. The working pattern:
 
@@ -285,15 +287,15 @@ Reddit's search input lives **two shadow levels deep** inside `reddit-search-lar
 
 ### X / Twitter
 
-| Target | Selector |
-|---|---|
-| Main search input | `input[data-testid='SearchBox_Search_Input']` |
-| Home nav link | `a[data-testid='AppTabBar_Home_Link']` |
-| Post text area (compose) | `[data-testid='tweetTextarea_0']` |
-| Reply buttons on feed | `[data-testid='reply']` |
-| Post / Tweet submit button | `[data-testid='tweetButton']` |
-| Caret (⋯) menu on a post | `[data-testid='caret']` |
-| Confirmation sheet button | `[data-testid='confirmationSheetConfirm']` |
+| Target                     | Selector                                      |
+| -------------------------- | --------------------------------------------- |
+| Main search input          | `input[data-testid='SearchBox_Search_Input']` |
+| Home nav link              | `a[data-testid='AppTabBar_Home_Link']`        |
+| Post text area (compose)   | `[data-testid='tweetTextarea_0']`             |
+| Reply buttons on feed      | `[data-testid='reply']`                       |
+| Post / Tweet submit button | `[data-testid='tweetButton']`                 |
+| Caret (⋯) menu on a post   | `[data-testid='caret']`                       |
+| Confirmation sheet button  | `[data-testid='confirmationSheetConfirm']`    |
 
 **X uses Draft.js for the compose text editor**, which does NOT accept synthetic input reliably. Working workaround: `browser_type(selector='[data-testid="tweetTextarea_0"]', text="...", delay_ms=20)`. The delay gives Draft.js time to process each keystroke. The first 1–2 characters may still get eaten — accept minor truncation or prepend a throwaway character. After typing, check `[data-testid="tweetButton"]` has `disabled: false` before clicking submit.
 
@@ -366,17 +368,35 @@ If Chrome detaches the debugger for its own reasons (tab closed, user opened Dev
 
 If reattach also fails, you'll get the underlying CDP error string — that's a real problem, usually the tab is gone.
 
-## When to reach for `browser_evaluate`
+## `browser_evaluate` is a last-resort escape hatch
 
-Use it when:
-- You need to read state from inside a shadow root that `browser_get_rect` doesn't handle
-- You need a one-shot JS snippet to trigger a site-specific action (scroll a specific container, open a menu, set a form field value directly)
-- You need to walk an AX tree or measure layout that the standard tools don't expose
+**Before using `browser_evaluate`, try these first — in this order:**
 
-Avoid it when:
-- A standard tool (`browser_click_coordinate`, `browser_type`, `browser_press`) already does what you need. Those go through CDP's native event pipeline, which real sites trust more than synthetic JS dispatch.
-- You're on a strict-CSP site and want to inject DOM — stick to `createElement` + `appendChild`, never `innerHTML`.
-- You need to trigger React / Vue / framework state changes — those frameworks watch for real browser events (`input`, `change`, `click`), not scripted `dispatchEvent` calls. Native-event tools are more reliable.
+1. **`browser_screenshot` + `browser_click_coordinate`** — works on every site regardless of shadow DOM, iframes, obfuscated classes. This is the default path for "click a thing you can see."
+2. **`browser_type(use_insert_text=True, text=...)`** — for typing into ANY input/contenteditable, including Lexical and Draft.js. Handles click-focus-insert with built-in retries. Do **not** call `document.execCommand('insertText')` via evaluate; this tool already does it correctly.
+3. **`browser_shadow_query`** or **`browser_get_rect(selector)`** with the `>>>` shadow-piercing syntax — for selector-based lookups across shadow roots.
+4. **`browser_get_text` / `browser_get_attribute`** — for reading element state by selector.
+5. **`browser_snapshot`** — for dumping the accessibility tree of the page.
+
+If all five of those fit your goal, **do not use `browser_evaluate`.** Each evaluate call is a small LLM round-trip of ~30-100 tokens of JS plus a JSON response; five of them burn more context than a single screenshot-and-coordinate does, with less reliability.
+
+### Anti-patterns — stop immediately if you catch yourself doing these
+
+- **Trying multiple `querySelectorAll` variants when the first returned `[]`.** Different selectors on the same page rarely work if the first guess failed — modern SPAs obfuscate class names at build time. After one empty result, switch to `browser_screenshot` + `browser_click_coordinate`. Do not write `.artdeco-list__item`, then `[data-test-incoming-invitation-card]`, then `[class*="invitation"]` — you are already on the wrong path.
+- **Writing `walk(root)` recursive shadow-DOM traversal functions.** Use `browser_shadow_query` — it traverses at the CDP level (native C++), not by re-running a recursive JS function every call.
+- **Calling `document.execCommand('insertText', ...)` to type into a contenteditable.** Use `browser_type(use_insert_text=True, text='...')`. The high-level tool handles the exact same Lexical/Draft.js case but with click-focus-retry logic built in.
+- **Accessing `iframe.contentDocument`.** Rarely works (cross-origin, late hydration) and when it does, the code is brittle. Use `browser_screenshot` to see the iframe, then `browser_click_coordinate` to interact.
+- **Using `innerHTML = "<...>"` on a Trusted Types site (LinkedIn, GitHub).** The assignment is silently dropped. Use `createElement` + `appendChild` if you must inject DOM — but first, ask whether you really need to.
+- **Triggering React/Vue state via synthetic `dispatchEvent`.** Frameworks watch for real browser events. Use `browser_click_coordinate`, `browser_press`, or `browser_type` — all go through CDP's native event pipeline.
+
+### Legitimate uses (when nothing semantic fits)
+
+- Reading a computed style, `window.innerWidth/Height`, `document.scrollingElement.scrollTop`, or other layout values the tools don't expose.
+- Firing a one-shot site-specific API call (analytics beacon, feature-flag toggle).
+- Stripping `onbeforeunload` before navigating away from a page with an unsent draft (LinkedIn, Gmail).
+- Detecting whether a specific shadow-root host exists before a follow-up screenshot.
+
+In all of these cases the script is SHORT (< 10 lines) and the result is CONSUMED (read, then acted on), not further probed.
 
 ## Login & auth walls
 

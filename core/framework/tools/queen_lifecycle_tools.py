@@ -903,9 +903,75 @@ def register_queen_lifecycle_tools(
     # ``start_worker`` was removed in the Phase 4 unification — its
     # bare-bones spawn duplicated ``run_agent_with_input`` (which has
     # credential preflight, concurrency guard, and phase tracking on
-    # top). The shared preflight timeout below is still used by
-    # ``run_agent_with_input``.
+    # top). The shared preflight timeout below is used by both
+    # ``run_agent_with_input`` and ``run_parallel_workers``.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
+
+    async def _preflight_credentials(
+        legacy: Any,
+        *,
+        tool_label: str,
+    ) -> set[str]:
+        """Compute tools whose credentials are missing and resync MCP servers.
+
+        Shared between ``run_agent_with_input`` (single spawn) and
+        ``run_parallel_workers`` (batch spawn). Returns the set of
+        tool names whose credentials failed validation; the caller
+        filters these out of the spawn's tool lists.
+
+        Exceptions (including validator bugs) are logged and treated
+        as "no tools dropped" so a broken validator can't block a
+        spawn. Wall-clock bound at ``_START_PREFLIGHT_TIMEOUT`` —
+        slow credential HTTP health checks can't stall the LLM turn.
+        """
+        unavailable: set[str] = set()
+
+        async def _run() -> None:
+            nonlocal unavailable
+            try:
+                from framework.credentials.validation import compute_unavailable_tools
+
+                loop = asyncio.get_running_loop()
+                drop, messages = await loop.run_in_executor(
+                    None,
+                    lambda: compute_unavailable_tools(legacy.graph.nodes),
+                )
+                unavailable = drop
+                if drop:
+                    logger.warning(
+                        "%s: dropping %d tool(s) with unavailable credentials: %s",
+                        tool_label,
+                        len(drop),
+                        "; ".join(messages),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "%s: compute_unavailable_tools raised, proceeding without "
+                    "credential-based tool filtering: %s",
+                    tool_label,
+                    exc,
+                )
+
+            runner = getattr(session, "runner", None)
+            if runner is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                    )
+                except Exception as exc:
+                    logger.warning("%s: MCP resync failed: %s", tool_label, exc)
+
+        try:
+            await asyncio.wait_for(_run(), timeout=_START_PREFLIGHT_TIMEOUT)
+        except TimeoutError:
+            logger.warning(
+                "%s: credential preflight timed out after %ds — proceeding",
+                tool_label,
+                _START_PREFLIGHT_TIMEOUT,
+            )
+        return unavailable
 
     # --- stop_worker -----------------------------------------------------------
 
@@ -1078,6 +1144,105 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
+        # Credential preflight — mirrors the one run_agent_with_input
+        # performs. Without this, missing credentials (e.g. stale
+        # GITHUB_TOKEN) fail once PER spawned worker, yielding N
+        # duplicate error reports for a single fixable issue. Catch
+        # once upfront, build a filtered tool list, and pass it to
+        # every spawn via tools_override.
+        legacy_for_preflight = _get_runtime()
+        unavailable_tools_parallel: set[str] = set()
+        tools_override_parallel: list[Any] | None = None
+        if legacy_for_preflight is not None:
+            try:
+                unavailable_tools_parallel = await _preflight_credentials(
+                    legacy_for_preflight, tool_label="run_parallel_workers"
+                )
+            except CredentialError as e:
+                # Structured credential failure: publish the
+                # CREDENTIALS_REQUIRED event so the frontend's modal
+                # can fire, and return the same shape the single-path
+                # tool returns on the same failure.
+                error_payload = credential_errors_to_json(e)
+                error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
+                bus = getattr(session, "event_bus", None)
+                if bus is not None:
+                    await bus.publish(
+                        AgentEvent(
+                            type=EventType.CREDENTIALS_REQUIRED,
+                            stream_id="queen",
+                            data=error_payload,
+                        )
+                    )
+                return json.dumps(error_payload)
+
+            if unavailable_tools_parallel:
+                colony_tools = list(getattr(colony, "_tools", []) or [])
+                before = len(colony_tools)
+                tools_override_parallel = [
+                    t
+                    for t in colony_tools
+                    if getattr(t, "name", None) not in unavailable_tools_parallel
+                ]
+                logger.info(
+                    "run_parallel_workers: dropped %d tool object(s) from spawn_tools (unavailable credentials)",
+                    before - len(tools_override_parallel),
+                )
+
+        # Colony progress tracker wiring: if the session's loaded
+        # worker points at a colony directory that has a progress.db,
+        # inject db_path + colony_id into every per-task ``data``
+        # dict so each spawned worker sees them in its first user
+        # message and can claim rows from the queue. ColonyRuntime.
+        # spawn() detects db_path in input_data and pre-activates
+        # hive.colony-progress-tracker into the catalog prompt.
+        _colony_db_path: str | None = None
+        _colony_id: str | None = None
+        _worker_path = getattr(session, "worker_path", None)
+        if _worker_path:
+            from pathlib import Path as _Path
+
+            _wp = _Path(_worker_path)
+            _pdb = _wp / "data" / "progress.db"
+            if _pdb.exists():
+                _colony_db_path = str(_pdb.resolve())
+                _colony_id = _wp.name
+
+        # Phase 2: enqueue each task into progress.db BEFORE building
+        # spawn specs so every parallel worker has a pre-assigned row
+        # to claim. Without this the queue stays empty and each
+        # worker's claim UPDATE affects zero rows, silently falling
+        # back to executing from its spawn message.
+        _enqueued_task_ids: list[str | None] = [None] * len(tasks)
+        if _colony_db_path:
+            from pathlib import Path as _PathP
+
+            from framework.host.progress_db import (
+                enqueue_task as _enqueue_task_fn,
+            )
+
+            _pdb_path_obj = _PathP(_colony_db_path)
+            for _i, _spec in enumerate(tasks):
+                if not isinstance(_spec, dict):
+                    continue
+                _task_text_pre = str(_spec.get("task", "")).strip()
+                if not _task_text_pre:
+                    continue
+                try:
+                    _enqueued_task_ids[_i] = await asyncio.to_thread(
+                        _enqueue_task_fn,
+                        _pdb_path_obj,
+                        _task_text_pre,
+                        source="run_parallel_workers",
+                    )
+                except Exception as _enqueue_exc:
+                    logger.warning(
+                        "run_parallel_workers: failed to enqueue tasks[%d] "
+                        "(spawn proceeding without pinned task_id): %s",
+                        _i,
+                        _enqueue_exc,
+                    )
+
         # Normalise: each entry must have a non-empty "task" string.
         normalised: list[dict] = []
         for i, spec in enumerate(tasks):
@@ -1086,17 +1251,57 @@ def register_queen_lifecycle_tools(
             task_text = str(spec.get("task", "")).strip()
             if not task_text:
                 return json.dumps({"error": f"tasks[{i}].task is empty"})
+            spec_data = spec.get("data") if isinstance(spec.get("data"), dict) else {}
+            if _colony_db_path:
+                spec_data = {
+                    **spec_data,
+                    "db_path": _colony_db_path,
+                    "colony_id": _colony_id,
+                }
+                if _enqueued_task_ids[i]:
+                    spec_data["task_id"] = _enqueued_task_ids[i]
             normalised.append(
                 {
                     "task": task_text,
-                    "data": spec.get("data") if isinstance(spec.get("data"), dict) else None,
+                    "data": spec_data or None,
                 }
             )
 
+        if _colony_db_path:
+            _pinned = sum(1 for tid in _enqueued_task_ids if tid)
+            logger.info(
+                "run_parallel_workers: attached progress_db context to "
+                "%d spawn(s) (colony_id=%s, %d pinned task_ids)",
+                len(normalised),
+                _colony_id,
+                _pinned,
+            )
+
         try:
-            worker_ids = await colony.spawn_batch(normalised)
+            worker_ids = await colony.spawn_batch(
+                normalised,
+                tools_override=tools_override_parallel,
+            )
         except Exception as e:
             return json.dumps({"error": f"spawn_batch failed: {e}"})
+
+        # Phase transition — mirrors run_agent_with_input. With the
+        # batch now spawned, the queen is semantically "running" until
+        # wait_for_worker_reports returns, so phase-gated running
+        # tools (inject_message, reply_to_worker, ...) should be
+        # available. Without this change run_parallel_workers left
+        # the queen in whatever phase she was in (typically staging).
+        if phase_state is not None:
+            try:
+                await phase_state.switch_to_running()
+                _update_meta_json(
+                    session_manager, manager_session_id, {"phase": "running"}
+                )
+            except Exception as exc:
+                logger.warning(
+                    "run_parallel_workers: phase transition to 'running' failed (non-fatal): %s",
+                    exc,
+                )
 
         try:
             reports = await colony.wait_for_worker_reports(
@@ -1322,6 +1527,35 @@ def register_queen_lifecycle_tools(
         except OSError as e:
             return None, f"failed to install skill into {target}: {e}"
 
+        # Cleanup the source directory after a successful install so
+        # the authored skill doesn't linger as debris in the agent
+        # workspace (or — pre-sandbox-split — in the hive git
+        # checkout). Only removes paths that are OUTSIDE
+        # ``~/.hive/skills/`` so we never nuke the canonical install
+        # target or user-owned skill dirs.
+        try:
+            src_resolved = src.resolve()
+            skills_root_resolved = target_root.resolve()
+            try:
+                src_resolved.relative_to(skills_root_resolved)
+                _under_skills_root = True
+            except ValueError:
+                _under_skills_root = False
+            if not _under_skills_root:
+                _shutil.rmtree(src_resolved)
+                logger.info(
+                    "create_colony: cleaned up authored skill source at %s "
+                    "(installed to %s)",
+                    src_resolved,
+                    target,
+                )
+        except OSError as e:
+            logger.warning(
+                "create_colony: failed to clean up skill source at %s (non-fatal): %s",
+                src,
+                e,
+            )
+
         return target, None
 
     async def create_colony(
@@ -1329,6 +1563,7 @@ def register_queen_lifecycle_tools(
         colony_name: str,
         task: str,
         skill_path: str,
+        tasks: list[dict] | None = None,
     ) -> str:
         """Create a colony after installing a pre-authored skill folder.
 
@@ -1338,6 +1573,13 @@ def register_queen_lifecycle_tools(
         they're ready to start the worker — at that point the worker
         reads the task from ``worker.json`` and the skill from
         ``~/.hive/skills/`` and starts informed.
+
+        When *tasks* is provided, each entry is seeded into the
+        colony's ``progress.db`` task queue in a single transaction.
+        Workers then claim rows from the queue using the
+        ``hive.colony-progress-tracker`` default skill. Each task dict
+        accepts: ``goal`` (required), optional ``steps``,
+        ``sop_items``, ``priority``, ``payload``, ``parent_task_id``.
         """
         if session is None:
             return json.dumps({"error": "No session bound to this tool registry."})
@@ -1392,6 +1634,7 @@ def register_queen_lifecycle_tools(
                 session=session,
                 colony_name=cn,
                 task=(task or "").strip(),
+                tasks=tasks if isinstance(tasks, list) else None,
             )
         except Exception as e:
             logger.exception("create_colony: fork failed after installing skill")
@@ -1444,6 +1687,8 @@ def register_queen_lifecycle_tools(
                 "is_new": fork_result.get("is_new", True),
                 "skill_installed": str(installed_skill),
                 "skill_name": installed_skill.name if installed_skill else None,
+                "db_path": fork_result.get("db_path"),
+                "tasks_seeded": len(fork_result.get("task_ids") or []),
             }
         )
 
@@ -1541,6 +1786,57 @@ def register_queen_lifecycle_tools(
                         "protocol'."
                     ),
                 },
+                "tasks": {
+                    "type": "array",
+                    "description": (
+                        "Optional pre-seeded task queue for the colony. "
+                        "When the colony is a fan-out of many similar "
+                        "units of work (e.g. 'process record #1234', "
+                        "'scrape profile X'), pass them here as an "
+                        "array and workers will claim rows atomically "
+                        "from the SQLite queue using the "
+                        "hive.colony-progress-tracker skill. Each task "
+                        "needs a 'goal' string; optionally include "
+                        "'steps' (ordered subtasks), 'sop_items' "
+                        "(required checklist gates), 'priority' "
+                        "(higher runs first), and 'payload' "
+                        "(task-specific parameters). Can be hundreds "
+                        "or thousands of entries — the bulk insert "
+                        "runs in a single transaction."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "goal": {"type": "string"},
+                            "priority": {"type": "integer"},
+                            "payload": {},
+                            "steps": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "detail": {"type": "string"},
+                                    },
+                                    "required": ["title"],
+                                },
+                            },
+                            "sop_items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "required": {"type": "boolean"},
+                                    },
+                                    "required": ["key", "description"],
+                                },
+                            },
+                        },
+                        "required": ["goal"],
+                    },
+                },
             },
             "required": ["colony_name", "task", "skill_path"],
         },
@@ -1549,6 +1845,158 @@ def register_queen_lifecycle_tools(
         "create_colony",
         _create_colony_tool,
         lambda inputs: create_colony(**inputs),
+    )
+    tools_registered += 1
+
+    # --- enqueue_task ------------------------------------------------------------
+
+    async def enqueue_task_tool(
+        *,
+        colony_name: str,
+        goal: str,
+        steps: list[dict] | None = None,
+        sop_items: list[dict] | None = None,
+        payload: Any = None,
+        priority: int = 0,
+        parent_task_id: str | None = None,
+    ) -> str:
+        """Append a single task to an existing colony's progress.db queue.
+
+        Use this when the colony is already created and more work
+        needs to be fanned out (webhook-driven, follow-up requests,
+        worker-generated subtasks). The colony's workers pick it up
+        on their next claim cycle.
+        """
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps(
+                {"error": "colony_name must be lowercase alphanumeric with underscores"}
+            )
+
+        from pathlib import Path as _Path
+
+        from framework.host.progress_db import (
+            enqueue_task as _enqueue_task,
+            ensure_progress_db as _ensure_db,
+        )
+
+        colony_dir = _Path.home() / ".hive" / "colonies" / cn
+        if not colony_dir.is_dir():
+            return json.dumps({"error": f"colony '{cn}' not found"})
+
+        try:
+            db_path = await asyncio.to_thread(_ensure_db, colony_dir)
+            task_id = await asyncio.to_thread(
+                _enqueue_task,
+                db_path,
+                goal,
+                steps=steps,
+                sop_items=sop_items,
+                payload=payload,
+                priority=priority,
+                parent_task_id=parent_task_id,
+            )
+        except Exception as e:
+            logger.exception("enqueue_task: failed to insert row")
+            return json.dumps({"error": f"enqueue_task failed: {e}"})
+
+        return json.dumps(
+            {
+                "status": "enqueued",
+                "colony_name": cn,
+                "task_id": task_id,
+                "db_path": str(db_path),
+            }
+        )
+
+    _enqueue_task_tool = Tool(
+        name="enqueue_task",
+        description=(
+            "Append a single task to an existing colony's progress.db "
+            "queue. Use this after create_colony when more work needs "
+            "to be fanned out — e.g. a webhook fired, the user asked "
+            "for a follow-up run, or a worker spawned a subtask. The "
+            "colony's workers pick it up on their next claim cycle "
+            "(atomic UPDATE … WHERE status='pending'). For bulk "
+            "authoring at colony creation time, pass the 'tasks' "
+            "array to create_colony instead."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {
+                    "type": "string",
+                    "description": "Target colony name (lowercase + underscores).",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": (
+                        "Human-readable task description. Self-contained — "
+                        "the worker has no context beyond this string plus "
+                        "any steps/sop_items/payload you attach."
+                    ),
+                },
+                "steps": {
+                    "type": "array",
+                    "description": (
+                        "Optional ordered subtasks the worker should "
+                        "check off as it executes. Each step needs a "
+                        "'title'; optional 'detail' for longer "
+                        "instructions."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "detail": {"type": "string"},
+                        },
+                        "required": ["title"],
+                    },
+                },
+                "sop_items": {
+                    "type": "array",
+                    "description": (
+                        "Optional hard-gate checklist items the worker "
+                        "MUST address before marking the task done. "
+                        "Each item needs a 'key' (slug) and "
+                        "'description'; 'required' defaults to true."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string"},
+                            "description": {"type": "string"},
+                            "required": {"type": "boolean"},
+                        },
+                        "required": ["key", "description"],
+                    },
+                },
+                "payload": {
+                    "description": (
+                        "Optional task-specific parameters. Stored as "
+                        "JSON in the 'payload' column."
+                    ),
+                },
+                "priority": {
+                    "type": "integer",
+                    "description": "Higher values run first. Default 0.",
+                },
+                "parent_task_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional reference to an existing task this "
+                        "one was spawned from (audit only; no blocking "
+                        "dependency resolver today)."
+                    ),
+                },
+            },
+            "required": ["colony_name", "goal"],
+        },
+    )
+    registry.register(
+        "enqueue_task",
+        _enqueue_task_tool,
+        lambda inputs: enqueue_task_tool(**inputs),
     )
     tools_registered += 1
 
@@ -2969,7 +3417,8 @@ def register_queen_lifecycle_tools(
         if preamble.get("pending_question"):
             result["pending_question"] = preamble["pending_question"]
 
-        result["agent_idle_seconds"] = round(runtime.agent_idle_seconds, 1)
+        _idle = runtime.agent_idle_seconds
+        result["agent_idle_seconds"] = round(_idle, 1) if _idle != float("inf") else -1
 
         for key in ("current_node", "current_iteration"):
             if key in preamble:
@@ -3713,6 +4162,33 @@ def register_queen_lifecycle_tools(
                 task,
             )
 
+        # Concurrency budget check — mirrors run_parallel_workers so a
+        # queen in a loop can't silently exceed max_concurrent_workers
+        # by hammering run_agent_with_input. Per-call count is 1, so
+        # the check is ``active + 1 > max_concurrent``.
+        colony_cfg = getattr(colony, "_config", None) or getattr(colony, "config", None)
+        max_concurrent = getattr(colony_cfg, "max_concurrent_workers", None)
+        if max_concurrent and max_concurrent > 0:
+            active = 0
+            try:
+                workers = getattr(colony, "_workers", {}) or {}
+                for w in workers.values():
+                    handle = getattr(w, "_task_handle", None)
+                    if handle is not None and not handle.done():
+                        active += 1
+            except Exception:
+                active = 0
+            if active + 1 > max_concurrent:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"run_agent_with_input would exceed max_concurrent_workers "
+                            f"({active} active + 1 new > {max_concurrent}). "
+                            "Wait for an existing worker to finish or stop one."
+                        )
+                    }
+                )
+
         try:
             # Pre-flight: compute the set of tools whose credentials are
             # NOT currently available, and resync MCP servers. We do NOT
@@ -3723,58 +4199,9 @@ def register_queen_lifecycle_tools(
             # to block the whole spawn with a CredentialError; the fix
             # is to treat unset credentials as "drop these tools" rather
             # than "abort the worker".
-            #
-            # Note: the MCP admission gate (_build_mcp_admission_gate in
-            # tool_registry.py) already filters MCP tools at registration
-            # time. This preflight covers the non-MCP path — tools.py
-            # discoveries via discover_from_module — which has no
-            # credential gate of its own.
-            loop = asyncio.get_running_loop()
-            unavailable_tools: set[str] = set()
-
-            async def _preflight():
-                nonlocal unavailable_tools
-                try:
-                    from framework.credentials.validation import compute_unavailable_tools
-
-                    drop, messages = await loop.run_in_executor(
-                        None,
-                        lambda: compute_unavailable_tools(legacy.graph.nodes),
-                    )
-                    unavailable_tools = drop
-                    if drop:
-                        logger.warning(
-                            "run_agent_with_input: dropping %d tool(s) with "
-                            "unavailable credentials from worker spawn: %s",
-                            len(drop),
-                            "; ".join(messages),
-                        )
-                except Exception as exc:
-                    # Validation itself failing (not a credential failure —
-                    # a code error in the validator) should not block the
-                    # spawn. Log and proceed as if nothing was dropped.
-                    logger.warning(
-                        "compute_unavailable_tools raised, proceeding without credential-based tool filtering: %s",
-                        exc,
-                    )
-
-                runner = getattr(session, "runner", None)
-                if runner:
-                    try:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
-                        )
-                    except Exception as e:
-                        logger.warning("MCP resync failed: %s", e)
-
-            try:
-                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
-            except TimeoutError:
-                logger.warning(
-                    "run_agent_with_input preflight timed out after %ds — proceeding",
-                    _START_PREFLIGHT_TIMEOUT,
-                )
+            unavailable_tools = await _preflight_credentials(
+                legacy, tool_label="run_agent_with_input"
+            )
 
             # Build a per-spawn AgentSpec that mirrors the loaded
             # worker's entry-node identity. This is what makes the
@@ -3848,10 +4275,66 @@ def register_queen_lifecycle_tools(
                         dropped_count,
                     )
 
+            # Colony progress tracker wiring: if the loaded worker
+            # lives under ~/.hive/colonies/{name}/ and has a
+            # progress.db, inject db_path + colony_id into input_data
+            # so the spawned worker sees them in its first user
+            # message and can use the hive.colony-progress-tracker
+            # skill to claim tasks from the queue.
+            _spawn_input_data: dict[str, Any] = {"user_request": task}
+            _worker_path = getattr(session, "worker_path", None)
+            if _worker_path:
+                from pathlib import Path as _Path
+
+                _worker_path_p = _Path(_worker_path)
+                _progress_db = _worker_path_p / "data" / "progress.db"
+                if _progress_db.exists():
+                    _spawn_input_data["db_path"] = str(_progress_db.resolve())
+                    _spawn_input_data["colony_id"] = _worker_path_p.name
+                    logger.info(
+                        "run_agent_with_input: attached progress_db context "
+                        "(colony_id=%s, db_path=%s)",
+                        _worker_path_p.name,
+                        _progress_db,
+                    )
+
+                    # Phase 2: enqueue the task into progress.db BEFORE
+                    # spawning so the worker has a concrete row to
+                    # claim. Without this the queue is empty and the
+                    # worker's claim UPDATE affects zero rows, so it
+                    # silently falls back to executing from the chat
+                    # spawn message. Any enqueue failure is logged and
+                    # the spawn proceeds without a pinned task_id
+                    # (degrades to the pre-Phase-2 behavior).
+                    try:
+                        from framework.host.progress_db import (
+                            enqueue_task as _enqueue_task_fn,
+                        )
+
+                        _task_id = await asyncio.to_thread(
+                            _enqueue_task_fn,
+                            _progress_db,
+                            task,
+                            source="run_agent_with_input",
+                        )
+                        _spawn_input_data["task_id"] = _task_id
+                        logger.info(
+                            "run_agent_with_input: enqueued task %s into %s",
+                            _task_id,
+                            _progress_db,
+                        )
+                    except Exception as _enqueue_exc:
+                        logger.warning(
+                            "run_agent_with_input: failed to enqueue task "
+                            "into progress.db (spawn proceeding without "
+                            "pinned task_id): %s",
+                            _enqueue_exc,
+                        )
+
             worker_ids = await colony.spawn(
                 task=task,
                 count=1,
-                input_data={"user_request": task},
+                input_data=_spawn_input_data,
                 agent_spec=spawn_spec,
                 tools=spawn_tools,
                 tool_executor=spawn_tool_executor,

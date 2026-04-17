@@ -328,6 +328,7 @@ def register_file_tools(
     mcp: FastMCP,
     *,
     resolve_path: Callable[[str], str] | None = None,
+    resolve_path_write: Callable[[str], str] | None = None,
     before_write: Callable[[], None] | None = None,
     project_root: str | None = None,
 ) -> None:
@@ -335,12 +336,18 @@ def register_file_tools(
 
     Args:
         mcp: FastMCP instance to register tools on.
-        resolve_path: Path resolver. Default: resolve to absolute path.
-            Raise ValueError to reject paths (e.g. outside sandbox).
+        resolve_path: Path resolver for READ operations. Default:
+            resolve to absolute path. Raise ValueError to reject paths
+            (e.g. outside sandbox).
+        resolve_path_write: Path resolver for WRITE/EDIT operations.
+            Defaults to ``resolve_path`` when not provided. Split
+            resolvers let callers keep reads permissive (framework
+            skills, docs) while confining writes to an agent workspace.
         before_write: Hook called before write/edit operations (e.g. git snapshot).
         project_root: If set, search_files relativizes output paths to this root.
     """
     _resolve = resolve_path or _default_resolve_path
+    _resolve_write = resolve_path_write or _resolve
 
     @mcp.tool()
     def read_file(path: str, offset: int = 1, limit: int = 0, hashline: bool = False) -> str:
@@ -440,7 +447,7 @@ def register_file_tools(
             path: Absolute file path to write.
             content: Complete file content to write.
         """
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         resolved_path = Path(resolved)
 
         # Stale-edit guard: an existing file must have been read recently
@@ -509,7 +516,7 @@ def register_file_tools(
             new_text: Replacement text.
             replace_all: Replace all occurrences (default: first only).
         """
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
 
@@ -815,7 +822,7 @@ def register_file_tools(
             return "Error: Too many edits in one call (max 100). Split into multiple calls."
 
         # 2. Read file
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
 

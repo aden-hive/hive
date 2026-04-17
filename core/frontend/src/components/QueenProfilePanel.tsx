@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   X,
@@ -46,8 +46,49 @@ export default function QueenProfilePanel({
   const name = profile?.name ?? summary?.name ?? "Queen";
   const title = profile?.title ?? summary?.title ?? "";
 
+  // ── Resizable width ──────────────────────────────────────────────────
+  const MIN_WIDTH = 280;
+  const MAX_WIDTH = 600;
+  const [width, setWidth] = useState(340);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = width;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      // Panel is on the right, so dragging left (negative delta) grows it
+      const delta = startX.current - ev.clientX;
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta)));
+    };
+    const onUp = () => {
+      dragging.current = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [width]);
+
   return (
-    <aside className="w-[340px] flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto">
+    <aside
+      className="flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto relative"
+      style={{ width }}
+    >
+      {/* Drag handle */}
+      <div
+        onMouseDown={onDragStart}
+        className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10"
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
