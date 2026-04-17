@@ -61,14 +61,14 @@
           "label": "Gemini 3 Flash - Fast",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 900000
+          "max_context_tokens": 240000
         },
         {
           "id": "gemini-3.1-pro-preview-customtools",
           "label": "Gemini 3.1 Pro - Best quality",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 900000
+          "max_context_tokens": 240000
         }
       ]
     },
