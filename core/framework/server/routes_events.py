@@ -119,6 +119,22 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     event_bus = session.event_bus
     event_types = _parse_event_types(request.query.get("types"))
 
+    # Worker-noise filter is phase-aware. In DM mode (queen phase
+    # "independent") the queen's chat should stay clean — workers
+    # are invisible. In colony mode (phase "working"/"reviewing")
+    # the user IS supervising the workers and wants to see the
+    # tool-call/text-delta chatter as it happens. Sample the phase
+    # once at SSE connect; if the queen later transitions the
+    # frontend reconnects.
+    def _should_filter_worker_noise() -> bool:
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is None:
+            return True  # unknown phase → be conservative, filter noise
+        phase = getattr(phase_state, "phase", "independent")
+        return phase == "independent"
+
+    filter_worker_noise = _should_filter_worker_noise()
+
     # Per-client buffer queue
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
@@ -145,7 +161,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             return
 
         evt_dict = event.to_dict()
-        if _is_worker_noise(evt_dict):
+        if filter_worker_noise and _is_worker_noise(evt_dict):
             return
         if evt_dict.get("type") in _CRITICAL_EVENTS:
             try:
@@ -202,7 +218,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     for past_event in event_bus._event_history:
         if past_event.type.value in replay_types:
             past_dict = past_event.to_dict()
-            if _is_worker_noise(past_dict):
+            if filter_worker_noise and _is_worker_noise(past_dict):
                 continue
             try:
                 queue.put_nowait(past_dict)

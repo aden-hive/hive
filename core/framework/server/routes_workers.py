@@ -236,6 +236,157 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     return web.json_response({"tools": tools_out})
 
 
+# ---------------------------------------------------------------------------
+# Live worker control — list / stop a specific worker / stop all
+# ---------------------------------------------------------------------------
+
+
+def _active_colony(session):
+    """Return the session's unified ColonyRuntime (``session.colony``) if present.
+
+    All spawned workers (queen-overseer + run_parallel_workers fan-outs)
+    are hosted here. ``session.colony_runtime`` is a different concept
+    (loaded agent graph) and doesn't hold the live worker registry we
+    need to enumerate / stop.
+    """
+    return getattr(session, "colony", None)
+
+
+async def handle_list_live_workers(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/workers — list live workers.
+
+    Returns an array of ``{worker_id, task, status, started_at, duration_seconds,
+    is_active}`` objects. Active workers come first. The queen overseer
+    (persistent worker) is included because the frontend should know it
+    exists, but the stop action on it is a session-level kill — the UI
+    should treat it differently (not offered here).
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    colony = _active_colony(session)
+    if colony is None:
+        return web.json_response({"workers": []})
+
+    now = time.monotonic()
+    payload = []
+    try:
+        workers = list(colony._workers.values())  # type: ignore[attr-defined]
+    except Exception:
+        workers = []
+
+    for w in workers:
+        started_at = getattr(w, "_started_at", 0.0) or 0.0
+        duration = (now - started_at) if started_at else 0.0
+        result = getattr(w, "_result", None)
+        payload.append(
+            {
+                "worker_id": w.id,
+                "task": (w.task or "")[:400],
+                "status": str(getattr(w, "status", "unknown")),
+                "is_active": bool(getattr(w, "is_active", False)),
+                "duration_seconds": round(duration, 1),
+                "explicit_report": getattr(w, "_explicit_report", None),
+                "result_status": (result.status if result else None),
+                "result_summary": (result.summary if result else None),
+            }
+        )
+
+    # Active workers first, then terminated, newest-started first within group.
+    payload.sort(key=lambda r: (not r["is_active"], -(r["duration_seconds"] or 0)))
+    return web.json_response({"workers": payload})
+
+
+async def handle_stop_live_worker(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/workers/{worker_id}/stop — force-stop one worker.
+
+    Calls ``colony.stop_worker(worker_id)`` which cancels the worker's
+    background task. The worker's terminal SUBAGENT_REPORT still fires
+    (preserving any _explicit_report) so the queen sees a `[WORKER_REPORT]`
+    with ``status="stopped"``.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    worker_id = request.match_info.get("worker_id", "")
+    if not worker_id:
+        return web.json_response({"error": "worker_id required"}, status=400)
+
+    colony = _active_colony(session)
+    if colony is None:
+        return web.json_response({"error": "No active colony on this session"}, status=503)
+
+    worker = colony._workers.get(worker_id)  # type: ignore[attr-defined]
+    if worker is None:
+        return web.json_response({"error": f"Worker '{worker_id}' not found"}, status=404)
+    if not worker.is_active:
+        return web.json_response(
+            {
+                "stopped": False,
+                "reason": "Worker already terminated",
+                "worker_id": worker_id,
+                "status": str(worker.status),
+            }
+        )
+
+    try:
+        await colony.stop_worker(worker_id)
+    except Exception as exc:
+        logger.exception("stop_worker failed for %s", worker_id)
+        return web.json_response(
+            {"stopped": False, "error": str(exc), "worker_id": worker_id},
+            status=500,
+        )
+
+    return web.json_response({"stopped": True, "worker_id": worker_id})
+
+
+async def handle_stop_all_live_workers(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/workers/stop-all — force-stop every active worker.
+
+    The persistent overseer (if any) is skipped — it is the queen itself
+    and stopping it would end the session. Only ephemeral fan-out workers
+    are targeted.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    colony = _active_colony(session)
+    if colony is None:
+        return web.json_response({"stopped": [], "error": "No active colony on this session"})
+
+    stopped: list[str] = []
+    errors: list[dict] = []
+    try:
+        workers = list(colony._workers.values())  # type: ignore[attr-defined]
+    except Exception:
+        workers = []
+
+    for w in workers:
+        if not w.is_active:
+            continue
+        if getattr(w, "_persistent", False):
+            # The overseer — don't kill the queen.
+            continue
+        try:
+            await colony.stop_worker(w.id)
+            stopped.append(w.id)
+        except Exception as exc:
+            logger.warning("stop-all: failed to stop %s: %s", w.id, exc)
+            errors.append({"worker_id": w.id, "error": str(exc)})
+
+    return web.json_response(
+        {
+            "stopped": stopped,
+            "stopped_count": len(stopped),
+            "errors": errors if errors else None,
+        }
+    )
+
+
 def register_routes(app: web.Application) -> None:
     """Register worker inspection routes."""
     app.router.add_get("/api/sessions/{session_id}/colonies/{colony_id}/nodes", handle_list_nodes)
@@ -247,4 +398,14 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}/tools",
         handle_node_tools,
+    )
+    # Live worker control
+    app.router.add_get("/api/sessions/{session_id}/workers", handle_list_live_workers)
+    app.router.add_post(
+        "/api/sessions/{session_id}/workers/stop-all",
+        handle_stop_all_live_workers,
+    )
+    app.router.add_post(
+        "/api/sessions/{session_id}/workers/{worker_id}/stop",
+        handle_stop_live_worker,
     )

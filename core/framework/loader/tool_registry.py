@@ -581,8 +581,18 @@ class ToolRegistry:
         tool_cap: int | None = None,
         log_collisions: bool = False,
     ) -> tuple[bool, int, str | None]:
-        """Register a single MCP server with one retry for transient failures."""
+        """Register a single MCP server with one retry for transient failures.
+
+        When ``preserve_existing_tools=True`` and the server's tools are
+        already present from a prior registration, ``register_mcp_server``
+        returns ``count=0`` because every tool was shadowed. That's a
+        no-op success, not a failure — don't retry / warn in that case.
+        Otherwise a duplicate-init path (e.g. a worker spawn re-loading
+        the MCP servers the queen already registered) spams shadow
+        warnings, sleeps 2s, and retries for no reason.
+        """
         name = server_config.get("name", "unknown")
+        already_loaded = bool(self._mcp_server_tools.get(name))
         last_error: str | None = None
 
         for attempt in range(2):
@@ -595,6 +605,10 @@ class ToolRegistry:
                 )
                 if count > 0:
                     return True, count, None
+                if already_loaded and preserve_existing_tools:
+                    # All tools shadowed by the prior registration of
+                    # the same server — nothing to do, server is usable.
+                    return True, 0, None
                 last_error = "registered 0 tools"
             except Exception as exc:
                 last_error = str(exc)
@@ -762,12 +776,18 @@ class ToolRegistry:
                 if preserve_existing_tools and mcp_tool.name in self._tools:
                     if log_collisions:
                         origin_server = self._find_mcp_origin_server_for_tool(mcp_tool.name) or "<existing>"
-                        logger.warning(
-                            "MCP tool '%s' from '%s' shadowed by '%s' (loaded first)",
-                            mcp_tool.name,
-                            server_name,
-                            origin_server,
-                        )
+                        # Don't warn when a server is being re-registered
+                        # by itself — that's a redundant-init case (e.g.
+                        # the same tool_registry seeing the same server
+                        # twice via pooled reconnect), not a real
+                        # cross-server shadow worth flagging.
+                        if origin_server != server_name:
+                            logger.warning(
+                                "MCP tool '%s' from '%s' shadowed by '%s' (loaded first)",
+                                mcp_tool.name,
+                                server_name,
+                                origin_server,
+                            )
                     # Skip registration; do not update MCP tool bookkeeping for this server.
                     continue
 
