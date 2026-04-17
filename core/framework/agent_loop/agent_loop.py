@@ -114,6 +114,29 @@ _INTERNAL_TAGS = frozenset(
     }
 )
 
+def _friendly_llm_error(e: Exception) -> str:
+    """Convert raw LLM exceptions into human-readable messages."""
+    import re
+    error_str = str(e)
+    
+    if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "RateLimitError" in error_str:
+        retry_match = re.search(r"retry in (\d+\.?\d*)s", error_str)
+        retry_msg = f" Try again in ~{int(float(retry_match.group(1)))}s." if retry_match else ""
+        return f"Rate limit reached for this model.{retry_msg} Switch models from the top-right dropdown."
+    
+    if "quota" in error_str.lower() and "free_tier" in error_str.lower():
+        return "Daily free-tier quota exhausted for this model. Please switch to a different model."
+    
+    if "authentication" in error_str.lower() or "401" in error_str:
+        return "Authentication failed. Please check your API key in Credentials."
+    
+    if "context" in error_str.lower() and ("length" in error_str.lower() or "window" in error_str.lower()):
+        return "Message too long for this model's context window. Start a new chat or use a model with larger context."
+    
+    # Fallback — just the first line, not the full JSON blob
+    first_line = error_str.splitlines()[0][:120]
+    return f"Request failed: {first_line}"
+
 # Closed-block form: <tag>value</tag>
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
@@ -1077,7 +1100,7 @@ class AgentLoop(AgentProtocol):
                     # for user input instead of killing the loop.  The user
                     # can retry or adjust the request.
                     if ctx.supports_direct_user_io:
-                        error_msg = f"LLM call failed: {e}"
+                        error_msg = f"LLM call failed: {_friendly_llm_error(e)}"
                         _guardrail_phrase = (
                             "no endpoints available matching your guardrail restrictions "
                             "and data policy"
@@ -1088,6 +1111,7 @@ class AgentLoop(AgentProtocol):
                                 "Update https://openrouter.ai/settings/privacy or choose another "
                                 "OpenRouter model."
                             )
+                        logger.debug("[%s] iter=%d: raw LLM error: %s", node_id, iteration, str(e))
                         logger.error(
                             "[%s] iter=%d: %s — waiting for user input",
                             node_id,
@@ -1126,7 +1150,7 @@ class AgentLoop(AgentProtocol):
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
                     latency_ms = int((time.time() - start_time) * 1000)
-                    error_msg = f"LLM call failed: {e}"
+                    error_msg = f"LLM call failed: {_friendly_llm_error(e)}"
                     stack_trace = traceback.format_exc()
 
                     if ctx.runtime_logger:
