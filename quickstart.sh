@@ -499,46 +499,60 @@ PRESET_ROWS=""
 PRESET_MODEL_CHOICE_ROWS=""
 
 load_model_catalog_rows() {
+    # Bash collapses empty fields for whitespace IFS delimiters like tabs, so use
+    # unit separator to preserve blanks for presets such as Ollama.
+    local catalog_sep=$'\x1f'
     # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
-    # into simple tab-separated rows once and reuse them for the interactive flow.
+    # into simple separator-delimited rows once and reuse them for the interactive flow.
     local catalog_lines=""
     catalog_lines="$(uv run python -c '
 from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
 
+sep = "\x1f"
+
 for provider_id, default_model in sorted(get_default_models().items()):
-    print(f"DEFAULT\t{provider_id}\t{default_model}")
+    print(sep.join(("DEFAULT", provider_id, default_model)))
 
 for provider_id, models in sorted(get_models_catalogue().items()):
     for model in models:
         print(
-            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
-                provider=provider_id,
-                id=model["id"],
-                label=model["label"],
-                max_tokens=model["max_tokens"],
-                max_context_tokens=model["max_context_tokens"],
+            sep.join(
+                (
+                    "MODEL",
+                    provider_id,
+                    str(model["id"]),
+                    str(model["label"]),
+                    str(model["max_tokens"]),
+                    str(model["max_context_tokens"]),
+                )
             )
         )
 
 for preset_id, preset in sorted(get_presets().items()):
     print(
-        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
-            preset_id=preset_id,
-            provider=preset["provider"],
-            model=preset.get("model", ""),
-            max_tokens=preset["max_tokens"],
-            max_context_tokens=preset["max_context_tokens"],
-            api_key_env_var=preset.get("api_key_env_var", ""),
-            api_base=preset.get("api_base", ""),
+        sep.join(
+            (
+                "PRESET",
+                preset_id,
+                str(preset["provider"]),
+                str(preset.get("model", "")),
+                str(preset["max_tokens"]),
+                str(preset["max_context_tokens"]),
+                str(preset.get("api_key_env_var", "")),
+                str(preset.get("api_base", "")),
+            )
         )
     )
     for choice in preset.get("model_choices", []):
         print(
-            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
-                preset_id=preset_id,
-                id=choice["id"],
-                label=choice["label"],
-                recommended=str(choice["recommended"]).lower(),
+            sep.join(
+                (
+                    "PRESET_MODEL",
+                    preset_id,
+                    str(choice["id"]),
+                    str(choice["label"]),
+                    str(choice["recommended"]).lower(),
+                )
             )
         )
 ' 2>/dev/null)" || return 1
@@ -548,23 +562,24 @@ for preset_id, preset in sorted(get_presets().items()):
     PRESET_ROWS=""
     PRESET_MODEL_CHOICE_ROWS=""
 
-    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
+    while IFS="$catalog_sep" read -r row_type field1 field2 field3 field4 field5 field6 field7; do
         [ -n "$row_type" ] || continue
         if [ "$row_type" = "DEFAULT" ]; then
-            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
+            MODEL_DEFAULT_ROWS+="${field1}${catalog_sep}${field2}"$'\n'
         elif [ "$row_type" = "MODEL" ]; then
-            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
+            MODEL_CHOICE_ROWS+="${field1}${catalog_sep}${field2}${catalog_sep}${field3}${catalog_sep}${field4}${catalog_sep}${field5}"$'\n'
         elif [ "$row_type" = "PRESET" ]; then
-            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
+            PRESET_ROWS+="${field1}${catalog_sep}${field2}${catalog_sep}${field3}${catalog_sep}${field4}${catalog_sep}${field5}${catalog_sep}${field6}${catalog_sep}${field7}"$'\n'
         elif [ "$row_type" = "PRESET_MODEL" ]; then
-            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
+            PRESET_MODEL_CHOICE_ROWS+="${field1}${catalog_sep}${field2}${catalog_sep}${field3}${catalog_sep}${field4}"$'\n'
         fi
     done <<< "$catalog_lines"
 }
 
 get_default_model() {
     local provider_id="$1"
-    while IFS=$'\t' read -r row_provider row_model; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_provider row_model; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             echo "$row_model"
@@ -576,7 +591,8 @@ get_default_model() {
 get_model_choice_count() {
     local provider_id="$1"
     local count=0
-    while IFS=$'\t' read -r row_provider _; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_provider _; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             count=$((count + 1))
@@ -590,7 +606,8 @@ get_model_choice_field() {
     local idx="$2"
     local field="$3"
     local count=0
-    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             if [ "$count" -eq "$idx" ]; then
@@ -626,7 +643,8 @@ get_model_choice_maxcontexttokens() {
 get_preset_field() {
     local preset_id="$1"
     local field="$2"
-    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             case "$field" in
@@ -655,7 +673,8 @@ apply_preset() {
 get_preset_model_choice_count() {
     local preset_id="$1"
     local count=0
-    while IFS=$'\t' read -r row_preset_id _; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_preset_id _; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             count=$((count + 1))
@@ -669,7 +688,8 @@ get_preset_model_choice_field() {
     local idx="$2"
     local field="$3"
     local count=0
-    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
+    local catalog_sep=$'\x1f'
+    while IFS="$catalog_sep" read -r row_preset_id row_id row_label row_recommended; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             if [ "$count" -eq "$idx" ]; then
