@@ -175,12 +175,10 @@ def _build_credentials_provider() -> Any:
 
             adapter = CredentialStoreAdapter.default()
             accounts = adapter.get_all_account_info()
-            tool_provider_map = adapter.get_tool_provider_map()
-            rendered = build_accounts_prompt(
-                accounts,
-                tool_provider_map=tool_provider_map,
-                node_tool_names=None,
-            )
+            # Compact form (no tool_provider_map) — tool schemas already
+            # surface function names; baking the full per-provider list
+            # into the system prompt on every turn was ~2 KB of redundancy.
+            rendered = build_accounts_prompt(accounts)
         except Exception:
             logger.debug("Failed to render ambient credentials block", exc_info=True)
             rendered = ""
@@ -231,7 +229,7 @@ async def materialize_queen_identity(
 
     phase_state.queen_id = queen_id
     phase_state.queen_profile = queen_profile
-    phase_state.queen_identity_prompt = format_queen_identity_prompt(queen_profile)
+    phase_state.queen_identity_prompt = format_queen_identity_prompt(queen_profile, max_examples=1)
 
     if event_bus is not None:
         await event_bus.publish(
@@ -565,6 +563,10 @@ async def create_queen(
         _queen_skills_mgr.load()
         phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
         phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
+        # Also store the manager so get_current_prompt() can render a
+        # phase-filtered catalog on each turn (skills with a `visibility`
+        # frontmatter that excludes the current phase are dropped).
+        phase_state.skills_manager = _queen_skills_mgr
         _queen_skill_dirs = _queen_skills_mgr.allowlisted_dirs
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
@@ -632,7 +634,7 @@ async def create_queen(
         except FileNotFoundError:
             logger.warning("Queen profile %s not found after selection", queen_id)
             return None
-        identity_prompt = format_queen_identity_prompt(profile)
+        identity_prompt = format_queen_identity_prompt(profile, max_examples=1)
         # Store on phase_state so identity persists across dynamic prompt refreshes
         phase_state.queen_id = queen_id
         phase_state.queen_profile = profile

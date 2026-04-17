@@ -194,6 +194,12 @@ class QueenPhaseState:
     protocols_prompt: str = ""
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
+    # Optional SkillsManager reference. When set, get_current_prompt()
+    # re-renders the catalog filtered by the current phase so skills
+    # whose frontmatter `visibility` list excludes this phase are
+    # dropped (shaves ~1 KB of DM-irrelevant framework skills on
+    # independent-phase turns).
+    skills_manager: Any = None
 
     # Provider for the ambient "Connected integrations" block. See
     # docstring on the simpler QueenPhaseState above.
@@ -250,8 +256,14 @@ class QueenPhaseState:
         credentials_block = _render_credentials_block(self.credentials_prompt_provider)
         if credentials_block:
             parts.append(credentials_block)
-        if self.skills_catalog_prompt:
-            parts.append(self.skills_catalog_prompt)
+        catalog_prompt = self.skills_catalog_prompt
+        if self.skills_manager is not None:
+            try:
+                catalog_prompt = self.skills_manager.skills_catalog_prompt_for_phase(self.phase)
+            except Exception:
+                catalog_prompt = self.skills_catalog_prompt
+        if catalog_prompt:
+            parts.append(catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
         if self._cached_global_recall_block:

@@ -37,6 +37,10 @@ class ParsedSkill:
     compatibility: list[str] | None = None
     metadata: dict[str, Any] | None = None
     allowed_tools: list[str] | None = None
+    # List of queen phases in which this skill appears in the catalog.
+    # None = visible in all phases. Example: ["planning", "building"]
+    # hides a framework-authoring skill from the INDEPENDENT/DM prompt.
+    visibility: list[str] | None = None
 
 
 def _try_fix_yaml(raw: str) -> str:
@@ -219,6 +223,19 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     raw_tools = frontmatter.get("allowed-tools")
     if isinstance(raw_tools, str):
         raw_tools = [raw_tools]
+    # `visibility` lives under `metadata.visibility` so it stays inside
+    # the open `metadata` map (the skill-file schema used by the IDE
+    # and other tooling only allows a fixed set of top-level keys).
+    raw_metadata = frontmatter.get("metadata")
+    raw_visibility: Any = None
+    if isinstance(raw_metadata, dict):
+        raw_visibility = raw_metadata.get("visibility")
+    if isinstance(raw_visibility, str):
+        raw_visibility = [raw_visibility]
+    if isinstance(raw_visibility, list):
+        raw_visibility = [str(v).strip() for v in raw_visibility if str(v).strip()] or None
+    else:
+        raw_visibility = None
 
     return ParsedSkill(
         name=name,
@@ -231,4 +248,5 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         compatibility=raw_compat,
         metadata=frontmatter.get("metadata"),
         allowed_tools=raw_tools,
+        visibility=raw_visibility,
     )

@@ -64,6 +64,7 @@ class SkillsManager:
     def __init__(self, config: SkillsManagerConfig | None = None) -> None:
         self._config = config or SkillsManagerConfig()
         self._loaded = False
+        self._catalog: object = None  # SkillCatalog, set after load()
         self._catalog_prompt: str = ""
         self._protocols_prompt: str = ""
         self._allowlisted_dirs: list[str] = []
@@ -91,6 +92,7 @@ class SkillsManager:
         mgr = cls.__new__(cls)
         mgr._config = SkillsManagerConfig()
         mgr._loaded = True  # skip load()
+        mgr._catalog = None
         mgr._catalog_prompt = skills_catalog_prompt
         mgr._protocols_prompt = protocols_prompt
         mgr._allowlisted_dirs = []
@@ -140,6 +142,7 @@ class SkillsManager:
             )
 
         catalog = SkillCatalog(discovered)
+        self._catalog = catalog
         self._allowlisted_dirs = catalog.allowlisted_dirs
         catalog_prompt = catalog.to_prompt()
 
@@ -270,6 +273,18 @@ class SkillsManager:
     def skills_catalog_prompt(self) -> str:
         """Community skills XML catalog for system prompt injection."""
         return self._catalog_prompt
+
+    def skills_catalog_prompt_for_phase(self, phase: str | None) -> str:
+        """Render the catalog filtered for the given queen phase.
+
+        Skills whose frontmatter ``visibility`` list is present and
+        excludes ``phase`` are dropped. Falls back to the cached
+        phase-agnostic prompt when no live catalog is available
+        (e.g. ``from_precomputed``).
+        """
+        if self._catalog is None or phase is None:
+            return self._catalog_prompt
+        return self._catalog.to_prompt(phase=phase)  # type: ignore[attr-defined]
 
     @property
     def protocols_prompt(self) -> str:

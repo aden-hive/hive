@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 # visible. Preserving awareness of every skill beats truncating entries.
 _COMPACT_THRESHOLD_CHARS = 5000
 
+# Per-skill description cap. Descriptions often run 300–500 chars of
+# context that's only useful once — the first sentence is enough to
+# decide whether a skill applies. Truncated entries get a trailing "…".
+_DESCRIPTION_CAP_CHARS = 140
+
 _MANDATORY_HEADER_FULL = """## Skills (mandatory)
 Before replying: scan <available_skills> <description> entries.
 - If exactly one skill clearly applies: read its SKILL.md at <location> with `read_file`, then follow it.
@@ -88,18 +93,27 @@ class SkillCatalog:
         """All skill base directories for file access allowlisting."""
         return [skill.base_dir for skill in self._skills.values()]
 
-    def to_prompt(self) -> str:
+    def to_prompt(self, *, phase: str | None = None) -> str:
         """Generate the catalog prompt for system prompt injection.
 
         Returns empty string when no skills are present. Otherwise returns
         a mandatory pre-reply checklist + decision rules + rate-limit note,
         followed by the <available_skills> XML body.
 
-        When the full XML body exceeds ``_COMPACT_THRESHOLD_CHARS``, the
-        compact variant is emitted instead: <description> elements are
-        dropped so every skill stays visible before any gets truncated.
+        When ``phase`` is set, skills whose ``visibility`` list is present
+        and does not include that phase are filtered out. Skills with
+        ``visibility=None`` always appear.
+
+        Descriptions are capped to the first sentence or
+        ``_DESCRIPTION_CAP_CHARS`` (whichever is shorter) with a trailing
+        "…" on truncation. When the full XML body still exceeds
+        ``_COMPACT_THRESHOLD_CHARS`` the compact variant is emitted:
+        <description> elements are dropped so every skill stays visible
+        before any gets truncated.
         """
         all_skills = sorted(self._skills.values(), key=lambda s: s.name)
+        if phase is not None:
+            all_skills = [s for s in all_skills if s.visibility is None or phase in s.visibility]
         if not all_skills:
             return ""
 
@@ -111,7 +125,25 @@ class SkillCatalog:
         return f"{_MANDATORY_HEADER_COMPACT}\n\n{compact_xml}"
 
     @staticmethod
-    def _render_xml(skills: list[ParsedSkill], *, compact: bool) -> str:
+    def _cap_description(description: str) -> str:
+        """Return the first sentence or first ``_DESCRIPTION_CAP_CHARS`` chars."""
+        text = description.strip()
+        if not text:
+            return text
+        # First sentence boundary — look for '. ', '! ', '? '. Avoid matching
+        # decimals or abbreviations by requiring whitespace after the mark.
+        for i, ch in enumerate(text):
+            if ch in ".!?" and (i + 1 == len(text) or text[i + 1].isspace()):
+                sentence = text[: i + 1]
+                if len(sentence) <= _DESCRIPTION_CAP_CHARS:
+                    return sentence
+                break
+        if len(text) <= _DESCRIPTION_CAP_CHARS:
+            return text
+        return text[: _DESCRIPTION_CAP_CHARS - 1].rstrip() + "…"
+
+    @classmethod
+    def _render_xml(cls, skills: list[ParsedSkill], *, compact: bool) -> str:
         """Render the `<available_skills>` block.
 
         ``compact=True`` drops `<description>` to preserve skill awareness
@@ -122,7 +154,8 @@ class SkillCatalog:
             lines.append("  <skill>")
             lines.append(f"    <name>{escape(skill.name)}</name>")
             if not compact:
-                lines.append(f"    <description>{escape(skill.description)}</description>")
+                capped = cls._cap_description(skill.description)
+                lines.append(f"    <description>{escape(capped)}</description>")
             lines.append(f"    <location>{escape(skill.location)}</location>")
             lines.append("  </skill>")
         lines.append("</available_skills>")
