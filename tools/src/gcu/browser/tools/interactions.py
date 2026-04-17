@@ -108,24 +108,25 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         button: Literal["left", "right", "middle"] = "left",
     ) -> dict:
         """
-        Click at specific viewport coordinates (CSS pixels).
+        Click at the given SCREENSHOT pixel.
 
-        Chrome DevTools Protocol's Input.dispatchMouseEvent operates in
-        **CSS pixels**, not physical pixels. If you have a screenshot
-        image coordinate, convert it with ``browser_coords(x, y)`` and
-        use the returned ``css_x`` / ``css_y`` — not ``physical_x/y``.
-        On a DPR=2 display, feeding physical coordinates lands the click
-        at 2× the intended position.
+        ``x`` and ``y`` are pixel coordinates read directly off a
+        ``browser_screenshot`` image (800 px wide JPEG). The tool
+        multiplies them by the cached image→CSS scale for the tab
+        before dispatching to Chrome — no scale awareness required on
+        the caller side. ``browser_get_rect`` / ``browser_shadow_query``
+        return coordinates in the same (screenshot) space.
 
         Args:
-            x: X coordinate in CSS pixels (viewport space)
-            y: Y coordinate in CSS pixels (viewport space)
+            x: X coordinate in screenshot pixels.
+            y: Y coordinate in screenshot pixels.
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             button: Mouse button to click (left, right, middle)
 
         Returns:
-            Dict with click result
+            Dict with click result, including ``focused_element``
+            describing what the click focused.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile, "button": button}
@@ -149,17 +150,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            from .inspection import _screenshot_css_scales, _screenshot_scales
+            from .inspection import _ensure_css_scale
 
-            click_result = await bridge.click_coordinate(target_tab, x, y, button=button)
+            css_scale = await _ensure_css_scale(target_tab)
+            s = css_scale if css_scale > 0 else 1.0
+            css_x = x * s
+            css_y = y * s
+            click_result = await bridge.click_coordinate(target_tab, css_x, css_y, button=button)
             log_tool_call(
                 "browser_click_coordinate",
                 params,
-                result={
-                    **click_result,
-                    "debug_stored_physicalScale": _screenshot_scales.get(target_tab, "unset"),
-                    "debug_stored_cssScale": _screenshot_css_scales.get(target_tab, "unset"),
-                },
+                result={**click_result, "cssScale": round(css_scale, 4)},
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             return click_result
@@ -484,15 +485,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Hover at CSS pixel coordinates without needing a CSS selector.
+        Hover at the given SCREENSHOT pixel.
 
         Use this instead of browser_hover when the element is in an overlay,
         shadow DOM, or virtual-rendered component that isn't in the regular DOM.
-        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+        ``x`` / ``y`` are pixel coordinates read directly off a
+        ``browser_screenshot`` image; the tool translates to CSS px
+        internally before dispatching to Chrome.
 
         Args:
-            x: CSS pixel X coordinate
-            y: CSS pixel Y coordinate
+            x: X coordinate in screenshot pixels.
+            y: Y coordinate in screenshot pixels.
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
@@ -521,7 +524,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            hover_result = await bridge.hover_coordinate(target_tab, x, y)
+            from .inspection import _ensure_css_scale
+
+            css_scale = await _ensure_css_scale(target_tab)
+            s = css_scale if css_scale > 0 else 1.0
+            hover_result = await bridge.hover_coordinate(target_tab, x * s, y * s)
             log_tool_call(
                 "browser_hover_coordinate",
                 params,
@@ -548,16 +555,18 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Move mouse to CSS pixel coordinates then press a key.
+        Move mouse to the given SCREENSHOT pixel, then press a key.
 
         Use this instead of browser_press when the focused element is in an overlay
         or virtual-rendered component. Moving the mouse first routes the key event
         through native browser hit-testing instead of the DOM focus chain.
-        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+        ``x`` / ``y`` are pixel coordinates read directly off a
+        ``browser_screenshot`` image; the tool translates to CSS px
+        internally.
 
         Args:
-            x: CSS pixel X coordinate to position mouse
-            y: CSS pixel Y coordinate to position mouse
+            x: X coordinate in screenshot pixels.
+            y: Y coordinate in screenshot pixels.
             key: Key to press (e.g. 'Enter', 'Space', 'Escape', 'ArrowDown')
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
@@ -587,7 +596,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            press_result = await bridge.press_key_at(target_tab, x, y, key)
+            from .inspection import _ensure_css_scale
+
+            css_scale = await _ensure_css_scale(target_tab)
+            s = css_scale if css_scale > 0 else 1.0
+            press_result = await bridge.press_key_at(target_tab, x * s, y * s, key)
             log_tool_call(
                 "browser_press_at",
                 params,

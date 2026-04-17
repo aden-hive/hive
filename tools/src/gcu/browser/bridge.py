@@ -80,33 +80,57 @@ async def _adaptive_poll_sleep(elapsed_s: float) -> None:
 _interaction_highlights: dict[int, dict] = {}
 
 
-# Compact descriptor of document.activeElement. Returned by both click()
+# Compact descriptor of the focused element. Returned by both click()
 # and click_coordinate() so the agent can verify it focused what it
-# intended, then decide whether to follow up with browser_type_focused(text=...).
-# Keeping this as a single shared string avoids drift
-# between the two click paths.
+# intended. When the outer document's activeElement is an <iframe>,
+# we recurse into the iframe's document (same-origin only) so the
+# response describes the real inner element — otherwise the agent
+# always sees {tag: "iframe"} and can't tell whether it hit the
+# composer or something else inside the frame (e.g. a sidebar item
+# in LinkedIn's #interop-outlet messaging overlay).
 _FOCUSED_ELEMENT_JS = """
 (function() {
+    function describe(el) {
+        var rect = el.getBoundingClientRect();
+        var attrs = {};
+        for (var i = 0; i < el.attributes.length && i < 10; i++) {
+            attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+        }
+        return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || null,
+            className: el.className || null,
+            name: el.getAttribute('name') || null,
+            type: el.getAttribute('type') || null,
+            role: el.getAttribute('role') || null,
+            contenteditable: el.getAttribute('contenteditable') || null,
+            text: (el.innerText || '').substring(0, 200),
+            value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
+            attributes: attrs,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+    }
     var el = document.activeElement;
     if (!el || el === document.body) return null;
-    var rect = el.getBoundingClientRect();
-    var attrs = {};
-    for (var i = 0; i < el.attributes.length && i < 10; i++) {
-        attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+    // Descend into same-origin iframes. Capped at 5 levels of
+    // nesting to bound cost. Cross-origin frames throw on
+    // contentDocument access → we catch and report the outermost
+    // iframe instead.
+    var framePath = [];
+    var depth = 0;
+    while (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME') && depth < 5) {
+        framePath.push(el.id || el.getAttribute('data-testid') || el.tagName.toLowerCase());
+        var innerDoc = null;
+        try { innerDoc = el.contentDocument; } catch (e) { innerDoc = null; }
+        if (!innerDoc) break;
+        var innerActive = innerDoc.activeElement;
+        if (!innerActive || innerActive === innerDoc.body) break;
+        el = innerActive;
+        depth++;
     }
-    return {
-        tag: el.tagName.toLowerCase(),
-        id: el.id || null,
-        className: el.className || null,
-        name: el.getAttribute('name') || null,
-        type: el.getAttribute('type') || null,
-        role: el.getAttribute('role') || null,
-        contenteditable: el.getAttribute('contenteditable') || null,
-        text: (el.innerText || '').substring(0, 200),
-        value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
-        attributes: attrs,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    };
+    var out = describe(el);
+    if (framePath.length) out.inFrame = framePath;
+    return out;
 })()
 """
 
@@ -937,16 +961,33 @@ class BeelineBridge:
     async def _read_focused_element(self, tab_id: int) -> dict | None:
         """Read document.activeElement and return a compact descriptor.
 
-        Returns None on any failure — never raises. Used by both click
-        paths (selector-based click() and click_coordinate()) so the
-        agent gets the same response shape regardless of which one was
-        called. The descriptor lets the agent answer "did my click land
-        on an editable?" without a second round-trip.
+        The JS returns ``rect`` fields in CSS px (they come straight
+        from ``getBoundingClientRect``). We scale them to screenshot
+        pixels here so the agent sees a rect in the same coord space
+        it passed to click / hover / press_at.
+
+        Returns None on any failure — never raises.
         """
         try:
             await self._try_enable_domain(tab_id, "Runtime")
             result = await self.evaluate(tab_id, _FOCUSED_ELEMENT_JS)
-            return (result or {}).get("result")
+            info = (result or {}).get("result")
+            if info and isinstance(info, dict) and isinstance(info.get("rect"), dict):
+                # Convert CSS px rect → screenshot px using the cached
+                # scale. Fall back to 1.0 if no screenshot has been
+                # taken yet on this tab.
+                from .tools.inspection import _screenshot_css_scales
+
+                scale = _screenshot_css_scales.get(tab_id, 1.0) or 1.0
+                if scale > 0 and scale != 1.0:
+                    r = info["rect"]
+                    info["rect"] = {
+                        "x": round(r.get("x", 0) / scale, 1),
+                        "y": round(r.get("y", 0) / scale, 1),
+                        "width": round(r.get("width", 0) / scale, 1),
+                        "height": round(r.get("height", 0) / scale, 1),
+                    }
+            return info
         except Exception:
             return None
 
@@ -959,18 +1000,11 @@ class BeelineBridge:
         button_map = {"left": "left", "right": "right", "middle": "middle"}
         cdp_button = button_map.get(button, "left")
 
-        from .tools.inspection import _screenshot_css_scales, _screenshot_scales
-
-        phys_scale = _screenshot_scales.get(tab_id, "unset")
-        css_scale = _screenshot_css_scales.get(tab_id, "unset")
         logger.info(
-            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent. "
-            "stored_scales: physicalScale=%s, cssScale=%s",
+            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent",
             tab_id,
             x,
             y,
-            phys_scale,
-            css_scale,
         )
 
         await self._cdp(

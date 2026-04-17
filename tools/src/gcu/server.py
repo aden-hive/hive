@@ -139,7 +139,10 @@ def main() -> None:
         mcp.run(transport="stdio")
     else:
         logger.info(f"Starting GCU server on {args.host}:{args.port}")
-        mcp.run(transport="http", host=args.host, port=args.port)
+        # FastMCP.run() forwards kwargs to anyio.run() instead of the
+        # transport, which breaks host/port for SSE. Invoke run_async
+        # directly so the kwargs land on run_sse_async.
+        asyncio.run(mcp.run_async(transport="sse", host=args.host, port=args.port))
 
 
 if __name__ == "__main__":

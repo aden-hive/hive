@@ -44,7 +44,18 @@
       "WebFetch(domain:docs.litellm.ai)",
       "Bash(cat /home/timothy/aden/hive/.venv/lib/python3.11/site-packages/litellm-*.dist-info/METADATA)",
       "Bash(find \"/home/timothy/.hive/agents/queens/queen_brand_design/sessions/session_20260415_100751_d49f4c28/\" -type f -name \"*.json*\" -exec grep -l \"协日\" {} \\\\;)",
-      "Bash(grep -v ':0$')"
+      "Bash(grep -v ':0$')",
+      "Bash(curl -s -m 2 http://127.0.0.1:4002/sse -o /dev/null -w 'status=%{http_code} time=%{time_total}s\\\\n')",
+      "mcp__gcu-tools__browser_status",
+      "mcp__gcu-tools__browser_start",
+      "mcp__gcu-tools__browser_navigate",
+      "mcp__gcu-tools__browser_evaluate",
+      "mcp__gcu-tools__browser_screenshot",
+      "mcp__gcu-tools__browser_open",
+      "mcp__gcu-tools__browser_click_coordinate",
+      "mcp__gcu-tools__browser_get_rect",
+      "mcp__gcu-tools__browser_type_focused",
+      "mcp__gcu-tools__browser_wait"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

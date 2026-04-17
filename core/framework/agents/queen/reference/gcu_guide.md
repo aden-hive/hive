@@ -25,7 +25,6 @@ All tools are prefixed with `browser_`:
 - `browser_screenshot` — visual capture (annotated PNG)
 <!-- /vision-only -->
 - `browser_shadow_query`, `browser_get_rect` — locate elements (shadow-piercing via `>>>`)
-- `browser_coords` — convert image pixels to CSS pixels (always use `css_x/y`, never `physical_x/y`)
 - `browser_scroll`, `browser_wait` — navigation helpers
 - `browser_evaluate` — run JavaScript
 - `browser_close`, `browser_close_finished` — tab cleanup
@@ -38,9 +37,9 @@ All tools are prefixed with `browser_`:
 
 Neither tool is "preferred" universally — they're for different jobs. Default to snapshot on text-heavy static pages, screenshot on SPAs and anything shadow-DOM-heavy. Activate the `browser-automation` skill for the full decision tree.
 
-## Coordinate rule: always CSS pixels
+## Coordinate rule
 
-Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS pixels**, not physical pixels. After a screenshot, use `browser_coords(image_x, image_y)` and feed the returned `css_x/y` (NOT `physical_x/y`) to `browser_click_coordinate`, `browser_hover_coordinate`, `browser_press_at`. Feeding physical pixels on a HiDPI display (DPR=1.6, 2, or 3) overshoots by `DPR×` and clicks land in the wrong place. `getBoundingClientRect()` already returns CSS pixels — pass through unchanged, no DPR multiplication.
+Every browser tool that takes or returns coordinates operates in **screenshot pixels** (the 800 px wide JPEG `browser_screenshot` delivers). Read a pixel off the image, pass it straight to `browser_click_coordinate` / `browser_hover_coordinate` / `browser_press_at`. `browser_get_rect` and `browser_shadow_query` return `rect.cx` / `rect.cy` in the same space. The tools translate to CSS px internally — no scale awareness required. Avoid raw `getBoundingClientRect()` via `browser_evaluate` for coord lookup; use `browser_get_rect` instead.
 
 ## System prompt tips for browser nodes
 
