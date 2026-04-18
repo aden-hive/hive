@@ -995,29 +995,57 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 
 // ── Data tab (airtable-style view of progress.db tables) ──────────────
 
+/** Table-list refresh cadence. Slower than the row poll because the
+ *  overview only drives the row-count chips; the operator doesn't care
+ *  if the count lags the live data by a few seconds. */
+const TABLES_POLL_MS = 5000;
+
 function DataTab({ sessionId }: { sessionId: string }) {
   const [tables, setTables] = useState<TableOverview[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(true);
   const [tablesError, setTablesError] = useState<string | null>(null);
 
-  const refreshTables = useCallback(() => {
-    setLoadingTables(true);
-    setTablesError(null);
-    colonyDataApi
-      .listTables(sessionId)
-      .then((r) => {
-        setTables(r.tables);
-        // Auto-select the first table when none chosen yet so the user
-        // lands on data instead of an empty picker.
-        setSelected((cur) => cur ?? r.tables[0]?.name ?? null);
-      })
-      .catch((e) => setTablesError(e?.message ?? "Failed to load tables"))
-      .finally(() => setLoadingTables(false));
-  }, [sessionId]);
+  const refreshTables = useCallback(
+    (opts: { silent?: boolean } = {}) => {
+      if (!opts.silent) {
+        setLoadingTables(true);
+        setTablesError(null);
+      }
+      return colonyDataApi
+        .listTables(sessionId)
+        .then((r) => {
+          setTables(r.tables);
+          // Auto-select the first table when none chosen yet so the user
+          // lands on data instead of an empty picker.
+          setSelected((cur) => cur ?? r.tables[0]?.name ?? null);
+          if (opts.silent) setTablesError(null);
+        })
+        .catch((e) => {
+          // Only surface errors on user-initiated loads; silent polls
+          // stay quiet and the next tick retries.
+          if (!opts.silent) setTablesError(e?.message ?? "Failed to load tables");
+        })
+        .finally(() => {
+          if (!opts.silent) setLoadingTables(false);
+        });
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     refreshTables();
+  }, [refreshTables]);
+
+  // Background poll for row-count freshness. Skipped when the browser
+  // tab is hidden — there's no point burning DB reads for a view the
+  // user isn't watching.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshTables({ silent: true });
+    }, TABLES_POLL_MS);
+    return () => clearInterval(id);
   }, [refreshTables]);
 
   return (
@@ -1062,8 +1090,8 @@ function DataTab({ sessionId }: { sessionId: string }) {
           </div>
 
           <p className="text-[10px] text-muted-foreground mb-2 italic">
-            Edits write directly to progress.db — a running worker may not
-            notice until its next DB read.
+            Live view — edits write directly to progress.db. A running worker
+            may not notice until its next DB read.
           </p>
 
           {selected && (
@@ -1089,6 +1117,49 @@ function DataTab({ sessionId }: { sessionId: string }) {
  *  small enough to keep edits responsive.  */
 const DATA_PAGE_SIZE = 100;
 
+/** Row-poll cadence. 2.5s balances "feels live" against server load
+ *  and our edit/poll race window. Shorter intervals amplify the
+ *  chance of a poll landing during a PATCH roundtrip. */
+const ROWS_POLL_MS = 2500;
+
+/** Returns true if the user is actively editing any cell inside the
+ *  grid — we sniff for a focused textarea. The alternative (bubbling
+ *  editing state up from every EditableCell) would force the grid
+ *  prop to track a counter. DOM inspection is simpler and — since the
+ *  grid is self-contained under `root` — equally reliable. */
+function isEditingInside(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  const active = document.activeElement;
+  return !!active && root.contains(active) && active.tagName === "TEXTAREA";
+}
+
+/** Shallow-merge new rows on top of the previous page *by primary
+ *  key*. Reuses unchanged row-object references so React can skip
+ *  re-rendering those `<tr>`s — important when the user has the grid
+ *  scrolled horizontally and we don't want jank at every poll. */
+function mergeRowsByPk(
+  prev: TableRowsResponse,
+  next: TableRowsResponse,
+): TableRowsResponse {
+  if (prev.primary_key.length === 0) return next;
+  const prevByKey = new Map<string, Record<string, CellValue>>();
+  for (const r of prev.rows) {
+    prevByKey.set(prev.primary_key.map((p) => String(r[p] ?? "")).join("|"), r);
+  }
+  const rows = next.rows.map((r) => {
+    const key = next.primary_key.map((p) => String(r[p] ?? "")).join("|");
+    const old = prevByKey.get(key);
+    if (!old) return r;
+    // Same key AND all columns identical → reuse the previous object
+    // so React's reference check skips re-rendering.
+    for (const col of Object.keys(r)) {
+      if (r[col] !== old[col]) return r;
+    }
+    return old;
+  });
+  return { ...next, rows };
+}
+
 function TableView({
   sessionId,
   table,
@@ -1105,24 +1176,64 @@ function TableView({
   const [orderBy, setOrderBy] = useState<string | null>(null);
   const [orderDir, setOrderDir] = useState<SortDir>("asc");
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    colonyDataApi
-      .listRows(sessionId, table, {
-        limit: DATA_PAGE_SIZE,
-        offset,
-        orderBy,
-        orderDir,
-      })
-      .then(setData)
-      .catch((e) => setError(e?.message ?? "Failed to load rows"))
-      .finally(() => setLoading(false));
-  }, [sessionId, table, offset, orderBy, orderDir]);
+  // Request-id guard. Any in-flight request with a stale id is
+  // discarded on return. Bumped on (a) every new request-start and
+  // (b) successful edits, so a poll that started *before* a PATCH
+  // cannot land *after* it and rollback the new value.
+  const reqIdRef = useRef(0);
+  const gridRef = useRef<HTMLDivElement | null>(null);
 
+  const fetchOnce = useCallback(
+    (opts: { silent: boolean }) => {
+      const myId = ++reqIdRef.current;
+      if (!opts.silent) {
+        setLoading(true);
+        setError(null);
+      }
+      colonyDataApi
+        .listRows(sessionId, table, {
+          limit: DATA_PAGE_SIZE,
+          offset,
+          orderBy,
+          orderDir,
+        })
+        .then((next) => {
+          // Discard stale responses — sort/offset changed, edit
+          // happened, or a subsequent poll started.
+          if (myId !== reqIdRef.current) return;
+          setData((prev) => (prev ? mergeRowsByPk(prev, next) : next));
+          if (opts.silent) setError(null);
+        })
+        .catch((e) => {
+          if (myId !== reqIdRef.current) return;
+          // Silent polls swallow errors; the next tick retries. User-
+          // initiated loads surface so the operator sees the failure.
+          if (!opts.silent) setError(e?.message ?? "Failed to load rows");
+        })
+        .finally(() => {
+          if (!opts.silent && myId === reqIdRef.current) setLoading(false);
+        });
+    },
+    [sessionId, table, offset, orderBy, orderDir],
+  );
+
+  // Initial + on-parameter-change load (user-initiated, shows spinner).
   useEffect(() => {
-    load();
-  }, [load]);
+    fetchOnce({ silent: false });
+  }, [fetchOnce]);
+
+  // Background polling. Pauses when (a) the browser tab is hidden —
+  // no point spending DB reads on an unwatched panel, and (b) the
+  // user is mid-edit — a silent re-fetch would reorder rows or reset
+  // the draft under their cursor.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (isEditingInside(gridRef.current)) return;
+      fetchOnce({ silent: true });
+    }, ROWS_POLL_MS);
+    return () => clearInterval(id);
+  }, [fetchOnce]);
 
   // Reset paging when switching tables (key prop on TableView takes care
   // of full unmount; this covers the sort-change case).
@@ -1141,6 +1252,10 @@ function TableView({
         pk,
         updates: { [column]: newValue },
       });
+      // Bump the request-id so any poll that started before the PATCH
+      // (and is about to return with pre-edit data) is discarded —
+      // otherwise the grid would briefly revert the cell.
+      reqIdRef.current++;
       // Optimistic patch of the local cache so the grid reflects the
       // edit instantly without a full re-fetch flash.
       setData((prev) => {
@@ -1177,7 +1292,7 @@ function TableView({
   const canNext = pageEnd < data.total;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" ref={gridRef}>
       <DataGrid
         columns={data.columns}
         rows={data.rows}
@@ -1190,10 +1305,16 @@ function TableView({
         emptyMessage="Table is empty."
       />
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>
-          {data.total === 0
-            ? "0 rows"
-            : `${data.offset + 1}–${pageEnd} of ${data.total.toLocaleString()}`}
+        <span className="flex items-center gap-1.5">
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 animate-pulse"
+            title={`Auto-refreshing every ${ROWS_POLL_MS / 1000}s (paused while editing)`}
+          />
+          <span>
+            {data.total === 0
+              ? "0 rows"
+              : `${data.offset + 1}–${pageEnd} of ${data.total.toLocaleString()}`}
+          </span>
         </span>
         <div className="flex gap-1">
           <button
