@@ -716,8 +716,56 @@ async def fork_session_into_colony(
     from framework.host.progress_db import ensure_progress_db, seed_tasks
     from framework.server.session_manager import _queen_session_dir
 
-    queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
+    # Diagnostic capture: when the fork fails here we want to know which
+    # piece of queen state was missing (executor cleared vs. node missing
+    # vs. _last_ctx never stamped). Without this, callers only see
+    # "'NoneType' object has no attribute 'node_registry'" with no hint
+    # whether the queen loop exited, is mid-revive, or ran a different
+    # path that never ran AgentLoop._execute_impl.
+    queen_executor = getattr(session, "queen_executor", None)
+    queen_task = getattr(session, "queen_task", None)
+    phase_state_dbg = getattr(session, "phase_state", None)
+    logger.info(
+        "[fork_session_into_colony] session=%s colony=%s "
+        "queen_executor=%s queen_task=%s queen_task_done=%s "
+        "phase=%s queen_name=%s",
+        session.id,
+        colony_name,
+        queen_executor,
+        queen_task,
+        queen_task.done() if queen_task is not None else None,
+        getattr(phase_state_dbg, "phase", None),
+        getattr(session, "queen_name", None),
+    )
+
+    if queen_executor is None:
+        raise RuntimeError(
+            f"queen_executor is None for session {session.id!r} — the "
+            "queen loop isn't running right now. Wait for the queen to "
+            "come back (or send her a chat message to revive her) and "
+            "retry create_colony. The skill folder is already written, "
+            "so the retry is free."
+        )
+
+    node_registry = getattr(queen_executor, "node_registry", None)
+    if not isinstance(node_registry, dict) or "queen" not in node_registry:
+        raise RuntimeError(
+            f"queen node is missing from the executor's registry for "
+            f"session {session.id!r} (registry keys="
+            f"{list(node_registry.keys()) if isinstance(node_registry, dict) else type(node_registry).__name__}"
+            "). The queen loop is in an initialization or teardown "
+            "window; retry after a moment."
+        )
+
+    queen_loop: AgentLoop = node_registry["queen"]
     queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
+    if queen_ctx is None:
+        logger.warning(
+            "[fork_session_into_colony] queen_loop has no _last_ctx yet "
+            "(session=%s) — falling back to empty tool/skill snapshot; "
+            "the forked worker will inherit no tools.",
+            session.id,
+        )
 
     colony_dir = Path.home() / ".hive" / "colonies" / colony_name
     is_new = not colony_dir.exists()
