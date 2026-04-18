@@ -131,6 +131,7 @@ class ExecutionContext:
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     status: str = "pending"  # pending, running, completed, failed, paused
+    cancellation_state: str | None = None  # "graceful", "detached"
 
 
 class ExecutionManager:
@@ -948,6 +949,13 @@ class ExecutionManager:
                 self._write_run_event(execution_id, ctx.run_id, "run_failed", {"error": str(e)})
 
             finally:
+                # If cancellation timed out earlier, the execution may have continued
+                # running in a non-cancellable context (e.g., LLM call, thread executor).
+                # At this point, the task has finally completed — log it for observability
+                # since the system may have already marked it as cancelled/detached.
+                ctx = self._active_executions.get(execution_id)
+                if ctx and getattr(ctx, "cancellation_state", None) == "detached":
+                    logger.warning(f"Detached execution {execution_id} finished after cancellation")
                 # Clean up state
                 self._state_manager.cleanup_execution(execution_id)
 
@@ -1212,13 +1220,13 @@ class ExecutionManager:
                 # The task will continue winding down in the background and its
                 # finally block will harmlessly pop already-removed keys.
                 logger.warning(
-                    "Execution %s did not finish within cancel timeout; force-cleaning bookkeeping",
-                    execution_id,
+                     "Execution %s did not finish within cancel timeout; marking as detached",
+                     execution_id
                 )
-                async with self._lock:
-                    self._active_executions.pop(execution_id, None)
-                    self._execution_tasks.pop(execution_id, None)
-                self._active_executors.pop(execution_id, None)
+                ctx = self._active_executions.get(execution_id)
+                if ctx:
+                    ctx.cancellation_state = "detached"
+                    ctx.status = "cancelling"
             return True
         return False
 
