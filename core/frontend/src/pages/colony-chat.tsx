@@ -16,6 +16,10 @@ import {
   formatAgentDisplayName,
   replayEventsToMessages,
 } from "@/lib/chat-helpers";
+import {
+  resolveInitialColonyPhase,
+  shouldUsePrefetchedColonyRestore,
+} from "@/lib/colony-session-restore";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
@@ -417,6 +421,7 @@ export default function ColonyChat() {
       let liveSession: LiveSession | undefined;
       let isResumedSession = false;
       let coldRestoreId: string | undefined;
+      let prefetchedRestore: SessionRestoreResult | null = null;
 
       // Check for existing live session for this agent
       try {
@@ -446,40 +451,30 @@ export default function ColonyChat() {
       let restoredPhase: "independent" | "working" | "reviewing" | null = null;
 
       if (!liveSession) {
-        // Pre-fetch messages from cold session
-        let preRestoredMsgs: ChatMessage[] = [];
         if (coldRestoreId) {
           const displayName = formatAgentDisplayName(agentPath);
-          const restored = await restoreSessionMessages(coldRestoreId, agentPath, displayName);
-          preRestoredMsgs = restored.messages;
-          restoredPhase = restored.restoredPhase;
+          prefetchedRestore = await restoreSessionMessages(
+            coldRestoreId,
+            agentPath,
+            displayName,
+          );
         }
 
-        if (coldRestoreId || preRestoredMsgs.length > 0) {
+        if (coldRestoreId || (prefetchedRestore?.messages.length ?? 0) > 0) {
           suppressIntroRef.current = true;
         }
 
         // Create new session (pass coldRestoreId for resume)
         liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
-
-        if (preRestoredMsgs.length > 0) {
-          preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-          setMessages(preRestoredMsgs);
-        }
       }
 
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.colony_name || agentPath);
-      const initialPhase =
-        restoredPhase || session.queen_phase || (session.has_worker ? "working" : "reviewing");
-      queenPhaseRef.current = initialPhase;
-
-      updateState({
-        sessionId: session.session_id,
-        displayName,
-        queenPhase: initialPhase,
-        queenSupportsImages: session.queen_supports_images !== false,
-      });
+      let restoredMessages: ChatMessage[] = [];
+      const reusePrefetchedRestore = shouldUsePrefetchedColonyRestore(
+        coldRestoreId,
+        session.session_id,
+      );
 
       // Restore messages for live resume
       if (isResumedSession) {
@@ -489,10 +484,40 @@ export default function ColonyChat() {
           displayName,
         );
         if (restored.messages.length > 0) {
-          restored.messages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-          setMessages(restored.messages);
+          restoredMessages = restored.messages;
+        }
+        restoredPhase = restored.restoredPhase;
+      } else if (prefetchedRestore) {
+        if (reusePrefetchedRestore) {
+          restoredMessages = prefetchedRestore.messages;
+          restoredPhase = prefetchedRestore.restoredPhase;
+        } else {
+          // The backend corrected the resume target to the colony's forked
+          // session. Reload from that session so the first paint doesn't show
+          // the source queen DM or its stale independent phase.
+          const restored = await restoreSessionMessages(
+            session.session_id,
+            agentPath,
+            displayName,
+          );
+          restoredMessages = restored.messages;
+          restoredPhase = restored.restoredPhase;
         }
       }
+
+      if (restoredMessages.length > 0) {
+        restoredMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        setMessages(restoredMessages);
+      }
+
+      const initialPhase = resolveInitialColonyPhase({
+        prefetchedSessionId: coldRestoreId,
+        resolvedSessionId: session.session_id,
+        prefetchedPhase: restoredPhase,
+        serverPhase: session.queen_phase,
+        hasWorker: session.has_worker,
+      });
+      queenPhaseRef.current = initialPhase;
 
       const hasRestoredContent = isResumedSession || !!coldRestoreId;
       if (!hasRestoredContent) suppressIntroRef.current = false;
@@ -500,6 +525,8 @@ export default function ColonyChat() {
       updateState({
         sessionId: session.session_id,
         displayName,
+        queenPhase: initialPhase,
+        queenSupportsImages: session.queen_supports_images !== false,
         ready: true,
         loading: false,
         queenReady: hasRestoredContent,
