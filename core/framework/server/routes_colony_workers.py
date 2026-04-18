@@ -11,6 +11,9 @@ instances.
 - GET /api/sessions/{session_id}/colony/tools       — colony's default tools
 - GET /api/sessions/{session_id}/colony/progress/snapshot — progress.db tasks/steps snapshot
 - GET /api/sessions/{session_id}/colony/progress/stream   — SSE feed of upserts (polled)
+- GET /api/sessions/{session_id}/colony/data/tables       — list user tables in progress.db
+- GET /api/sessions/{session_id}/colony/data/tables/{table}/rows — paginated rows
+- PATCH /api/sessions/{session_id}/colony/data/tables/{table}/rows — edit a row
 """
 
 import asyncio
@@ -465,6 +468,230 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
     return resp
 
 
+# ── Raw data grid (airtable-style view/edit of progress.db tables) ─────
+#
+# The Data tab lets the operator inspect and hand-edit SQLite rows.
+# Identifier-quoting note: SQLite params can only bind values, never
+# identifiers, so we have to interpolate table/column names into SQL.
+# Every name is *validated against sqlite_master / PRAGMA table_info*
+# before use and then wrapped with ``_q()`` which escapes embedded
+# quotes. Do NOT accept raw names from the request without running them
+# through ``_validate_ident`` first.
+
+
+def _q(ident: str) -> str:
+    """Quote a SQLite identifier (table or column) safely."""
+    return '"' + ident.replace('"', '""') + '"'
+
+
+def _list_user_tables(con: sqlite3.Connection) -> list[str]:
+    return [
+        r["name"]
+        for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+
+
+def _table_columns(con: sqlite3.Connection, table: str) -> list[dict]:
+    """Return PRAGMA table_info rows as dicts. Empty list if no such table."""
+    return [
+        {
+            "name": r["name"],
+            "type": r["type"] or "",
+            "notnull": bool(r["notnull"]),
+            # pk>0 means the column is part of the primary key (ordinal);
+            # 0 means non-PK.
+            "pk": int(r["pk"]),
+            "dflt_value": r["dflt_value"],
+        }
+        for r in con.execute(f"PRAGMA table_info({_q(table)})")
+    ]
+
+
+def _read_tables_overview(db_path: Path) -> list[dict]:
+    """List user tables with columns + row counts."""
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        out: list[dict] = []
+        for name in _list_user_tables(con):
+            cols = _table_columns(con, name)
+            count_row = con.execute(f"SELECT COUNT(*) AS c FROM {_q(name)}").fetchone()
+            out.append(
+                {
+                    "name": name,
+                    "columns": cols,
+                    "row_count": int(count_row["c"]),
+                    "primary_key": [c["name"] for c in cols if c["pk"] > 0],
+                }
+            )
+        return out
+    finally:
+        con.close()
+
+
+def _validate_ident(name: str, known: set[str]) -> str | None:
+    """Return ``name`` if present in ``known``, else ``None``."""
+    return name if name in known else None
+
+
+def _read_table_rows(
+    db_path: Path,
+    table: str,
+    limit: int,
+    offset: int,
+    order_by: str | None,
+    order_dir: str,
+) -> dict:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        tables = set(_list_user_tables(con))
+        if _validate_ident(table, tables) is None:
+            return {"error": f"unknown table: {table}"}
+        cols = _table_columns(con, table)
+        col_names = {c["name"] for c in cols}
+
+        sql = f"SELECT * FROM {_q(table)}"
+        if order_by and order_by in col_names:
+            direction = "DESC" if order_dir.lower() == "desc" else "ASC"
+            sql += f" ORDER BY {_q(order_by)} {direction}"
+        sql += " LIMIT ? OFFSET ?"
+        rows = con.execute(sql, (int(limit), int(offset))).fetchall()
+        total = con.execute(f"SELECT COUNT(*) AS c FROM {_q(table)}").fetchone()["c"]
+        return {
+            "table": table,
+            "columns": cols,
+            "primary_key": [c["name"] for c in cols if c["pk"] > 0],
+            "rows": [dict(r) for r in rows],
+            "total": int(total),
+            "limit": int(limit),
+            "offset": int(offset),
+        }
+    finally:
+        con.close()
+
+
+def _update_table_row(
+    db_path: Path,
+    table: str,
+    pk: dict,
+    updates: dict,
+) -> dict:
+    """Apply ``updates`` (column->value) to the row matching ``pk``.
+
+    Returns ``{"updated": n}`` with the number of rows affected (0 or 1),
+    or ``{"error": ...}`` on validation failure.
+    """
+    if not updates:
+        return {"error": "no updates provided"}
+    con = sqlite3.connect(db_path, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        tables = set(_list_user_tables(con))
+        if _validate_ident(table, tables) is None:
+            return {"error": f"unknown table: {table}"}
+        cols = _table_columns(con, table)
+        col_names = {c["name"] for c in cols}
+        pk_cols = [c["name"] for c in cols if c["pk"] > 0]
+        if not pk_cols:
+            return {"error": f"table {table!r} has no primary key; cannot edit by row"}
+
+        # Validate pk has every pk column and all values are scalars.
+        missing = [p for p in pk_cols if p not in pk]
+        if missing:
+            return {"error": f"missing primary key columns: {missing}"}
+
+        # Validate update columns exist and aren't part of the primary key
+        # (changing a PK column would silently break joins/foreign refs).
+        bad = [c for c in updates if c not in col_names]
+        if bad:
+            return {"error": f"unknown columns: {bad}"}
+        pk_update = [c for c in updates if c in pk_cols]
+        if pk_update:
+            return {"error": f"cannot edit primary key columns: {pk_update}"}
+
+        set_sql = ", ".join(f"{_q(c)} = ?" for c in updates)
+        where_sql = " AND ".join(f"{_q(c)} = ?" for c in pk_cols)
+        sql = f"UPDATE {_q(table)} SET {set_sql} WHERE {where_sql}"
+        params = list(updates.values()) + [pk[c] for c in pk_cols]
+        cur = con.execute(sql, params)
+        con.commit()
+        return {"updated": cur.rowcount}
+    finally:
+        con.close()
+
+
+async def handle_list_tables(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/colony/data/tables"""
+    session, err = resolve_session(request)
+    if err:
+        return err
+    db_path = _resolve_progress_db(session)
+    if db_path is None:
+        return web.json_response({"tables": []})
+    tables = await asyncio.to_thread(_read_tables_overview, db_path)
+    return web.json_response({"tables": tables})
+
+
+async def handle_table_rows(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/colony/data/tables/{table}/rows"""
+    session, err = resolve_session(request)
+    if err:
+        return err
+    db_path = _resolve_progress_db(session)
+    if db_path is None:
+        return web.json_response({"error": "no progress.db"}, status=404)
+
+    table = request.match_info["table"]
+    # Clamp limit: 500 is enough for the grid's virtualization window;
+    # a larger cap would make accidental full-table loads cheap.
+    try:
+        limit = max(1, min(500, int(request.query.get("limit", "100"))))
+        offset = max(0, int(request.query.get("offset", "0")))
+    except ValueError:
+        return web.json_response({"error": "invalid limit/offset"}, status=400)
+    order_by = request.query.get("order_by") or None
+    order_dir = request.query.get("order_dir", "asc")
+
+    result = await asyncio.to_thread(
+        _read_table_rows, db_path, table, limit, offset, order_by, order_dir
+    )
+    if "error" in result:
+        return web.json_response(result, status=400)
+    return web.json_response(result)
+
+
+async def handle_update_row(request: web.Request) -> web.Response:
+    """PATCH /api/sessions/{session_id}/colony/data/tables/{table}/rows
+
+    Body: ``{"pk": {col: value, ...}, "updates": {col: value, ...}}``.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+    db_path = _resolve_progress_db(session)
+    if db_path is None:
+        return web.json_response({"error": "no progress.db"}, status=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    pk = body.get("pk") or {}
+    updates = body.get("updates") or {}
+    if not isinstance(pk, dict) or not isinstance(updates, dict):
+        return web.json_response({"error": "pk and updates must be objects"}, status=400)
+
+    table = request.match_info["table"]
+    result = await asyncio.to_thread(_update_table_row, db_path, table, pk, updates)
+    if "error" in result:
+        return web.json_response(result, status=400)
+    return web.json_response(result)
+
+
 def register_routes(app: web.Application) -> None:
     """Register colony worker routes."""
     app.router.add_get("/api/sessions/{session_id}/workers", handle_list_workers)
@@ -481,4 +708,15 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/sessions/{session_id}/colony/progress/stream",
         handle_progress_stream,
+    )
+    app.router.add_get(
+        "/api/sessions/{session_id}/colony/data/tables", handle_list_tables
+    )
+    app.router.add_get(
+        "/api/sessions/{session_id}/colony/data/tables/{table}/rows",
+        handle_table_rows,
+    )
+    app.router.add_patch(
+        "/api/sessions/{session_id}/colony/data/tables/{table}/rows",
+        handle_update_row,
     )

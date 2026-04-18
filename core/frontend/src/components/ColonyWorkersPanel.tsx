@@ -24,18 +24,25 @@ import {
   type ProgressStep,
   type WorkerSummary,
 } from "@/api/colonyWorkers";
+import {
+  colonyDataApi,
+  type CellValue,
+  type TableOverview,
+  type TableRowsResponse,
+} from "@/api/colonyData";
 import { workersApi } from "@/api/workers";
 import { sessionsApi } from "@/api/sessions";
 import { cronToLabel } from "@/lib/graphUtils";
 import type { GraphNode } from "@/components/graph-types";
 import { useColonyWorkers } from "@/context/ColonyWorkersContext";
+import { DataGrid, type SortDir } from "@/components/data-grid";
 
 interface ColonyWorkersPanelProps {
   sessionId: string;
   onClose: () => void;
 }
 
-type TabKey = "skills" | "tools" | "sessions" | "triggers";
+type TabKey = "skills" | "tools" | "sessions" | "triggers" | "data";
 
 function statusClasses(status: string): string {
   const s = status.toLowerCase();
@@ -142,6 +149,7 @@ export default function ColonyWorkersPanel({
         <TabButton active={tab === "triggers"} onClick={() => setTab("triggers")} label="Triggers" />
         <TabButton active={tab === "skills"} onClick={() => setTab("skills")} label="Skills" />
         <TabButton active={tab === "tools"} onClick={() => setTab("tools")} label="Tools" />
+        <TabButton active={tab === "data"} onClick={() => setTab("data")} label="Data" />
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -149,6 +157,7 @@ export default function ColonyWorkersPanel({
         {tab === "triggers" && <TriggersTab sessionId={sessionId} />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
         {tab === "tools" && <ToolsTab sessionId={sessionId} />}
+        {tab === "data" && <DataTab sessionId={sessionId} />}
       </div>
     </aside>
   );
@@ -979,6 +988,229 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       </p>
       <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2.5">
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Data tab (airtable-style view of progress.db tables) ──────────────
+
+function DataTab({ sessionId }: { sessionId: string }) {
+  const [tables, setTables] = useState<TableOverview[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [loadingTables, setLoadingTables] = useState(true);
+  const [tablesError, setTablesError] = useState<string | null>(null);
+
+  const refreshTables = useCallback(() => {
+    setLoadingTables(true);
+    setTablesError(null);
+    colonyDataApi
+      .listTables(sessionId)
+      .then((r) => {
+        setTables(r.tables);
+        // Auto-select the first table when none chosen yet so the user
+        // lands on data instead of an empty picker.
+        setSelected((cur) => cur ?? r.tables[0]?.name ?? null);
+      })
+      .catch((e) => setTablesError(e?.message ?? "Failed to load tables"))
+      .finally(() => setLoadingTables(false));
+  }, [sessionId]);
+
+  useEffect(() => {
+    refreshTables();
+  }, [refreshTables]);
+
+  return (
+    <div className="px-4 py-3">
+      {tablesError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive mb-3">
+          {tablesError}
+        </div>
+      )}
+
+      {loadingTables && tables.length === 0 ? (
+        <div className="flex justify-center py-10">
+          <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+        </div>
+      ) : tables.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-8">
+          No tables in progress.db (or the colony has no DB yet).
+        </p>
+      ) : (
+        <>
+          {/* Table picker — chips so we avoid a heavier select dropdown
+              in the narrow sidebar. Row counts hint at scale before the
+              user clicks in. */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {tables.map((t) => (
+              <button
+                key={t.name}
+                onClick={() => setSelected(t.name)}
+                className={`text-[10.5px] font-mono px-2 py-1 rounded border transition-colors ${
+                  selected === t.name
+                    ? "border-primary/60 bg-primary/10 text-foreground"
+                    : "border-border/50 bg-background/40 text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                }`}
+                title={`${t.row_count.toLocaleString()} rows · ${t.columns.length} columns`}
+              >
+                {t.name}
+                <span className="ml-1 text-muted-foreground/70">
+                  ({t.row_count.toLocaleString()})
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-muted-foreground mb-2 italic">
+            Edits write directly to progress.db — a running worker may not
+            notice until its next DB read.
+          </p>
+
+          {selected && (
+            <TableView
+              key={selected}
+              sessionId={sessionId}
+              table={selected}
+              onAnyEdit={() => {
+                // Row counts can change via cascading triggers or NULL→value
+                // edits; re-pull so the chip stays truthful.
+                void refreshTables();
+              }}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Page size for the Data tab grid. 100 is a sweet spot for the narrow
+ *  sidebar — big enough that most real-world tables render in one page,
+ *  small enough to keep edits responsive.  */
+const DATA_PAGE_SIZE = 100;
+
+function TableView({
+  sessionId,
+  table,
+  onAnyEdit,
+}: {
+  sessionId: string;
+  table: string;
+  onAnyEdit: () => void;
+}) {
+  const [data, setData] = useState<TableRowsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [orderBy, setOrderBy] = useState<string | null>(null);
+  const [orderDir, setOrderDir] = useState<SortDir>("asc");
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    colonyDataApi
+      .listRows(sessionId, table, {
+        limit: DATA_PAGE_SIZE,
+        offset,
+        orderBy,
+        orderDir,
+      })
+      .then(setData)
+      .catch((e) => setError(e?.message ?? "Failed to load rows"))
+      .finally(() => setLoading(false));
+  }, [sessionId, table, offset, orderBy, orderDir]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Reset paging when switching tables (key prop on TableView takes care
+  // of full unmount; this covers the sort-change case).
+  useEffect(() => {
+    setOffset(0);
+  }, [orderBy, orderDir]);
+
+  const handleSort = useCallback((col: string | null, dir: SortDir) => {
+    setOrderBy(col);
+    setOrderDir(dir);
+  }, []);
+
+  const handleEdit = useCallback(
+    async (pk: Record<string, CellValue>, column: string, newValue: CellValue) => {
+      await colonyDataApi.updateRow(sessionId, table, {
+        pk,
+        updates: { [column]: newValue },
+      });
+      // Optimistic patch of the local cache so the grid reflects the
+      // edit instantly without a full re-fetch flash.
+      setData((prev) => {
+        if (!prev) return prev;
+        const rows = prev.rows.map((r) => {
+          const matches = prev.primary_key.every((p) => r[p] === pk[p]);
+          return matches ? { ...r, [column]: newValue } : r;
+        });
+        return { ...prev, rows };
+      });
+      onAnyEdit();
+    },
+    [sessionId, table, onAnyEdit],
+  );
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="flex justify-center py-10">
+        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  const pageEnd = Math.min(data.offset + data.rows.length, data.total);
+  const canPrev = data.offset > 0;
+  const canNext = pageEnd < data.total;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <DataGrid
+        columns={data.columns}
+        rows={data.rows}
+        primaryKey={data.primary_key}
+        orderBy={orderBy}
+        orderDir={orderDir}
+        onSortChange={handleSort}
+        onCellEdit={handleEdit}
+        loading={loading}
+        emptyMessage="Table is empty."
+      />
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>
+          {data.total === 0
+            ? "0 rows"
+            : `${data.offset + 1}–${pageEnd} of ${data.total.toLocaleString()}`}
+        </span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setOffset(Math.max(0, offset - DATA_PAGE_SIZE))}
+            disabled={!canPrev || loading}
+            className="px-2 py-0.5 rounded border border-border/50 disabled:opacity-40 hover:bg-muted/30"
+          >
+            Prev
+          </button>
+          <button
+            onClick={() => setOffset(offset + DATA_PAGE_SIZE)}
+            disabled={!canNext || loading}
+            className="px-2 py-0.5 rounded border border-border/50 disabled:opacity-40 hover:bg-muted/30"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );
