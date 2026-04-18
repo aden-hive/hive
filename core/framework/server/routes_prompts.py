@@ -8,7 +8,6 @@
 import json
 import logging
 import time
-from pathlib import Path
 
 from aiohttp import web
 

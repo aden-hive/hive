@@ -312,8 +312,8 @@ async def _validate_provider_key(
 
     Runs the check in a thread pool to avoid blocking the event loop.
     """
-    from scripts.check_llm_key import PROVIDERS as CHECK_PROVIDERS
     from scripts.check_llm_key import (
+        PROVIDERS as CHECK_PROVIDERS,
         check_anthropic_compatible,
         check_minimax,
         check_openai_compatible,
@@ -326,21 +326,15 @@ async def _validate_provider_key(
         try:
             # Subscription providers with custom api_base
             if pid == "openrouter" and model:
-                return check_openrouter_model(
-                    api_key, model=model, api_base=api_base or "https://openrouter.ai/api/v1"
-                )
+                return check_openrouter_model(api_key, model=model, api_base=api_base or "https://openrouter.ai/api/v1")
             if api_base and pid == "minimax":
                 return check_minimax(api_key, api_base)
             if api_base and pid == "openrouter":
                 return check_openrouter(api_key, api_base)
             if api_base and pid == "kimi":
-                return check_anthropic_compatible(
-                    api_key, api_base.rstrip("/") + "/v1/messages", "Kimi"
-                )
+                return check_anthropic_compatible(api_key, api_base.rstrip("/") + "/v1/messages", "Kimi")
             if api_base and pid == "hive":
-                return check_anthropic_compatible(
-                    api_key, api_base.rstrip("/") + "/v1/messages", "Hive"
-                )
+                return check_anthropic_compatible(api_key, api_base.rstrip("/") + "/v1/messages", "Hive")
             if api_base:
                 endpoint = api_base.rstrip("/") + "/models"
                 name = {"zai": "ZAI"}.get(pid, "Custom provider")
@@ -380,10 +374,7 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
 
     # Subscription detection — only include subscriptions whose tokens exist
     active_subscription = _get_active_subscription(llm)
-    detected_subscriptions = [
-        sid for sid in _detect_subscriptions()
-        if _get_subscription_token(sid)
-    ]
+    detected_subscriptions = [sid for sid in _detect_subscriptions() if _get_subscription_token(sid)]
 
     return web.json_response(
         {
