@@ -108,24 +108,31 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         button: Literal["left", "right", "middle"] = "left",
     ) -> dict:
         """
-        Click at specific viewport coordinates (CSS pixels).
+        Click at a FRACTION of the viewport (0..1, 0..1).
 
-        Chrome DevTools Protocol's Input.dispatchMouseEvent operates in
-        **CSS pixels**, not physical pixels. If you have a screenshot
-        image coordinate, convert it with ``browser_coords(x, y)`` and
-        use the returned ``css_x`` / ``css_y`` — not ``physical_x/y``.
-        On a DPR=2 display, feeding physical coordinates lands the click
-        at 2× the intended position.
+        Coordinates are **fractions of the viewport**, not pixels:
+        ``(0.5, 0.5)`` is the center, ``(0.1, 0.2)`` is 10 % from the
+        left and 20 % from the top. Read a target's proportional
+        position off ``browser_screenshot`` (or pass
+        ``rect.cx`` / ``rect.cy`` from ``browser_get_rect`` /
+        ``browser_shadow_query`` directly — they return fractions too).
+
+        Fractions are used because every vision model resizes or tiles
+        images differently (Claude ~1.15 MP target, GPT-4o 512-px
+        tiles, etc.). Proportional positions survive every such
+        transform; pixel coords do not.
 
         Args:
-            x: X coordinate in CSS pixels (viewport space)
-            y: Y coordinate in CSS pixels (viewport space)
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             button: Mouse button to click (left, right, middle)
 
         Returns:
-            Dict with click result
+            Dict with click result, including ``focused_element``
+            describing what the click focused. ``focused_element.rect``
+            is also in fractions.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile, "button": button}
@@ -148,18 +155,33 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_click_coordinate", params, result=result)
             return result
 
-        try:
-            from .inspection import _screenshot_css_scales, _screenshot_scales
+        # Pixel-input guard: legitimate fractions live in [0, 1]. Allow a
+        # small overshoot tolerance for edge targets.
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport. Read the target's "
+                    "proportional position off browser_screenshot, or pass "
+                    "rect.cx / rect.cy from browser_get_rect / "
+                    "browser_shadow_query (they return fractions)."
+                ),
+            }
+            log_tool_call("browser_click_coordinate", params, result=result)
+            return result
 
-            click_result = await bridge.click_coordinate(target_tab, x, y, button=button)
+        try:
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            css_x = x * cw
+            css_y = y * ch
+            click_result = await bridge.click_coordinate(target_tab, css_x, css_y, button=button)
             log_tool_call(
                 "browser_click_coordinate",
                 params,
-                result={
-                    **click_result,
-                    "debug_stored_physicalScale": _screenshot_scales.get(target_tab, "unset"),
-                    "debug_stored_cssScale": _screenshot_css_scales.get(target_tab, "unset"),
-                },
+                result={**click_result, "cssWidth": cw, "cssHeight": ch},
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             return click_result
@@ -484,15 +506,16 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Hover at CSS pixel coordinates without needing a CSS selector.
+        Hover at a FRACTION of the viewport (0..1, 0..1).
 
         Use this instead of browser_hover when the element is in an overlay,
         shadow DOM, or virtual-rendered component that isn't in the regular DOM.
-        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+        ``x`` / ``y`` are fractions of the viewport (``0.5`` = center);
+        the tool converts to CSS px internally.
 
         Args:
-            x: CSS pixel X coordinate
-            y: CSS pixel Y coordinate
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
@@ -520,8 +543,22 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_hover_coordinate", params, result=result)
             return result
 
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport."
+                ),
+            }
+            log_tool_call("browser_hover_coordinate", params, result=result)
+            return result
+
         try:
-            hover_result = await bridge.hover_coordinate(target_tab, x, y)
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            hover_result = await bridge.hover_coordinate(target_tab, x * cw, y * ch)
             log_tool_call(
                 "browser_hover_coordinate",
                 params,
@@ -548,16 +585,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Move mouse to CSS pixel coordinates then press a key.
+        Move mouse to a FRACTION of the viewport (0..1, 0..1), then press a key.
 
         Use this instead of browser_press when the focused element is in an overlay
         or virtual-rendered component. Moving the mouse first routes the key event
         through native browser hit-testing instead of the DOM focus chain.
-        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+        ``x`` / ``y`` are fractions of the viewport; the tool converts
+        to CSS px internally.
 
         Args:
-            x: CSS pixel X coordinate to position mouse
-            y: CSS pixel Y coordinate to position mouse
+            x: X fraction of the viewport (0..1).
+            y: Y fraction of the viewport (0..1).
             key: Key to press (e.g. 'Enter', 'Space', 'Escape', 'ArrowDown')
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
@@ -586,8 +624,22 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             log_tool_call("browser_press_at", params, result=result)
             return result
 
+        if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
+            result = {
+                "ok": False,
+                "error": (
+                    f"Coords ({x}, {y}) look like pixels. This tool expects "
+                    "fractions 0..1 of the viewport."
+                ),
+            }
+            log_tool_call("browser_press_at", params, result=result)
+            return result
+
         try:
-            press_result = await bridge.press_key_at(target_tab, x, y, key)
+            from .inspection import _ensure_viewport_size
+
+            cw, ch = await _ensure_viewport_size(target_tab)
+            press_result = await bridge.press_key_at(target_tab, x * cw, y * ch, key)
             log_tool_call(
                 "browser_press_at",
                 params,

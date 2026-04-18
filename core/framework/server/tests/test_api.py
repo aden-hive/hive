@@ -638,13 +638,17 @@ class TestQueenSessionSelection:
             )
             assert resp.status == 200
             data = await resp.json()
-
-        assert data == {
-            "session_id": "queen_live",
-            "queen_id": "queen_technology",
-            "status": "live",
-        }
-        assert any(call.args == ("other_live",) for call in manager.stop_session.await_args_list)
+            # Assert inside the async-with so app shutdown (which stops
+            # remaining sessions as cleanup) doesn't pollute the assertions.
+            assert data == {
+                "session_id": "queen_live",
+                "queen_id": "queen_technology",
+                "status": "live",
+            }
+            # Other queen's live session must be left running so multiple
+            # queens can stay active in parallel across navigation.
+            manager.stop_session.assert_not_awaited()
+            assert "other_live" in manager._sessions
 
     @pytest.mark.asyncio
     async def test_select_queen_session_restores_specific_history_session(self, monkeypatch, tmp_path):
@@ -745,18 +749,21 @@ class TestQueenSessionSelection:
             )
             assert resp.status == 200
             data = await resp.json()
-
-        assert data == {
-            "session_id": "fresh_thread",
-            "queen_id": "queen_technology",
-            "status": "created",
-        }
-        manager.stop_session.assert_awaited_once_with("old_live")
-        manager.create_session.assert_awaited_once_with(
-            initial_prompt=None,
-            queen_name="queen_technology",
-            initial_phase="independent",
-        )
+            # Assert inside the async-with so app shutdown (which stops
+            # remaining sessions as cleanup) doesn't pollute the assertions.
+            assert data == {
+                "session_id": "fresh_thread",
+                "queen_id": "queen_technology",
+                "status": "created",
+            }
+            # Other queen's live session must be left running.
+            manager.stop_session.assert_not_awaited()
+            assert "old_live" in manager._sessions
+            manager.create_session.assert_awaited_once_with(
+                initial_prompt=None,
+                queen_name="queen_technology",
+                initial_phase="independent",
+            )
 
 
 class TestExecution:

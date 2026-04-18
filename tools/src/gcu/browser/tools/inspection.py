@@ -23,13 +23,39 @@ from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
 
-# Target width for normalized screenshots (px in the delivered image)
-_SCREENSHOT_WIDTH = 600
 
-# Maps tab_id -> physical scale: image_coord × scale = physical pixels (for CDP Input events)
+# Fixed output width for all screenshots (bandwidth default). This
+# number does NOT affect coordinate semantics — click / hover / press
+# and rect tools all work in fractions of the viewport (0..1), which
+# are invariant to whatever resize / tile the vision API applies. The
+# 800 px width is simply small enough to keep JPEG payloads under
+# ~150 KB on typical UI screenshots.
+_SCREENSHOT_WIDTH = 800
+
+# Per-tab viewport-size cache populated on every browser_screenshot
+# and on lazy-init inside the click tools. Stores CSS-pixel viewport
+# dimensions (window.innerWidth / window.innerHeight). Click tools
+# multiply fractional inputs by these to get CSS coords before
+# dispatching CDP events; rect tools divide CSS-pixel DOM rects by
+# these to produce fractions for the agent.
+_viewport_sizes: dict[int, tuple[int, int]] = {}
+
+# Optional debug cache — physical-px scale per tab (orig_png_w /
+# _SCREENSHOT_WIDTH). Logged only; no consumer.
 _screenshot_scales: dict[int, float] = {}
-# Maps tab_id -> CSS scale: image_coord × scale = CSS pixels (for DOM APIs / getBoundingClientRect)
-_screenshot_css_scales: dict[int, float] = {}
+
+
+def clear_tab_state(tab_ids) -> None:
+    """Drop cached screenshot scales for the given tab_ids.
+
+    Called when a tab closes or a profile's context is destroyed so stale
+    scale values can't bleed into a later tab that Chrome happens to assign
+    the same id. Accepts a single id or any iterable.
+    """
+    if isinstance(tab_ids, int):
+        tab_ids = (tab_ids,)
+    for tid in tab_ids:
+        _screenshot_scales.pop(tid, None)
 
 
 def _resize_and_annotate(
@@ -37,18 +63,25 @@ def _resize_and_annotate(
     css_width: int,
     dpr: float = 1.0,
     highlights: list[dict] | None = None,
-    width: int = _SCREENSHOT_WIDTH,
-) -> tuple[str, float, float]:
-    """Resize a base64 PNG to _SCREENSHOT_WIDTH wide, annotate highlights.
+) -> tuple[str, float]:
+    """Resize the captured PNG down to ``_SCREENSHOT_WIDTH`` (=800 px)
+    and re-encode as JPEG quality 75.
 
-    Returns (new_b64, physical_scale, css_scale) where:
-      physical_scale = physical_px_per_image_px  (multiply image coords → physical px)
-      css_scale      = css_px_per_image_px        (multiply image coords → CSS px for DOM APIs)
+    The image dimensions do NOT determine click coordinates any more —
+    the tools work in viewport fractions. This helper exists purely
+    for bandwidth + annotation overlay. Returns ``(new_b64,
+    physical_scale)`` where ``physical_scale = orig_png_w / output_w``
+    is kept for debug logging.
 
-    Highlights have x,y,w,h in CSS pixels (what getBoundingClientRect returns,
-    and what CDP Input.dispatchMouseEvent accepts).
-    Falls back to original data if Pillow unavailable or resize fails.
+    Highlight rects arrive in CSS px; they're converted to image-space
+    for overlay drawing via the local ``css_to_image = css_width /
+    output_w`` factor (computed inline — no external cache).
     """
+    if not css_width or css_width <= 0:
+        # Bridge always supplies css_width from window.innerWidth; only
+        # reach here on a degraded response. Return the raw PNG.
+        return data, 1.0
+
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -58,47 +91,43 @@ def _resize_and_annotate(
             import struct
 
             orig_w = struct.unpack(">I", raw[16:20])[0]
-        raw_size_bytes = len(raw)
-        physical_scale = orig_w / width if orig_w and width else 1.0
-        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+        physical_scale = orig_w / _SCREENSHOT_WIDTH if orig_w else 1.0
         logger.warning(
-            "PIL not available — screenshot resize SKIPPED (cannot downscale image). "
-            "raw_size=%d bytes, png_width=%d, css_width=%s, dpr=%s, target_width=%d. "
-            "Returning ORIGINAL image with computed scales: physicalScale=%.4f, cssScale=%.4f. "
-            "Agent must use browser_coords() to convert image positions before clicking.",
-            raw_size_bytes,
-            orig_w,
+            "PIL not available — screenshot resize SKIPPED. "
+            "Returning raw physical-px PNG. physicalScale=%.4f, "
+            "css_width=%d, dpr=%s. Install Pillow for annotation.",
+            physical_scale,
             css_width,
             dpr,
-            width,
-            physical_scale,
-            css_scale,
         )
-        return data, round(physical_scale, 4), round(css_scale, 4)
+        return data, round(physical_scale, 4)
 
     try:
         raw = base64.b64decode(data)
         img = Image.open(io.BytesIO(raw)).convert("RGBA")
         orig_w, orig_h = img.size
 
-        physical_scale = orig_w / width
-        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+        physical_scale = orig_w / _SCREENSHOT_WIDTH
+        new_w = _SCREENSHOT_WIDTH
+        new_h = round(orig_h * new_w / orig_w)
+        if (new_w, new_h) != img.size:
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # Local CSS → image px factor for overlay draws. Kept local —
+        # not exported, not stored, not leaked to the agent.
+        css_to_image = css_width / _SCREENSHOT_WIDTH
 
         logger.info(
-            "Screenshot resize: orig=%dx%d → target=%dx%d, css_width=%s, dpr=%s, physicalScale=%.4f, cssScale=%.4f",
+            "Screenshot: orig=%dx%d → out=%dx%d (css_width=%d, dpr=%s), physicalScale=%.4f, css_to_image=%.4f",
             orig_w,
             orig_h,
-            width,
-            round(orig_h * width / orig_w),
+            new_w,
+            new_h,
             css_width,
             dpr,
             physical_scale,
-            css_scale,
+            css_to_image,
         )
-
-        new_w = width
-        new_h = round(orig_h * new_w / orig_w)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
 
         if highlights:
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -111,11 +140,11 @@ def _resize_and_annotate(
             for h in highlights:
                 kind = h.get("kind", "rect")
                 label = h.get("label", "")
-                # Highlights are in CSS px → convert to image px
-                ix = h["x"] / css_scale
-                iy = h["y"] / css_scale
-                iw = h.get("w", 0) / css_scale
-                ih = h.get("h", 0) / css_scale
+                # Highlights arrive in CSS px → convert to image px.
+                ix = h["x"] / css_to_image
+                iy = h["y"] / css_to_image
+                iw = h.get("w", 0) / css_to_image
+                ih = h.get("h", 0) / css_to_image
 
                 if kind == "point":
                     cx, cy, r = ix, iy, 10
@@ -135,11 +164,9 @@ def _resize_and_annotate(
                         width=2,
                     )
 
-                # Label: show image pixel position so user knows where to look
-                img_coords = f"img:({round(ix)},{round(iy)})"
-                display_label = f"{img_coords} {label}" if label else img_coords
+                display_label = f"({round(ix)},{round(iy)}) {label}".strip()
                 lx, ly = ix, max(2, iy - 16)
-                lx = max(2, min(lx, width - 120))
+                lx = max(2, min(lx, new_w - 120))
                 bbox = draw.textbbox((lx, ly), display_label, font=font)
                 pad = 3
                 draw.rectangle(
@@ -153,22 +180,50 @@ def _resize_and_annotate(
             img = img.convert("RGB")
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
+        img.save(buf, format="JPEG", quality=75, optimize=True)
         return (
             base64.b64encode(buf.getvalue()).decode(),
             round(physical_scale, 4),
-            round(css_scale, 4),
         )
     except Exception:
         logger.warning(
-            "Screenshot resize/annotate FAILED — returning original image with scale=1.0. "
-            "css_width=%s, dpr=%s, target_width=%d. Clicks will be misaligned.",
+            "Screenshot resize/annotate FAILED — returning original image. "
+            "css_width=%s, dpr=%s.",
             css_width,
             dpr,
-            width,
             exc_info=True,
         )
-        return data, 1.0, 1.0
+        return data, 1.0
+
+
+async def _ensure_viewport_size(tab_id: int) -> tuple[int, int]:
+    """Return ``(cssWidth, cssHeight)`` for ``tab_id``, populating the
+    cache via ``window.innerWidth`` / ``window.innerHeight`` on miss.
+
+    Used by click / hover / press tools to turn fractional inputs
+    (0..1) into CSS px, and by rect tools to turn CSS-px rects into
+    fractions. Degrades to ``(1, 1)`` if the bridge can't be queried
+    — that makes every coord an identity op, which is a safe no-op
+    (and preferable to crashing).
+    """
+    cached = _viewport_sizes.get(tab_id)
+    if cached is not None and cached[0] > 0 and cached[1] > 0:
+        return cached
+    bridge = get_bridge()
+    try:
+        result = await bridge.evaluate(tab_id, "({w: window.innerWidth, h: window.innerHeight})")
+        inner = (result or {}).get("result") or {}
+        cw = int(float(inner.get("w") or 0))
+        ch = int(float(inner.get("h") or 0))
+    except Exception:
+        cw, ch = 0, 0
+    if cw <= 0 or ch <= 0:
+        # Degraded: bridge didn't return viewport. Cache an identity
+        # so we don't retry on every call; corrects itself after the
+        # next successful browser_screenshot.
+        cw, ch = 1, 1
+    _viewport_sizes[tab_id] = (cw, ch)
+    return cw, ch
 
 
 def register_inspection_tools(mcp: FastMCP) -> None:
@@ -180,29 +235,33 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
         full_page: bool = False,
         selector: str | None = None,
-        image_type: Literal["png", "jpeg"] = "png",
         annotate: bool = True,
-        width: int = _SCREENSHOT_WIDTH,
     ) -> list:
         """
         Take a screenshot of the current page.
 
-        Returns a normalized image alongside text metadata (URL, size, scale
-        factors, etc.). Automatically annotates the last interaction (click,
-        hover, type) with a bounding box overlay.
+        Image is 800 px wide (JPEG quality 75, ~50–120 KB). All
+        coordinate tools work in **fractions of the viewport (0..1)**,
+        not pixels — so read a target's proportional position off this
+        image ("~35 % from the left, ~20 % from the top") and pass
+        ``(0.35, 0.20)`` to ``browser_click_coordinate`` /
+        ``browser_hover_coordinate`` / ``browser_press_at``.
+        ``browser_get_rect`` and ``browser_shadow_query`` likewise
+        return coordinates as fractions.
 
         Args:
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            full_page: Capture full scrollable page (default: False)
+            full_page: Capture full scrollable page (default: False).
+                Note: full_page images extend beyond the viewport, so
+                fractions read off them do NOT map cleanly to
+                viewport-space clicks. Use for reading / overview only,
+                not for pointing.
             selector: CSS selector to screenshot a specific element (optional)
-            image_type: Image format - png or jpeg (default: png)
             annotate: Draw bounding box of last interaction on image (default: True)
-            width: Output image width in pixels (default: 600). Use 800+ for fine
-                   text, 400 for quick layout checks.
 
         Returns:
-            List of content blocks: text metadata + image
+            List of content blocks: text metadata + image.
         """
         start = time.perf_counter()
         params = {
@@ -252,7 +311,6 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                 return [TextContent(type="text", text=json.dumps(screenshot_result))]
 
             data = screenshot_result.get("data")
-            mime_type = screenshot_result.get("mimeType", "image/png")
             css_width = screenshot_result.get("cssWidth", 0)
             dpr = screenshot_result.get("devicePixelRatio", 1.0)
 
@@ -263,45 +321,50 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             if annotate and target_tab in _interaction_highlights:
                 highlights = [_interaction_highlights[target_tab]]
 
-            # Normalize to 800px wide and annotate. Offloaded to a
-            # thread because PIL Image.open/resize/ImageDraw/composite on
-            # a 2-megapixel PNG blocks for ~150-300ms of CPU — plenty to
-            # freeze the asyncio event loop and delay every concurrent
-            # tool call during a screenshot. The function is reentrant
-            # (fresh PIL Image per call, no shared state), so to_thread
-            # is safe.
-            data, physical_scale, css_scale = await asyncio.to_thread(
+            # Resize to CSS-viewport dimensions (image px == CSS px)
+            # and re-encode as JPEG. Offloaded to a thread because PIL
+            # Image.open/resize/ImageDraw/composite on a 2-megapixel
+            # PNG blocks for ~150–300 ms of CPU — plenty to freeze the
+            # asyncio event loop. Reentrant: no shared state.
+            data, physical_scale = await asyncio.to_thread(
                 _resize_and_annotate,
                 data,
                 css_width,
                 dpr,
                 highlights,
-                width,
             )
-            _screenshot_scales[target_tab] = physical_scale
-            _screenshot_css_scales[target_tab] = css_scale
+            # Cache live viewport dimensions so click / hover / press /
+            # rect tools can translate fractions ↔ CSS px without
+            # asking the page again.
+            css_height = int(screenshot_result.get("cssHeight", 0)) or 0
+            if target_tab is not None and css_width > 0 and css_height > 0:
+                _viewport_sizes[target_tab] = (int(css_width), css_height)
+                _screenshot_scales[target_tab] = physical_scale
 
             meta = json.dumps(
                 {
                     "ok": True,
                     "tabId": target_tab,
                     "url": screenshot_result.get("url", ""),
-                    "imageType": mime_type.split("/")[-1],
+                    "imageType": "jpeg",
                     "size": len(base64.b64decode(data)) if data else 0,
-                    "imageWidth": width,
+                    "imageWidth": _SCREENSHOT_WIDTH,
+                    "cssWidth": css_width,
+                    "cssHeight": css_height,
                     "fullPage": full_page,
                     "devicePixelRatio": dpr,
                     "physicalScale": physical_scale,
-                    "cssScale": css_scale,
                     "annotated": bool(highlights),
                     "scaleHint": (
-                        f"image_coord × {css_scale} = CSS px "
-                        f"→ feed to browser_click_coordinate, "
-                        f"browser_hover_coordinate, browser_press_at "
-                        f"(CDP Input events use CSS pixels). "
-                        f"image_coord × {physical_scale} = physical px "
-                        f"is debug-only on HiDPI displays and must NOT "
-                        f"be used for clicks — it overshoots by DPR×."
+                        "Coordinates for click / hover / press are "
+                        "fractions 0..1 of the viewport. Read a "
+                        "target's proportional position off this image "
+                        "(e.g. '~35 % from the left, ~20 % from the top' "
+                        "→ (0.35, 0.20)) and pass that to "
+                        "browser_click_coordinate / "
+                        "browser_hover_coordinate / browser_press_at. "
+                        "browser_get_rect / browser_shadow_query / "
+                        "focused_element.rect return fractions too."
                     ),
                 }
             )
@@ -313,17 +376,17 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     "ok": True,
                     "size": len(base64.b64decode(data)) if data else 0,
                     "url": screenshot_result.get("url", ""),
+                    "cssWidth": css_width,
+                    "cssHeight": css_height,
                     "physicalScale": physical_scale,
-                    "cssScale": css_scale,
-                    "debug_cssWidth": css_width,
-                    "debug_dpr": dpr,
+                    "dpr": dpr,
                 },
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
             return [
                 TextContent(type="text", text=meta),
-                ImageContent(type="image", data=data, mimeType=mime_type),
+                ImageContent(type="image", data=data, mimeType="image/jpeg"),
             ]
         except Exception as e:
             log_tool_call(
@@ -333,73 +396,6 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             return [TextContent(type="text", text=json.dumps({"ok": False, "error": str(e)}))]
-
-    @mcp.tool()
-    def browser_coords(
-        x: float,
-        y: float,
-        tab_id: int | None = None,
-        profile: str | None = None,
-    ) -> dict:
-        """
-        Convert screenshot image coordinates to browser click coordinates.
-
-        After browser_screenshot returns a downscaled image, use this to
-        translate pixel positions you see in the image into the CSS pixel
-        coordinates that Chrome DevTools Protocol expects.
-
-        **CDP Input.dispatchMouseEvent uses CSS pixels**, so you want
-        ``css_x`` / ``css_y`` for every click/hover tool. ``physical_x/y``
-        is kept in the return for debugging on HiDPI displays — do NOT
-        feed it to clicks; on a DPR=2 screen it lands 2× too far.
-
-        Edge case: pages using ``zoom`` or ``transform: scale()`` (e.g.
-        LinkedIn's ``#interop-outlet`` shadow DOM) render in a scaled
-        local coordinate space. For those, ``getBoundingClientRect()``
-        reports pre-zoom coordinates and you may still need to multiply
-        by the element's effective zoom. Use browser_shadow_query to
-        get the zoomed rect directly.
-
-        Args:
-            x: X pixel position in the screenshot image
-            y: Y pixel position in the screenshot image
-            tab_id: Chrome tab ID (default: active tab for profile)
-            profile: Browser profile name (default: "default")
-
-        Returns:
-            Dict with css_x, css_y (primary — use these), physical_x,
-            physical_y (debug only), and scale factors.
-        """
-        ctx = _get_context(profile)
-        target_tab = tab_id or (ctx.get("activeTabId") if ctx else None)
-
-        physical_scale = _screenshot_scales.get(target_tab, 1.0) if target_tab else 1.0
-        # css_scale stored in second slot via _screenshot_css_scales
-        css_scale = _screenshot_css_scales.get(target_tab, physical_scale) if target_tab else physical_scale
-
-        return {
-            "ok": True,
-            # Primary output: CSS pixels. Feed these to click/hover/press.
-            "css_x": round(x * css_scale, 1),
-            "css_y": round(y * css_scale, 1),
-            # Debug output: raw physical pixels. DO NOT feed to clicks on
-            # HiDPI displays — CDP Input events use CSS pixels, so sending
-            # physical coordinates lands the click at roughly DPR× the
-            # intended position.
-            "physical_x": round(x * physical_scale, 1),
-            "physical_y": round(y * physical_scale, 1),
-            "physicalScale": physical_scale,
-            "cssScale": css_scale,
-            "tabId": target_tab,
-            "note": (
-                "Use css_x/css_y with browser_click_coordinate, "
-                "browser_hover_coordinate, browser_press_at — "
-                "Chrome DevTools Protocol Input.dispatchMouseEvent "
-                "operates in CSS pixels. physical_x/y is for debugging "
-                "on HiDPI displays only; feeding it to clicks lands "
-                "them at DPR× the intended coordinate."
-            ),
-        }
 
     @mcp.tool()
     async def browser_shadow_query(
@@ -412,7 +408,9 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
         Traverses shadow roots to find elements inside closed/open shadow DOM,
         overlays, and virtual-rendered components (e.g. LinkedIn's #interop-outlet).
-        Returns getBoundingClientRect in both CSS and physical pixels.
+        Returns the element's bounding rect as **fractions of the
+        viewport (0..1)** — feed ``rect.cx`` / ``rect.cy`` straight
+        into browser_click_coordinate / hover_coordinate / press_at.
 
         Args:
             selector: CSS selectors joined by ' >>> ' to pierce shadow roots.
@@ -421,7 +419,8 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with rect (CSS px) and physical rect (CSS px × DPR) of the element
+            Dict with ``rect`` block (x, y, w, h, cx, cy) as fractions,
+            plus ``cssWidth`` / ``cssHeight`` for reference.
         """
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
@@ -438,36 +437,27 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return result
 
         rect = result["rect"]
-        physical_scale = _screenshot_scales.get(target_tab, 1.0)
-        css_scale = _screenshot_css_scales.get(target_tab, 1.0)
-        dpr = physical_scale / css_scale if css_scale else 1.0
-
+        cw, ch = await _ensure_viewport_size(target_tab)
+        cw_f = float(cw) if cw > 0 else 1.0
+        ch_f = float(ch) if ch > 0 else 1.0
         return {
             "ok": True,
             "selector": selector,
             "tag": rect.get("tag"),
-            "css": {
-                "x": rect["x"],
-                "y": rect["y"],
-                "w": rect["w"],
-                "h": rect["h"],
-                "cx": rect["cx"],
-                "cy": rect["cy"],
+            "rect": {
+                "x": round(rect["x"] / cw_f, 4),
+                "y": round(rect["y"] / ch_f, 4),
+                "w": round(rect["w"] / cw_f, 4),
+                "h": round(rect["h"] / ch_f, 4),
+                "cx": round(rect["cx"] / cw_f, 4),
+                "cy": round(rect["cy"] / ch_f, 4),
             },
-            "physical": {
-                "x": round(rect["x"] * dpr, 1),
-                "y": round(rect["y"] * dpr, 1),
-                "w": round(rect["w"] * dpr, 1),
-                "h": round(rect["h"] * dpr, 1),
-                "cx": round(rect["cx"] * dpr, 1),
-                "cy": round(rect["cy"] * dpr, 1),
-            },
+            "cssWidth": cw,
+            "cssHeight": ch,
             "note": (
-                "Use css.cx/cy with browser_click_coordinate, "
-                "browser_hover_coordinate, browser_press_at — "
-                "CDP Input events operate in CSS pixels. "
-                "physical.* is debug-only; feeding it to clicks "
-                "lands them DPR× too far on HiDPI displays."
+                "rect fields are fractions of the viewport (0..1). "
+                "Pass rect.cx / rect.cy to browser_click_coordinate / "
+                "hover_coordinate / press_at."
             ),
         }
 
@@ -480,11 +470,10 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         """
         Get the bounding rect of an element by CSS selector.
 
-        Supports '>>>' shadow-piercing selectors for overlay/shadow DOM content.
-        Returns coordinates in CSS pixels (for clicks and DOM APIs); the
-        physical-pixel variant is returned for debugging on HiDPI displays
-        only — it must not be fed to click/hover/press tools, which use
-        CSS pixels.
+        Supports '>>>' shadow-piercing selectors for overlay/shadow DOM
+        content. Returns the rect as **fractions of the viewport
+        (0..1)** — the same coordinate space browser_click_coordinate
+        / hover_coordinate / press_at expect.
 
         Args:
             selector: CSS selector, optionally with ' >>> ' to pierce shadow roots.
@@ -493,7 +482,8 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with css and physical bounding rects
+            Dict with ``rect`` block (x, y, w, h, cx, cy) as fractions,
+            plus ``cssWidth`` / ``cssHeight`` for reference.
         """
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
@@ -510,36 +500,27 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return result
 
         rect = result["rect"]
-        physical_scale = _screenshot_scales.get(target_tab, 1.0)
-        css_scale = _screenshot_css_scales.get(target_tab, 1.0)
-        dpr = physical_scale / css_scale if css_scale else 1.0
-
+        cw, ch = await _ensure_viewport_size(target_tab)
+        cw_f = float(cw) if cw > 0 else 1.0
+        ch_f = float(ch) if ch > 0 else 1.0
         return {
             "ok": True,
             "selector": selector,
             "tag": rect.get("tag"),
-            "css": {
-                "x": rect["x"],
-                "y": rect["y"],
-                "w": rect["w"],
-                "h": rect["h"],
-                "cx": rect["cx"],
-                "cy": rect["cy"],
+            "rect": {
+                "x": round(rect["x"] / cw_f, 4),
+                "y": round(rect["y"] / ch_f, 4),
+                "w": round(rect["w"] / cw_f, 4),
+                "h": round(rect["h"] / ch_f, 4),
+                "cx": round(rect["cx"] / cw_f, 4),
+                "cy": round(rect["cy"] / ch_f, 4),
             },
-            "physical": {
-                "x": round(rect["x"] * dpr, 1),
-                "y": round(rect["y"] * dpr, 1),
-                "w": round(rect["w"] * dpr, 1),
-                "h": round(rect["h"] * dpr, 1),
-                "cx": round(rect["cx"] * dpr, 1),
-                "cy": round(rect["cy"] * dpr, 1),
-            },
+            "cssWidth": cw,
+            "cssHeight": ch,
             "note": (
-                "Use css.cx/cy with browser_click_coordinate, "
-                "browser_hover_coordinate, browser_press_at — "
-                "CDP Input events operate in CSS pixels. "
-                "physical.* is debug-only; feeding it to clicks "
-                "lands them DPR× too far on HiDPI displays."
+                "rect fields are fractions of the viewport (0..1). "
+                "Pass rect.cx / rect.cy to browser_click_coordinate / "
+                "hover_coordinate / press_at."
             ),
         }
 

@@ -28,17 +28,6 @@ from framework.config import QUEENS_DIR
 logger = logging.getLogger(__name__)
 
 
-async def _stop_live_sessions(manager, keep_session_id: str | None = None) -> None:
-    """Stop live sessions so only the selected queen session remains active."""
-    for session in list(manager.list_sessions()):
-        if keep_session_id and session.id == keep_session_id:
-            continue
-        try:
-            await manager.stop_session(session.id)
-        except Exception:
-            logger.debug("Failed to stop session %s during queen switch", session.id)
-
-
 def _read_queen_session_meta(queen_id: str, session_id: str) -> dict[str, Any]:
     """Return persisted metadata for a queen session when available."""
     session_dir = QUEENS_DIR / queen_id / "sessions" / session_id
@@ -267,10 +256,6 @@ async def handle_queen_session(request: web.Request) -> web.Response:
                 }
             )
 
-    # Stop any live sessions bound to a different queen so only one queen
-    # is active at a time.
-    await _stop_live_sessions(manager)
-
     # 2. Find the most recent cold session for this queen and resume it.
     # IMPORTANT: skip sessions that don't belong in the queen DM:
     #   - ``colony_fork: true`` -- duplicates created by handle_colony_spawn
@@ -361,7 +346,6 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
 
     live_session = manager.get_session(target_session_id)
     if live_session is not None:
-        await _stop_live_sessions(manager, keep_session_id=target_session_id)
         return web.json_response(
             {
                 "session_id": live_session.id,
@@ -369,8 +353,6 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
                 "status": "live",
             }
         )
-
-    await _stop_live_sessions(manager)
 
     meta = _read_queen_session_meta(queen_id, target_session_id)
     agent_path = meta.get("agent_path")
@@ -405,7 +387,6 @@ async def handle_new_queen_session(request: web.Request) -> web.Response:
     initial_prompt = body.get("initial_prompt")
     initial_phase = body.get("initial_phase") or "independent"
 
-    await _stop_live_sessions(manager)
     session = await manager.create_session(
         initial_prompt=initial_prompt,
         queen_name=queen_id,

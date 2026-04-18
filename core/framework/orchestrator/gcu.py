@@ -42,25 +42,26 @@ after an interaction unless you need a fresh view.
 Only fall back to `browser_get_text` for extracting small elements by
 CSS selector.
 
-## Coordinates: always CSS pixels
+## Coordinates
 
-Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS
-pixels**, not physical pixels. This is critical and often gets wrong:
+Every browser tool that takes or returns coordinates operates in
+**fractions of the viewport (0..1 for both axes)**. Read a target's
+proportional position off `browser_screenshot` — "this button is
+~35% from the left, ~20% from the top" → pass `(0.35, 0.20)`.
+`browser_get_rect` and `browser_shadow_query` return `rect.cx` /
+`rect.cy` as fractions in the same space. The tools handle the
+fraction → CSS-px multiplication internally; you do not need to
+track image pixels, DPR, or any scale factor.
 
-| Tool | Unit |
-|---|---|
-| `browser_click_coordinate(x, y)` | **CSS pixels** |
-| `browser_hover_coordinate(x, y)` | **CSS pixels** |
-| `browser_press_at(x, y, key)` | **CSS pixels** |
-| `getBoundingClientRect()` | already CSS pixels — pass straight through |
-| `browser_coords(img_x, img_y)` | returns `css_x/y` (use this) and `physical_x/y` (debug only) |
+Why fractions: every vision model (Claude, GPT-4o, Gemini, local
+VLMs) resizes or tiles images differently before the model sees the
+pixels. Proportions survive every such transform; pixel coordinates
+only "work" per-model and break when you swap backends.
 
-**Always use `css_x/y`** from `browser_coords`. Feeding `physical_x/y`
-on a HiDPI display overshoots by `DPR×` — clicks land DPR times too
-far right and down. On a DPR=1.6 display that's 60% off.
-
-Never multiply `getBoundingClientRect()` by `devicePixelRatio` — it's
-already in the right unit.
+Avoid raw `browser_evaluate` + `getBoundingClientRect()` for coord
+lookup — that returns CSS px and will be wrong when fed to click
+tools. Prefer `browser_get_rect` / `browser_shadow_query`, which
+return fractions.
 
 ## Rich-text editors (X, LinkedIn DMs, Gmail, Reddit, Slack, Discord)
 
@@ -88,11 +89,10 @@ reach shadow elements transparently.
 
 **Shadow-heavy site workflow:**
 1. `browser_screenshot()` → visual image
-2. Identify target visually → image coordinate
-3. `browser_coords(x, y)` → CSS px
-4. `browser_click_coordinate(css_x, css_y)` → lands via native hit
-   test; inputs get focused regardless of shadow depth
-5. Type via `browser_type_focused` (no selector needed — types into the
+2. Identify target visually → pixel `(x, y)` read straight off the image
+3. `browser_click_coordinate(x, y)` → lands via native hit test;
+   inputs get focused regardless of shadow depth
+4. Type via `browser_type_focused` (no selector needed — types into the
    already-focused element), or `browser_type` if you have a selector
 
 For selector-style access when you know the shadow path:

@@ -46,7 +46,10 @@ TOOL_SCHEMAS: dict[str, dict] = {
         },
     },
     "browser_type_focused": {
-        "description": "Type text into the already-focused element. Use after browser_click_coordinate has focused the target. Faster than browser_press for multi-character input.",
+        "description": (
+            "Type text into the already-focused element. Use after browser_click_coordinate "
+            "has focused the target. Faster than browser_press for multi-character input."
+        ),
         "params": {
             "text": {"type": "string", "required": True},
             "tab_id": {"type": "integer"},

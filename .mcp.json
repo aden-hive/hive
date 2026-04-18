@@ -1,3 +1,10 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "gcu-tools": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+      "cwd": "/home/timothy/aden/hive/tools"
+    }
+  }
 }

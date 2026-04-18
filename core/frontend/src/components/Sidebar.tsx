@@ -15,7 +15,10 @@ import { useColony } from "@/context/ColonyContext";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { colonies, queenProfiles, sidebarCollapsed, setSidebarCollapsed } = useColony();
+  const { colonies, queens, queenProfiles, sidebarCollapsed, setSidebarCollapsed } = useColony();
+  const activeQueenIds = new Set(
+    queens.filter((q) => q.status === "online").map((q) => q.id),
+  );
   const [coloniesExpanded, setColoniesExpanded] = useState(true);
   const [queensExpanded, setQueensExpanded] = useState(true);
 
@@ -148,7 +151,11 @@ export default function Sidebar() {
           {queensExpanded && (
             <div className="flex flex-col gap-0.5 mt-0.5">
               {queenProfiles.map((queen) => (
-                <SidebarQueenItem key={queen.id} queen={queen} />
+                <SidebarQueenItem
+                  key={queen.id}
+                  queen={queen}
+                  isActive={activeQueenIds.has(queen.id)}
+                />
               ))}
               {queenProfiles.length === 0 && (
                 <p className="px-5 py-2 text-xs text-sidebar-muted">
