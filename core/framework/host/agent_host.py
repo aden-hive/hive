@@ -1672,7 +1672,7 @@ class AgentHost:
         entry_point_id: str,
         execution_id: str,
         graph_id: str | None = None,
-    ) -> bool:
+    ) -> str:
         """
         Cancel a running execution.
 
@@ -1682,11 +1682,11 @@ class AgentHost:
             graph_id: Graph to search (defaults to active graph)
 
         Returns:
-            True if cancelled, False if not found
+            Cancellation outcome from the stream.
         """
         stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
-            return False
+            return "not_found"
         return await stream.cancel_execution(execution_id)
 
     # === QUERY OPERATIONS ===

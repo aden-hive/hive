@@ -921,7 +921,6 @@ def register_queen_lifecycle_tools(
         the queen called this tool.
         """
         stopped_unified = 0
-        stopped_legacy = 0
         errors: list[str] = []
 
         # 1. Stop everything on the unified ColonyRuntime. This is
@@ -945,9 +944,7 @@ def register_queen_lifecycle_tools(
         if legacy is not None:
             try:
                 legacy_workers = legacy.list_workers()
-                stopped_legacy = len(legacy_workers) if isinstance(legacy_workers, list) else 0
-                await legacy.stop_all_workers()
-                legacy.pause_timers()
+                _ = len(legacy_workers) if isinstance(legacy_workers, list) else 0
             except Exception as e:
                 errors.append(f"legacy: {e}")
                 logger.warning(
@@ -958,26 +955,73 @@ def register_queen_lifecycle_tools(
         if colony is None and legacy is None:
             return json.dumps({"error": "No runtime on this session."})
 
-        total_stopped = stopped_unified + stopped_legacy
+        cancelled: list[str] = []
+        cancelling: list[str] = []
+
+        # 3. Stop legacy runtime executions with per-stream cancellation so a
+        # still-alive task keeps the worker in "cancelling" instead of being
+        # reported as fully stopped too early.
+        if legacy is not None:
+            try:
+                for graph_id in legacy.list_graphs():
+                    reg = legacy.get_graph_registration(graph_id)
+                    if reg is None:
+                        continue
+
+                    for _ep_id, stream in reg.streams.items():
+                        for executor in stream._active_executors.values():
+                            for node in executor.node_registry.values():
+                                if hasattr(node, "signal_shutdown"):
+                                    node.signal_shutdown()
+                                if hasattr(node, "cancel_current_turn"):
+                                    node.cancel_current_turn()
+
+                        for exec_id in list(stream.active_execution_ids):
+                            try:
+                                outcome = await stream.cancel_execution(exec_id, reason=reason)
+                                if outcome == "cancelled":
+                                    cancelled.append(exec_id)
+                                elif outcome == "cancelling":
+                                    cancelling.append(exec_id)
+                            except Exception as e:
+                                errors.append(f"legacy-cancel:{exec_id}: {e}")
+                                logger.warning("Failed to cancel %s: %s", exec_id, e)
+
+                legacy.pause_timers()
+            except Exception as e:
+                errors.append(f"legacy-runtime: {e}")
+                logger.warning(
+                    "stop_worker: failed to inspect legacy runtime executions",
+                    exc_info=True,
+                )
+
+        total_stopped = stopped_unified + len(cancelled)
         logger.info(
-            "stop_worker: stopped %d workers (unified=%d, legacy=%d). reason=%s",
-            total_stopped,
+            "stop_worker: status=%s (unified=%d, cancelled=%d, cancelling=%d). reason=%s",
+            "cancelling" if cancelling else "stopped" if total_stopped else "no_active_executions",
             stopped_unified,
-            stopped_legacy,
+            len(cancelled),
+            len(cancelling),
             reason,
         )
 
         return json.dumps(
             {
-                "status": "stopped",
+                "status": ("cancelling" if cancelling else "stopped" if total_stopped else "no_active_executions"),
                 "workers_stopped": total_stopped,
                 "unified_stopped": stopped_unified,
-                "legacy_stopped": stopped_legacy,
+                "legacy_stopped": len(cancelled),
+                "cancelled": cancelled,
+                "cancelling": cancelling,
                 "timers_paused": legacy is not None,
                 "reason": reason,
                 "errors": errors if errors else None,
             }
         )
+
+    def _stop_result_allows_phase_transition(stop_result: str) -> tuple[dict, bool]:
+        result = json.loads(stop_result)
+        return result, result.get("status") != "cancelling"
 
     _stop_tool = Tool(
         name="stop_worker",
@@ -1561,18 +1605,23 @@ def register_queen_lifecycle_tools(
         inject config adjustments, or escalate to building/planning.
         """
         stop_result = await stop_worker()
+        result, can_transition = _stop_result_allows_phase_transition(stop_result)
 
-        if phase_state is not None:
+        if phase_state is not None and can_transition:
             await phase_state.switch_to_reviewing()
-            _update_meta_json(session_manager, manager_session_id, {"phase": "editing"})
+            _update_meta_json(session_manager, manager_session_id, {"phase": "reviewing"})
 
-        result = json.loads(stop_result)
-        result["phase"] = "editing"
-        result["message"] = (
-            "Worker stopped. You are now in editing phase. "
-            "You can re-run with run_agent_with_input(task), tweak config "
-            "with inject_message, or escalate to building/planning."
-        )
+        if can_transition:
+            result["phase"] = "reviewing"
+            result["message"] = (
+                "Worker stopped. You are now in reviewing phase. "
+                "Review the latest results and decide whether to re-run, "
+                "edit the agent, or move into planning."
+            )
+        else:
+            result["message"] = (
+                "Stop requested, but the worker is still shutting down. Phase will not change until shutdown completes."
+            )
         return json.dumps(result)
 
     _switch_editing_tool = Tool(
@@ -1596,21 +1645,26 @@ def register_queen_lifecycle_tools(
     async def stop_worker_and_review() -> str:
         """Stop the loaded graph and switch to building phase for editing the agent."""
         stop_result = await stop_worker()
+        result, can_transition = _stop_result_allows_phase_transition(stop_result)
 
         # Switch to building phase
-        if phase_state is not None:
+        if phase_state is not None and can_transition:
             await phase_state.switch_to_building()
             _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
 
-        result = json.loads(stop_result)
-        result["phase"] = "building"
-        result["message"] = (
-            "Graph stopped. You are now in building phase. "
-            "Use your coding tools to modify the agent, then call "
-            "load_built_agent(path) to stage it again."
-        )
+        if can_transition:
+            result["phase"] = "building"
+            result["message"] = (
+                "Graph stopped. You are now in building phase. "
+                "Use your coding tools to modify the agent, then call "
+                "load_built_agent(path) to stage it again."
+            )
+        else:
+            result["message"] = (
+                "Stop requested, but the worker is still shutting down. Phase will not change until shutdown completes."
+            )
         # Nudge the queen to start coding instead of blocking for user input.
-        if phase_state is not None and phase_state.inject_notification:
+        if can_transition and phase_state is not None and phase_state.inject_notification:
             await phase_state.inject_notification(
                 "[PHASE CHANGE] Switched to BUILDING phase. Start implementing the changes now."
             )
@@ -1633,19 +1687,25 @@ def register_queen_lifecycle_tools(
     async def stop_worker_and_plan() -> str:
         """Stop the loaded graph and switch to planning phase for diagnosis."""
         stop_result = await stop_worker()
+        result, can_transition = _stop_result_allows_phase_transition(stop_result)
 
         # Switch to planning phase
-        if phase_state is not None:
+        if phase_state is not None and can_transition:
             await phase_state.switch_to_planning(source="tool")
+            _update_meta_json(session_manager, manager_session_id, {"phase": "planning"})
 
-        result = json.loads(stop_result)
-        result["phase"] = "planning"
-        result["message"] = (
-            "Graph stopped. You are now in planning phase. "
-            "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
-            "discuss a fix plan with the user, then call "
-            "initialize_and_build_agent() to implement the fix."
-        )
+        if can_transition:
+            result["phase"] = "planning"
+            result["message"] = (
+                "Graph stopped. You are now in planning phase. "
+                "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
+                "discuss a fix plan with the user, then call "
+                "initialize_and_build_agent() to implement the fix."
+            )
+        else:
+            result["message"] = (
+                "Stop requested, but the worker is still shutting down. Phase will not change until shutdown completes."
+            )
         return json.dumps(result)
 
     _stop_plan_tool = Tool(
@@ -2507,19 +2567,25 @@ def register_queen_lifecycle_tools(
         2. Edit the agent code → call stop_worker_and_review() to go to building phase
         """
         stop_result = await stop_worker()
+        result, can_transition = _stop_result_allows_phase_transition(stop_result)
 
         # Switch to staging phase
-        if phase_state is not None:
+        if phase_state is not None and can_transition:
             await phase_state.switch_to_staging()
             _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
-        result = json.loads(stop_result)
-        result["phase"] = "staging"
-        result["message"] = (
-            "Graph stopped. You are now in staging phase. "
-            "Ask the user: would they like to re-run with new input, "
-            "or edit the agent code?"
-        )
+        if can_transition:
+            result["phase"] = "staging"
+            result["message"] = (
+                "Graph stopped. You are now in staging phase. "
+                "Ask the user: would they like to re-run with new input, "
+                "or edit the agent code?"
+            )
+        else:
+            result["message"] = (
+                "Stop requested, but the worker is still shutting down. "
+                "Stay in the current phase until shutdown completes."
+            )
         return json.dumps(result)
 
     _stop_worker_tool = Tool(
