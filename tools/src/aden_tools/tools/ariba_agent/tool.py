@@ -1,40 +1,47 @@
+from __future__ import annotations
 
-# hive/tools/src/aden_tools/tools/ariba_agent/tool.py
-
-from fastmcp import FastMCP
 from typing import Dict, List
 
+from fastmcp import FastMCP
+
 from .ariba_client import AribaClient
-from .semantic_filter import filter_opportunities, classify_tech_moat
-from .scoring import score_opportunity
 from .draft_generator import generate_rfi_draft
+from .scoring import score_opportunity
+from .semantic_filter import classify_tech_moat, filter_opportunities
+
+_client = AribaClient()
 
 
 def register_tools(mcp: FastMCP) -> None:
+    """
+    Register MCP tools for Ariba procurement automation.
+    """
 
     @mcp.tool()
-    async def search_ariba_opportunities(query: Dict) -> Dict:
+    async def search_ariba_opportunities(query: Dict[str, object]) -> Dict[str, object]:
         """
-        Discover and score SAP Ariba opportunities using semantic filtering.
+        Search, filter, score, and enrich SAP Ariba opportunities.
+
+        Args:
+            query: Structured query dict.
+
+        Returns:
+            Dict containing results and total count OR error.
         """
         try:
-            client = AribaClient()
-
-            raw_results = await client.search_async(query)
-
+            raw_results = await _client.search_async(query)
             filtered = filter_opportunities(raw_results)
 
-            results: List[Dict] = []
+            results: List[Dict[str, object]] = []
 
             for opp in filtered:
                 score = score_opportunity(opp)
-
                 opp["confidence_score"] = score
                 opp["tech_moat"] = classify_tech_moat(
-                    opp.get("description", "")
+                    str(opp.get("description", ""))
                 )
 
-                if score > 0.85:
+                if score >= 0.85:
                     opp["hitl_required"] = True
                     opp["draft_rfi"] = generate_rfi_draft(opp)
                 else:
@@ -42,10 +49,7 @@ def register_tools(mcp: FastMCP) -> None:
 
                 results.append(opp)
 
-            return {
-                "results": results,
-                "total": len(results),
-            }
+            return {"results": results, "total": len(results)}
 
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": "processing_failed", "message": str(e)}
