@@ -1099,12 +1099,17 @@ def ensure_default_queens() -> None:
 
     Safe to call multiple times — skips any profile that already has a file.
     """
+    created = 0
     for queen_id, profile in DEFAULT_QUEENS.items():
         queen_dir = QUEENS_DIR / queen_id
         profile_path = queen_dir / "profile.yaml"
+        if profile_path.exists():
+            continue
         queen_dir.mkdir(parents=True, exist_ok=True)
         profile_path.write_text(yaml.safe_dump(profile, sort_keys=False, allow_unicode=True))
-    logger.info("Queen profiles ensured at %s", QUEENS_DIR)
+        created += 1
+    if created:
+        logger.info("Created %d default queen profile(s) at %s", created, QUEENS_DIR)
 
 
 def list_queens() -> list[dict[str, str]]:
@@ -1143,6 +1148,10 @@ def load_queen_profile(queen_id: str) -> dict[str, Any]:
 def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     """Merge partial updates into an existing queen profile and persist.
 
+    Performs a shallow merge at the top level, but deep-merges dict values
+    (e.g. world_lore, hidden_background) so partial sub-field updates don't
+    clobber sibling keys.
+
     Returns the full updated profile.
     Raises FileNotFoundError if the profile doesn't exist.
     """
@@ -1150,7 +1159,11 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
     if not profile_path.exists():
         raise FileNotFoundError(f"Queen profile not found: {queen_id}")
     data = yaml.safe_load(profile_path.read_text())
-    data.update(updates)
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(data.get(key), dict):
+            data[key].update(value)
+        else:
+            data[key] = value
     profile_path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
     return data
 

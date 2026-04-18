@@ -64,4 +64,10 @@ export const configApi = {
       about,
       ...(theme ? { theme } : {}),
     }),
+
+  uploadAvatar: (file: File) => {
+    const fd = new FormData();
+    fd.append("avatar", file);
+    return api.upload<{ avatar_url: string }>("/config/profile/avatar", fd);
+  },
 };
