@@ -312,7 +312,46 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
             data = screenshot_result.get("data")
             css_width = screenshot_result.get("cssWidth", 0)
+            css_height_raw = screenshot_result.get("cssHeight", 0)
             dpr = screenshot_result.get("devicePixelRatio", 1.0)
+            png_w = screenshot_result.get("pngWidth", 0)
+            png_h = screenshot_result.get("pngHeight", 0)
+
+            # Diagnostic for the y-axis offset hunt: clicks convert
+            # fractions through cssHeight, but the displayed image is
+            # resized using the PNG's aspect ratio. If png_h differs
+            # from cssHeight × dpr the two coordinate systems drift.
+            # X is checked too — should always read delta_x ≈ 0 since
+            # physical_scale is derived from pngWidth.
+            try:
+                from ..telemetry import write_log
+                expected_w = css_width * dpr
+                expected_h = css_height_raw * dpr
+                write_log({
+                    "type": "screenshot_geometry",
+                    "tab_id": target_tab,
+                    "url": screenshot_result.get("url", ""),
+                    "pngWidth": png_w,
+                    "pngHeight": png_h,
+                    "cssWidth": css_width,
+                    "cssHeight": css_height_raw,
+                    "dpr": dpr,
+                    "expectedPngWidth": expected_w,
+                    "expectedPngHeight": expected_h,
+                    "deltaPngWidthPx": png_w - expected_w,
+                    "deltaPngHeightPx": png_h - expected_h,
+                    # If the PNG is taller than cssHeight×dpr (e.g. a
+                    # devtools-attached banner adds rows above the page
+                    # in the capture), clicks land BELOW intended at
+                    # the top of the page and converge to 0 error at
+                    # the bottom. Reverse signs if PNG is shorter.
+                    # Worst-case error in CSS px at fy=0:
+                    "yErrorAtTopCssPx": (
+                        (png_h - expected_h) / dpr if dpr else 0
+                    ),
+                })
+            except Exception:
+                pass
 
             # Collect highlights: last interaction from bridge + CDP already drew in browser
             from ..bridge import _interaction_highlights

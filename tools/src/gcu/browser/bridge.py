@@ -101,6 +101,71 @@ def clear_tab_highlights(tab_ids) -> None:
 # always sees {tag: "iframe"} and can't tell whether it hit the
 # composer or something else inside the frame (e.g. a sidebar item
 # in LinkedIn's #interop-outlet messaging overlay).
+# Diagnostic probe for the Y-offset hunt. Returns the element under
+# the (x, y) the click is about to hit, plus its bounding rect and
+# the click's offset relative to that rect. If clicks are landing on
+# the wrong element or near a rect boundary, we'll see it in the log
+# without having to ask the agent what it intended to click.
+_HIT_ELEMENT_JS = """
+(function(x, y) {
+    function describe(el) {
+        if (!el) return null;
+        var rect = el.getBoundingClientRect();
+        return {
+            tag: el.tagName ? el.tagName.toLowerCase() : null,
+            id: el.id || null,
+            className: typeof el.className === 'string' ? el.className.substring(0, 120) : null,
+            role: el.getAttribute ? el.getAttribute('role') : null,
+            text: ((el.innerText || el.textContent || '') + '').substring(0, 80),
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        };
+    }
+    var topEl = document.elementFromPoint(x, y);
+    var stack = [];
+    if (typeof document.elementsFromPoint === 'function') {
+        var els = document.elementsFromPoint(x, y);
+        for (var i = 0; i < Math.min(els.length, 4); i++) {
+            stack.push(describe(els[i]));
+        }
+    } else {
+        stack.push(describe(topEl));
+    }
+    // Vertical-stripe sweep: query elementFromPoint at y±5 and y±15
+    // so we can detect "click is just barely outside the element a
+    // human would have hit". Records only tag+text for compactness.
+    function brief(el) {
+        if (!el) return null;
+        return {
+            tag: el.tagName ? el.tagName.toLowerCase() : null,
+            text: ((el.innerText || el.textContent || '') + '').substring(0, 40)
+        };
+    }
+    var sweep = {};
+    [-15, -5, 5, 15].forEach(function (dy) {
+        sweep['y' + (dy >= 0 ? '+' : '') + dy] = brief(document.elementFromPoint(x, y + dy));
+    });
+    var hit = describe(topEl);
+    var offsetInRect = null;
+    if (hit && hit.rect && hit.rect.width > 0 && hit.rect.height > 0) {
+        offsetInRect = {
+            xFrac: (x - hit.rect.x) / hit.rect.width,
+            yFrac: (y - hit.rect.y) / hit.rect.height,
+            dxFromCenter: x - (hit.rect.x + hit.rect.width / 2),
+            dyFromCenter: y - (hit.rect.y + hit.rect.height / 2)
+        };
+    }
+    return {
+        clickPoint: { x: x, y: y },
+        viewport: { w: window.innerWidth, h: window.innerHeight, sx: window.scrollX, sy: window.scrollY },
+        hit: hit,
+        stack: stack,
+        sweep: sweep,
+        offsetInRect: offsetInRect
+    };
+})
+"""
+
+
 _FOCUSED_ELEMENT_JS = """
 (function() {
     function describe(el) {
@@ -1026,6 +1091,23 @@ class BeelineBridge:
             y,
         )
 
+        # Pre-click hit probe — log the element actually under (x, y)
+        # right before the dispatch so we can compare intended vs
+        # actual landing for the y-offset hunt. Best-effort, never
+        # blocks the click.
+        hit_probe = None
+        try:
+            # `return` prefix ensures evaluate() wraps as
+            # `(function(){ return (...)(x,y) })()` and the value
+            # actually comes back — without it the wrapper drops
+            # the result on the floor (returns undefined).
+            probe_result = await self.evaluate(
+                tab_id, f"return ({_HIT_ELEMENT_JS})({x}, {y})"
+            )
+            hit_probe = (probe_result or {}).get("result")
+        except Exception:
+            hit_probe = None
+
         await self._cdp(
             tab_id,
             "Input.dispatchMouseEvent",
@@ -1043,6 +1125,25 @@ class BeelineBridge:
         resp = {"ok": True, "action": "click_coordinate", "x": x, "y": y}
         if focused_info:
             resp["focused_element"] = focused_info
+
+        # Telemetry side-channel: record where the click actually
+        # landed so we can audit the y-axis offset. Kept out of the
+        # response payload to avoid bloating what the agent sees.
+        if hit_probe is not None:
+            try:
+                from .telemetry import write_log
+                write_log({
+                    "type": "click_hit_probe",
+                    "tab_id": tab_id,
+                    "intended": {"x": x, "y": y},
+                    "viewport": hit_probe.get("viewport"),
+                    "hit": hit_probe.get("hit"),
+                    "stack": hit_probe.get("stack"),
+                    "sweep": hit_probe.get("sweep"),
+                    "offsetInRect": hit_probe.get("offsetInRect"),
+                })
+            except Exception:
+                pass
         return resp
 
     async def type_text(
@@ -2526,6 +2627,12 @@ class BeelineBridge:
                     "devicePixelRatio": dpr,
                     "cssWidth": css_w,
                     "cssHeight": css_h,
+                    # Raw PNG pixel dims so callers can compare against
+                    # cssWidth/cssHeight × dpr and detect viewport ↔
+                    # capture mismatches (e.g. devtools-attached infobar
+                    # shifting one but not the other).
+                    "pngWidth": png_w,
+                    "pngHeight": png_h,
                     "data": data,
                     "mimeType": "image/png",
                 }
