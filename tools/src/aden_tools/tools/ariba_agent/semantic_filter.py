@@ -1,34 +1,31 @@
+from __future__ import annotations
 
-from typing import List, Dict
+import re
+from typing import Dict, List
 
-TECH_MOAT_KEYWORDS = {
-    "intelligence": ["ai", "nlp", "machine learning", "computer vision"],
-    "infrastructure": ["cloud", "saas", "distributed"],
-    "advanced": ["robotics", "web3", "radar"]
+
+TECH_MOAT = {
+    "intelligence": ["ai", "nlp", "machine learning", "natural language"],
+    "infrastructure": ["cloud", "saas", "paas", "api"],
+    "advanced": ["robotics", "computer vision", "web3", "radar", "media"],
 }
 
 
-def classify_tech_moat(text: str) -> Dict:
+def _match(text: str, keywords: List[str]) -> bool:
+    return any(re.search(rf"\b{re.escape(k)}\b", text) for k in keywords)
+
+
+def classify_tech_moat(text: str) -> Dict[str, bool]:
     text = text.lower()
-    result = {}
-
-    for category, keywords in TECH_MOAT_KEYWORDS.items():
-        result[category] = any(k in text for k in keywords)
-
-    return result
+    return {k: _match(text, v) for k, v in TECH_MOAT.items()}
 
 
-def filter_opportunities(opps: List[Dict]) -> List[Dict]:
+def filter_opportunities(opps: List[Dict[str, object]]) -> List[Dict[str, object]]:
     filtered = []
 
     for opp in opps:
-        description = opp.get("description", "").lower()
-
-        if any(
-            keyword in description
-            for group in TECH_MOAT_KEYWORDS.values()
-            for keyword in group
-        ):
+        desc = str(opp.get("description", "")).lower()
+        if any(_match(desc, kws) for kws in TECH_MOAT.values()):
             filtered.append(opp)
 
     return filtered
