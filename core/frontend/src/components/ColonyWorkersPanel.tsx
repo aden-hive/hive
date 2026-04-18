@@ -8,6 +8,13 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
+  Square,
+  Play,
+  Clock,
+  Webhook,
+  Zap,
+  Activity,
+  Loader2,
 } from "lucide-react";
 import {
   colonyWorkersApi,
@@ -17,13 +24,18 @@ import {
   type ProgressStep,
   type WorkerSummary,
 } from "@/api/colonyWorkers";
+import { workersApi } from "@/api/workers";
+import { sessionsApi } from "@/api/sessions";
+import { cronToLabel } from "@/lib/graphUtils";
+import type { GraphNode } from "@/components/graph-types";
+import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 
 interface ColonyWorkersPanelProps {
   sessionId: string;
   onClose: () => void;
 }
 
-type TabKey = "skills" | "tools" | "sessions";
+type TabKey = "skills" | "tools" | "sessions" | "triggers";
 
 function statusClasses(status: string): string {
   const s = status.toLowerCase();
@@ -64,7 +76,7 @@ export default function ColonyWorkersPanel({
   sessionId,
   onClose,
 }: ColonyWorkersPanelProps) {
-  const [tab, setTab] = useState<TabKey>("skills");
+  const [tab, setTab] = useState<TabKey>("sessions");
 
   // ── Resizable width (mirrors QueenProfilePanel) ─────────────────────
   const MIN_WIDTH = 280;
@@ -126,15 +138,17 @@ export default function ColonyWorkersPanel({
 
       {/* Tab bar */}
       <div className="flex border-b border-border/60 flex-shrink-0">
+        <TabButton active={tab === "sessions"} onClick={() => setTab("sessions")} label="Sessions" />
+        <TabButton active={tab === "triggers"} onClick={() => setTab("triggers")} label="Triggers" />
         <TabButton active={tab === "skills"} onClick={() => setTab("skills")} label="Skills" />
         <TabButton active={tab === "tools"} onClick={() => setTab("tools")} label="Tools" />
-        <TabButton active={tab === "sessions"} onClick={() => setTab("sessions")} label="Sessions" />
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {tab === "sessions" && <SessionsTab sessionId={sessionId} />}
+        {tab === "triggers" && <TriggersTab sessionId={sessionId} />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
         {tab === "tools" && <ToolsTab sessionId={sessionId} />}
-        {tab === "sessions" && <SessionsTab sessionId={sessionId} />}
       </div>
     </aside>
   );
@@ -450,6 +464,8 @@ function SessionsTab({ sessionId }: { sessionId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [stoppingId, setStoppingId] = useState<string | null>(null);
+  const [stoppingAll, setStoppingAll] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -465,10 +481,76 @@ function SessionsTab({ sessionId }: { sessionId: string }) {
     refresh();
   }, [refresh]);
 
+  // Light poll so live workers tick their duration/status without the
+  // user hitting refresh. 2s matches the cadence of the standalone
+  // WorkersPanel this tab replaces.
+  useEffect(() => {
+    const id = setInterval(() => {
+      colonyWorkersApi
+        .list(sessionId)
+        .then((r) => setWorkers(r.workers))
+        .catch(() => {
+          /* swallow poll-time errors; the next tick retries. */
+        });
+    }, 2000);
+    return () => clearInterval(id);
+  }, [sessionId]);
+
   const selectedWorker = useMemo(
     () => (selected ? workers.find((w) => w.worker_id === selected) : null),
     [selected, workers],
   );
+
+  const stopOne = useCallback(
+    async (workerId: string) => {
+      setStoppingId(workerId);
+      try {
+        await workersApi.stopLive(sessionId, workerId);
+      } catch {
+        /* next poll reflects truth */
+      } finally {
+        setStoppingId(null);
+        refresh();
+      }
+    },
+    [sessionId, refresh],
+  );
+
+  const stopAll = useCallback(async () => {
+    setStoppingAll(true);
+    try {
+      await workersApi.stopAllLive(sessionId);
+    } catch {
+      /* ignore */
+    } finally {
+      setStoppingAll(false);
+      refresh();
+    }
+  }, [sessionId, refresh]);
+
+  // Split into active / history buckets — active workers are hoisted
+  // to the top and rendered with a primary-tinted card so the user's
+  // attention lands there first. History stays visible but muted so
+  // prior runs stay auditable without competing for focus.
+  //
+  // NB: this useMemo MUST run on every render (no conditional
+  // early-return before it) — React's Rules of Hooks require a
+  // stable hook order. Previously we returned early on `selected`
+  // BEFORE calling useMemo, which produced React error #300 in
+  // the minified prod build the moment the user drilled into a
+  // worker detail view.
+  const { activeWorkers, historyWorkers } = useMemo(() => {
+    const act: WorkerSummary[] = [];
+    const hist: WorkerSummary[] = [];
+    for (const w of workers) {
+      (isWorkerActive(w) ? act : hist).push(w);
+    }
+    const byRecent = (a: WorkerSummary, b: WorkerSummary) =>
+      (b.started_at || 0) - (a.started_at || 0);
+    act.sort(byRecent);
+    hist.sort(byRecent);
+    return { activeWorkers: act, historyWorkers: hist };
+  }, [workers]);
 
   if (selected) {
     return (
@@ -481,45 +563,424 @@ function SessionsTab({ sessionId }: { sessionId: string }) {
     );
   }
 
-  return (
-    <TabShell loading={loading} error={error} onRefresh={refresh} empty={workers.length === 0 ? "No workers spawned yet." : null}>
-      <ul className="flex flex-col gap-1.5">
-        {workers.map((w) => (
-          <li key={w.worker_id}>
-            <button
-              onClick={() => setSelected(w.worker_id)}
-              className="w-full text-left rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 hover:bg-muted/30 transition-colors"
+  const activeCount = activeWorkers.length;
+
+  const renderCard = (w: WorkerSummary, active: boolean) => (
+    <li key={w.worker_id}>
+      <div
+        className={`rounded-lg border transition-colors ${
+          active
+            ? "border-primary/40 bg-primary/[0.06] ring-1 ring-primary/20 hover:bg-primary/10"
+            : "border-border/40 bg-background/20 opacity-80 hover:bg-muted/20 hover:opacity-100"
+        }`}
+      >
+        <button
+          onClick={() => setSelected(w.worker_id)}
+          className="w-full text-left px-3 py-2.5"
+        >
+          <div className="flex items-center justify-between mb-1 gap-2">
+            <code
+              className={`text-xs font-mono ${active ? "text-foreground" : "text-foreground/70"}`}
             >
-              <div className="flex items-center justify-between mb-1 gap-2">
-                <code className="text-xs font-mono text-foreground">{shortId(w.worker_id)}</code>
-                <div className="flex items-center gap-1">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusClasses(w.status)}`}
-                  >
-                    {w.status}
-                  </span>
-                  <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                </div>
-              </div>
-              {w.task && (
-                <p className="text-xs text-foreground/80 line-clamp-2 mb-1">{w.task}</p>
-              )}
-              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>{fmtStarted(w.started_at)}</span>
-                {w.result && (
-                  <span>
-                    {w.result.duration_seconds ? `${w.result.duration_seconds.toFixed(1)}s` : ""}
-                    {w.result.tokens_used
-                      ? ` · ${w.result.tokens_used.toLocaleString()} tok`
-                      : ""}
-                  </span>
-                )}
-              </div>
+              {shortId(w.worker_id)}
+            </code>
+            <div className="flex items-center gap-1">
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusClasses(w.status)}`}
+              >
+                {w.status}
+              </span>
+              <ChevronRight className="w-3 h-3 text-muted-foreground" />
+            </div>
+          </div>
+          {w.task && (
+            <p
+              className={`text-xs line-clamp-2 mb-1 ${
+                active ? "text-foreground/85" : "text-foreground/60"
+              }`}
+            >
+              {w.task}
+            </p>
+          )}
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>{fmtStarted(w.started_at)}</span>
+            {w.result && (
+              <span>
+                {w.result.duration_seconds ? `${w.result.duration_seconds.toFixed(1)}s` : ""}
+                {w.result.tokens_used
+                  ? ` · ${w.result.tokens_used.toLocaleString()} tok`
+                  : ""}
+              </span>
+            )}
+          </div>
+        </button>
+        {active && (
+          <div className="border-t border-primary/20 px-3 py-1.5 flex justify-end">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                stopOne(w.worker_id);
+              }}
+              disabled={stoppingId === w.worker_id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-destructive/40 text-destructive text-[10px] hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+              title="Stop this worker"
+            >
+              <Square className="w-2.5 h-2.5" />
+              {stoppingId === w.worker_id ? "Stopping…" : "Stop"}
             </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+
+  return (
+    <TabShell
+      loading={loading}
+      error={error}
+      onRefresh={refresh}
+      empty={workers.length === 0 ? "No workers spawned yet." : null}
+      headerRight={
+        activeCount > 0 ? (
+          <button
+            onClick={stopAll}
+            disabled={stoppingAll}
+            className="text-[10px] px-2 py-0.5 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+            title={`Stop ${activeCount} active worker${activeCount === 1 ? "" : "s"}`}
+          >
+            {stoppingAll ? "Stopping…" : `Stop all (${activeCount})`}
+          </button>
+        ) : null
+      }
+    >
+      <div className="flex flex-col gap-3">
+        {activeWorkers.length > 0 && (
+          <section>
+            <h4 className="text-[10px] uppercase tracking-wide font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Active ({activeWorkers.length})
+            </h4>
+            <ul className="flex flex-col gap-1.5">
+              {activeWorkers.map((w) => renderCard(w, true))}
+            </ul>
+          </section>
+        )}
+        {historyWorkers.length > 0 && (
+          <section>
+            <h4 className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
+              History ({historyWorkers.length})
+            </h4>
+            <ul className="flex flex-col gap-1.5">
+              {historyWorkers.map((w) => renderCard(w, false))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </TabShell>
+  );
+}
+
+function isWorkerActive(w: WorkerSummary): boolean {
+  const s = (w.status || "").toLowerCase();
+  return s === "pending" || s === "running";
+}
+
+// ── Triggers tab ───────────────────────────────────────────────────────
+
+function TriggersTab({ sessionId }: { sessionId: string }) {
+  const { triggers } = useColonyWorkers();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = useMemo(
+    () => (selectedId ? triggers.find((t) => t.id === selectedId) ?? null : null),
+    [selectedId, triggers],
+  );
+
+  if (selected) {
+    return (
+      <TriggerDetail
+        sessionId={sessionId}
+        trigger={selected}
+        onBack={() => setSelectedId(null)}
+      />
+    );
+  }
+
+  return (
+    <TabShell
+      loading={false}
+      error={null}
+      onRefresh={() => {
+        /* triggers come from SSE in the colony page — no pull-refresh needed */
+      }}
+      empty={
+        triggers.length === 0
+          ? "No triggers configured. Ask the queen to set a schedule or webhook."
+          : null
+      }
+    >
+      <ul className="flex flex-col gap-1.5">
+        {triggers.map((t) => (
+          <li key={t.id}>
+            <TriggerCard trigger={t} onClick={() => setSelectedId(t.id)} />
           </li>
         ))}
       </ul>
     </TabShell>
+  );
+}
+
+function triggerIsActive(t: GraphNode): boolean {
+  return t.status === "running" || t.status === "complete";
+}
+
+function TriggerIcon({ type }: { type?: string }) {
+  const cls = "w-3.5 h-3.5";
+  switch (type) {
+    case "webhook":
+      return <Webhook className={cls} />;
+    case "timer":
+      return <Clock className={cls} />;
+    case "api":
+      return <ChevronRight className={cls} />;
+    case "event":
+      return <Activity className={cls} />;
+    default:
+      return <Zap className={cls} />;
+  }
+}
+
+function scheduleLabel(config: Record<string, unknown> | undefined): string | null {
+  if (!config) return null;
+  const cron = config.cron as string | undefined;
+  if (cron) return cronToLabel(cron);
+  const interval = config.interval_minutes as number | undefined;
+  if (interval != null) {
+    if (interval >= 60) return `Every ${interval / 60}h`;
+    return `Every ${interval}m`;
+  }
+  return null;
+}
+
+function countdownLabel(nextFireIn: number | undefined): string | null {
+  if (nextFireIn == null || nextFireIn <= 0) return null;
+  const h = Math.floor(nextFireIn / 3600);
+  const m = Math.floor((nextFireIn % 3600) / 60);
+  const s = Math.floor(nextFireIn % 60);
+  return h > 0
+    ? `next in ${h}h ${String(m).padStart(2, "0")}m`
+    : `next in ${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+function TriggerCard({ trigger, onClick }: { trigger: GraphNode; onClick: () => void }) {
+  const isActive = triggerIsActive(trigger);
+  const schedule = scheduleLabel(trigger.triggerConfig);
+  const nextFireIn = trigger.triggerConfig?.next_fire_in as number | undefined;
+  const countdown = isActive ? countdownLabel(nextFireIn) : null;
+
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 hover:bg-muted/30 transition-colors"
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+            isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
+          }`}
+        >
+          <TriggerIcon type={trigger.triggerType} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-foreground truncate">{trigger.label}</p>
+          {schedule && schedule !== trigger.label && (
+            <p className="text-[10.5px] text-muted-foreground truncate mt-0.5">{schedule}</p>
+          )}
+        </div>
+        <span
+          className={`flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+            isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-muted/60 text-muted-foreground"
+          }`}
+        >
+          {isActive ? "active" : "inactive"}
+        </span>
+      </div>
+      {countdown && (
+        <p className="text-[10px] text-muted-foreground mt-1.5 italic pl-8">{countdown}</p>
+      )}
+    </button>
+  );
+}
+
+function formatCountdown(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+function TriggerDetail({
+  sessionId,
+  trigger,
+  onBack,
+}: {
+  sessionId: string;
+  trigger: GraphNode;
+  onBack: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isActive = triggerIsActive(trigger);
+  const config = (trigger.triggerConfig || {}) as Record<string, unknown>;
+  const cron = config.cron as string | undefined;
+  const interval = config.interval_minutes as number | undefined;
+  const nextFireIn = config.next_fire_in as number | undefined;
+  const triggerId = trigger.id.replace(/^__trigger_/, "");
+
+  const handleToggle = async () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (isActive) {
+        await sessionsApi.deactivateTrigger(sessionId, triggerId);
+      } else {
+        await sessionsApi.activateTrigger(sessionId, triggerId);
+      }
+      // SSE TRIGGER_ACTIVATED / TRIGGER_DEACTIVATED flips the card
+      // state in the context; we don't set local state.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const schedule = cron
+    ? cronToLabel(cron)
+    : interval != null
+      ? interval >= 60
+        ? `Every ${interval / 60}h`
+        : `Every ${interval}m`
+      : null;
+
+  // Hide UI-synthesised fields so the user sees only real operator config.
+  const displayEntries = Object.entries(config).filter(
+    ([k]) => k !== "next_fire_in" && k !== "entry_node",
+  );
+
+  return (
+    <div className="px-4 py-3">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-3"
+      >
+        <ArrowLeft className="w-3 h-3" />
+        All triggers
+      </button>
+
+      <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 mb-3">
+        <div className="flex items-start gap-2.5 mb-2">
+          <div
+            className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              isActive ? "bg-primary/15 text-primary" : "bg-muted/50 text-muted-foreground"
+            }`}
+          >
+            <TriggerIcon type={trigger.triggerType} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground leading-tight truncate">
+              {trigger.label}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span
+                className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                  isActive
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-muted/60 text-muted-foreground"
+                }`}
+              >
+                {isActive ? "active" : "inactive"}
+              </span>
+              {trigger.triggerType && (
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  {trigger.triggerType}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {schedule && (
+        <Section label="Schedule">
+          <p className="text-xs text-foreground">{schedule}</p>
+          {cron && <p className="text-[10px] text-muted-foreground mt-1 font-mono">{cron}</p>}
+        </Section>
+      )}
+
+      {isActive && nextFireIn != null && nextFireIn > 0 && (
+        <Section label="Next fire">
+          <p className="text-xs text-foreground italic">in {formatCountdown(nextFireIn)}</p>
+        </Section>
+      )}
+
+      {displayEntries.length > 0 && (
+        <Section label="Config">
+          <div className="space-y-1">
+            {displayEntries.map(([k, v]) => (
+              <div key={k} className="flex items-start justify-between gap-3 text-[11px]">
+                <span className="text-muted-foreground font-mono">{k}</span>
+                <span className="text-foreground font-mono text-right truncate">
+                  {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section label="Trigger ID">
+        <p className="text-[11px] text-muted-foreground font-mono break-all">{triggerId}</p>
+      </Section>
+
+      {error && (
+        <p className="text-[10.5px] text-destructive leading-snug mb-2">{error}</p>
+      )}
+      <button
+        type="button"
+        onClick={handleToggle}
+        disabled={busy || !sessionId}
+        className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+          isActive
+            ? "bg-muted/50 text-foreground hover:bg-muted/70 border border-border/30"
+            : "bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30"
+        }`}
+      >
+        {busy ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : isActive ? (
+          <Square className="w-3.5 h-3.5" />
+        ) : (
+          <Play className="w-3.5 h-3.5" />
+        )}
+        {busy ? "Working…" : isActive ? "Stop trigger" : "Start trigger"}
+      </button>
+    </div>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+        {label}
+      </p>
+      <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2.5">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -536,7 +997,14 @@ function WorkerDetail({
   workerId: string;
   onBack: () => void;
 }) {
-  const { snapshot, streamState, error } = useProgressStream(sessionId, workerId);
+  // Historical workers (loaded from disk rather than live memory) have
+  // no live progress.db stream to attach to — opening the SSE just
+  // renders "No progress rows yet." forever, which is what the user
+  // was calling "middle of nowhere". Skip the stream and show the
+  // result summary + an archived-conversation hint instead.
+  const isHistorical =
+    worker?.status === "historical" ||
+    (worker != null && !isWorkerActive(worker) && worker.result == null);
 
   return (
     <div className="px-4 py-3">
@@ -565,9 +1033,41 @@ function WorkerDetail({
           {worker?.result?.duration_seconds
             ? ` · ${worker.result.duration_seconds.toFixed(1)}s`
             : ""}
+          {worker?.result?.tokens_used
+            ? ` · ${worker.result.tokens_used.toLocaleString()} tok`
+            : ""}
         </div>
+        {worker?.result?.summary && (
+          <p className="mt-2 text-xs text-foreground/90 border-t border-border/40 pt-2">
+            {worker.result.summary}
+          </p>
+        )}
+        {worker?.result?.error && (
+          <p className="mt-2 text-xs text-destructive border-t border-destructive/30 pt-2">
+            {worker.result.error}
+          </p>
+        )}
       </div>
 
+      {isHistorical ? (
+        <HistoricalWorkerPlaceholder workerId={workerId} />
+      ) : (
+        <LiveWorkerProgress sessionId={sessionId} workerId={workerId} />
+      )}
+    </div>
+  );
+}
+
+function LiveWorkerProgress({
+  sessionId,
+  workerId,
+}: {
+  sessionId: string;
+  workerId: string;
+}) {
+  const { snapshot, streamState, error } = useProgressStream(sessionId, workerId);
+  return (
+    <>
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/90">
           <Database className="w-3.5 h-3.5 text-primary" />
@@ -583,6 +1083,24 @@ function WorkerDetail({
       )}
 
       <ProgressView snapshot={snapshot} />
+    </>
+  );
+}
+
+function HistoricalWorkerPlaceholder({ workerId }: { workerId: string }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-4 text-xs text-muted-foreground space-y-1.5">
+      <p className="text-foreground/80">This worker has finished.</p>
+      <p>
+        Live progress is no longer streaming. The worker's full conversation is
+        archived under{" "}
+        <code className="text-[11px] font-mono text-foreground/80">
+          workers/{shortId(workerId)}/conversations/
+        </code>{" "}
+        in the session data folder — use the{" "}
+        <span className="text-foreground/80 font-medium">Data</span> button in
+        the header to open it.
+      </p>
     </div>
   );
 }
@@ -767,17 +1285,20 @@ function TabShell({
   error,
   onRefresh,
   empty,
+  headerRight,
   children,
 }: {
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
   empty: string | null;
+  headerRight?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="px-4 py-3">
-      <div className="flex justify-end mb-2">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>{headerRight}</div>
         <button
           onClick={onRefresh}
           className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"

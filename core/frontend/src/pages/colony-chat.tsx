@@ -2,9 +2,6 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { Loader2, WifiOff, KeyRound, FolderOpen, X, Users } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
-import TriggersPanel from "@/components/TriggersPanel";
-import TriggerDetailPanel from "@/components/TriggerDetailPanel";
-import WorkersPanel from "@/components/WorkersPanel";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import CredentialsModal, {
   type Credential,
@@ -197,7 +194,7 @@ export default function ColonyChat() {
   const location = useLocation();
   const { colonies, markVisited, refresh: refreshColonies } = useColony();
   const { setActions } = useHeaderActions();
-  const { openColonyWorkers } = useColonyWorkers();
+  const { toggleColonyWorkers } = useColonyWorkers();
 
   // Route state from home page (new chat flow)
   const routeState = (location.state || {}) as {
@@ -244,7 +241,6 @@ export default function ColonyChat() {
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [credentialAgentPath, setCredentialAgentPath] = useState<string | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
 
   // ── Header actions (Credentials, Data, Browser) ─────────────────────────
   useEffect(() => {
@@ -269,9 +265,9 @@ export default function ColonyChat() {
         )}
         {agentState.sessionId && (
           <button
-            onClick={() => openColonyWorkers(agentState.sessionId!)}
+            onClick={() => toggleColonyWorkers()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-            title="Show workers in this colony"
+            title="Show / hide the colony workers panel"
           >
             <Users className="w-3.5 h-3.5" />
             Workers
@@ -281,7 +277,7 @@ export default function ColonyChat() {
       </>,
     );
     return () => setActions(null);
-  }, [agentState.sessionId, setActions, openColonyWorkers]);
+  }, [agentState.sessionId, setActions, toggleColonyWorkers]);
 
   // Refs for SSE callback stability
   const messagesRef = useRef(messages);
@@ -1239,15 +1235,30 @@ export default function ColonyChat() {
       .catch(() => {});
   }, [agentState.sessionId, agentState.pendingQuestion, updateState]);
 
-  // ── Resolved selected node (sync with live graph updates) ──────────────
-
-  const liveSelectedNode = selectedNode && graphNodes.find((n) => n.id === selectedNode.id);
-  const resolvedSelectedNode = liveSelectedNode || selectedNode;
-
   const triggers = useMemo(
     () => graphNodes.filter((n) => n.nodeType === "trigger"),
     [graphNodes],
   );
+
+  // Mirror live triggers into the shared context so the tabbed
+  // ColonyWorkersPanel (rendered at the layout level) can render the
+  // Triggers tab without having to re-subscribe to the session SSE.
+  const { setTriggers: setCtxTriggers, setSessionId: setCtxSessionId } =
+    useColonyWorkers();
+  useEffect(() => {
+    setCtxTriggers(triggers);
+    return () => setCtxTriggers([]);
+  }, [triggers, setCtxTriggers]);
+
+  // Publish the live colony session id to the context. The AppLayout
+  // renders ``ColonyWorkersPanel`` whenever this is non-null AND the
+  // user hasn't dismissed it (via the X button). Cleanup clears it so
+  // the panel closes when we leave the colony room.
+  useEffect(() => {
+    if (!agentState.sessionId) return;
+    setCtxSessionId(agentState.sessionId);
+    return () => setCtxSessionId(null);
+  }, [agentState.sessionId, setCtxSessionId]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -1341,39 +1352,10 @@ export default function ColonyChat() {
           />
         </div>
 
-        {/* Workers sidebar — live list of active + recently-finished workers
-            with per-worker stop controls. Shown whenever the queen is in
-            working or reviewing phase (i.e., there's a meaningful worker
-            population to manage). */}
-        {(agentState.queenPhase === "working" || agentState.queenPhase === "reviewing") && (
-          <div className="w-[260px] flex-shrink-0">
-            <WorkersPanel sessionId={agentState.sessionId} />
-          </div>
-        )}
-
-        {/* Triggers sidebar — only rendered when the colony actually has triggers */}
-        {triggers.length > 0 && (
-          <div className="w-[260px] flex-shrink-0">
-            <TriggersPanel
-              triggers={triggers}
-              selectedId={resolvedSelectedNode?.id ?? null}
-              onSelect={(trigger) =>
-                setSelectedNode((prev) => (prev?.id === trigger.id ? null : trigger))
-              }
-            />
-          </div>
-        )}
-
-        {/* Trigger detail panel */}
-        {resolvedSelectedNode && resolvedSelectedNode.nodeType === "trigger" && (
-          <div className="w-[380px] min-w-[320px] flex-shrink-0">
-            <TriggerDetailPanel
-              trigger={resolvedSelectedNode}
-              sessionId={agentState.sessionId || ""}
-              onClose={() => setSelectedNode(null)}
-            />
-          </div>
-        )}
+        {/* Workers / Triggers / Skills / Tools now live in the tabbed
+            ColonyWorkersPanel rendered by AppLayout. Trigger data is
+            pushed up via ColonyWorkersContext (see the useEffect that
+            mirrors `triggers` into context.setTriggers). */}
       </div>
 
       <CredentialsModal

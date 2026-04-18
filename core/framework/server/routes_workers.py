@@ -311,24 +311,6 @@ def _payload_change_signature(payload: list[dict]) -> tuple:
     )
 
 
-async def handle_list_live_workers(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/workers — list live workers.
-
-    Returns an array of ``{worker_id, task, status, started_at, duration_seconds,
-    is_active}`` objects. Active workers come first. The queen overseer
-    (persistent worker) is included because the frontend should know it
-    exists, but the stop action on it is a session-level kill — the UI
-    should treat it differently (not offered here).
-    """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    colony = _active_colony(session)
-    payload = _build_live_workers_payload(colony)
-    return web.json_response({"workers": payload})
-
-
 async def handle_live_workers_stream(request: web.Request) -> web.StreamResponse:
     """GET /api/sessions/{session_id}/workers/stream — SSE feed.
 
@@ -477,8 +459,12 @@ def register_routes(app: web.Application) -> None:
         "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}/tools",
         handle_node_tools,
     )
-    # Live worker control
-    app.router.add_get("/api/sessions/{session_id}/workers", handle_list_live_workers)
+    # Live worker control. The GET /workers list endpoint lives in
+    # routes_colony_workers.py — it reads from session.colony (the
+    # unified ColonyRuntime where run_parallel_workers-spawned workers
+    # actually live) and returns the WorkerSummary shape the frontend
+    # types against. Registering a duplicate here shadowed it in
+    # aiohttp's router and broke the Sessions tab.
     app.router.add_get(
         "/api/sessions/{session_id}/workers/stream", handle_live_workers_stream
     )

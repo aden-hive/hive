@@ -53,17 +53,129 @@ def _worker_info_to_dict(info) -> dict:
 
 
 async def handle_list_workers(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/workers -- list workers in a session's colony."""
+    """GET /api/sessions/{session_id}/workers -- list workers in a session's colony.
+
+    Returns two populations merged:
+      1. In-memory workers from the session's unified ColonyRuntime
+         (``session.colony._workers``). Includes live + just-finished
+         entries since ``_workers`` isn't pruned on termination.
+      2. Historical worker directories on disk under
+         ``<session_dir>/workers/`` that are not in memory. Populated
+         from dir name / first user message / dir mtime. These appear
+         as ``status="historical"`` so the frontend can style them
+         distinctly from actives.
+
+    Falls back to the legacy ``session.colony_runtime`` for the
+    in-memory half when ``session.colony`` isn't set.
+    """
     session, err = resolve_session(request)
     if err:
         return err
 
-    runtime = session.colony_runtime
-    if runtime is None:
-        return web.json_response({"workers": []})
+    runtime = getattr(session, "colony", None) or getattr(session, "colony_runtime", None)
 
-    workers = [_worker_info_to_dict(info) for info in runtime.list_workers()]
+    workers: list[dict] = []
+    known_ids: set[str] = set()
+    storage_path: Path | None = None
+    if runtime is not None:
+        for info in runtime.list_workers():
+            workers.append(_worker_info_to_dict(info))
+            known_ids.add(info.id)
+        raw_storage = getattr(runtime, "_storage_path", None)
+        if raw_storage is not None:
+            storage_path = Path(raw_storage)
+
+    # Fall back to the session's directory if the runtime didn't expose one.
+    if storage_path is None:
+        session_dir = getattr(session, "queen_dir", None) or getattr(session, "session_dir", None)
+        if session_dir is not None:
+            storage_path = Path(session_dir)
+
+    if storage_path is not None:
+        workers.extend(
+            await asyncio.to_thread(_walk_historical_workers, storage_path, known_ids)
+        )
+
     return web.json_response({"workers": workers})
+
+
+def _walk_historical_workers(storage_path: Path, known_ids: set[str]) -> list[dict]:
+    """Scan ``<storage_path>/workers/`` for worker session dirs not already
+    in memory and return minimal ``WorkerSummary``-shaped entries.
+
+    We don't persist a standalone status file per worker, so the on-disk
+    entries get ``status="historical"`` and ``result=None``. The task is
+    reconstructed from the first non-boilerplate user message in the
+    worker's conversation parts.
+    """
+    workers_dir = storage_path / "workers"
+    if not workers_dir.exists() or not workers_dir.is_dir():
+        return []
+
+    out: list[dict] = []
+    try:
+        entries = list(workers_dir.iterdir())
+    except OSError:
+        return []
+
+    # Newest dir first so recent runs surface first in the tab.
+    entries.sort(key=lambda p: _safe_mtime(p), reverse=True)
+
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        wid = entry.name
+        if wid in known_ids:
+            continue
+        out.append(
+            {
+                "worker_id": wid,
+                "task": _extract_historical_task(entry),
+                "status": "historical",
+                "started_at": _safe_mtime(entry),
+                "result": None,
+            }
+        )
+    return out
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _extract_historical_task(worker_dir: Path) -> str:
+    """Pull the worker's initial task from its conversation parts.
+
+    seq 0 is a boilerplate "Hello" greeting in most flows; the real
+    task lands in an early user message (typically seq 1 or 2). Scan
+    the first few parts and return the first ``role="user"`` content
+    that isn't the greeting. Bounded at 5 parts to stay cheap on
+    directory listings containing hundreds of workers.
+    """
+    parts_dir = worker_dir / "conversations" / "parts"
+    if not parts_dir.exists():
+        return ""
+    try:
+        for i in range(5):
+            p = parts_dir / f"{i:010d}.json"
+            if not p.exists():
+                break
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if data.get("role") != "user":
+                continue
+            content = data.get("content", "")
+            if not isinstance(content, str):
+                continue
+            text = content.strip()
+            if not text or text.lower() == "hello":
+                continue
+            return text[:400]
+    except Exception:
+        return ""
+    return ""
 
 
 # ── Skills & tools ─────────────────────────────────────────────────

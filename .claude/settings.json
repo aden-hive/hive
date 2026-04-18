@@ -62,7 +62,8 @@
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
       "/tmp",
-      "/home/timothy/.hive/skills"
+      "/home/timothy/.hive/skills",
+      "/home/timothy/aden/hive/core/frontend/src/components"
     ]
   },
   "hooks": {
