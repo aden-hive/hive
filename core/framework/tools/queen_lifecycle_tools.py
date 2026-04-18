@@ -1130,7 +1130,10 @@ def register_queen_lifecycle_tools(
     # the skill content INLINE as tool arguments (skill_name,
     # skill_description, skill_body, and optional skill_files for
     # supporting scripts/references). The tool materializes the skill
-    # folder under ``~/.hive/skills/{name}/`` itself, then forks.
+    # folder under ``~/.hive/colonies/{colony_name}/.hive/skills/{name}/``
+    # itself — colony-scoped, discovered as project scope by the
+    # colony's worker and invisible to every other colony on the
+    # machine — then forks.
     #
     # Why inline instead of a pre-authored folder path: earlier versions
     # required the queen to write SKILL.md with her own write_file tool
@@ -1140,8 +1143,17 @@ def register_queen_lifecycle_tools(
     # "refusing to overwrite" error and didn't know how to recover. By
     # inlining the content we make colony creation a single atomic
     # operation with domain-level semantics: the queen owns her skill
-    # namespace, so calling create_colony with an existing name simply
-    # replaces the old skill (her latest content wins).
+    # namespace inside the colony, so calling create_colony with an
+    # existing name simply replaces the old skill (her latest content
+    # wins).
+    #
+    # Why colony-scoped instead of user-scoped: an earlier version
+    # materialized the folder at ``~/.hive/skills/{name}/``. That made
+    # every colony on the machine see every colony-specific skill via
+    # user-scope discovery — a worker in colony A could be offered
+    # colony B's hyper-specific skill during selection. Writing into
+    # the colony's own project dir kills that leak while still keeping
+    # re-runs idempotent.
 
     import re as _re
     import shutil as _shutil
@@ -1155,8 +1167,16 @@ def register_queen_lifecycle_tools(
         skill_description: str,
         skill_body: str,
         skill_files: list[dict] | None,
+        colony_dir: Path,
     ) -> tuple[Path | None, str | None, bool]:
-        """Write a skill folder at ``~/.hive/skills/{name}/`` from inline content.
+        """Write a skill folder under ``{colony_dir}/.hive/skills/{name}/`` from inline content.
+
+        The skill is scoped to a single colony: ``SkillDiscovery`` scans
+        ``{project_root}/.hive/skills/`` as project-scope, and the
+        colony's worker uses ``project_root = colony_dir`` — so only
+        that colony's workers see it, not every colony on the machine.
+        We deliberately avoid ``~/.hive/skills/`` here because that
+        directory is scanned as user scope and leaks into every agent.
 
         Returns ``(installed_path, error, replaced)``. On success
         ``error`` is ``None`` and ``installed_path`` is the final
@@ -1228,7 +1248,7 @@ def register_queen_lifecycle_tools(
                     ), False
                 normalized_files.append((rel_path, content))
 
-        target_root = Path.home() / ".hive" / "skills"
+        target_root = colony_dir / ".hive" / "skills"
         target = target_root / name
         try:
             target_root.mkdir(parents=True, exist_ok=True)
@@ -1276,13 +1296,15 @@ def register_queen_lifecycle_tools(
         The queen passes skill content inline: ``skill_name``,
         ``skill_description``, ``skill_body``, and optional
         ``skill_files`` (supporting scripts/references). The tool
-        writes ``~/.hive/skills/{skill_name}/SKILL.md`` and any extras,
-        then forks the queen session into a new colony directory and
-        stores the task in ``worker.json``. NOTHING RUNS after fork.
+        writes ``~/.hive/colonies/{colony_name}/.hive/skills/{skill_name}/``
+        (colony-scoped, only this colony's workers see it), then forks
+        the queen session into that colony directory and stores the
+        task in ``worker.json``. NOTHING RUNS after fork.
 
-        If a skill of the same name already exists, it is overwritten —
-        the queen owns her skill namespace, and calling create_colony
-        with an existing name means "my latest content wins."
+        If a skill of the same name already exists inside this colony,
+        it is overwritten — the queen owns her skill namespace inside
+        the colony, and calling create_colony with an existing name
+        means "my latest content wins."
 
         When *tasks* is provided, each entry is seeded into the
         colony's ``progress.db`` task queue in a single transaction.
@@ -1300,11 +1322,22 @@ def register_queen_lifecycle_tools(
                 {"error": ("colony_name must be lowercase alphanumeric with underscores (e.g. 'honeycomb_research').")}
             )
 
+        # Pre-create the colony dir so the skill can be materialized
+        # INSIDE it (project scope, colony-local). fork_session_into_colony
+        # keys "is_new" off worker.json rather than the dir itself, so
+        # pre-creating here does not wrongly flag fresh colonies as "old".
+        colony_dir = Path.home() / ".hive" / "colonies" / cn
+        try:
+            colony_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return json.dumps({"error": f"failed to create colony dir {colony_dir}: {e}"})
+
         installed_skill, skill_err, skill_replaced = _materialize_skill_folder(
             skill_name=skill_name,
             skill_description=skill_description,
             skill_body=skill_body,
             skill_files=skill_files,
+            colony_dir=colony_dir,
         )
         if skill_err is not None:
             return json.dumps(
@@ -1425,11 +1458,15 @@ def register_queen_lifecycle_tools(
             "chat, use run_parallel_workers instead.\n\n"
             "ATOMIC CALL: you pass the skill content INLINE as "
             "arguments (skill_name, skill_description, skill_body, "
-            "optional skill_files). Do NOT write the skill folder "
-            "yourself beforehand — this tool materializes "
-            "~/.hive/skills/{skill_name}/ for you and then forks. If a "
-            "skill of the same name already exists it is replaced by "
-            "your latest content (you own your skill namespace).\n\n"
+            "optional skill_files). The tool writes the folder at "
+            "~/.hive/colonies/{colony_name}/.hive/skills/{skill_name}/ "
+            "— scoped to THIS colony only (project scope); no other "
+            "colony on the machine can see it. Do NOT write the folder "
+            "yourself with write_file; folders hand-authored at "
+            "~/.hive/skills/ are user-scoped and LEAK to every colony. "
+            "If a skill of the same name already exists under this "
+            "colony, it is replaced by your latest content (you own "
+            "your skill namespace inside the colony).\n\n"
             "NOTHING RUNS AFTER FORK. This tool is file-system only: "
             "it writes the skill folder, copies the queen session "
             "into a new colony directory, and stores the task in "
@@ -1486,10 +1523,11 @@ def register_queen_lifecycle_tools(
                         "Identifier for the skill folder. Lowercase "
                         "[a-z0-9-], no leading/trailing/consecutive "
                         "hyphens, ≤64 chars. Becomes the directory "
-                        "under ~/.hive/skills/ and the frontmatter "
-                        "'name' field. Example: "
-                        "'honeycomb-api-protocol'. Reusing an existing "
-                        "name replaces that skill."
+                        "under ~/.hive/colonies/<colony_name>/.hive/"
+                        "skills/ and the frontmatter 'name' field. "
+                        "Example: 'honeycomb-api-protocol'. Reusing "
+                        "an existing name within this colony replaces "
+                        "that skill."
                     ),
                 },
                 "skill_description": {

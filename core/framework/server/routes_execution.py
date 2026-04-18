@@ -767,8 +767,16 @@ async def fork_session_into_colony(
             session.id,
         )
 
+    # "is_new" keys off worker.json, not bare dir existence: the queen's
+    # create_colony tool now pre-creates colony_dir (so it can
+    # materialize the colony-scoped skill folder BEFORE the fork), which
+    # would wrongly flag every fresh colony as "already-exists" if we
+    # used ``not colony_dir.exists()``. A colony is "new" until its
+    # worker config has actually been written.
     colony_dir = Path.home() / ".hive" / "colonies" / colony_name
-    is_new = not colony_dir.exists()
+    worker_name = "worker"
+    worker_config_path = colony_dir / f"{worker_name}.json"
+    is_new = not worker_config_path.exists()
     colony_dir.mkdir(parents=True, exist_ok=True)
     (colony_dir / "data").mkdir(exist_ok=True)
 
@@ -815,10 +823,9 @@ async def fork_session_into_colony(
                 exc,
             )
 
-    # Fixed worker name -- sessions are the unit of parallelism, not workers
-    worker_name = "worker"
-
-    worker_config_path = colony_dir / f"{worker_name}.json"
+    # Fixed worker name and config path are already computed above so
+    # ``is_new`` can be derived from worker.json rather than the colony
+    # directory (see comment on the ``is_new`` block).
 
     # ── 1. Gather queen state ─────────────────────────────────────
     # Queen-lifecycle + agent-management tools are registered ONLY against

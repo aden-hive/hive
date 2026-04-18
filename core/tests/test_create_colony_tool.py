@@ -4,10 +4,14 @@ Contract (atomic inline-skill flow):
 
 The queen calls ``create_colony(colony_name, task, skill_name,
 skill_description, skill_body, skill_files?, tasks?)`` in a single
-call. The tool materializes ``~/.hive/skills/{skill_name}/`` from the
+call. The tool materializes
+``~/.hive/colonies/{colony_name}/.hive/skills/{skill_name}/`` from the
 inline content (writing SKILL.md and any supporting files), then forks
-the queen session into a colony. Reusing an existing skill name simply
-replaces the old skill — the queen owns her skill namespace.
+the queen session into that colony. The skill is **colony-scoped** —
+discovered as project scope by that colony's workers, invisible to
+every other colony on the machine. Reusing an existing skill name
+inside the colony simply replaces the old skill — the queen owns her
+skill namespace inside the colony.
 
 We monkeypatch ``fork_session_into_colony`` so the test doesn't need a
 real queen / session directory. We also redirect ``$HOME`` so the test's
@@ -61,9 +65,14 @@ async def _call(executor, **inputs) -> dict:
 
 @pytest.fixture
 def patched_home(tmp_path, monkeypatch):
-    """Redirect $HOME so ~/.hive/skills/ lands in tmp_path."""
+    """Redirect $HOME so ~/.hive/colonies/ lands in tmp_path."""
     monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
+
+
+def _colony_skill_path(home: Path, colony_name: str, skill_name: str) -> Path:
+    """Where the tool now materializes the skill (colony-scoped project dir)."""
+    return home / ".hive" / "colonies" / colony_name / ".hive" / "skills" / skill_name
 
 
 @pytest.fixture
@@ -153,10 +162,10 @@ async def test_happy_path_emits_colony_created_event(
 
 
 @pytest.mark.asyncio
-async def test_happy_path_materializes_skill_under_home(
+async def test_happy_path_materializes_skill_under_colony_dir(
     patched_home: Path, patched_fork: list[dict]
 ) -> None:
-    """Inline skill content is written to ~/.hive/skills/{name}/."""
+    """Inline skill content is written to ~/.hive/colonies/{colony}/.hive/skills/{name}/."""
     executor, session = _make_executor()
 
     description = (
@@ -189,7 +198,10 @@ async def test_happy_path_materializes_skill_under_home(
     assert payload["skill_name"] == "honeycomb-api-protocol"
     assert payload["skill_replaced"] is False
 
-    installed = patched_home / ".hive" / "skills" / "honeycomb-api-protocol" / "SKILL.md"
+    installed = (
+        _colony_skill_path(patched_home, "honeycomb_research", "honeycomb-api-protocol")
+        / "SKILL.md"
+    )
     assert installed.exists()
     text = installed.read_text(encoding="utf-8")
     assert text.startswith("---\n")
@@ -197,11 +209,61 @@ async def test_happy_path_materializes_skill_under_home(
     assert f"description: {description}" in text
     assert "HoneyComb API Operational Protocol" in text
 
+    # Critically: the skill must NOT land in the shared user-scope dir —
+    # that was the leak we are fixing.
+    assert not (patched_home / ".hive" / "skills" / "honeycomb-api-protocol").exists()
+
     # Fork was called with the right args
     assert len(patched_fork) == 1
     assert patched_fork[0]["colony_name"] == "honeycomb_research"
     assert "honeycomb market report" in patched_fork[0]["task"]
     assert patched_fork[0]["session"] is session
+
+
+@pytest.mark.asyncio
+async def test_two_colonies_do_not_share_skill_namespace(
+    patched_home: Path, patched_fork: list[dict]
+) -> None:
+    """A skill authored via create_colony is invisible to other colonies' worker dirs.
+
+    This is the core isolation guarantee: colony A's create_colony call
+    must NOT plant files under colony B's project root or under the
+    user-global skills dir.
+    """
+    executor, _ = _make_executor()
+
+    payload_a = await _call(
+        executor,
+        colony_name="alpha",
+        task="t",
+        skill_name="alpha-only-skill",
+        skill_description="Only the alpha colony should see this skill.",
+        skill_body=_DEFAULT_BODY,
+    )
+    assert payload_a.get("status") == "created", payload_a
+
+    payload_b = await _call(
+        executor,
+        colony_name="bravo",
+        task="t",
+        skill_name="bravo-only-skill",
+        skill_description="Only the bravo colony should see this skill.",
+        skill_body=_DEFAULT_BODY,
+    )
+    assert payload_b.get("status") == "created", payload_b
+
+    alpha_dir = patched_home / ".hive" / "colonies" / "alpha" / ".hive" / "skills"
+    bravo_dir = patched_home / ".hive" / "colonies" / "bravo" / ".hive" / "skills"
+    user_skills = patched_home / ".hive" / "skills"
+
+    # Each colony only contains its own skill
+    assert (alpha_dir / "alpha-only-skill" / "SKILL.md").exists()
+    assert not (alpha_dir / "bravo-only-skill").exists()
+    assert (bravo_dir / "bravo-only-skill" / "SKILL.md").exists()
+    assert not (bravo_dir / "alpha-only-skill").exists()
+
+    # Nothing landed in the shared user-global dir.
+    assert not user_skills.exists() or not any(user_skills.iterdir())
 
 
 @pytest.mark.asyncio
@@ -225,7 +287,7 @@ async def test_skill_files_are_written_alongside_skill_md(
     )
     assert payload.get("status") == "created", payload
 
-    skill_dir = patched_home / ".hive" / "skills" / "fancy-skill"
+    skill_dir = _colony_skill_path(patched_home, "fancy_skill", "fancy-skill")
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "scripts" / "run.sh").read_text() == "#!/bin/sh\necho hi\n"
     assert (skill_dir / "references" / "shapes.md").read_text() == "# Shapes\nfoo\n"
@@ -235,10 +297,10 @@ async def test_skill_files_are_written_alongside_skill_md(
 async def test_existing_skill_is_replaced(
     patched_home: Path, patched_fork: list[dict]
 ) -> None:
-    """Reusing a skill_name replaces the old skill with fresh content."""
+    """Reusing a skill_name within the same colony replaces the old skill."""
     executor, _ = _make_executor()
 
-    skill_root = patched_home / ".hive" / "skills" / "x-job-market-replier"
+    skill_root = _colony_skill_path(patched_home, "replier_colony", "x-job-market-replier")
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text(
         "---\nname: x-job-market-replier\ndescription: stale\n---\n\nold body\n",
@@ -460,6 +522,8 @@ async def test_fork_failure_keeps_materialized_skill(
     assert "error" in payload
     assert "fork failed" in payload["error"]
     assert "skill_installed" in payload
-    installed = patched_home / ".hive" / "skills" / "durable-skill" / "SKILL.md"
+    installed = (
+        _colony_skill_path(patched_home, "will_fail", "durable-skill") / "SKILL.md"
+    )
     assert installed.exists()
     assert "hint" in payload
