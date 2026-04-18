@@ -150,6 +150,11 @@ def test_openrouter_catalog_tracks_current_frontier_set():
         "anthropic/claude-opus-4.6",
         "google/gemini-3.1-pro-preview-customtools",
         "deepseek/deepseek-v3.2",
+        "qwen/qwen3.6-plus",
+        "z-ai/glm-5v-turbo",
+        "x-ai/grok-4.20",
+        "xiaomi/mimo-v2-pro",
+        "stepfun/step-3.5-flash",
     ]
     assert openrouter_models[0]["max_tokens"] == 128000
     assert openrouter_models[0]["max_context_tokens"] == 922000
