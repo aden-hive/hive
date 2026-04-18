@@ -1,6 +1,7 @@
+# hive/tools/src/aden_tools/tools/__init__.py
 
-# hive/tools/src/aden_tools/tools/ariba_agent/__init__.py
+from .ariba_agent import register_ariba_tools
 
-from .tool import register_tools as register_ariba_tools
-
-__all__ = ["register_ariba_tools"]
+def register_all_tools(mcp, credentials=None, include_unverified=False):
+    ...
+    register_ariba_tools(mcp)
