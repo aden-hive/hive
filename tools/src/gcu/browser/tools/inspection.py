@@ -187,8 +187,7 @@ def _resize_and_annotate(
         )
     except Exception:
         logger.warning(
-            "Screenshot resize/annotate FAILED — returning original image. "
-            "css_width=%s, dpr=%s.",
+            "Screenshot resize/annotate FAILED — returning original image. css_width=%s, dpr=%s.",
             css_width,
             dpr,
             exc_info=True,
