@@ -1282,8 +1282,7 @@ export default function ColonyChat() {
   // user hasn't dismissed it (via the X button). Cleanup clears it so
   // the panel closes when we leave the colony room.
   useEffect(() => {
-    if (!agentState.sessionId) return;
-    setCtxSessionId(agentState.sessionId);
+    setCtxSessionId(agentState.sessionId ?? null);
     return () => setCtxSessionId(null);
   }, [agentState.sessionId, setCtxSessionId]);
 

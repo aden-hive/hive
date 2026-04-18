@@ -207,9 +207,16 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     initial_prompt = body.get("initial_prompt")
     initial_phase = body.get("initial_phase")
 
-    # 1. Check for an existing live session bound to this queen.
+    # 1. Check for an existing live DM session bound to this queen.
+    # Skip colony sessions: a colony forked from this queen also carries
+    # queen_name == queen_id, but it has a worker loaded (colony_id /
+    # worker_path set) and is the colony's chat, not the queen's DM.
     for session in manager.list_sessions():
-        if session.queen_name == queen_id:
+        if (
+            session.queen_name == queen_id
+            and session.colony_id is None
+            and session.worker_path is None
+        ):
             return web.json_response(
                 {
                     "session_id": session.id,

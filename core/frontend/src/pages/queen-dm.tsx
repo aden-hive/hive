@@ -157,18 +157,18 @@ export default function QueenDM() {
 
     (async () => {
       try {
+        let bootstrapSessionId: string | null = null;
         if (isBootstrap) {
           // Pass the pending message as initial_prompt so the queen
           // processes it immediately (no phantom "Hello" greeting).
-          await queensApi.createNewSession(
+          const bootstrapResult = await queensApi.createNewSession(
             queenId,
             pendingFirstMessage ?? undefined,
             "independent",
           );
+          bootstrapSessionId = bootstrapResult.session_id;
         } else if (selectedSessionParam) {
           await queensApi.selectSession(queenId, selectedSessionParam);
-        } else {
-          await queensApi.getOrCreateSession(queenId, undefined, "independent");
         }
         if (cancelled) return;
         let sid: string;
@@ -206,14 +206,20 @@ export default function QueenDM() {
             setSearchParams({ session: sid }, { replace: true });
           }
         } else {
-          // No session specified - get or create one
-          const result = await queensApi.getOrCreateSession(
-            queenId,
-            undefined,
-            "independent",
-          );
-          if (cancelled) return;
-          sid = result.session_id;
+          // Bootstrap uses the session id from createNewSession directly so a
+          // stale live session for this queen can't steal the flow. Otherwise
+          // fall back to get-or-create.
+          if (bootstrapSessionId) {
+            sid = bootstrapSessionId;
+          } else {
+            const result = await queensApi.getOrCreateSession(
+              queenId,
+              undefined,
+              "independent",
+            );
+            if (cancelled) return;
+            sid = result.session_id;
+          }
           setSessionId(sid);
           setQueenReady(true);
 
