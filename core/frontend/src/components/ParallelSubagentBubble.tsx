@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Cpu } from "lucide-react";
 import type { ChatMessage, ContextUsageEntry } from "@/components/ChatPanel";
 import MarkdownContent from "@/components/MarkdownContent";
 import { cssVar } from "@/lib/graphUtils";
+import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -317,6 +318,7 @@ const ParallelSubagentBubble = memo(
     const [expanded, setExpanded] = useState(false);
     const [zoomedIdx, setZoomedIdx] = useState<number | null>(null);
     const mux = useMuxColors();
+    const { openColonyWorkers } = useColonyWorkers();
 
     // Labels with instance numbers for duplicates
     const labels: string[] = (() => {
@@ -371,16 +373,21 @@ const ParallelSubagentBubble = memo(
 
     return (
       <div className="flex gap-3">
-        {/* Left icon */}
-        <div
-          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1"
+        {/* Left icon — subagents aren't top-level colony workers, so the
+            click opens the sidebar without pre-selection. */}
+        <button
+          type="button"
+          onClick={() => openColonyWorkers()}
+          aria-label="Open colony workers sidebar"
+          title="Open colony workers sidebar"
+          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1 transition-opacity hover:opacity-80 cursor-pointer"
           style={{
             backgroundColor: `${workerColor}18`,
             border: `1.5px solid ${workerColor}35`,
           }}
         >
           <Cpu className="w-3.5 h-3.5" style={{ color: workerColor }} />
-        </div>
+        </button>
 
         <div className="flex-1 min-w-0 max-w-[90%]">
           {/* Header */}

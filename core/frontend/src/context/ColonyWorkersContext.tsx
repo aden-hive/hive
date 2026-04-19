@@ -35,6 +35,17 @@ interface ColonyWorkersContextValue {
    *  colony room. */
   toggleColonyWorkers: () => void;
 
+  /** Worker the Sessions tab should auto-select on the next render.
+   *  Set by ``openColonyWorkers(workerId)`` when a chat avatar is
+   *  clicked; cleared by the panel after it consumes the value. */
+  focusWorkerId: string | null;
+  setFocusWorkerId: (workerId: string | null) => void;
+
+  /** Open the panel and optionally pre-select a worker. Un-dismisses
+   *  the panel even if it was previously closed. Passing no workerId
+   *  just opens the panel without changing selection. */
+  openColonyWorkers: (workerId?: string) => void;
+
   /** Current session's triggers, pushed from whichever page is active
    *  (colony-chat today). ``ColonyWorkersPanel`` reads these to render
    *  its Triggers tab without having to re-subscribe to SSE itself. */
@@ -48,6 +59,7 @@ export function ColonyWorkersProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionIdState] = useState<string | null>(null);
   const [colonyName, setColonyName] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [focusWorkerId, setFocusWorkerId] = useState<string | null>(null);
   const [triggers, setTriggers] = useState<GraphNode[]>([]);
 
   const setSessionId = useCallback((next: string | null) => {
@@ -64,6 +76,11 @@ export function ColonyWorkersProvider({ children }: { children: ReactNode }) {
     setDismissed((d) => !d);
   }, []);
 
+  const openColonyWorkers = useCallback((workerId?: string) => {
+    setDismissed(false);
+    setFocusWorkerId(workerId ?? null);
+  }, []);
+
   return (
     <ColonyWorkersContext.Provider
       value={{
@@ -73,6 +90,9 @@ export function ColonyWorkersProvider({ children }: { children: ReactNode }) {
         setColonyName,
         dismissed,
         toggleColonyWorkers,
+        focusWorkerId,
+        setFocusWorkerId,
+        openColonyWorkers,
         triggers,
         setTriggers,
       }}

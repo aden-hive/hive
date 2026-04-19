@@ -15,6 +15,23 @@ import type { AgentEvent } from "@/api/types";
  *   "inbox-management"              → "Inbox Management"
  *   "job_hunter"                    → "Job Hunter"
  */
+/**
+ * Extract the colony worker uuid from a parallel-worker ``streamId``.
+ *
+ * Worker messages tag their ``streamId`` as either ``"worker"`` (single-worker
+ * legacy case) or ``"worker:{uuid}"`` (parallel fan-out). The uuid half is
+ * the colony worker id — the same identifier the Colony Workers sidebar uses
+ * to key its Sessions cards. Returns null for the legacy single-worker case
+ * or any other stream kind.
+ */
+export function workerIdFromStreamId(
+  streamId: string | null | undefined,
+): string | null {
+  if (!streamId) return null;
+  const m = /^worker:(.+)$/.exec(streamId);
+  return m ? m[1] : null;
+}
+
 export function formatAgentDisplayName(raw: string): string {
   // Take the last path segment (in case it's a path like "examples/templates/foo")
   const base = raw.split("/").pop() || raw;

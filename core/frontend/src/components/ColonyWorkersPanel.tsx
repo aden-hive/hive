@@ -90,6 +90,15 @@ export default function ColonyWorkersPanel({
   onClose,
 }: ColonyWorkersPanelProps) {
   const [tab, setTab] = useState<TabKey>("sessions");
+  const { focusWorkerId } = useColonyWorkers();
+
+  // When an external caller (e.g. clicking a worker avatar in chat)
+  // requests focus on a specific worker, jump to the Sessions tab so
+  // the pre-select in SessionsTab is visible. The actual select +
+  // focus-clear happens inside SessionsTab.
+  useEffect(() => {
+    if (focusWorkerId) setTab("sessions");
+  }, [focusWorkerId]);
 
   // ── Resizable width (mirrors QueenProfilePanel) ─────────────────────
   const MIN_WIDTH = 280;
@@ -489,6 +498,21 @@ function SessionsTab({
   const [selected, setSelected] = useState<string | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [stoppingAll, setStoppingAll] = useState(false);
+  const { focusWorkerId, setFocusWorkerId } = useColonyWorkers();
+
+  // Consume focus requests from avatar clicks in chat. Wait for the
+  // initial fetch before deciding so a click that arrives before the
+  // workers list has loaded still resolves. If the requested id is
+  // present we drill into its detail view; if it's aged out we swallow
+  // the request silently. Either way we clear the focus so it isn't
+  // re-applied on every re-render.
+  useEffect(() => {
+    if (!focusWorkerId || loading) return;
+    if (workers.some((w) => w.worker_id === focusWorkerId)) {
+      setSelected(focusWorkerId);
+    }
+    setFocusWorkerId(null);
+  }, [focusWorkerId, workers, loading, setFocusWorkerId]);
 
   const refresh = useCallback(() => {
     setLoading(true);
