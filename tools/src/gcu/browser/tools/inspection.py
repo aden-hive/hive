@@ -46,16 +46,17 @@ _screenshot_scales: dict[int, float] = {}
 
 
 def clear_tab_state(tab_ids) -> None:
-    """Drop cached screenshot scales for the given tab_ids.
+    """Drop cached screenshot scales and viewport sizes for the given tab_ids.
 
     Called when a tab closes or a profile's context is destroyed so stale
-    scale values can't bleed into a later tab that Chrome happens to assign
+    cache values can't bleed into a later tab that Chrome happens to assign
     the same id. Accepts a single id or any iterable.
     """
     if isinstance(tab_ids, int):
         tab_ids = (tab_ids,)
     for tid in tab_ids:
         _screenshot_scales.pop(tid, None)
+        _viewport_sizes.pop(tid, None)
 
 
 def _resize_and_annotate(
@@ -195,34 +196,71 @@ def _resize_and_annotate(
         return data, 1.0
 
 
-async def _ensure_viewport_size(tab_id: int) -> tuple[int, int]:
-    """Return ``(cssWidth, cssHeight)`` for ``tab_id``, populating the
-    cache via ``window.innerWidth`` / ``window.innerHeight`` on miss.
+async def _ensure_viewport_size(tab_id: int, _caller: str = "unknown") -> tuple[int, int]:
+    """Return ``(cssWidth, cssHeight)`` for ``tab_id``, always
+    refreshing from ``window.innerWidth`` / ``window.innerHeight``.
 
     Used by click / hover / press tools to turn fractional inputs
     (0..1) into CSS px, and by rect tools to turn CSS-px rects into
-    fractions. Degrades to ``(1, 1)`` if the bridge can't be queried
-    — that makes every coord an identity op, which is a safe no-op
-    (and preferable to crashing).
+    fractions.
+
+    Every call emits a ``viewport_sample`` telemetry entry so we
+    can build a timeline of Chrome's reported viewport across an
+    agent run — needed to diagnose the sessions where cssH changes
+    silently (no visible layout shift) between screenshot and
+    click. The entry records the live value, the cached value, and
+    the delta so the transition point is trivial to locate in
+    ``~/.hive/browser-logs/browser-YYYY-MM-DD.jsonl``.
+
+    Falls back to the cached value on evaluate failure, then to
+    ``(1, 1)`` if there's no cache — identity-op is a safe no-op.
     """
-    cached = _viewport_sizes.get(tab_id)
-    if cached is not None and cached[0] > 0 and cached[1] > 0:
-        return cached
     bridge = get_bridge()
+    cw = ch = 0
+    evaluate_error: str | None = None
     try:
         result = await bridge.evaluate(tab_id, "({w: window.innerWidth, h: window.innerHeight})")
         inner = (result or {}).get("result") or {}
         cw = int(float(inner.get("w") or 0))
         ch = int(float(inner.get("h") or 0))
-    except Exception:
-        cw, ch = 0, 0
+    except Exception as e:
+        evaluate_error = str(e)
+        cw = ch = 0
+
+    cached_before = _viewport_sizes.get(tab_id)
+
     if cw <= 0 or ch <= 0:
-        # Degraded: bridge didn't return viewport. Cache an identity
-        # so we don't retry on every call; corrects itself after the
-        # next successful browser_screenshot.
-        cw, ch = 1, 1
-    _viewport_sizes[tab_id] = (cw, ch)
-    return cw, ch
+        if cached_before is not None and cached_before[0] > 0 and cached_before[1] > 0:
+            result_cw, result_ch = cached_before
+        else:
+            result_cw, result_ch = 1, 1
+    else:
+        result_cw, result_ch = cw, ch
+        _viewport_sizes[tab_id] = (cw, ch)
+
+    try:
+        from ..telemetry import write_log
+        write_log({
+            "type": "viewport_sample",
+            "tab_id": tab_id,
+            "caller": _caller,
+            "live_w": cw,
+            "live_h": ch,
+            "cached_w": cached_before[0] if cached_before else None,
+            "cached_h": cached_before[1] if cached_before else None,
+            "deltaH_vs_cache": (
+                (ch - cached_before[1])
+                if (cached_before and ch > 0)
+                else None
+            ),
+            "returned_w": result_cw,
+            "returned_h": result_ch,
+            "evaluate_error": evaluate_error,
+        })
+    except Exception:
+        pass
+
+    return result_cw, result_ch
 
 
 def register_inspection_tools(mcp: FastMCP) -> None:
@@ -475,7 +513,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return result
 
         rect = result["rect"]
-        cw, ch = await _ensure_viewport_size(target_tab)
+        cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_shadow_query")
         cw_f = float(cw) if cw > 0 else 1.0
         ch_f = float(ch) if ch > 0 else 1.0
         return {
@@ -538,7 +576,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return result
 
         rect = result["rect"]
-        cw, ch = await _ensure_viewport_size(target_tab)
+        cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_get_rect")
         cw_f = float(cw) if cw > 0 else 1.0
         ch_f = float(ch) if ch > 0 else 1.0
         return {

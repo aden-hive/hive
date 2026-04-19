@@ -211,6 +211,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(ensureOffscreen);
 chrome.runtime.onStartup.addListener(ensureOffscreen);
 
+// ---------------------------------------------------------------------------
+// CDP event forwarder — diagnostic channel
+// ---------------------------------------------------------------------------
+//
+// chrome.debugger.sendCommand (the cdp handler above) only responds to
+// requests. CDP also emits unsolicited EVENTS (Runtime.consoleAPICalled,
+// Page.frameResized, Target.targetInfoChanged, …) that the bridge doesn't
+// see today. Forward the narrow subset we're currently diagnosing so the
+// Python side can correlate viewport changes with page lifecycle events.
+// Filtered at the source to keep the wire slim.
+const FORWARDED_CDP_EVENTS = new Set([
+  "Runtime.consoleAPICalled",
+  "Page.lifecycleEvent",
+  "Page.frameResized",
+  "Page.frameNavigated",
+  "Target.targetInfoChanged",
+]);
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (!FORWARDED_CDP_EVENTS.has(method)) return;
+  wsSend({
+    type: "cdp_event",
+    tabId: source.tabId,
+    method,
+    params: params ?? {},
+  });
+});
+
 // Periodic alarm keeps the service worker from being garbage-collected and
 // recreates the offscreen document if it was evicted.
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });

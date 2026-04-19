@@ -57,7 +57,9 @@
       "mcp__gcu-tools__browser_type_focused",
       "mcp__gcu-tools__browser_wait",
       "Bash(python3 -c ' *)",
-      "Bash(python3 scripts/debug_queen_prompt.py independent)"
+      "Bash(python3 scripts/debug_queen_prompt.py independent)",
+      "Bash(curl -s --max-time 2 http://127.0.0.1:9230/status)",
+      "Bash(python3 -c \"import json, sys; print\\(json.loads\\(sys.stdin.read\\(\\)\\)['data']['content']\\)\")"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

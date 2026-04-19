@@ -7,11 +7,13 @@ All operations go through the Beeline extension via CDP - no Playwright required
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Literal
 
 from fastmcp import FastMCP
+from mcp.types import ImageContent, TextContent
 
 from ..bridge import get_bridge
 from ..telemetry import log_tool_call
@@ -26,6 +28,57 @@ _AUTO_SNAPSHOT_SETTLE_S = 0.5
 
 
 AutoSnapshotMode = Literal["default", "simple", "interactive", "off"]
+
+
+def _text_only(result: dict) -> list:
+    """Wrap a dict result as a single-block MCP text response.
+
+    Used for early-error returns from coordinate interaction tools that
+    promise a list shape — keeps the result round-trippable through the
+    MCP transport without a fragile dict-vs-list union.
+    """
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def _build_visual_response(result: dict, bridge, target_tab: int | None) -> list:
+    """Wrap an interaction result and append an annotated post-action screenshot.
+
+    Every coordinate-based interaction (click / hover / press_at) goes
+    through here so the agent ALWAYS sees what the page looks like
+    immediately after — with the click marker overlaid — and can
+    self-correct on a near-miss in the same turn instead of issuing a
+    separate ``browser_screenshot`` call. The marker comes from
+    ``_interaction_highlights`` which is populated by ``highlight_point``
+    inside the bridge call, so it's guaranteed to be present here.
+
+    Degrades to text-only on any failure (action errored, no tab,
+    screenshot timed out) — never blocks the interaction itself.
+    """
+    text_block = TextContent(type="text", text=json.dumps(result))
+    if not result.get("ok") or target_tab is None or bridge is None:
+        return [text_block]
+    try:
+        from ..bridge import _interaction_highlights
+        from .inspection import _resize_and_annotate
+
+        shot = await bridge.screenshot(target_tab, full_page=False)
+        if not shot.get("ok"):
+            return [text_block]
+        highlights = (
+            [_interaction_highlights[target_tab]]
+            if target_tab in _interaction_highlights
+            else None
+        )
+        data, _ = await asyncio.to_thread(
+            _resize_and_annotate,
+            shot["data"],
+            shot.get("cssWidth", 0),
+            shot.get("devicePixelRatio", 1.0),
+            highlights,
+        )
+        return [text_block, ImageContent(type="image", data=data, mimeType="image/jpeg")]
+    except Exception:
+        return [text_block]
 
 
 async def _attach_snapshot(result: dict, bridge, target_tab: int, auto_snapshot_mode: str) -> dict:
@@ -139,7 +192,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         tab_id: int | None = None,
         profile: str | None = None,
         button: Literal["left", "right", "middle"] = "left",
-    ) -> dict:
+    ) -> list:
         """
         Click at a FRACTION of the viewport (0..1, 0..1).
 
@@ -155,6 +208,22 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         tiles, etc.). Proportional positions survive every such
         transform; pixel coords do not.
 
+        Precision floor: visual coordinate picking from a screenshot
+        is reliable to roughly **3 % of the viewport** (~25–50 CSS px
+        on a 1280×800 window). The y-axis tends to drift more than x
+        because vision models perceive vertical centres less
+        accurately. For targets smaller than that — narrow buttons,
+        checkboxes, dense rows, links — look up the rect with
+        ``browser_get_rect`` (selector-based) or ``browser_shadow_query``
+        (web-component) and pass ``rect.cx`` / ``rect.cy`` directly.
+
+        The response is a 2-block list: a JSON text block with the
+        click result, and a fresh annotated screenshot showing where
+        the click landed (red marker at the dispatched coord). Use
+        the screenshot to verify; if the marker is sitting on the
+        wrong element, retry with the rect-derived centre instead of
+        re-eyeballing.
+
         Args:
             x: X fraction of the viewport (0..1).
             y: Y fraction of the viewport (0..1).
@@ -163,9 +232,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             button: Mouse button to click (left, right, middle)
 
         Returns:
-            Dict with click result, including ``focused_element``
-            describing what the click focused. ``focused_element.rect``
-            is also in fractions.
+            List with two content blocks: TextContent(JSON of the
+            click result, including ``focused_element`` and its rect
+            in fractions) and ImageContent(annotated post-click
+            screenshot). Falls back to a single-block text-only
+            response on any error.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile, "button": button}
@@ -174,19 +245,19 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {"ok": False, "error": "Browser extension not connected"}
             log_tool_call("browser_click_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         ctx = _get_context(profile)
         if not ctx:
             result = {"ok": False, "error": "Browser not started. Call browser_start first."}
             log_tool_call("browser_click_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
             result = {"ok": False, "error": "No active tab"}
             log_tool_call("browser_click_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         # Pixel-input guard: legitimate fractions live in [0, 1]. Allow a
         # small overshoot tolerance for edge targets.
@@ -202,12 +273,12 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 ),
             }
             log_tool_call("browser_click_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         try:
             from .inspection import _ensure_viewport_size
 
-            cw, ch = await _ensure_viewport_size(target_tab)
+            cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_click_coordinate")
             css_x = x * cw
             css_y = y * ch
             click_result = await bridge.click_coordinate(target_tab, css_x, css_y, button=button)
@@ -217,7 +288,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result={**click_result, "cssWidth": cw, "cssHeight": ch},
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return click_result
+            return await _build_visual_response(click_result, bridge, target_tab)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call(
@@ -226,7 +297,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 error=e,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return result
+            return _text_only(result)
 
     @mcp.tool()
     async def browser_type(
@@ -558,7 +629,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         y: float,
         tab_id: int | None = None,
         profile: str | None = None,
-    ) -> dict:
+    ) -> list:
         """
         Hover at a FRACTION of the viewport (0..1, 0..1).
 
@@ -567,6 +638,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         ``x`` / ``y`` are fractions of the viewport (``0.5`` = center);
         the tool converts to CSS px internally.
 
+        Same precision-floor caveat as ``browser_click_coordinate``:
+        for sub-3 % targets, use rect-derived coords from
+        ``browser_get_rect`` / ``browser_shadow_query``.
+
         Args:
             x: X fraction of the viewport (0..1).
             y: Y fraction of the viewport (0..1).
@@ -574,7 +649,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with hover result
+            List with two content blocks: TextContent(JSON of the
+            hover result) and ImageContent(annotated post-hover
+            screenshot showing the cursor marker). Useful for
+            verifying tooltip / hover-state changes triggered. Falls
+            back to text-only on error.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile}
@@ -583,19 +662,19 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {"ok": False, "error": "Browser extension not connected"}
             log_tool_call("browser_hover_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         ctx = _get_context(profile)
         if not ctx:
             result = {"ok": False, "error": "Browser not started. Call browser_start first."}
             log_tool_call("browser_hover_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
             result = {"ok": False, "error": "No active tab"}
             log_tool_call("browser_hover_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
@@ -603,12 +682,12 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_hover_coordinate", params, result=result)
-            return result
+            return _text_only(result)
 
         try:
             from .inspection import _ensure_viewport_size
 
-            cw, ch = await _ensure_viewport_size(target_tab)
+            cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_hover_coordinate")
             hover_result = await bridge.hover_coordinate(target_tab, x * cw, y * ch)
             log_tool_call(
                 "browser_hover_coordinate",
@@ -616,7 +695,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=hover_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return hover_result
+            return await _build_visual_response(hover_result, bridge, target_tab)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call(
@@ -625,7 +704,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 error=e,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return result
+            return _text_only(result)
 
     @mcp.tool()
     async def browser_press_at(
@@ -634,7 +713,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         key: str,
         tab_id: int | None = None,
         profile: str | None = None,
-    ) -> dict:
+    ) -> list:
         """
         Move mouse to a FRACTION of the viewport (0..1, 0..1), then press a key.
 
@@ -644,6 +723,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         ``x`` / ``y`` are fractions of the viewport; the tool converts
         to CSS px internally.
 
+        Same precision-floor caveat as ``browser_click_coordinate``:
+        for sub-3 % targets, use rect-derived coords from
+        ``browser_get_rect`` / ``browser_shadow_query``.
+
         Args:
             x: X fraction of the viewport (0..1).
             y: Y fraction of the viewport (0..1).
@@ -652,7 +735,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with press result
+            List with two content blocks: TextContent(JSON of the
+            press result) and ImageContent(annotated post-press
+            screenshot showing where the key was dispatched). Falls
+            back to text-only on error.
         """
         start = time.perf_counter()
         params = {"x": x, "y": y, "key": key, "tab_id": tab_id, "profile": profile}
@@ -661,19 +747,19 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {"ok": False, "error": "Browser extension not connected"}
             log_tool_call("browser_press_at", params, result=result)
-            return result
+            return _text_only(result)
 
         ctx = _get_context(profile)
         if not ctx:
             result = {"ok": False, "error": "Browser not started. Call browser_start first."}
             log_tool_call("browser_press_at", params, result=result)
-            return result
+            return _text_only(result)
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
             result = {"ok": False, "error": "No active tab"}
             log_tool_call("browser_press_at", params, result=result)
-            return result
+            return _text_only(result)
 
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
@@ -681,12 +767,12 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_press_at", params, result=result)
-            return result
+            return _text_only(result)
 
         try:
             from .inspection import _ensure_viewport_size
 
-            cw, ch = await _ensure_viewport_size(target_tab)
+            cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_press_at")
             press_result = await bridge.press_key_at(target_tab, x * cw, y * ch, key)
             log_tool_call(
                 "browser_press_at",
@@ -694,7 +780,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=press_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return press_result
+            return await _build_visual_response(press_result, bridge, target_tab)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call(
@@ -703,7 +789,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 error=e,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return result
+            return _text_only(result)
 
     @mcp.tool()
     async def browser_select(

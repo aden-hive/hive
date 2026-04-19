@@ -166,6 +166,41 @@ _HIT_ELEMENT_JS = """
 """
 
 
+# Diagnostic probe — installs viewport/visibility listeners on the page
+# and posts their observations through console.info so the CDP event
+# channel (Runtime.consoleAPICalled) forwards them to our telemetry.
+# Idempotent via ``window.__hive_vp_instrumented``.
+_HIVE_VP_PROBE_JS = """
+(function () {
+  if (window.__hive_vp_instrumented) return;
+  window.__hive_vp_instrumented = true;
+  function sample(kind) {
+    try {
+      console.info('[hive_vp]', JSON.stringify({
+        kind: kind,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        visualW: window.visualViewport && window.visualViewport.width,
+        visualH: window.visualViewport && window.visualViewport.height,
+        docHidden: document.hidden,
+        visibilityState: document.visibilityState,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        dpr: window.devicePixelRatio,
+        ts: Date.now()
+      }));
+    } catch (e) {}
+  }
+  sample('init');
+  window.addEventListener('resize', function () { sample('resize'); });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { sample('visualResize'); });
+  }
+  document.addEventListener('visibilitychange', function () { sample('visibility'); });
+})();
+"""
+
+
 _FOCUSED_ELEMENT_JS = """
 (function() {
     function describe(el) {
@@ -368,6 +403,23 @@ class BeelineBridge:
                     log_connection_event("hello", {"version": msg.get("version")})
                     continue
 
+                if msg.get("type") == "cdp_event":
+                    # Unsolicited CDP event forwarded by the extension.
+                    # Narrow diagnostic channel — see FORWARDED_CDP_EVENTS
+                    # in browser-extension/background.js. We pick out
+                    # the [hive_vp] console probe as a structured
+                    # viewport_event telemetry entry and also log the
+                    # raw event for correlation with page lifecycle.
+                    try:
+                        self._handle_cdp_event(
+                            msg.get("tabId"),
+                            msg.get("method", ""),
+                            msg.get("params") or {},
+                        )
+                    except Exception:
+                        pass
+                    continue
+
                 msg_id = msg.get("id")
                 if msg_id and msg_id in self._pending:
                     fut = self._pending.pop(msg_id)
@@ -391,6 +443,84 @@ class BeelineBridge:
                     if not fut.done():
                         fut.cancel()
                 self._pending.clear()
+
+    def _handle_cdp_event(self, tab_id: int | None, method: str, params: dict) -> None:
+        """Decode a CDP event forwarded from the extension and route it
+        to telemetry. Keep this method sync and best-effort — a bad
+        event must never break the bridge's read loop.
+
+        Runtime.consoleAPICalled with our ``[hive_vp]`` prefix is
+        split off as a structured ``viewport_event`` entry so the
+        reader can ``grep`` it without touching the raw console log.
+        All other forwarded events are logged verbatim under
+        ``cdp_event`` so we can correlate viewport changes with
+        lifecycle / resize / target-info events.
+        """
+        from .telemetry import write_log
+
+        if method == "Runtime.consoleAPICalled":
+            args = params.get("args") or []
+            first = args[0].get("value") if args and isinstance(args[0], dict) else None
+            payload = args[1].get("value") if len(args) >= 2 and isinstance(args[1], dict) else None
+
+            # Structured [hive_vp] viewport probe → viewport_event
+            if first == "[hive_vp]" and isinstance(payload, str):
+                try:
+                    parsed = json.loads(payload)
+                except Exception:
+                    parsed = {"_raw": payload}
+                write_log({
+                    "type": "viewport_event",
+                    "tab_id": tab_id,
+                    **parsed,
+                })
+                return
+
+            # Attach-time canary → attach_canary (proves extension
+            # forwarder is alive end-to-end).
+            if first == "[hive_attach_canary]" and isinstance(payload, str):
+                try:
+                    parsed = json.loads(payload)
+                except Exception:
+                    parsed = {"_raw": payload}
+                write_log({
+                    "type": "attach_canary",
+                    "tab_id": tab_id,
+                    **parsed,
+                })
+                return
+
+            # Everything else — keep a compact row so we can tell
+            # whether ANY console output is flowing through the
+            # pipe. Truncate each arg so a chatty page can't flood
+            # the log.
+            compact = []
+            for a in args[:4]:
+                if not isinstance(a, dict):
+                    continue
+                v = a.get("value")
+                if isinstance(v, str):
+                    compact.append(v[:120])
+                elif v is not None:
+                    compact.append(str(v)[:120])
+            write_log({
+                "type": "cdp_event",
+                "tab_id": tab_id,
+                "method": method,
+                "level": params.get("type"),
+                "args": compact,
+            })
+            return
+
+        # Other forwarded events (Page.lifecycleEvent, frameResized,
+        # frameNavigated, Target.targetInfoChanged) are rare and high
+        # signal — keep the full param dict but truncate strings.
+        write_log({
+            "type": "cdp_event",
+            "tab_id": tab_id,
+            "method": method,
+            "params": params,
+        })
 
     # Default wait on a bridge command. Callers with known-slow ops
     # (full-page screenshots on slow networks, AX tree on huge pages)
@@ -594,12 +724,111 @@ class BeelineBridge:
         """Attach CDP debugger to a tab.
 
         Returns {"ok": bool}.
+
+        First-attach-per-tab triggers Chrome's "<extension> started
+        debugging this browser" infobar, which shrinks the layout
+        viewport by ~30–70 CSS px. The banner's commit is async from
+        the attach return, so a screenshot taken immediately after
+        can capture the pre-banner layout, leaving the viewport
+        cache stale until the next screenshot or
+        ``_ensure_viewport_size`` call. We wait a short grace here
+        and proactively prime the viewport cache with the settled
+        (post-banner) dimensions, so the very first coord-conversion
+        after attach already operates on the real frame.
         """
         if tab_id in self._cdp_attached:
             return {"ok": True, "attached": False, "message": "Already attached"}
         result = await self._send("cdp.attach", tabId=tab_id)
-        if result.get("ok"):
-            self._cdp_attached.add(tab_id)
+        if not result.get("ok"):
+            return result
+        self._cdp_attached.add(tab_id)
+        # Prime the viewport cache so the first coord-conversion
+        # after attach has a reasonable seed. Also install the
+        # diagnostic viewport-change probe ([hive_vp] console
+        # messages that stream through our CDP-event channel).
+        # Failures are silent — cache will heal on next screenshot
+        # or _ensure_viewport_size call.
+        try:
+            from .tools.inspection import _viewport_sizes
+
+            eval_res = await self._cdp(
+                tab_id,
+                "Runtime.evaluate",
+                {
+                    "expression": "({w: window.innerWidth, h: window.innerHeight})",
+                    "returnByValue": True,
+                },
+            )
+            inner = (eval_res or {}).get("result", {}).get("value") or {}
+            cw = int(float(inner.get("w") or 0))
+            ch = int(float(inner.get("h") or 0))
+            if cw > 0 and ch > 0:
+                _viewport_sizes[tab_id] = (cw, ch)
+        except Exception:
+            pass
+
+        # Runtime must be enabled for consoleAPICalled events to
+        # fire; Page must be enabled for frame* / lifecycle events
+        # to reach the extension. Page.setLifecycleEventsEnabled
+        # is the critical one — without it Chrome withholds the
+        # DOMContentLoaded / load / firstMeaningfulPaint stream.
+        # Each wrapped in try so a failure on one domain doesn't
+        # block the others.
+        try:
+            await self._cdp(tab_id, "Runtime.enable", {})
+        except Exception:
+            pass
+        try:
+            await self._cdp(tab_id, "Page.enable", {})
+        except Exception:
+            pass
+        try:
+            await self._cdp(tab_id, "Page.setLifecycleEventsEnabled", {"enabled": True})
+        except Exception:
+            pass
+
+        # [hive_vp] probe — install resize / visibility listeners on
+        # the page so Chrome tells us when the renderer sees a
+        # viewport change. Uses console.info as a cheap transport
+        # through CDP; filtered server-side by the cdp_event
+        # handler. Idempotent via __hive_vp_instrumented.
+        try:
+            await self._cdp(
+                tab_id,
+                "Runtime.evaluate",
+                {
+                    "expression": _HIVE_VP_PROBE_JS,
+                    "returnByValue": True,
+                    "awaitPromise": False,
+                },
+            )
+        except Exception:
+            pass
+
+        # Canary — emit a recognisable marker from the page so we
+        # can verify end-to-end (page → CDP → extension → bridge →
+        # telemetry) is wired. Should produce one ``cdp_event``
+        # with method=Runtime.consoleAPICalled whose args start
+        # ``[hive_attach_canary]``. Zero canary entries after a
+        # run means the extension forwarder is stale and the user
+        # needs to reload the Hive extension in chrome://extensions.
+        try:
+            await self._cdp(
+                tab_id,
+                "Runtime.evaluate",
+                {
+                    "expression": (
+                        "console.info('[hive_attach_canary]', "
+                        "JSON.stringify({tabId: "
+                        + str(tab_id) + ", ts: Date.now()}))"
+                    ),
+                    "returnByValue": True,
+                    "awaitPromise": False,
+                },
+            )
+        except Exception:
+            pass
+
         return result
 
     async def cdp_detach(self, tab_id: int) -> dict:
