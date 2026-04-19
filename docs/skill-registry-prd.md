@@ -42,7 +42,7 @@ On top of the standard, Hive adds two things:
 | ----------------- | ------------------------------------------------------- | ------------------------------------------------- |
 | **Tool**          | A single function call via MCP                          | `web_search`, `gmail_send`, `jira_create_issue`   |
 | **Skill**         | A `SKILL.md` with instructions, scripts, and references | "Deep Research", "Code Review", "Data Analysis"   |
-| **Default Skill** | A built-in skill for runtime resiliency                 | "Structured Note-Taking", "Batch Progress Ledger" |
+| **Default Skill** | A built-in skill for runtime resiliency                 | "Structured Note-Taking", "Colony Progress Tracker" |
 | **Agent**         | A complete goal-driven worker composed of skills        | "Sales Outreach Agent", "Support Triage Agent"    |
 
 ---
@@ -324,39 +324,23 @@ Update incrementally — do not rewrite from scratch each time.
 
 ---
 
-#### 5.3.2 Batch Progress Ledger (`hive.batch-ledger`)
+#### 5.3.2 Colony Progress Tracker (`hive.colony-progress-tracker`)
 
-**Purpose:** When processing a collection of items, maintain a structured ledger tracking each item's status so no item is skipped, duplicated, or silently dropped.
+**Purpose:** When workers in a colony share a queue of tasks, claim/complete them through a per-colony SQLite ledger (`progress.db`) so no item is skipped, duplicated, or silently dropped — across workers, runs, and crashes.
 
-**Problem:** Agents processing batches lose track of which items they've handled, especially after context compaction or checkpoint resume. Without a ledger, agents re-process items (waste) or skip items (data loss).
+**Problem:** Agents processing batches lose track of which items they've handled, especially after context compaction, checkpoint resume, or worker hand-off. In-memory ledgers don't survive crashes and don't synchronize across parallel workers.
 
-**Protocol (injected into system prompt):**
+**Background:** Replaces the older in-memory `_batch_ledger` (and `_working_notes → Current Plan` decomposition) — both were removed on 2026-04-15 because they duplicated state that belongs in SQLite. The queue, per-task `steps` decomposition, and `sop_checklist` hard-gates now all live in `progress.db` and are authoritative.
 
-```markdown
-## Operational Protocol: Batch Progress Ledger
+**Protocol (injected into system prompt):** Workers receive `db_path` and `colony_id` (and optionally `task_id`) in their spawn message and interact with the ledger via `sqlite3` through `execute_command_tool`. The full claim → load plan → execute step → SOP-gate → mark done loop is documented in the skill's `SKILL.md`.
 
-When processing a collection of items, maintain a batch ledger in `_batch_ledger`.
+**Tables:**
+- `tasks` — queue: pending → claimed → done|failed, with `worker_id` and atomic claim tokens
+- `steps` — per-task decomposition with `status` and `evidence`
+- `sop_checklist` — hard gates that must be checked off before a task can be marked done
+- `colony_meta` — colony-level metadata
 
-Initialize when you identify the batch:
-
-- `_batch_total`: total item count
-- `_batch_ledger`: JSON with per-item status
-
-Per-item statuses: pending → in_progress → completed|failed|skipped
-
-- Set `in_progress` BEFORE processing
-- Set final status AFTER processing with 1-line result_summary
-- Include error reason for failed/skipped items
-- Update aggregate counts after each item
-- NEVER remove items from the ledger
-- If resuming, skip items already marked completed
-```
-
-**Shared memory:** `_batch_ledger` (dict), `_batch_total` (int), `_batch_completed` (int), `_batch_failed` (int)
-
-**Config:** `enabled` (default true), `auto_detect_batch` (default true), `checkpoint_every_n` (default 5)
-
-**Completion check:** At node completion, if `_batch_completed + _batch_failed + _batch_skipped < _batch_total`, emit warning.
+**Config:** `enabled` (default true). Concurrency is handled by SQLite WAL mode + `BEGIN IMMEDIATE` claims; no checkpoint frequency knob.
 
 ---
 
@@ -447,32 +431,6 @@ When a tool call fails:
 
 ---
 
-#### 5.3.6 Task Decomposition (`hive.task-decomposition`)
-
-**Purpose:** Decompose complex tasks into explicit subtasks before diving in. Maintain the decomposition as a living checklist.
-
-**Problem:** Agents facing complex tasks start executing immediately without planning, leading to incomplete coverage and iteration budget exhaustion on the first sub-problem.
-
-**Protocol (injected into system prompt):**
-
-```markdown
-## Operational Protocol: Task Decomposition
-
-Before starting a complex task:
-
-1. Decompose — break into numbered subtasks in `_working_notes` Current Plan
-2. Estimate — relative effort per subtask (small/medium/large)
-3. Execute — work through in order, mark ✓ when complete
-4. Budget — if running low on iterations, prioritize by impact
-5. Verify — before declaring done, every subtask must be ✓, skipped (with reason), or blocked
-```
-
-**Shared memory:** `_subtasks` (list), `_iteration_budget_remaining` (int)
-
-**Config:** `enabled` (default true), `decomposition_threshold` (default `auto`), `budget_awareness` (default true)
-
----
-
 ### 5.4 Default Skill Configuration
 
 Agents configure default skills via `default_skills` in their agent definition:
@@ -483,14 +441,13 @@ Agents configure default skills via `default_skills` in their agent definition:
 {
   "default_skills": {
     "hive.note-taking": { "enabled": true },
-    "hive.batch-ledger": { "enabled": true, "checkpoint_every_n": 10 },
+    "hive.colony-progress-tracker": { "enabled": true },
     "hive.context-preservation": {
       "enabled": true,
       "warn_at_usage_ratio": 0.4
     },
     "hive.quality-monitor": { "enabled": false },
-    "hive.error-recovery": { "enabled": true },
-    "hive.task-decomposition": { "enabled": true }
+    "hive.error-recovery": { "enabled": true }
   }
 }
 ```
@@ -503,7 +460,7 @@ All default skill protocols combined must total under **2000 tokens** to minimiz
 
 ### 5.6 Shared Memory Convention
 
-All default skill shared buffer keys use the `_` prefix (`_working_notes`, `_batch_ledger`, etc.) to avoid collisions with domain-level keys. These keys are:
+All default skill shared buffer keys use the `_` prefix (`_working_notes`, `_preserved_data`, etc.) to avoid collisions with domain-level keys. These keys are:
 
 - Visible to the agent (for self-reference)
 - Visible to the judge (for evaluation context)
@@ -647,7 +604,7 @@ CI runs these evals on submitted skills to validate quality.
 
 | ID    | Requirement                                                                                                                                                           | Priority |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| DS-1  | Ship 6 default skills: `hive.note-taking`, `hive.batch-ledger`, `hive.context-preservation`, `hive.quality-monitor`, `hive.error-recovery`, `hive.task-decomposition` | P0       |
+| DS-1  | Ship default skills: `hive.note-taking`, `hive.colony-progress-tracker`, `hive.context-preservation`, `hive.quality-monitor`, `hive.error-recovery`, `hive.writing-hive-skills` | P0       |
 | DS-2  | Default skills are valid Agent Skills packages (`SKILL.md` format) in the framework install directory                                                                 | P0       |
 | DS-3  | All default skills loaded automatically for every worker agent unless explicitly disabled                                                                             | P0       |
 | DS-4  | Default skills integrate via system prompt injection — no additional graph nodes                                                                                      | P0       |
@@ -658,7 +615,6 @@ CI runs these evals on submitted skills to validate quality.
 | DS-9  | Iteration boundary callbacks for quality check and notes staleness                                                                                                    | P0       |
 | DS-10 | Node completion hooks for batch completeness and handoff write                                                                                                        | P0       |
 | DS-11 | Phase transition hooks for context carry-over and notes persistence                                                                                                   | P1       |
-| DS-12 | `hive.batch-ledger` auto-detects batch scenarios via heuristic                                                                                                        | P1       |
 | DS-13 | `hive.context-preservation` warns at 0.45 token usage (before 0.6 framework prune)                                                                                    | P0       |
 | DS-14 | Combined default skill prompts total under 2000 tokens                                                                                                                | P0       |
 | DS-15 | Agent startup logs active default skills and config                                                                                                                   | P0       |
@@ -812,7 +768,7 @@ CI runs these evals on submitted skills to validate quality.
 | Low community adoption — nobody submits skills        | Registry empty, no value                                 | Medium     | Seed with 10+ skills from existing templates + ported from `github.com/anthropics/skills`; bounty program; `hive skill init` trivializes creation                                |
 | Prompt injection via malicious skill instructions     | Skill manipulates agent behavior                         | Medium     | Trust gating for project-level skills; maintainer review on registry PRs; `verified` tier requires audit; security notice on install                                             |
 | Default skill prompts bloat system prompt             | Reduced token budget for reasoning                       | Medium     | Hard cap of 2000 tokens total; individually disableable; terse checklist format                                                                                                  |
-| Default skills create rigid behavior for simple tasks | Agent follows batch protocol on trivial single-item task | Medium     | `auto_detect_batch` heuristic; `task_decomposition` threshold defaults to `auto`; all defaults individually disableable                                                          |
+| Default skills create rigid behavior for simple tasks | Agent follows queue protocol on trivial single-item task | Medium     | `hive.colony-progress-tracker` only activates when the spawn message has `db_path:`; all defaults individually disableable                                                       |
 | Context window consumed by too many active skills     | Multiple skills + default skills exhaust context         | Medium     | Progressive disclosure limits base cost (~100 tokens/skill); skills activated one-at-a-time on demand; skill body recommended <5000 tokens; default skills capped at 2000 tokens |
 | Skill quality inconsistent across registry            | Users install ineffective skills                         | Medium     | Trust tiers; eval framework in CI; `hive skill test`; community signals (install count); `deprecated` flag                                                                       |
 
@@ -882,7 +838,7 @@ Phase 0 and Phase 1 can proceed in parallel — default skills depend on the pro
 | #   | Question                                                                                                                               | Owner               | Status |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------ |
 | Q1  | Should the registry repo live under `aden-hive` org or a shared `agentskills` org?                                                     | Platform            | Open   |
-| Q2  | Should default skill protocols be adaptive (e.g., `hive.batch-ledger` adjusts checkpoint frequency based on item size)?                | Engineering         | Open   |
+| Q2  | Should default skill protocols be adaptive (e.g., `hive.colony-progress-tracker` adjusts SOP-gate strictness based on task type)?      | Engineering         | Open   |
 | Q3  | Should default skills be tunable per-node (not just per-agent)?                                                                        | Engineering         | Open   |
 | Q4  | Should `hive.quality-monitor` self-assessments feed into judge decisions (auto-trigger RETRY on self-reported degradation)?            | Engineering         | Open   |
 | Q5  | What is the right combined token budget for default skill prompts? 2000 tokens proposed — configurable or fixed?                       | Engineering         | Open   |

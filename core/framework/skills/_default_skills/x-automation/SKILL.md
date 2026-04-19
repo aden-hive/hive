@@ -203,7 +203,7 @@ for c in candidates:
     else:
         browser_click("[data-testid='tweetButton']")
         sleep(2)
-        record_sent(c['preview'], reply_text)  # append to ledger
+        # Mark the task done in progress.db — see hive.colony-progress-tracker
 
     # Close the composer (press Escape or click the Close button)
     browser_press("Escape")
@@ -307,24 +307,9 @@ If any of these appear, **stop the run, screenshot the state, and surface the is
 
 ## Deduplication pattern
 
-Every daily loop should maintain a ledger file. Append after each successful reply/post, atomic-write to survive crashes.
+Dedup is handled by the colony progress queue, not a separate JSON file. The queen enqueues one row in the `tasks` table per reply target (keyed by tweet URL); workers claim, reply, and mark done. Already-`done` rows are skipped on the next claim — that's your crash-resume and cross-day dedup, for free. See `hive.colony-progress-tracker` for the full claim/update protocol.
 
-```
-# data/x_replies_ledger.json
-{
-  "replies": [
-    {
-      "tweet_url": "https://x.com/<author>/status/<id>",
-      "author": "username",
-      "original_preview": "first 100 chars of the tweet",
-      "reply_text": "what you sent",
-      "timestamp": "2026-04-13T09:30:00Z"
-    }
-  ]
-}
-```
-
-Extract the tweet URL via `browser_evaluate`:
+Extract the tweet URL via `browser_evaluate` so the queen can use it as the task key:
 
 ```
 url = browser_evaluate("""
@@ -337,7 +322,13 @@ url = browser_evaluate("""
 """, article_index)
 ```
 
-Before each reply, check if the URL already has a ledger entry. If yes, skip. This survives across runs and across days.
+If you need to check whether a given tweet URL has already been replied to in a prior run (e.g., scanning live search results before enqueuing), query the queue directly:
+
+```bash
+sqlite3 "<db_path>" "SELECT status FROM tasks WHERE payload LIKE '%\"tweet_url\":\"<url>\"%';"
+```
+
+Empty → not yet enqueued, safe to add. Otherwise honor the existing row's status.
 
 ## Reply style guidelines
 

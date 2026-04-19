@@ -381,24 +381,15 @@ is_logged_in = browser_evaluate("""
 
 ## Deduplication pattern
 
-For any daily loop (connection acceptance, profile visits, DMs), maintain a ledger file:
+Dedup is handled by the colony progress queue, not a separate JSON file. For any daily loop (connection acceptance, profile visits, DMs), the queen enqueues one row in the `tasks` table per `(profile_url, action)` pair; workers claim, act, and mark done. Already-`done` rows are skipped on the next claim — that's your crash-resume and cross-day dedup. See `hive.colony-progress-tracker` for the full claim/update protocol.
 
-```
-# data/linkedin_contacts.json
-{
-  "contacts": [
-    {
-      "profile_url": "https://www.linkedin.com/in/username/",
-      "name": "First Last",
-      "action": "connection_accepted+message_sent",
-      "timestamp": "2026-04-13T09:30:00Z",
-      "message_preview": "first 50 chars of message sent"
-    }
-  ]
-}
+If you need to check whether a given `(profile_url, action)` has already been handled in a prior run before enqueuing a new row, query the queue directly:
+
+```bash
+sqlite3 "<db_path>" "SELECT status FROM tasks WHERE payload LIKE '%\"profile_url\":\"<url>\"%' AND payload LIKE '%\"action\":\"<action>\"%';"
 ```
 
-Before any action, check if the profile URL already has a recent entry for the same action. Skip if yes. Atomic-write the ledger after each success so crash-resume works.
+Empty → not yet enqueued, safe to add. Otherwise honor the existing row's status.
 
 ## See also
 
