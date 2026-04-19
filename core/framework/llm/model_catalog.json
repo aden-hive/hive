@@ -288,14 +288,14 @@
           "label": "GPT-5.4 - Best overall",
           "recommended": true,
           "max_tokens": 128000,
-          "max_context_tokens": 922000
+          "max_context_tokens": 872000
         },
         {
           "id": "anthropic/claude-sonnet-4.6",
           "label": "Claude Sonnet 4.6 - Best coding balance",
           "recommended": false,
           "max_tokens": 64000,
-          "max_context_tokens": 936000
+          "max_context_tokens": 872000
         },
         {
           "id": "anthropic/claude-opus-4.6",
@@ -309,28 +309,28 @@
           "label": "Gemini 3.1 Pro Preview - Long-context reasoning",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 1048576
-        },
-        {
-          "id": "deepseek/deepseek-v3.2",
-          "label": "DeepSeek V3.2 - Best value",
-          "recommended": false,
-          "max_tokens": 32768,
-          "max_context_tokens": 163840
+          "max_context_tokens": 872000
         },
         {
           "id": "qwen/qwen3.6-plus",
           "label": "Qwen 3.6 Plus - Strong reasoning",
-          "recommended": false,
+          "recommended": true,
           "max_tokens": 32768,
           "max_context_tokens": 131072
         },
         {
           "id": "z-ai/glm-5v-turbo",
           "label": "GLM-5V Turbo - Vision capable",
-          "recommended": false,
-          "max_tokens": 16384,
-          "max_context_tokens": 128000
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 192000
+        },
+        {
+          "id": "z-ai/glm-5.1",
+          "label": "GLM-5.1 - Better but Slower",
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 192000
         },
         {
           "id": "x-ai/grok-4.20",
@@ -342,16 +342,9 @@
         {
           "id": "xiaomi/mimo-v2-pro",
           "label": "MiMo V2 Pro - Xiaomi multimodal",
-          "recommended": false,
-          "max_tokens": 16384,
-          "max_context_tokens": 65536
-        },
-        {
-          "id": "stepfun/step-3.5-flash",
-          "label": "Step 3.5 Flash - Fast inference",
-          "recommended": false,
-          "max_tokens": 32768,
-          "max_context_tokens": 128000
+          "recommended": true,
+          "max_tokens": 64000,
+          "max_context_tokens": 872000
         }
       ]
     }
