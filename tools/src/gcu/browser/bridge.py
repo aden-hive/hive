@@ -522,6 +522,55 @@ class BeelineBridge:
             "params": params,
         })
 
+        # Main-frame navigation wipes the previous document's scripts.
+        # Our [hive_vp] probe's event listeners die with it. Reinstall
+        # on every main-frame navigation so the post-nav page is also
+        # instrumented. Sub-frame navs (iframes, about:srcdoc) ignored.
+        if method == "Page.frameNavigated":
+            frame = params.get("frame") or {}
+            if frame and not frame.get("parentId") and tab_id is not None:
+                self._schedule_reinject_probe(tab_id)
+
+        # Layout viewport resized (hidden→visible, banner commit,
+        # user window resize, devtools open/close, zoom). Invalidate
+        # the viewport cache so the next non-live reader — e.g.
+        # _read_focused_element — re-queries instead of returning a
+        # stale value. Click conversion already live-queries, so
+        # this is for the rect / focused_element paths that read
+        # _viewport_sizes directly.
+        if method == "Page.frameResized" and tab_id is not None:
+            try:
+                from .tools.inspection import _viewport_sizes
+                _viewport_sizes.pop(tab_id, None)
+            except Exception:
+                pass
+
+    def _schedule_reinject_probe(self, tab_id: int) -> None:
+        """Fire-and-forget re-injection of _HIVE_VP_PROBE_JS on the
+        current document of ``tab_id``. Called from sync context
+        inside ``_handle_cdp_event``, so we create a task on the
+        running loop. Failures are silent."""
+        async def _do() -> None:
+            try:
+                # The new document's global scope doesn't have
+                # __hive_vp_instrumented — the probe's idempotency
+                # guard works because nav cleared window state.
+                await self._cdp(
+                    tab_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": _HIVE_VP_PROBE_JS,
+                        "returnByValue": True,
+                        "awaitPromise": False,
+                    },
+                )
+            except Exception:
+                pass
+        try:
+            asyncio.get_event_loop().create_task(_do())
+        except RuntimeError:
+            pass
+
     # Default wait on a bridge command. Callers with known-slow ops
     # (full-page screenshots on slow networks, AX tree on huge pages)
     # can pass a longer value via _send(..., timeout=...). Using the
