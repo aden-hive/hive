@@ -62,7 +62,8 @@ function LayoutShell({
   onOpenQueenProfile: (queenId: string) => void;
   colonies: ReturnType<typeof useColony>["colonies"];
 }) {
-  const { sessionId, dismissed, toggleColonyWorkers } = useColonyWorkers();
+  const { sessionId, colonyName, dismissed, toggleColonyWorkers } =
+    useColonyWorkers();
   const showWorkersPanel = Boolean(sessionId && !dismissed);
 
   return (
@@ -84,6 +85,7 @@ function LayoutShell({
           {showWorkersPanel && sessionId && (
             <ColonyWorkersPanel
               sessionId={sessionId}
+              colonyName={colonyName}
               onClose={toggleColonyWorkers}
             />
           )}

@@ -149,13 +149,9 @@ class SessionManager:
         try:
             ensured = ensure_all_colony_dbs()
             if ensured:
-                logger.info(
-                    "progress_db: ensured %d colony DB(s) at startup", len(ensured)
-                )
+                logger.info("progress_db: ensured %d colony DB(s) at startup", len(ensured))
         except Exception:
-            logger.warning(
-                "progress_db: backfill at startup failed (non-fatal)", exc_info=True
-            )
+            logger.warning("progress_db: backfill at startup failed (non-fatal)", exc_info=True)
 
     def build_llm(self, model: str | None = None):
         """Construct an LLM provider using the server's configured defaults."""

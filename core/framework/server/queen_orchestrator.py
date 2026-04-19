@@ -429,13 +429,7 @@ async def create_queen(
         _has_vision,
     )
     phase_state.prompt_working = finalize_queen_prompt(
-        (
-            _queen_character_core
-            + _queen_role_working
-            + _queen_style
-            + _queen_tools_working
-            + _queen_behavior_always
-        ),
+        (_queen_character_core + _queen_role_working + _queen_style + _queen_tools_working + _queen_behavior_always),
         _has_vision,
     )
     phase_state.prompt_reviewing = finalize_queen_prompt(

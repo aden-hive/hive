@@ -3,6 +3,8 @@ import { ChevronDown, ChevronUp, Cpu } from "lucide-react";
 import type { ChatMessage } from "@/components/ChatPanel";
 import { ToolActivityRow } from "@/components/ChatPanel";
 import MarkdownContent from "@/components/MarkdownContent";
+import { useColonyWorkers } from "@/context/ColonyWorkersContext";
+import { workerIdFromStreamId } from "@/lib/chat-helpers";
 
 const workerColor = "hsl(220,60%,55%)";
 
@@ -68,6 +70,19 @@ const WorkerRunBubble = memo(
   function WorkerRunBubble({ group, label }: WorkerRunBubbleProps) {
     const [expanded, setExpanded] = useState(false);
     const bodyRef = useRef<HTMLDivElement>(null);
+    const { openColonyWorkers } = useColonyWorkers();
+
+    // Derive the colony worker id from the first message that carries
+    // a parallel-worker streamId (``worker:{uuid}``). Legacy single-worker
+    // bubbles (streamId="worker") have no uuid — the click still opens
+    // the sidebar, just without a preselection.
+    const workerId = (() => {
+      for (const m of group.messages) {
+        const id = workerIdFromStreamId(m.streamId);
+        if (id) return id;
+      }
+      return null;
+    })();
 
     // Separate text messages from tool status
     const textMsgs = group.messages.filter(
@@ -123,16 +138,21 @@ const WorkerRunBubble = memo(
 
     return (
       <div className="flex gap-3">
-        {/* Left icon */}
-        <div
-          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1"
+        {/* Left icon — clicking opens the Colony Workers sidebar and
+            pre-selects this worker if we can derive its id. */}
+        <button
+          type="button"
+          onClick={() => openColonyWorkers(workerId ?? undefined)}
+          aria-label="Open worker in colony sidebar"
+          title="Open worker in colony sidebar"
+          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1 transition-opacity hover:opacity-80 cursor-pointer"
           style={{
             backgroundColor: `${workerColor}18`,
             border: `1.5px solid ${workerColor}35`,
           }}
         >
           <Cpu className="w-3.5 h-3.5" style={{ color: workerColor }} />
-        </div>
+        </button>
 
         <div className="flex-1 min-w-0 max-w-[90%]">
           {/* Clickable header */}

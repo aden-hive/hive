@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror, parse as urlparse, request as urlrequest
@@ -214,7 +215,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     """Start the HTTP server and open the dashboard in the browser."""
-    _ping_hive_gateway_availability("hive-open")
+    # Don't block local startup on a best-effort analytics probe.
+    threading.Thread(
+        target=_ping_hive_gateway_availability,
+        args=("hive-open",),
+        daemon=True,
+        name="hive-open-gateway-ping",
+    ).start()
     args.open = True
     return cmd_serve(args)
 

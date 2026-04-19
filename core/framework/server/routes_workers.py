@@ -465,9 +465,7 @@ def register_routes(app: web.Application) -> None:
     # actually live) and returns the WorkerSummary shape the frontend
     # types against. Registering a duplicate here shadowed it in
     # aiohttp's router and broke the Sessions tab.
-    app.router.add_get(
-        "/api/sessions/{session_id}/workers/stream", handle_live_workers_stream
-    )
+    app.router.add_get("/api/sessions/{session_id}/workers/stream", handle_live_workers_stream)
     app.router.add_post(
         "/api/sessions/{session_id}/workers/stop-all",
         handle_stop_all_live_workers,

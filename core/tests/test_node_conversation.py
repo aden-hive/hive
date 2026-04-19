@@ -1751,20 +1751,12 @@ class TestFindCompletedToolCall:
         ]
         # 4 newer assistant turns (no tool calls that match)
         for i in range(3, 7):
-            conv._messages.append(
-                Message(seq=i, role="assistant", content=f"noise {i}")
-            )
+            conv._messages.append(Message(seq=i, role="assistant", content=f"noise {i}"))
         # Window=3 → prior assistant with browser_setup is at turn index 5
         # backwards (noise, noise, noise, noise, setup) — skipped.
-        assert (
-            conv.find_completed_tool_call("browser_setup", {}, within_last_turns=3)
-            is None
-        )
+        assert conv.find_completed_tool_call("browser_setup", {}, within_last_turns=3) is None
         # Window=10 → found.
-        assert (
-            conv.find_completed_tool_call("browser_setup", {}, within_last_turns=10)
-            is not None
-        )
+        assert conv.find_completed_tool_call("browser_setup", {}, within_last_turns=10) is not None
 
 
 class TestPartialCheckpoint:
@@ -1821,9 +1813,7 @@ class TestPartialCheckpoint:
         await conv.add_user_message("hi")
         await conv.add_assistant_message("real")  # seq=1
         # Manually plant a stale partial at seq=1 (already committed).
-        await store.write_partial(
-            1, {"seq": 1, "role": "assistant", "content": "stale", "truncated": True}
-        )
+        await store.write_partial(1, {"seq": 1, "role": "assistant", "content": "stale", "truncated": True})
         fresh = await NodeConversation.restore(store)
         assert fresh is not None
         assert [m.content for m in fresh.messages] == ["hi", "real"]

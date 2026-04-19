@@ -4,7 +4,6 @@ import re
 
 from framework.orchestrator import NodeSpec
 
-
 # Wraps prompt sections that should only be shown to vision-capable models.
 # Content inside `<!-- vision-only -->...<!-- /vision-only -->` is kept for
 # vision models and stripped for text-only models. Applied once per session
@@ -169,20 +168,24 @@ search_files, run_command, undo_changes
 - MUST Follow the browser-automation skill protocol before using browser tools.
 
 ## Persistent colony
-- create_colony(colony_name, task, skill_path) — Fork this session into a \
+- create_colony(colony_name, task, skill_name, skill_description, \
+  skill_body, skill_files?, tasks?) — Fork this session into a \
   persistent colony for headless / recurring / background work. The colony \
   has its own chat surface and runs `run_parallel_workers` from there.
-- `skill_path` must point to a pre-authored skill folder with `SKILL.md`; \
-  author it in a scratch location first, then call `create_colony`.
-- **Two-step flow:**
-  1. Write a skill folder with `SKILL.md` in a scratch location.
-  2. Call `create_colony(colony_name, task, skill_path)` with a FULL, \
-     self-contained task.
-- The tool validates and installs the skill, forks this session into a \
-  colony, and stores the task for later. Nothing runs immediately after \
-  the call.
-- The task must be FULL and self-contained because the future worker run \
-  cannot rely on this live chat turn for missing context.
+- **Atomic call — pass the skill INLINE.** Do NOT write SKILL.md with \
+  `write_file` beforehand. Provide `skill_name`, `skill_description`, \
+  and `skill_body` as arguments and the tool will materialize \
+  `~/.hive/skills/{skill_name}/` for you, then fork. Use optional \
+  `skill_files` (array of `{path, content}`) for supporting scripts \
+  or references. Reusing an existing `skill_name` simply replaces that \
+  skill with your latest content.
+- The `task` must be FULL and self-contained because the future worker \
+  run cannot rely on this live chat turn for missing context.
+- The `skill_body` must be FULL and self-contained too — capture the \
+  operational protocol (endpoints, auth, gotchas, pre-baked queries) so \
+  the worker doesn't have to rediscover what you already know.
+- Nothing runs immediately after the call. The user launches the \
+  worker later from the new colony page.
 """
 
 _queen_tools_working = """
@@ -298,13 +301,7 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
-    tools=sorted(
-        set(
-            _QUEEN_INDEPENDENT_TOOLS
-            + _QUEEN_WORKING_TOOLS
-            + _QUEEN_REVIEWING_TOOLS
-        )
-    ),
+    tools=sorted(set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS)),
     system_prompt=(
         _queen_character_core
         + _queen_role_independent
@@ -315,13 +312,7 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = sorted(
-    set(
-        _QUEEN_INDEPENDENT_TOOLS
-        + _QUEEN_WORKING_TOOLS
-        + _QUEEN_REVIEWING_TOOLS
-    )
-)
+ALL_QUEEN_TOOLS = sorted(set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS))
 
 __all__ = [
     "queen_node",

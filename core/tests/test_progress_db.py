@@ -11,13 +11,12 @@ import pytest
 
 from framework.host.progress_db import (
     SCHEMA_VERSION,
+    enqueue_task,
     ensure_all_colony_dbs,
     ensure_progress_db,
-    enqueue_task,
     reclaim_stale,
     seed_tasks,
 )
-
 
 # ----------------------------------------------------------------------
 # Schema / init
@@ -116,14 +115,10 @@ def test_seed_tasks_basic(tmp_path: Path) -> None:
         assert rows[0][4] == "queen_create"
         assert '"url"' in rows[0][5]
 
-        step_count = con.execute(
-            "SELECT count(*) FROM steps WHERE task_id=?", (ids[0],)
-        ).fetchone()[0]
+        step_count = con.execute("SELECT count(*) FROM steps WHERE task_id=?", (ids[0],)).fetchone()[0]
         assert step_count == 2
 
-        sop_rows = list(con.execute(
-            "SELECT key, required FROM sop_checklist WHERE task_id=? ORDER BY key", (ids[0],)
-        ))
+        sop_rows = list(con.execute("SELECT key, required FROM sop_checklist WHERE task_id=? ORDER BY key", (ids[0],)))
         assert sop_rows == [("captcha_handled", 1), ("soft_hint", 0)]
     finally:
         con.close()
@@ -173,13 +168,9 @@ def test_enqueue_task(tmp_path: Path) -> None:
 
     con = sqlite3.connect(str(db))
     try:
-        row = con.execute(
-            "SELECT goal, priority, source FROM tasks WHERE id=?", (tid,)
-        ).fetchone()
+        row = con.execute("SELECT goal, priority, source FROM tasks WHERE id=?", (tid,)).fetchone()
         assert row == ("appended", 3, "enqueue_tool")
-        assert con.execute(
-            "SELECT count(*) FROM steps WHERE task_id=?", (tid,)
-        ).fetchone()[0] == 1
+        assert con.execute("SELECT count(*) FROM steps WHERE task_id=?", (tid,)).fetchone()[0] == 1
     finally:
         con.close()
 
@@ -242,9 +233,7 @@ def test_claim_by_assigned_id(tmp_path: Path) -> None:
         assert cur2.fetchone() is None, "second claim should affect zero rows"
 
         # Ensure worker_id on the row is still the first claimant.
-        owner = con.execute(
-            "SELECT worker_id, status FROM tasks WHERE id=?", (tid,)
-        ).fetchone()
+        owner = con.execute("SELECT worker_id, status FROM tasks WHERE id=?", (tid,)).fetchone()
         assert owner == ("w1", "claimed")
     finally:
         con.close()
@@ -368,13 +357,9 @@ def test_claim_atomicity_under_concurrency(tmp_path: Path) -> None:
 
     con = sqlite3.connect(str(db))
     try:
-        remaining = con.execute(
-            "SELECT count(*) FROM tasks WHERE status='pending'"
-        ).fetchone()[0]
+        remaining = con.execute("SELECT count(*) FROM tasks WHERE status='pending'").fetchone()[0]
         assert remaining == 0
-        claimed = con.execute(
-            "SELECT count(*) FROM tasks WHERE status='claimed'"
-        ).fetchone()[0]
+        claimed = con.execute("SELECT count(*) FROM tasks WHERE status='claimed'").fetchone()[0]
         assert claimed == 100
     finally:
         con.close()
@@ -393,8 +378,7 @@ def test_reclaim_stale_returns_to_pending(tmp_path: Path) -> None:
     con = sqlite3.connect(str(db), isolation_level=None)
     try:
         con.execute(
-            "UPDATE tasks SET status='claimed', worker_id='w1', "
-            "claimed_at=datetime('now', '-20 minutes') WHERE id=?",
+            "UPDATE tasks SET status='claimed', worker_id='w1', claimed_at=datetime('now', '-20 minutes') WHERE id=?",
             (tid,),
         )
     finally:
@@ -405,9 +389,7 @@ def test_reclaim_stale_returns_to_pending(tmp_path: Path) -> None:
 
     con = sqlite3.connect(str(db))
     try:
-        row = con.execute(
-            "SELECT status, worker_id, retry_count FROM tasks WHERE id=?", (tid,)
-        ).fetchone()
+        row = con.execute("SELECT status, worker_id, retry_count FROM tasks WHERE id=?", (tid,)).fetchone()
         assert row == ("pending", None, 1)
     finally:
         con.close()
@@ -431,9 +413,7 @@ def test_reclaim_stale_fails_after_max_retries(tmp_path: Path) -> None:
 
     con = sqlite3.connect(str(db))
     try:
-        row = con.execute(
-            "SELECT status, last_error FROM tasks WHERE id=?", (tid,)
-        ).fetchone()
+        row = con.execute("SELECT status, last_error FROM tasks WHERE id=?", (tid,)).fetchone()
         assert row[0] == "failed"
         assert row[1] is not None and "max_retries" in row[1]
     finally:
@@ -447,8 +427,7 @@ def test_reclaim_stale_ignores_fresh_claims(tmp_path: Path) -> None:
     con = sqlite3.connect(str(db), isolation_level=None)
     try:
         con.execute(
-            "UPDATE tasks SET status='claimed', worker_id='w1', "
-            "claimed_at=datetime('now') WHERE id=?",
+            "UPDATE tasks SET status='claimed', worker_id='w1', claimed_at=datetime('now') WHERE id=?",
             (tid,),
         )
     finally:
@@ -580,11 +559,7 @@ def test_task_delete_cascades_to_steps_and_sop(tmp_path: Path) -> None:
     try:
         con.execute("PRAGMA foreign_keys = ON")
         con.execute("DELETE FROM tasks WHERE id=?", (tid,))
-        assert con.execute(
-            "SELECT count(*) FROM steps WHERE task_id=?", (tid,)
-        ).fetchone()[0] == 0
-        assert con.execute(
-            "SELECT count(*) FROM sop_checklist WHERE task_id=?", (tid,)
-        ).fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM steps WHERE task_id=?", (tid,)).fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM sop_checklist WHERE task_id=?", (tid,)).fetchone()[0] == 0
     finally:
         con.close()

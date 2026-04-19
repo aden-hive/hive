@@ -6,22 +6,35 @@ profile panel. Distinct from ``routes_workers.py``, which deals with
 *graph nodes* inside a worker definition rather than live worker
 instances.
 
+Session-scoped (bound to a live session's runtime):
 - GET /api/sessions/{session_id}/workers            — live + completed workers
 - GET /api/sessions/{session_id}/colony/skills      — colony's shared skills catalog
 - GET /api/sessions/{session_id}/colony/tools       — colony's default tools
-- GET /api/sessions/{session_id}/colony/progress/snapshot — progress.db tasks/steps snapshot
-- GET /api/sessions/{session_id}/colony/progress/stream   — SSE feed of upserts (polled)
+
+Colony-scoped (bound to the on-disk colony directory, independent of any
+live session — one colony has exactly one progress.db):
+- GET /api/colonies/{colony_name}/progress/snapshot — progress.db tasks/steps snapshot
+- GET /api/colonies/{colony_name}/progress/stream   — SSE feed of upserts (polled)
+- GET /api/colonies/{colony_name}/data/tables       — list user tables in progress.db
+- GET /api/colonies/{colony_name}/data/tables/{table}/rows — paginated rows
+- PATCH /api/colonies/{colony_name}/data/tables/{table}/rows — edit a row
 """
 
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
 from aiohttp import web
 
 from framework.server.app import resolve_session
+
+# Same validation used by create_colony — keep them in sync. Blocks path
+# traversal (``..``) and shell-special chars; the endpoint would 400 on
+# anything else anyway, but validating early avoids a disk hit.
+_COLONY_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +105,7 @@ async def handle_list_workers(request: web.Request) -> web.Response:
             storage_path = Path(session_dir)
 
     if storage_path is not None:
-        workers.extend(
-            await asyncio.to_thread(_walk_historical_workers, storage_path, known_ids)
-        )
+        workers.extend(await asyncio.to_thread(_walk_historical_workers, storage_path, known_ids))
 
     return web.json_response({"workers": workers})
 
@@ -179,6 +190,7 @@ def _extract_historical_task(worker_dir: Path) -> str:
 
 
 # ── Skills & tools ─────────────────────────────────────────────────
+
 
 def _parsed_skill_to_dict(skill) -> dict:
     """Serialize a ParsedSkill for the frontend."""
@@ -271,14 +283,16 @@ async def handle_list_colony_tools(request: web.Request) -> web.Response:
 
 # ── Progress DB (tasks/steps) ──────────────────────────────────────
 
-def _resolve_progress_db(session) -> Path | None:
-    """Resolve the colony's progress.db path for ``session``.
 
-    Returns ``None`` if the session is not bound to a colony yet or if
-    the DB file doesn't exist.
+def _resolve_progress_db_by_name(colony_name: str) -> Path | None:
+    """Resolve a colony's progress.db path by directory name.
+
+    Returns ``None`` when the name fails validation or the file does not
+    exist. Both conditions render as an empty Data tab in the UI rather
+    than a hard error so an operator can open the panel before any
+    workers have actually run.
     """
-    colony_name = getattr(session, "colony_name", None)
-    if not colony_name:
+    if not _COLONY_NAME_RE.match(colony_name):
         return None
     db_path = Path.home() / ".hive" / "colonies" / colony_name / "data" / "progress.db"
     return db_path if db_path.exists() else None
@@ -303,12 +317,8 @@ def _read_progress_snapshot(db_path: Path, worker_id: str | None) -> dict:
                 (worker_id,),
             ).fetchall()
         else:
-            task_rows = con.execute(
-                "SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 500"
-            ).fetchall()
-            step_rows = con.execute(
-                "SELECT * FROM steps ORDER BY task_id, seq LIMIT 2000"
-            ).fetchall()
+            task_rows = con.execute("SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 500").fetchall()
+            step_rows = con.execute("SELECT * FROM steps ORDER BY task_id, seq LIMIT 2000").fetchall()
         return {
             "tasks": [dict(r) for r in task_rows],
             "steps": [dict(r) for r in step_rows],
@@ -318,15 +328,12 @@ def _read_progress_snapshot(db_path: Path, worker_id: str | None) -> dict:
 
 
 async def handle_progress_snapshot(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/colony/progress/snapshot
+    """GET /api/colonies/{colony_name}/progress/snapshot
 
     Optional ?worker_id=... to filter to rows touched by a specific worker.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    db_path = _resolve_progress_db(session)
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         return web.json_response({"tasks": [], "steps": []})
 
@@ -391,7 +398,7 @@ def _read_progress_upserts(
 
 
 async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
-    """GET /api/sessions/{session_id}/colony/progress/stream
+    """GET /api/colonies/{colony_name}/progress/stream
 
     SSE feed that emits ``snapshot`` once (current state) followed by
     ``upsert`` events whenever a task/step row changes. Polls the DB
@@ -399,10 +406,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
     workers use for writes doesn't fire SQLite's update hook on our
     connection, so polling is the robust option.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
+    colony_name = request.match_info["colony_name"]
     worker_id = request.query.get("worker_id") or None
 
     resp = web.StreamResponse(
@@ -420,7 +424,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
         payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
         await resp.write(payload.encode("utf-8"))
 
-    db_path = _resolve_progress_db(session)
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         await _send("snapshot", {"tasks": [], "steps": []})
         await _send("end", {"reason": "no_progress_db"})
@@ -447,9 +451,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
         # required.
         while True:
             await asyncio.sleep(_PROGRESS_POLL_INTERVAL)
-            tasks, steps, new_since = await asyncio.to_thread(
-                _read_progress_upserts, db_path, worker_id, since
-            )
+            tasks, steps, new_since = await asyncio.to_thread(_read_progress_upserts, db_path, worker_id, since)
             if tasks or steps:
                 await _send("upsert", {"tasks": tasks, "steps": steps})
                 since = new_since
@@ -465,20 +467,242 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
     return resp
 
 
+# ── Raw data grid (airtable-style view/edit of progress.db tables) ─────
+#
+# The Data tab lets the operator inspect and hand-edit SQLite rows.
+# Identifier-quoting note: SQLite params can only bind values, never
+# identifiers, so we have to interpolate table/column names into SQL.
+# Every name is *validated against sqlite_master / PRAGMA table_info*
+# before use and then wrapped with ``_q()`` which escapes embedded
+# quotes. Do NOT accept raw names from the request without running them
+# through ``_validate_ident`` first.
+
+
+def _q(ident: str) -> str:
+    """Quote a SQLite identifier (table or column) safely."""
+    return '"' + ident.replace('"', '""') + '"'
+
+
+def _list_user_tables(con: sqlite3.Connection) -> list[str]:
+    return [
+        r["name"]
+        for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+
+
+def _table_columns(con: sqlite3.Connection, table: str) -> list[dict]:
+    """Return PRAGMA table_info rows as dicts. Empty list if no such table."""
+    return [
+        {
+            "name": r["name"],
+            "type": r["type"] or "",
+            "notnull": bool(r["notnull"]),
+            # pk>0 means the column is part of the primary key (ordinal);
+            # 0 means non-PK.
+            "pk": int(r["pk"]),
+            "dflt_value": r["dflt_value"],
+        }
+        for r in con.execute(f"PRAGMA table_info({_q(table)})")
+    ]
+
+
+def _read_tables_overview(db_path: Path) -> list[dict]:
+    """List user tables with columns + row counts."""
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        out: list[dict] = []
+        for name in _list_user_tables(con):
+            cols = _table_columns(con, name)
+            count_row = con.execute(f"SELECT COUNT(*) AS c FROM {_q(name)}").fetchone()
+            out.append(
+                {
+                    "name": name,
+                    "columns": cols,
+                    "row_count": int(count_row["c"]),
+                    "primary_key": [c["name"] for c in cols if c["pk"] > 0],
+                }
+            )
+        return out
+    finally:
+        con.close()
+
+
+def _validate_ident(name: str, known: set[str]) -> str | None:
+    """Return ``name`` if present in ``known``, else ``None``."""
+    return name if name in known else None
+
+
+def _read_table_rows(
+    db_path: Path,
+    table: str,
+    limit: int,
+    offset: int,
+    order_by: str | None,
+    order_dir: str,
+) -> dict:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        tables = set(_list_user_tables(con))
+        if _validate_ident(table, tables) is None:
+            return {"error": f"unknown table: {table}"}
+        cols = _table_columns(con, table)
+        col_names = {c["name"] for c in cols}
+
+        sql = f"SELECT * FROM {_q(table)}"
+        if order_by and order_by in col_names:
+            direction = "DESC" if order_dir.lower() == "desc" else "ASC"
+            sql += f" ORDER BY {_q(order_by)} {direction}"
+        sql += " LIMIT ? OFFSET ?"
+        rows = con.execute(sql, (int(limit), int(offset))).fetchall()
+        total = con.execute(f"SELECT COUNT(*) AS c FROM {_q(table)}").fetchone()["c"]
+        return {
+            "table": table,
+            "columns": cols,
+            "primary_key": [c["name"] for c in cols if c["pk"] > 0],
+            "rows": [dict(r) for r in rows],
+            "total": int(total),
+            "limit": int(limit),
+            "offset": int(offset),
+        }
+    finally:
+        con.close()
+
+
+def _update_table_row(
+    db_path: Path,
+    table: str,
+    pk: dict,
+    updates: dict,
+) -> dict:
+    """Apply ``updates`` (column->value) to the row matching ``pk``.
+
+    Returns ``{"updated": n}`` with the number of rows affected (0 or 1),
+    or ``{"error": ...}`` on validation failure.
+    """
+    if not updates:
+        return {"error": "no updates provided"}
+    con = sqlite3.connect(db_path, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        tables = set(_list_user_tables(con))
+        if _validate_ident(table, tables) is None:
+            return {"error": f"unknown table: {table}"}
+        cols = _table_columns(con, table)
+        col_names = {c["name"] for c in cols}
+        pk_cols = [c["name"] for c in cols if c["pk"] > 0]
+        if not pk_cols:
+            return {"error": f"table {table!r} has no primary key; cannot edit by row"}
+
+        # Validate pk has every pk column and all values are scalars.
+        missing = [p for p in pk_cols if p not in pk]
+        if missing:
+            return {"error": f"missing primary key columns: {missing}"}
+
+        # Validate update columns exist and aren't part of the primary key
+        # (changing a PK column would silently break joins/foreign refs).
+        bad = [c for c in updates if c not in col_names]
+        if bad:
+            return {"error": f"unknown columns: {bad}"}
+        pk_update = [c for c in updates if c in pk_cols]
+        if pk_update:
+            return {"error": f"cannot edit primary key columns: {pk_update}"}
+
+        set_sql = ", ".join(f"{_q(c)} = ?" for c in updates)
+        where_sql = " AND ".join(f"{_q(c)} = ?" for c in pk_cols)
+        sql = f"UPDATE {_q(table)} SET {set_sql} WHERE {where_sql}"
+        params = list(updates.values()) + [pk[c] for c in pk_cols]
+        cur = con.execute(sql, params)
+        con.commit()
+        return {"updated": cur.rowcount}
+    finally:
+        con.close()
+
+
+async def handle_list_tables(request: web.Request) -> web.Response:
+    """GET /api/colonies/{colony_name}/data/tables"""
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
+    if db_path is None:
+        return web.json_response({"tables": []})
+    tables = await asyncio.to_thread(_read_tables_overview, db_path)
+    return web.json_response({"tables": tables})
+
+
+async def handle_table_rows(request: web.Request) -> web.Response:
+    """GET /api/colonies/{colony_name}/data/tables/{table}/rows"""
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
+    if db_path is None:
+        return web.json_response({"error": "no progress.db"}, status=404)
+
+    table = request.match_info["table"]
+    # Clamp limit: 500 is enough for the grid's virtualization window;
+    # a larger cap would make accidental full-table loads cheap.
+    try:
+        limit = max(1, min(500, int(request.query.get("limit", "100"))))
+        offset = max(0, int(request.query.get("offset", "0")))
+    except ValueError:
+        return web.json_response({"error": "invalid limit/offset"}, status=400)
+    order_by = request.query.get("order_by") or None
+    order_dir = request.query.get("order_dir", "asc")
+
+    result = await asyncio.to_thread(_read_table_rows, db_path, table, limit, offset, order_by, order_dir)
+    if "error" in result:
+        return web.json_response(result, status=400)
+    return web.json_response(result)
+
+
+async def handle_update_row(request: web.Request) -> web.Response:
+    """PATCH /api/colonies/{colony_name}/data/tables/{table}/rows
+
+    Body: ``{"pk": {col: value, ...}, "updates": {col: value, ...}}``.
+    """
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
+    if db_path is None:
+        return web.json_response({"error": "no progress.db"}, status=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    pk = body.get("pk") or {}
+    updates = body.get("updates") or {}
+    if not isinstance(pk, dict) or not isinstance(updates, dict):
+        return web.json_response({"error": "pk and updates must be objects"}, status=400)
+
+    table = request.match_info["table"]
+    result = await asyncio.to_thread(_update_table_row, db_path, table, pk, updates)
+    if "error" in result:
+        return web.json_response(result, status=400)
+    return web.json_response(result)
+
+
 def register_routes(app: web.Application) -> None:
     """Register colony worker routes."""
+    # Session-scoped — these read live runtime state from a session.
     app.router.add_get("/api/sessions/{session_id}/workers", handle_list_workers)
+    app.router.add_get("/api/sessions/{session_id}/colony/skills", handle_list_colony_skills)
+    app.router.add_get("/api/sessions/{session_id}/colony/tools", handle_list_colony_tools)
+    # Colony-scoped — one progress.db per colony, no session indirection.
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/skills", handle_list_colony_skills
-    )
-    app.router.add_get(
-        "/api/sessions/{session_id}/colony/tools", handle_list_colony_tools
-    )
-    app.router.add_get(
-        "/api/sessions/{session_id}/colony/progress/snapshot",
+        "/api/colonies/{colony_name}/progress/snapshot",
         handle_progress_snapshot,
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/progress/stream",
+        "/api/colonies/{colony_name}/progress/stream",
         handle_progress_stream,
+    )
+    app.router.add_get("/api/colonies/{colony_name}/data/tables", handle_list_tables)
+    app.router.add_get(
+        "/api/colonies/{colony_name}/data/tables/{table}/rows",
+        handle_table_rows,
+    )
+    app.router.add_patch(
+        "/api/colonies/{colony_name}/data/tables/{table}/rows",
+        handle_update_row,
     )

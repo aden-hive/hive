@@ -61,6 +61,9 @@ interface ColonyContextValue {
   deleteColony: (colonyId: string) => Promise<void>;
   /** Refresh colony data from the server */
   refresh: () => void;
+  /** Cache-busting version for user avatar — bump after upload */
+  userAvatarVersion: number;
+  bumpUserAvatar: () => void;
 }
 
 const ColonyContext = createContext<ColonyContextValue | null>(null);
@@ -87,6 +90,9 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   const [, setLastVisit] = useState<Record<string, number>>(() =>
     loadJson(LAST_VISIT_KEY, {}),
   );
+
+  const [userAvatarVersion, setUserAvatarVersion] = useState(0);
+  const bumpUserAvatar = useCallback(() => setUserAvatarVersion((v) => v + 1), []);
 
   const coloniesRef = useRef<Colony[]>(colonies);
   useEffect(() => {
@@ -264,9 +270,14 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
     // Optimistically remove from UI
     setColonies((prev) => prev.filter((c) => c.id !== colonyId));
     setQueens((prev) => prev.filter((q) => q.colonyId !== colonyId));
-    // Delete on backend (fire-and-forget)
-    agentsApi.deleteAgent(colony.agentPath).catch(() => {});
-  }, []);
+    // Delete on backend, then re-fetch to confirm it's gone
+    try {
+      await agentsApi.deleteAgent(colony.agentPath);
+    } catch {
+      // Deletion failed — re-fetch to restore the colony in the UI
+    }
+    fetchColonies();
+  }, [fetchColonies]);
 
   const refresh = useCallback(() => {
     fetchColonies();
@@ -312,6 +323,8 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         markVisited,
         deleteColony,
         refresh,
+        userAvatarVersion,
+        bumpUserAvatar,
       }}
     >
       {children}

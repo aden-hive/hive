@@ -92,10 +92,12 @@ async def handle_status(request: web.Request) -> web.Response:
     try:
         client = get_mcp_client()
         tools = client.list_tools()
-        return web.json_response({
-            "connected": True,
-            "tools_count": len(tools),
-        })
+        return web.json_response(
+            {
+                "connected": True,
+                "tools_count": len(tools),
+            }
+        )
     except Exception as e:
         return web.json_response({"connected": False, "error": str(e)})
 

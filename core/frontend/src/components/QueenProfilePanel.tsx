@@ -1,15 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import {
-  X,
-  MessageSquare,
-  Crown,
-  ChevronRight,
-  Briefcase,
-  Award,
-} from "lucide-react";
+import { X, MessageSquare, Crown, ChevronRight, Briefcase, Award, Pencil, Check, Loader2, Camera } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { queensApi, type QueenProfile } from "@/api/queens";
+import { compressImage } from "@/lib/image-utils";
 import type { Colony } from "@/types/colony";
 
 interface QueenProfilePanelProps {
@@ -18,30 +12,105 @@ interface QueenProfilePanelProps {
   onClose: () => void;
 }
 
-export default function QueenProfilePanel({
-  queenId,
-  colonies,
-  onClose,
-}: QueenProfilePanelProps) {
+function SectionHeader({ children, onEdit }: { children: React.ReactNode; onEdit?: () => void }) {
+  return (
+    <div className="flex items-center justify-between mb-2">
+      <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{children}</h4>
+      {onEdit && (
+        <button onClick={onEdit} className="p-0.5 rounded text-muted-foreground/40 hover:text-foreground" title="Edit">
+          <Pencil className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenProfilePanelProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { queenProfiles } = useColony();
+  const { queenProfiles, refresh } = useColony();
   const summary = queenProfiles.find((q) => q.id === queenId);
   const [profile, setProfile] = useState<QueenProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // Hide the "Message {name}" button when we're already in this queen's PM.
+  // Avatar state
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Edit form state
+  const [editName, setEditName] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editSummary, setEditSummary] = useState("");
+  const [editSkills, setEditSkills] = useState("");
+  const [editAchievement, setEditAchievement] = useState("");
+
   const alreadyInQueenPm = location.pathname === `/queen/${queenId}`;
 
   useEffect(() => {
     setLoading(true);
     setProfile(null);
-    queensApi
-      .getProfile(queenId)
-      .then(setProfile)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    setEditing(false);
+    // Set avatar URL with cache buster
+    setAvatarUrl(`/api/queen/${queenId}/avatar?t=${Date.now()}`);
+    queensApi.getProfile(queenId).then(setProfile).catch(() => {}).finally(() => setLoading(false));
   }, [queenId]);
+
+  const startEditing = () => {
+    if (!profile) return;
+    setEditName(profile.name);
+    setEditTitle(profile.title);
+    setEditSummary(profile.summary || "");
+    setEditSkills(profile.skills || "");
+    setEditAchievement(profile.signature_achievement || "");
+    setEditing(true);
+  };
+
+  const cancelEditing = () => setEditing(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updated = await queensApi.updateProfile(queenId, {
+        name: editName.trim(),
+        title: editTitle.trim(),
+        summary: editSummary.trim(),
+        skills: editSkills.trim(),
+        signature_achievement: editAchievement.trim(),
+      });
+      setProfile(updated);
+      setEditing(false);
+      refresh();
+    } catch (err) {
+      console.error("Failed to save profile:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAvatarClick = () => fileInputRef.current?.click();
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so same file can be re-selected
+    e.target.value = "";
+
+    if (!file.type.startsWith("image/")) return;
+
+    setUploadingAvatar(true);
+    try {
+      const compressed = await compressImage(file);
+      await queensApi.uploadAvatar(queenId, compressed);
+      setAvatarUrl(`/api/queen/${queenId}/avatar?t=${Date.now()}`);
+    } catch (err) {
+      console.error("Failed to upload avatar:", err);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const name = profile?.name ?? summary?.name ?? "Queen";
   const title = profile?.title ?? summary?.title ?? "";
@@ -79,9 +148,42 @@ export default function QueenProfilePanel({
     document.body.style.userSelect = "none";
   }, [width]);
 
+  const inputCls = "w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40";
+  const textareaCls = `${inputCls} resize-none`;
+
+  const avatarElement = (
+    <div className="relative group">
+      <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center overflow-hidden">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={name}
+            className="w-full h-full object-cover"
+            onError={() => setAvatarUrl(null)}
+          />
+        ) : (
+          <span className="text-xl font-bold text-primary">{name.charAt(0)}</span>
+        )}
+      </div>
+      <button
+        onClick={handleAvatarClick}
+        disabled={uploadingAvatar}
+        className="absolute inset-0 w-16 h-16 rounded-full flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 cursor-pointer"
+        title="Change photo"
+      >
+        {uploadingAvatar ? (
+          <Loader2 className="w-4 h-4 text-white animate-spin" />
+        ) : (
+          <Camera className="w-4 h-4 text-white" />
+        )}
+      </button>
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+    </div>
+  );
+
   return (
     <aside
-      className="flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto relative"
+      className="flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto overscroll-contain relative"
       style={{ width }}
     >
       {/* Drag handle */}
@@ -95,10 +197,7 @@ export default function QueenProfilePanel({
           <Crown className="w-4 h-4 text-primary" />
           QUEEN PROFILE
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-        >
+        <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -108,70 +207,93 @@ export default function QueenProfilePanel({
           <div className="flex justify-center py-10">
             <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
           </div>
-        ) : (
-          <>
-            {/* Avatar + name + title */}
-            <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center mb-3">
-                <span className="text-xl font-bold text-primary">
-                  {name.charAt(0)}
-                </span>
-              </div>
-              <h3 className="text-base font-semibold text-foreground">
-                {name}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{title}</p>
+        ) : editing ? (
+          /* ── Edit Mode ──────────────────────────────────────────── */
+          <div className="flex flex-col gap-5">
+            {/* Avatar */}
+            <div className="flex justify-center mb-1">
+              {avatarElement}
             </div>
 
-            {/* Message button — hidden when already in this queen's PM */}
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Name</label>
+              <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputCls} />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Title</label>
+              <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className={inputCls} />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">About</label>
+              <textarea value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={10} className={textareaCls} />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Skills (comma-separated)</label>
+              <textarea value={editSkills} onChange={(e) => setEditSkills(e.target.value)} rows={3} className={textareaCls} />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Signature Achievement</label>
+              <textarea value={editAchievement} onChange={(e) => setEditAchievement(e.target.value)} rows={5} className={textareaCls} />
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button onClick={handleSave} disabled={saving || !editName.trim() || !editTitle.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                {saving ? "Saving..." : "Save"}
+              </button>
+              <button onClick={cancelEditing} disabled={saving}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── View Mode ──────────────────────────────────────────── */
+          <>
+            {/* Avatar + name + title */}
+            <div className="flex flex-col items-center text-center mb-6 group relative">
+              <div className="mb-3">
+                {avatarElement}
+              </div>
+              <h3 className="text-base font-semibold text-foreground">{name}</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">{title}</p>
+              <button onClick={startEditing}
+                className="absolute top-0 right-0 p-1 rounded text-muted-foreground/40 hover:text-foreground opacity-0 group-hover:opacity-100" title="Edit name & title">
+                <Pencil className="w-3 h-3" />
+              </button>
+            </div>
+
             {!alreadyInQueenPm && (
-              <button
-                onClick={() => {
-                  navigate(`/queen/${queenId}`);
-                  onClose();
-                }}
-                className="w-full flex items-center justify-center gap-2 rounded-lg border border-border/60 py-2.5 text-sm font-medium text-foreground hover:bg-muted/40 transition-colors mb-6"
-              >
+              <button onClick={() => { navigate(`/queen/${queenId}`); onClose(); }}
+                className="w-full flex items-center justify-center gap-2 rounded-lg border border-border/60 py-2.5 text-sm font-medium text-foreground hover:bg-muted/40 mb-6">
                 <MessageSquare className="w-4 h-4" />
                 Message {name}
               </button>
             )}
 
-            {/* About */}
             {profile?.summary && (
               <div className="mb-6">
-                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  About
-                </h4>
-                <p className="text-sm text-foreground/80 leading-relaxed">
-                  {profile.summary}
-                </p>
+                <SectionHeader onEdit={startEditing}>About</SectionHeader>
+                <p className="text-sm text-foreground/80 leading-relaxed">{profile.summary}</p>
               </div>
             )}
 
-            {/* Experience */}
             {profile?.experience && profile.experience.length > 0 && (
               <div className="mb-6">
-                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Experience
-                </h4>
+                <SectionHeader onEdit={startEditing}>Experience</SectionHeader>
                 <div className="space-y-3">
                   {profile.experience.map((exp, i) => (
                     <div key={i} className="flex items-start gap-2">
                       <Briefcase className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {exp.role}
-                        </p>
+                        <p className="text-sm font-medium text-foreground">{exp.role}</p>
                         <ul className="mt-1 space-y-0.5">
-                          {exp.details.map((d, j) => (
-                            <li
-                              key={j}
-                              className="text-xs text-muted-foreground"
-                            >
-                              {d}
-                            </li>
-                          ))}
+                          {exp.details.map((d, j) => <li key={j} className="text-xs text-muted-foreground">{d}</li>)}
                         </ul>
                       </div>
                     </div>
@@ -180,54 +302,34 @@ export default function QueenProfilePanel({
               </div>
             )}
 
-            {/* Skills */}
             {profile?.skills && (
               <div className="mb-6">
-                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Skills
-                </h4>
+                <SectionHeader onEdit={startEditing}>Skills</SectionHeader>
                 <div className="flex flex-wrap gap-1.5">
                   {profile.skills.split(",").map((skill, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-0.5 rounded-full bg-muted/60 text-xs text-muted-foreground"
-                    >
-                      {skill.trim()}
-                    </span>
+                    <span key={i} className="px-2 py-0.5 rounded-full bg-muted/60 text-xs text-muted-foreground">{skill.trim()}</span>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Signature achievement */}
             {profile?.signature_achievement && (
               <div className="mb-6">
-                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Signature Achievement
-                </h4>
+                <SectionHeader onEdit={startEditing}>Signature Achievement</SectionHeader>
                 <div className="flex items-start gap-2">
                   <Award className="w-3.5 h-3.5 text-primary mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-foreground/80">
-                    {profile.signature_achievement}
-                  </p>
+                  <p className="text-sm text-foreground/80">{profile.signature_achievement}</p>
                 </div>
               </div>
             )}
 
-            {/* Assigned colonies */}
             {colonies.length > 0 && (
               <div>
-                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Assigned Colonies
-                </h4>
+                <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assigned Colonies</h4>
                 <div className="flex flex-col gap-1.5">
                   {colonies.map((colony) => (
-                    <NavLink
-                      key={colony.id}
-                      to={`/colony/${colony.id}`}
-                      onClick={onClose}
-                      className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2 text-sm text-primary hover:bg-primary/[0.08] transition-colors"
-                    >
+                    <NavLink key={colony.id} to={`/colony/${colony.id}`} onClick={onClose}
+                      className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2 text-sm text-primary hover:bg-primary/[0.08]">
                       <span className="font-medium">#{colony.id}</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </NavLink>

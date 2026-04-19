@@ -19,6 +19,30 @@ from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
 
+# How long to let the page settle after an interaction before grabbing
+# the auto-snapshot. Enough to cover most click → re-render cycles
+# (React commit + layout) without adding much observable latency.
+_AUTO_SNAPSHOT_SETTLE_S = 0.5
+
+
+AutoSnapshotMode = Literal["default", "simple", "interactive", "off"]
+
+
+async def _attach_snapshot(result: dict, bridge, target_tab: int, auto_snapshot_mode: str) -> dict:
+    """If the interaction succeeded and the caller opted into auto-snapshot,
+    wait for the page to settle and attach an accessibility snapshot under
+    the ``snapshot`` key using ``auto_snapshot_mode`` as the snapshot filter
+    mode. ``"off"`` skips the capture entirely. Snapshot failures surface
+    under ``snapshot_error`` and do NOT fail the interaction itself."""
+    if auto_snapshot_mode == "off" or not isinstance(result, dict) or not result.get("ok"):
+        return result
+    try:
+        await asyncio.sleep(_AUTO_SNAPSHOT_SETTLE_S)
+        result["snapshot"] = await bridge.snapshot(target_tab, mode=auto_snapshot_mode)
+    except Exception as e:
+        result["snapshot_error"] = str(e)
+    return result
+
 
 def register_interaction_tools(mcp: FastMCP) -> None:
     """Register browser interaction tools."""
@@ -31,6 +55,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         button: Literal["left", "right", "middle"] = "left",
         double_click: bool = False,
         timeout_ms: int = 5000,
+        auto_snapshot_mode: AutoSnapshotMode = "default",
     ) -> dict:
         """
         Click an element on the page.
@@ -48,9 +73,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 Pass a larger value (e.g. 15000) ONLY when you know the
                 element will take longer than 5s to render — for example
                 right after a navigation that triggers slow hydration.
+            auto_snapshot_mode: Controls the accessibility snapshot taken
+                0.5s after a successful click. ``"default"`` (the default)
+                returns the full tree; ``"simple"`` trims unnamed structural
+                nodes; ``"interactive"`` returns only controls (buttons,
+                links, inputs) for the tightest token footprint;
+                ``"off"`` skips the capture entirely — use when batching
+                multiple interactions.
 
         Returns:
-            Dict with click result and coordinates
+            Dict with click result and coordinates. Includes ``snapshot``
+            unless ``auto_snapshot_mode="off"`` or the click failed.
         """
         start = time.perf_counter()
         params = {
@@ -93,7 +126,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=click_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return click_result
+            return await _attach_snapshot(click_result, bridge, target_tab, auto_snapshot_mode)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call("browser_click", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
@@ -205,6 +238,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         clear_first: bool = True,
         timeout_ms: int = 30000,
         use_insert_text: bool = True,
+        auto_snapshot_mode: AutoSnapshotMode = "default",
     ) -> dict:
         """
         Click a selector to focus it, then type text into it.
@@ -226,9 +260,16 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             use_insert_text: Use CDP Input.insertText (default: True) for
                 reliable insertion into rich-text editors. Set False for
                 per-keystroke dispatch.
+            auto_snapshot_mode: Controls the accessibility snapshot taken
+                0.5s after successful typing. ``"default"`` returns the
+                full tree; ``"simple"`` trims unnamed structural nodes;
+                ``"interactive"`` returns only controls for the tightest
+                token footprint; ``"off"`` skips the capture entirely —
+                use when batching multiple interactions.
 
         Returns:
-            Dict with type result.
+            Dict with type result. Includes ``snapshot`` unless
+            ``auto_snapshot_mode="off"`` or typing failed.
         """
         start = time.perf_counter()
         params = {"selector": selector, "text": text, "tab_id": tab_id, "profile": profile}
@@ -267,7 +308,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=type_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return type_result
+            return await _attach_snapshot(type_result, bridge, target_tab, auto_snapshot_mode)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call("browser_type", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
@@ -280,6 +321,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         tab_id: int | None = None,
         profile: str | None = None,
         timeout_ms: int = 30000,
+        auto_snapshot_mode: AutoSnapshotMode = "default",
     ) -> dict:
         """
         Fill an input element with a value (clears existing content first).
@@ -292,9 +334,14 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             timeout_ms: Timeout waiting for element (default: 30000)
+            auto_snapshot_mode: Controls the accessibility snapshot taken
+                0.5s after a successful fill. ``"default"`` returns the
+                full tree; ``"simple"`` / ``"interactive"`` return tighter
+                trees; ``"off"`` skips the capture — use when batching.
 
         Returns:
-            Dict with fill result
+            Dict with fill result. Includes ``snapshot`` unless
+            ``auto_snapshot_mode="off"`` or the fill failed.
         """
         return await browser_type(
             selector=selector,
@@ -304,6 +351,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             delay_ms=0,
             clear_first=True,
             timeout_ms=timeout_ms,
+            auto_snapshot_mode=auto_snapshot_mode,
         )
 
     @mcp.tool()
@@ -314,6 +362,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         delay_ms: int = 1,
         clear_first: bool = True,
         use_insert_text: bool = True,
+        auto_snapshot_mode: AutoSnapshotMode = "default",
     ) -> dict:
         """
         Type text into the already-focused element.
@@ -331,9 +380,14 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                       Forces per-keystroke dispatch when > 0.
             clear_first: Clear existing text before typing (default: True).
             use_insert_text: Use CDP Input.insertText (default: True).
+            auto_snapshot_mode: Controls the accessibility snapshot taken
+                0.5s after successful typing. ``"default"`` returns the
+                full tree; ``"simple"`` / ``"interactive"`` return tighter
+                trees; ``"off"`` skips the capture — use when batching.
 
         Returns:
-            Dict with type result.
+            Dict with type result. Includes ``snapshot`` unless
+            ``auto_snapshot_mode="off"`` or typing failed.
         """
         start = time.perf_counter()
         params = {"text": text, "tab_id": tab_id, "profile": profile}
@@ -371,7 +425,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=type_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return type_result
+            return await _attach_snapshot(type_result, bridge, target_tab, auto_snapshot_mode)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call("browser_type_focused", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
@@ -546,10 +600,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
                 "ok": False,
-                "error": (
-                    f"Coords ({x}, {y}) look like pixels. This tool expects "
-                    "fractions 0..1 of the viewport."
-                ),
+                "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_hover_coordinate", params, result=result)
             return result
@@ -627,10 +678,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
                 "ok": False,
-                "error": (
-                    f"Coords ({x}, {y}) look like pixels. This tool expects "
-                    "fractions 0..1 of the viewport."
-                ),
+                "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_press_at", params, result=result)
             return result
@@ -717,6 +765,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         amount: int = 500,
         tab_id: int | None = None,
         profile: str | None = None,
+        auto_snapshot_mode: AutoSnapshotMode = "default",
     ) -> dict:
         """
         Scroll the page.
@@ -726,9 +775,16 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             amount: Scroll amount in pixels (default: 500)
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
+            auto_snapshot_mode: Controls the accessibility snapshot taken
+                0.5s after a successful scroll. ``"default"`` returns the
+                full tree; ``"simple"`` / ``"interactive"`` return tighter
+                trees — useful on virtual-scroll UIs that produce huge
+                default trees; ``"off"`` skips the capture — use when
+                issuing many scrolls in a row.
 
         Returns:
-            Dict with scroll result
+            Dict with scroll result. Includes ``snapshot`` unless
+            ``auto_snapshot_mode="off"`` or the scroll failed.
         """
         start = time.perf_counter()
         params = {"direction": direction, "amount": amount, "tab_id": tab_id, "profile": profile}
@@ -759,7 +815,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 result=scroll_result,
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
-            return scroll_result
+            return await _attach_snapshot(scroll_result, bridge, target_tab, auto_snapshot_mode)
         except Exception as e:
             result = {"ok": False, "error": str(e)}
             log_tool_call("browser_scroll", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)

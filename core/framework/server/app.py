@@ -186,9 +186,7 @@ async def _probe_browser_bridge() -> dict:
     status_port = bridge_port + 1
 
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection("127.0.0.1", status_port), timeout=0.5
-        )
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", status_port), timeout=0.5)
         writer.write(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         await writer.drain()
         raw = await asyncio.wait_for(reader.read(512), timeout=0.5)
@@ -285,49 +283,22 @@ def create_app(model: str | None = None) -> web.Application:
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
-        credential_store = CredentialStore.with_aden_sync()
+        # Local server startup should not wait on an eager Aden sync.
+        # The store can still fetch/refresh credentials on demand.
+        credential_store = CredentialStore.with_aden_sync(auto_sync=False)
     except Exception:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
         credential_store = CredentialStore.for_testing({})
 
     app["credential_store"] = credential_store
 
-    # Pre-load queen MCP tools once at startup (cached for all sessions)
-    # This avoids rebuilding the tool registry for every queen session
-    from framework.loader.mcp_registry import MCPRegistry
-    from framework.loader.tool_registry import ToolRegistry
-
-    _queen_tool_registry: ToolRegistry | None = None
-    try:
-        _queen_tool_registry = ToolRegistry()
-        import framework.agents.queen as _queen_pkg
-
-        queen_pkg_dir = Path(_queen_pkg.__file__).parent
-        mcp_config = queen_pkg_dir / "mcp_servers.json"
-        if mcp_config.exists():
-            _queen_tool_registry.load_mcp_config(mcp_config)
-            logger.info("Pre-loaded queen MCP tools from %s", mcp_config)
-
-        registry = MCPRegistry()
-        registry.initialize()
-        registry.ensure_defaults()
-        if (queen_pkg_dir / "mcp_registry.json").is_file():
-            _queen_tool_registry.set_mcp_registry_agent_path(queen_pkg_dir)
-        registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
-        if registry_configs:
-            _queen_tool_registry.load_registry_servers(
-                registry_configs,
-                preserve_existing_tools=True,
-                log_collisions=True,
-                max_tools=selection_max_tools,
-            )
-        logger.info("Pre-loaded queen tool registry with %d tools", len(_queen_tool_registry.get_tools()))
-    except Exception as e:
-        logger.warning("Failed to pre-load queen tool registry: %s", e)
-
-    app["queen_tool_registry"] = _queen_tool_registry
+    # Let queen sessions build their registry lazily on first use instead of
+    # paying the MCP discovery cost during `hive open`.
+    app["queen_tool_registry"] = None
     app["manager"] = SessionManager(
-        model=model, credential_store=credential_store, queen_tool_registry=_queen_tool_registry
+        model=model,
+        credential_store=credential_store,
+        queen_tool_registry=None,
     )
 
     # Register shutdown hook
@@ -339,13 +310,14 @@ def create_app(model: str | None = None) -> web.Application:
     app.router.add_get("/api/browser/status/stream", handle_browser_status_stream)
 
     # Register route modules
+    from framework.server.routes_colony_workers import register_routes as register_colony_worker_routes
     from framework.server.routes_config import register_routes as register_config_routes
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_messages import register_routes as register_message_routes
-    from framework.server.routes_colony_workers import register_routes as register_colony_worker_routes
+    from framework.server.routes_prompts import register_routes as register_prompt_routes
     from framework.server.routes_queens import register_routes as register_queen_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
     from framework.server.routes_workers import register_routes as register_worker_routes
@@ -360,6 +332,7 @@ def create_app(model: str | None = None) -> web.Application:
     register_log_routes(app)
     register_queen_routes(app)
     register_colony_worker_routes(app)
+    register_prompt_routes(app)
 
     # Static file serving — Option C production mode
     # If frontend/dist/ exists, serve built frontend files on /

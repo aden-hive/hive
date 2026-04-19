@@ -16,7 +16,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from framework.host.event_bus import EventBus
 from framework.host.shared_state import IsolationLevel, SharedBufferManager
@@ -47,6 +47,8 @@ class ExecutionAlreadyRunningError(RuntimeError):
 
 
 logger = logging.getLogger(__name__)
+
+CancelExecutionResult = Literal["cancelled", "cancelling", "not_found"]
 
 
 class GraphScopedEventBus(EventBus):
@@ -130,7 +132,7 @@ class ExecutionContext:
     run_id: str | None = None  # Unique ID per trigger() invocation
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
-    status: str = "pending"  # pending, running, completed, failed, paused
+    status: str = "pending"  # pending, running, cancelling, completed, failed, paused, cancelled
 
 
 class ExecutionManager:
@@ -315,6 +317,22 @@ class ExecutionManager:
         """Return IDs of all currently active executions."""
         return list(self._active_executions.keys())
 
+    def _get_blocking_execution_ids_locked(self) -> list[str]:
+        """Return executions that still block a replacement from starting.
+
+        An execution continues to block replacement until its task has
+        terminated and the task's final cleanup has removed its bookkeeping.
+        This is intentional: a timed-out cancellation does not mean the old
+        task is harmless. If it is still alive, it can still write shared
+        session state, so letting a replacement start would guarantee
+        overlapping mutations on the same session.
+        """
+        blocking_ids: list[str] = list(self._active_executions.keys())
+        for execution_id, task in self._execution_tasks.items():
+            if not task.done() and execution_id not in self._active_executions:
+                blocking_ids.append(execution_id)
+        return blocking_ids
+
     @property
     def agent_idle_seconds(self) -> float:
         """Seconds since the last agent activity (LLM call, tool call, node transition).
@@ -396,15 +414,22 @@ class ExecutionManager:
 
     async def stop(self) -> None:
         """Stop the execution stream and cancel active executions."""
-        if not self._running:
-            return
+        async with self._lock:
+            if not self._running:
+                return
 
-        self._running = False
+            self._running = False
 
-        # Cancel all active executions
-        tasks_to_wait = []
-        for _, task in self._execution_tasks.items():
-            if not task.done():
+            # Cancel all active executions, but keep bookkeeping until each
+            # task reaches its own cleanup path.
+            tasks_to_wait: list[asyncio.Task] = []
+            for execution_id, task in self._execution_tasks.items():
+                if task.done():
+                    continue
+                ctx = self._active_executions.get(execution_id)
+                if ctx is not None:
+                    ctx.status = "cancelling"
+                self._cancel_reasons.setdefault(execution_id, "Execution cancelled")
                 task.cancel()
                 tasks_to_wait.append(task)
 
@@ -417,9 +442,6 @@ class ExecutionManager:
                     "%d execution task(s) did not finish within 5s after cancellation",
                     len(pending),
                 )
-
-        self._execution_tasks.clear()
-        self._active_executions.clear()
 
         logger.info(f"ExecutionStream '{self.stream_id}' stopped")
 
@@ -569,12 +591,16 @@ class ExecutionManager:
         )
 
         async with self._lock:
+            if not self._running:
+                raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
+
+            blocking_ids = self._get_blocking_execution_ids_locked()
+            if blocking_ids:
+                raise ExecutionAlreadyRunningError(self.stream_id, blocking_ids)
+
             self._active_executions[execution_id] = ctx
             self._completion_events[execution_id] = asyncio.Event()
-
-        # Start execution task
-        task = asyncio.create_task(self._run_execution(ctx))
-        self._execution_tasks[execution_id] = task
+            self._execution_tasks[execution_id] = asyncio.create_task(self._run_execution(ctx))
 
         logger.debug(f"Queued execution {execution_id} for stream {self.stream_id}")
         return execution_id
@@ -1183,7 +1209,7 @@ class ExecutionManager:
         """Get execution context."""
         return self._active_executions.get(execution_id)
 
-    async def cancel_execution(self, execution_id: str, *, reason: str | None = None) -> bool:
+    async def cancel_execution(self, execution_id: str, *, reason: str | None = None) -> CancelExecutionResult:
         """
         Cancel a running execution.
 
@@ -1194,33 +1220,38 @@ class ExecutionManager:
                 provided, defaults to "Execution cancelled".
 
         Returns:
-            True if cancelled, False if not found
+            "cancelled" if the task fully exited within the grace period,
+            "cancelling" if cancellation was requested but the task is still
+            shutting down, or "not_found" if no active task exists.
         """
-        task = self._execution_tasks.get(execution_id)
-        if task and not task.done():
+        async with self._lock:
+            task = self._execution_tasks.get(execution_id)
+            if task is None or task.done():
+                return "not_found"
+
             # Store the reason so the CancelledError handler can use it
             # when emitting the pause/fail event.
             self._cancel_reasons[execution_id] = reason or "Execution cancelled"
+            ctx = self._active_executions.get(execution_id)
+            if ctx is not None:
+                ctx.status = "cancelling"
             task.cancel()
-            # Wait briefly for the task to finish. Don't block indefinitely —
-            # the task may be stuck in a long LLM API call that doesn't
-            # respond to cancellation quickly.
-            done, _ = await asyncio.wait({task}, timeout=5.0)
-            if not done:
-                # Task didn't finish within timeout — clean up bookkeeping now
-                # so the session doesn't think it still has running executions.
-                # The task will continue winding down in the background and its
-                # finally block will harmlessly pop already-removed keys.
-                logger.warning(
-                    "Execution %s did not finish within cancel timeout; force-cleaning bookkeeping",
-                    execution_id,
-                )
-                async with self._lock:
-                    self._active_executions.pop(execution_id, None)
-                    self._execution_tasks.pop(execution_id, None)
-                self._active_executors.pop(execution_id, None)
-            return True
-        return False
+
+        # Wait briefly for the task to finish. Don't block indefinitely —
+        # the task may be stuck in a long LLM API call that doesn't
+        # respond to cancellation quickly.
+        done, _ = await asyncio.wait({task}, timeout=5.0)
+        if not done:
+            # Keep bookkeeping in place until the task's own finally block runs.
+            # We intentionally do not add deferred cleanup keyed by execution_id
+            # here because resumed executions reuse the same id; a delayed pop
+            # could otherwise delete bookkeeping that belongs to the new run.
+            logger.warning(
+                "Execution %s did not finish within cancel timeout; leaving bookkeeping in place until task exit",
+                execution_id,
+            )
+            return "cancelling"
+        return "cancelled"
 
     # === STATS AND MONITORING ===
 

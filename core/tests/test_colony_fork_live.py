@@ -45,10 +45,13 @@ def _has_any_llm_key() -> bool:
     return any(os.environ.get(k) for k in _LLM_KEY_ENV_VARS)
 
 
-pytestmark = pytest.mark.skipif(
-    not _has_any_llm_key(),
-    reason="No LLM API key set; skipping live integration test",
-)
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not _has_any_llm_key(),
+        reason="No LLM API key set; skipping live integration test",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

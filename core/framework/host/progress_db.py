@@ -33,7 +33,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +118,7 @@ _PRAGMAS = (
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _new_id() -> str:
@@ -167,13 +167,10 @@ def ensure_progress_db(colony_dir: Path) -> Path:
             con.executescript(_SCHEMA_V1)
             con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             con.execute(
-                "INSERT OR REPLACE INTO colony_meta(key, value, updated_at) "
-                "VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO colony_meta(key, value, updated_at) VALUES (?, ?, ?)",
                 ("schema_version", str(SCHEMA_VERSION), _now_iso()),
             )
-            logger.info(
-                "progress_db: initialized schema v%d at %s", SCHEMA_VERSION, db_path
-            )
+            logger.info("progress_db: initialized schema v%d at %s", SCHEMA_VERSION, db_path)
 
         reclaimed = _reclaim_stale_inner(con, stale_after_minutes=15)
         if reclaimed:
@@ -191,19 +188,28 @@ def ensure_progress_db(colony_dir: Path) -> Path:
 
 
 def _patch_worker_configs(colony_dir: Path, db_path: Path) -> int:
-    """Inject ``input_data.db_path`` + ``input_data.colony_id`` into
-    existing ``worker.json`` files in a colony directory.
+    """Inject ``input_data.db_path`` + ``input_data.colony_id`` +
+    ``input_data.colony_data_dir`` into existing ``worker.json`` files
+    in a colony directory.
 
     Runs on every ``ensure_progress_db`` call so colonies that were
     forked before this feature landed get their worker spawn messages
     patched in place. Idempotent: if ``input_data`` already contains
-    the correct ``db_path``, the file is not rewritten.
+    all three values, the file is not rewritten.
 
     Returns the number of files that were actually modified (0 on
     the common case of already-patched colonies).
+
+    Why ``colony_data_dir``? ``db_path`` alone points agents at
+    ``progress.db``; for anything else (custom SQLite stores, JSON
+    ledgers, scraped artefacts) they need the *directory* so they
+    stop creating state under ``~/.hive/skills/`` — which holds skill
+    *definitions*, not runtime data. See
+    ``_default_skills/colony-storage-paths/SKILL.md``.
     """
     colony_id = colony_dir.name
     abs_db = str(db_path)
+    abs_data_dir = str(db_path.parent)
     patched = 0
 
     for worker_cfg in colony_dir.glob("*.json"):
@@ -227,26 +233,24 @@ def _patch_worker_configs(colony_dir: Path, db_path: Path) -> int:
         if (
             input_data.get("db_path") == abs_db
             and input_data.get("colony_id") == colony_id
+            and input_data.get("colony_data_dir") == abs_data_dir
         ):
             continue  # already patched
 
         input_data["db_path"] = abs_db
         input_data["colony_id"] = colony_id
+        input_data["colony_data_dir"] = abs_data_dir
         data["input_data"] = input_data
 
         try:
-            worker_cfg.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            worker_cfg.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             patched += 1
         except OSError as e:
-            logger.warning(
-                "progress_db: failed to patch worker config %s: %s", worker_cfg, e
-            )
+            logger.warning("progress_db: failed to patch worker config %s: %s", worker_cfg, e)
 
     if patched:
         logger.info(
-            "progress_db: patched %d worker config(s) in colony '%s' with db_path",
+            "progress_db: patched %d worker config(s) in colony '%s' with db_path + colony_data_dir",
             patched,
             colony_id,
         )
@@ -271,9 +275,7 @@ def ensure_all_colony_dbs(colonies_root: Path | None = None) -> list[Path]:
         try:
             initialized.append(ensure_progress_db(entry))
         except Exception as e:
-            logger.warning(
-                "progress_db: failed to ensure DB for colony '%s': %s", entry.name, e
-            )
+            logger.warning("progress_db: failed to ensure DB for colony '%s': %s", entry.name, e)
     return initialized
 
 
@@ -340,9 +342,7 @@ def seed_tasks(
 
             for step_seq, step in enumerate(task.get("steps") or [], start=1):
                 if not step.get("title"):
-                    raise ValueError(
-                        f"task[{idx}].steps[{step_seq - 1}] missing required 'title'"
-                    )
+                    raise ValueError(f"task[{idx}].steps[{step_seq - 1}] missing required 'title'")
                 con.execute(
                     """
                     INSERT INTO steps (id, task_id, seq, title, detail, status)
@@ -361,9 +361,7 @@ def seed_tasks(
                 key = sop.get("key")
                 description = sop.get("description")
                 if not key or not description:
-                    raise ValueError(
-                        f"task[{idx}].sop_items missing 'key' or 'description'"
-                    )
+                    raise ValueError(f"task[{idx}].sop_items missing 'key' or 'description'")
                 con.execute(
                     """
                     INSERT INTO sop_checklist
@@ -421,9 +419,7 @@ def enqueue_task(
     return ids[0]
 
 
-def _reclaim_stale_inner(
-    con: sqlite3.Connection, *, stale_after_minutes: int
-) -> int:
+def _reclaim_stale_inner(con: sqlite3.Connection, *, stale_after_minutes: int) -> int:
     """Reclaim stale claims. Runs inside an existing open connection.
 
     Two-step:

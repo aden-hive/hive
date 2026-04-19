@@ -16,6 +16,10 @@ import {
   formatAgentDisplayName,
   replayEventsToMessages,
 } from "@/lib/chat-helpers";
+import {
+  resolveInitialColonyPhase,
+  shouldUsePrefetchedColonyRestore,
+} from "@/lib/colony-session-restore";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
@@ -121,6 +125,13 @@ async function restoreSessionMessages(
 
 interface AgentState {
   sessionId: string | null;
+  /** Colony directory name (e.g. ``linkedin_honeycomb_messaging``) —
+   *  the value used for the colony-scoped progress + data endpoints.
+   *  Comes from ``LiveSession.colony_id`` (the legacy field name; it's
+   *  the on-disk directory under ``~/.hive/colonies/``). Distinct from
+   *  the URL's ``colonyId`` route param, which is a display-mangled
+   *  slug. Null for queen-DM sessions not bound to a colony. */
+  colonyDirName: string | null;
   loading: boolean;
   ready: boolean;
   queenReady: boolean;
@@ -159,6 +170,7 @@ interface AgentState {
 function defaultAgentState(): AgentState {
   return {
     sessionId: null,
+    colonyDirName: null,
     loading: true,
     ready: false,
     queenReady: false,
@@ -417,6 +429,7 @@ export default function ColonyChat() {
       let liveSession: LiveSession | undefined;
       let isResumedSession = false;
       let coldRestoreId: string | undefined;
+      let prefetchedRestore: SessionRestoreResult | null = null;
 
       // Check for existing live session for this agent
       try {
@@ -446,40 +459,30 @@ export default function ColonyChat() {
       let restoredPhase: "independent" | "working" | "reviewing" | null = null;
 
       if (!liveSession) {
-        // Pre-fetch messages from cold session
-        let preRestoredMsgs: ChatMessage[] = [];
         if (coldRestoreId) {
           const displayName = formatAgentDisplayName(agentPath);
-          const restored = await restoreSessionMessages(coldRestoreId, agentPath, displayName);
-          preRestoredMsgs = restored.messages;
-          restoredPhase = restored.restoredPhase;
+          prefetchedRestore = await restoreSessionMessages(
+            coldRestoreId,
+            agentPath,
+            displayName,
+          );
         }
 
-        if (coldRestoreId || preRestoredMsgs.length > 0) {
+        if (coldRestoreId || (prefetchedRestore?.messages.length ?? 0) > 0) {
           suppressIntroRef.current = true;
         }
 
         // Create new session (pass coldRestoreId for resume)
         liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
-
-        if (preRestoredMsgs.length > 0) {
-          preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-          setMessages(preRestoredMsgs);
-        }
       }
 
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.colony_name || agentPath);
-      const initialPhase =
-        restoredPhase || session.queen_phase || (session.has_worker ? "working" : "reviewing");
-      queenPhaseRef.current = initialPhase;
-
-      updateState({
-        sessionId: session.session_id,
-        displayName,
-        queenPhase: initialPhase,
-        queenSupportsImages: session.queen_supports_images !== false,
-      });
+      let restoredMessages: ChatMessage[] = [];
+      const reusePrefetchedRestore = shouldUsePrefetchedColonyRestore(
+        coldRestoreId,
+        session.session_id,
+      );
 
       // Restore messages for live resume
       if (isResumedSession) {
@@ -489,17 +492,50 @@ export default function ColonyChat() {
           displayName,
         );
         if (restored.messages.length > 0) {
-          restored.messages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-          setMessages(restored.messages);
+          restoredMessages = restored.messages;
+        }
+        restoredPhase = restored.restoredPhase;
+      } else if (prefetchedRestore) {
+        if (reusePrefetchedRestore) {
+          restoredMessages = prefetchedRestore.messages;
+          restoredPhase = prefetchedRestore.restoredPhase;
+        } else {
+          // The backend corrected the resume target to the colony's forked
+          // session. Reload from that session so the first paint doesn't show
+          // the source queen DM or its stale independent phase.
+          const restored = await restoreSessionMessages(
+            session.session_id,
+            agentPath,
+            displayName,
+          );
+          restoredMessages = restored.messages;
+          restoredPhase = restored.restoredPhase;
         }
       }
+
+      if (restoredMessages.length > 0) {
+        restoredMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        setMessages(restoredMessages);
+      }
+
+      const initialPhase = resolveInitialColonyPhase({
+        prefetchedSessionId: coldRestoreId,
+        resolvedSessionId: session.session_id,
+        prefetchedPhase: restoredPhase,
+        serverPhase: session.queen_phase,
+        hasWorker: session.has_worker,
+      });
+      queenPhaseRef.current = initialPhase;
 
       const hasRestoredContent = isResumedSession || !!coldRestoreId;
       if (!hasRestoredContent) suppressIntroRef.current = false;
 
       updateState({
         sessionId: session.session_id,
+        colonyDirName: session.colony_id,
         displayName,
+        queenPhase: initialPhase,
+        queenSupportsImages: session.queen_supports_images !== false,
         ready: true,
         loading: false,
         queenReady: hasRestoredContent,
@@ -1243,8 +1279,11 @@ export default function ColonyChat() {
   // Mirror live triggers into the shared context so the tabbed
   // ColonyWorkersPanel (rendered at the layout level) can render the
   // Triggers tab without having to re-subscribe to the session SSE.
-  const { setTriggers: setCtxTriggers, setSessionId: setCtxSessionId } =
-    useColonyWorkers();
+  const {
+    setTriggers: setCtxTriggers,
+    setSessionId: setCtxSessionId,
+    setColonyName: setCtxColonyName,
+  } = useColonyWorkers();
   useEffect(() => {
     setCtxTriggers(triggers);
     return () => setCtxTriggers([]);
@@ -1255,10 +1294,20 @@ export default function ColonyChat() {
   // user hasn't dismissed it (via the X button). Cleanup clears it so
   // the panel closes when we leave the colony room.
   useEffect(() => {
-    if (!agentState.sessionId) return;
-    setCtxSessionId(agentState.sessionId);
+    setCtxSessionId(agentState.sessionId ?? null);
     return () => setCtxSessionId(null);
   }, [agentState.sessionId, setCtxSessionId]);
+
+  // Publish the colony directory name (e.g. ``linkedin_honeycomb_messaging``)
+  // alongside the session id. The panel's progress + data tabs route by
+  // colony name, not session — one progress.db per colony, independent
+  // of which session is open. Comes from ``LiveSession.colony_id`` (the
+  // on-disk directory) rather than the URL slug, which is mangled by
+  // ``slugToColonyId``.
+  useEffect(() => {
+    setCtxColonyName(agentState.colonyDirName ?? null);
+    return () => setCtxColonyName(null);
+  }, [agentState.colonyDirName, setCtxColonyName]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -1349,6 +1398,7 @@ export default function ColonyChat() {
             onQuestionDismiss={handleQuestionDismiss}
             contextUsage={agentState.contextUsage}
             supportsImages={agentState.queenSupportsImages}
+            queenProfileId={colony?.queenProfileId ?? null}
           />
         </div>
 

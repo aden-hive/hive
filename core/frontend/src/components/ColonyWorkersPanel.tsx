@@ -24,18 +24,30 @@ import {
   type ProgressStep,
   type WorkerSummary,
 } from "@/api/colonyWorkers";
+import {
+  colonyDataApi,
+  type CellValue,
+  type TableOverview,
+  type TableRowsResponse,
+} from "@/api/colonyData";
 import { workersApi } from "@/api/workers";
 import { sessionsApi } from "@/api/sessions";
 import { cronToLabel } from "@/lib/graphUtils";
 import type { GraphNode } from "@/components/graph-types";
 import { useColonyWorkers } from "@/context/ColonyWorkersContext";
+import { DataGrid, type SortDir } from "@/components/data-grid";
 
 interface ColonyWorkersPanelProps {
   sessionId: string;
+  /** Colony directory name (e.g. ``linkedin_honeycomb_messaging``) for
+   *  the colony-scoped progress + data endpoints. ``null`` when the
+   *  attached session isn't bound to a colony — those tabs render
+   *  empty rather than fire requests with an invalid name. */
+  colonyName: string | null;
   onClose: () => void;
 }
 
-type TabKey = "skills" | "tools" | "sessions" | "triggers";
+type TabKey = "skills" | "tools" | "sessions" | "triggers" | "data";
 
 function statusClasses(status: string): string {
   const s = status.toLowerCase();
@@ -74,9 +86,19 @@ function fmtIso(ts: string | null | undefined): string {
 
 export default function ColonyWorkersPanel({
   sessionId,
+  colonyName,
   onClose,
 }: ColonyWorkersPanelProps) {
   const [tab, setTab] = useState<TabKey>("sessions");
+  const { focusWorkerId } = useColonyWorkers();
+
+  // When an external caller (e.g. clicking a worker avatar in chat)
+  // requests focus on a specific worker, jump to the Sessions tab so
+  // the pre-select in SessionsTab is visible. The actual select +
+  // focus-clear happens inside SessionsTab.
+  useEffect(() => {
+    if (focusWorkerId) setTab("sessions");
+  }, [focusWorkerId]);
 
   // ── Resizable width (mirrors QueenProfilePanel) ─────────────────────
   const MIN_WIDTH = 280;
@@ -142,13 +164,17 @@ export default function ColonyWorkersPanel({
         <TabButton active={tab === "triggers"} onClick={() => setTab("triggers")} label="Triggers" />
         <TabButton active={tab === "skills"} onClick={() => setTab("skills")} label="Skills" />
         <TabButton active={tab === "tools"} onClick={() => setTab("tools")} label="Tools" />
+        <TabButton active={tab === "data"} onClick={() => setTab("data")} label="Data" />
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === "sessions" && <SessionsTab sessionId={sessionId} />}
+        {tab === "sessions" && (
+          <SessionsTab sessionId={sessionId} colonyName={colonyName} />
+        )}
         {tab === "triggers" && <TriggersTab sessionId={sessionId} />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
         {tab === "tools" && <ToolsTab sessionId={sessionId} />}
+        {tab === "data" && <DataTab colonyName={colonyName} />}
       </div>
     </aside>
   );
@@ -459,13 +485,34 @@ function ToolGroup({ label, items }: { label: string; items: ColonyTool[] }) {
 
 // ── Sessions tab ───────────────────────────────────────────────────────
 
-function SessionsTab({ sessionId }: { sessionId: string }) {
+function SessionsTab({
+  sessionId,
+  colonyName,
+}: {
+  sessionId: string;
+  colonyName: string | null;
+}) {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [stoppingAll, setStoppingAll] = useState(false);
+  const { focusWorkerId, setFocusWorkerId } = useColonyWorkers();
+
+  // Consume focus requests from avatar clicks in chat. Wait for the
+  // initial fetch before deciding so a click that arrives before the
+  // workers list has loaded still resolves. If the requested id is
+  // present we drill into its detail view; if it's aged out we swallow
+  // the request silently. Either way we clear the focus so it isn't
+  // re-applied on every re-render.
+  useEffect(() => {
+    if (!focusWorkerId || loading) return;
+    if (workers.some((w) => w.worker_id === focusWorkerId)) {
+      setSelected(focusWorkerId);
+    }
+    setFocusWorkerId(null);
+  }, [focusWorkerId, workers, loading, setFocusWorkerId]);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -555,7 +602,7 @@ function SessionsTab({ sessionId }: { sessionId: string }) {
   if (selected) {
     return (
       <WorkerDetail
-        sessionId={sessionId}
+        colonyName={colonyName}
         worker={selectedWorker}
         workerId={selected}
         onBack={() => setSelected(null)}
@@ -984,15 +1031,372 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+// ── Data tab (airtable-style view of progress.db tables) ──────────────
+
+/** Table-list refresh cadence. Slower than the row poll because the
+ *  overview only drives the row-count chips; the operator doesn't care
+ *  if the count lags the live data by a few seconds. */
+const TABLES_POLL_MS = 5000;
+
+function DataTab({ colonyName }: { colonyName: string | null }) {
+  const [tables, setTables] = useState<TableOverview[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [loadingTables, setLoadingTables] = useState(true);
+  const [tablesError, setTablesError] = useState<string | null>(null);
+
+  const refreshTables = useCallback(
+    (opts: { silent?: boolean } = {}) => {
+      if (!colonyName) {
+        setTables([]);
+        setLoadingTables(false);
+        return Promise.resolve();
+      }
+      if (!opts.silent) {
+        setLoadingTables(true);
+        setTablesError(null);
+      }
+      return colonyDataApi
+        .listTables(colonyName)
+        .then((r) => {
+          setTables(r.tables);
+          // Auto-select the first table when none chosen yet so the user
+          // lands on data instead of an empty picker.
+          setSelected((cur) => cur ?? r.tables[0]?.name ?? null);
+          if (opts.silent) setTablesError(null);
+        })
+        .catch((e) => {
+          // Only surface errors on user-initiated loads; silent polls
+          // stay quiet and the next tick retries.
+          if (!opts.silent) setTablesError(e?.message ?? "Failed to load tables");
+        })
+        .finally(() => {
+          if (!opts.silent) setLoadingTables(false);
+        });
+    },
+    [colonyName],
+  );
+
+  useEffect(() => {
+    refreshTables();
+  }, [refreshTables]);
+
+  // Background poll for row-count freshness. Skipped when the browser
+  // tab is hidden — there's no point burning DB reads for a view the
+  // user isn't watching.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshTables({ silent: true });
+    }, TABLES_POLL_MS);
+    return () => clearInterval(id);
+  }, [refreshTables]);
+
+  if (!colonyName) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-8 px-4">
+        This session isn't bound to a colony yet — no progress.db to view.
+      </p>
+    );
+  }
+
+  return (
+    <div className="px-4 py-3">
+      {tablesError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive mb-3">
+          {tablesError}
+        </div>
+      )}
+
+      {loadingTables && tables.length === 0 ? (
+        <div className="flex justify-center py-10">
+          <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+        </div>
+      ) : tables.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-8">
+          No tables in progress.db (or the colony has no DB yet).
+        </p>
+      ) : (
+        <>
+          {/* Table picker — chips so we avoid a heavier select dropdown
+              in the narrow sidebar. Row counts hint at scale before the
+              user clicks in. */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {tables.map((t) => (
+              <button
+                key={t.name}
+                onClick={() => setSelected(t.name)}
+                className={`text-[10.5px] font-mono px-2 py-1 rounded border transition-colors ${
+                  selected === t.name
+                    ? "border-primary/60 bg-primary/10 text-foreground"
+                    : "border-border/50 bg-background/40 text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                }`}
+                title={`${t.row_count.toLocaleString()} rows · ${t.columns.length} columns`}
+              >
+                {t.name}
+                <span className="ml-1 text-muted-foreground/70">
+                  ({t.row_count.toLocaleString()})
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-muted-foreground mb-2 italic">
+            Live view — edits write directly to progress.db. A running worker
+            may not notice until its next DB read.
+          </p>
+
+          {selected && (
+            <TableView
+              key={selected}
+              colonyName={colonyName}
+              table={selected}
+              onAnyEdit={() => {
+                // Row counts can change via cascading triggers or NULL→value
+                // edits; re-pull so the chip stays truthful.
+                void refreshTables();
+              }}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Page size for the Data tab grid. 100 is a sweet spot for the narrow
+ *  sidebar — big enough that most real-world tables render in one page,
+ *  small enough to keep edits responsive.  */
+const DATA_PAGE_SIZE = 100;
+
+/** Row-poll cadence. 2.5s balances "feels live" against server load
+ *  and our edit/poll race window. Shorter intervals amplify the
+ *  chance of a poll landing during a PATCH roundtrip. */
+const ROWS_POLL_MS = 2500;
+
+/** Returns true if the user is actively editing any cell inside the
+ *  grid — we sniff for a focused textarea. The alternative (bubbling
+ *  editing state up from every EditableCell) would force the grid
+ *  prop to track a counter. DOM inspection is simpler and — since the
+ *  grid is self-contained under `root` — equally reliable. */
+function isEditingInside(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  const active = document.activeElement;
+  return !!active && root.contains(active) && active.tagName === "TEXTAREA";
+}
+
+/** Shallow-merge new rows on top of the previous page *by primary
+ *  key*. Reuses unchanged row-object references so React can skip
+ *  re-rendering those `<tr>`s — important when the user has the grid
+ *  scrolled horizontally and we don't want jank at every poll. */
+function mergeRowsByPk(
+  prev: TableRowsResponse,
+  next: TableRowsResponse,
+): TableRowsResponse {
+  if (prev.primary_key.length === 0) return next;
+  const prevByKey = new Map<string, Record<string, CellValue>>();
+  for (const r of prev.rows) {
+    prevByKey.set(prev.primary_key.map((p) => String(r[p] ?? "")).join("|"), r);
+  }
+  const rows = next.rows.map((r) => {
+    const key = next.primary_key.map((p) => String(r[p] ?? "")).join("|");
+    const old = prevByKey.get(key);
+    if (!old) return r;
+    // Same key AND all columns identical → reuse the previous object
+    // so React's reference check skips re-rendering.
+    for (const col of Object.keys(r)) {
+      if (r[col] !== old[col]) return r;
+    }
+    return old;
+  });
+  return { ...next, rows };
+}
+
+function TableView({
+  colonyName,
+  table,
+  onAnyEdit,
+}: {
+  colonyName: string;
+  table: string;
+  onAnyEdit: () => void;
+}) {
+  const [data, setData] = useState<TableRowsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [orderBy, setOrderBy] = useState<string | null>(null);
+  const [orderDir, setOrderDir] = useState<SortDir>("asc");
+
+  // Request-id guard. Any in-flight request with a stale id is
+  // discarded on return. Bumped on (a) every new request-start and
+  // (b) successful edits, so a poll that started *before* a PATCH
+  // cannot land *after* it and rollback the new value.
+  const reqIdRef = useRef(0);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+
+  const fetchOnce = useCallback(
+    (opts: { silent: boolean }) => {
+      const myId = ++reqIdRef.current;
+      if (!opts.silent) {
+        setLoading(true);
+        setError(null);
+      }
+      colonyDataApi
+        .listRows(colonyName, table, {
+          limit: DATA_PAGE_SIZE,
+          offset,
+          orderBy,
+          orderDir,
+        })
+        .then((next) => {
+          // Discard stale responses — sort/offset changed, edit
+          // happened, or a subsequent poll started.
+          if (myId !== reqIdRef.current) return;
+          setData((prev) => (prev ? mergeRowsByPk(prev, next) : next));
+          if (opts.silent) setError(null);
+        })
+        .catch((e) => {
+          if (myId !== reqIdRef.current) return;
+          // Silent polls swallow errors; the next tick retries. User-
+          // initiated loads surface so the operator sees the failure.
+          if (!opts.silent) setError(e?.message ?? "Failed to load rows");
+        })
+        .finally(() => {
+          if (!opts.silent && myId === reqIdRef.current) setLoading(false);
+        });
+    },
+    [colonyName, table, offset, orderBy, orderDir],
+  );
+
+  // Initial + on-parameter-change load (user-initiated, shows spinner).
+  useEffect(() => {
+    fetchOnce({ silent: false });
+  }, [fetchOnce]);
+
+  // Background polling. Pauses when (a) the browser tab is hidden —
+  // no point spending DB reads on an unwatched panel, and (b) the
+  // user is mid-edit — a silent re-fetch would reorder rows or reset
+  // the draft under their cursor.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (isEditingInside(gridRef.current)) return;
+      fetchOnce({ silent: true });
+    }, ROWS_POLL_MS);
+    return () => clearInterval(id);
+  }, [fetchOnce]);
+
+  // Reset paging when switching tables (key prop on TableView takes care
+  // of full unmount; this covers the sort-change case).
+  useEffect(() => {
+    setOffset(0);
+  }, [orderBy, orderDir]);
+
+  const handleSort = useCallback((col: string | null, dir: SortDir) => {
+    setOrderBy(col);
+    setOrderDir(dir);
+  }, []);
+
+  const handleEdit = useCallback(
+    async (pk: Record<string, CellValue>, column: string, newValue: CellValue) => {
+      await colonyDataApi.updateRow(colonyName, table, {
+        pk,
+        updates: { [column]: newValue },
+      });
+      // Bump the request-id so any poll that started before the PATCH
+      // (and is about to return with pre-edit data) is discarded —
+      // otherwise the grid would briefly revert the cell.
+      reqIdRef.current++;
+      // Optimistic patch of the local cache so the grid reflects the
+      // edit instantly without a full re-fetch flash.
+      setData((prev) => {
+        if (!prev) return prev;
+        const rows = prev.rows.map((r) => {
+          const matches = prev.primary_key.every((p) => r[p] === pk[p]);
+          return matches ? { ...r, [column]: newValue } : r;
+        });
+        return { ...prev, rows };
+      });
+      onAnyEdit();
+    },
+    [colonyName, table, onAnyEdit],
+  );
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="flex justify-center py-10">
+        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  const pageEnd = Math.min(data.offset + data.rows.length, data.total);
+  const canPrev = data.offset > 0;
+  const canNext = pageEnd < data.total;
+
+  return (
+    <div className="flex flex-col gap-2" ref={gridRef}>
+      <DataGrid
+        columns={data.columns}
+        rows={data.rows}
+        primaryKey={data.primary_key}
+        orderBy={orderBy}
+        orderDir={orderDir}
+        onSortChange={handleSort}
+        onCellEdit={handleEdit}
+        loading={loading}
+        emptyMessage="Table is empty."
+      />
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 animate-pulse"
+            title={`Auto-refreshing every ${ROWS_POLL_MS / 1000}s (paused while editing)`}
+          />
+          <span>
+            {data.total === 0
+              ? "0 rows"
+              : `${data.offset + 1}–${pageEnd} of ${data.total.toLocaleString()}`}
+          </span>
+        </span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setOffset(Math.max(0, offset - DATA_PAGE_SIZE))}
+            disabled={!canPrev || loading}
+            className="px-2 py-0.5 rounded border border-border/50 disabled:opacity-40 hover:bg-muted/30"
+          >
+            Prev
+          </button>
+          <button
+            onClick={() => setOffset(offset + DATA_PAGE_SIZE)}
+            disabled={!canNext || loading}
+            className="px-2 py-0.5 rounded border border-border/50 disabled:opacity-40 hover:bg-muted/30"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Worker detail view (inside Sessions tab) ───────────────────────────
 
 function WorkerDetail({
-  sessionId,
+  colonyName,
   worker,
   workerId,
   onBack,
 }: {
-  sessionId: string;
+  colonyName: string | null;
   worker: WorkerSummary | null | undefined;
   workerId: string;
   onBack: () => void;
@@ -1052,20 +1456,20 @@ function WorkerDetail({
       {isHistorical ? (
         <HistoricalWorkerPlaceholder workerId={workerId} />
       ) : (
-        <LiveWorkerProgress sessionId={sessionId} workerId={workerId} />
+        <LiveWorkerProgress colonyName={colonyName} workerId={workerId} />
       )}
     </div>
   );
 }
 
 function LiveWorkerProgress({
-  sessionId,
+  colonyName,
   workerId,
 }: {
-  sessionId: string;
+  colonyName: string | null;
   workerId: string;
 }) {
-  const { snapshot, streamState, error } = useProgressStream(sessionId, workerId);
+  const { snapshot, streamState, error } = useProgressStream(colonyName, workerId);
   return (
     <>
       <div className="flex items-center justify-between mb-1.5">
@@ -1201,7 +1605,7 @@ function ProgressView({ snapshot }: { snapshot: ProgressSnapshot }) {
 
 // ── Hook: live progress via SSE ────────────────────────────────────────
 
-function useProgressStream(sessionId: string, workerId: string) {
+function useProgressStream(colonyName: string | null, workerId: string) {
   const [snapshot, setSnapshot] = useState<ProgressSnapshot>({ tasks: [], steps: [] });
   const [streamState, setStreamState] = useState<"connecting" | "open" | "closed" | "error">(
     "connecting",
@@ -1213,7 +1617,14 @@ function useProgressStream(sessionId: string, workerId: string) {
     setError(null);
     setStreamState("connecting");
 
-    const url = colonyWorkersApi.progressStreamUrl(sessionId, workerId);
+    // Skip the SSE connection entirely if the session isn't bound to a
+    // colony — we'd just hit a 400 on every reconnect attempt.
+    if (!colonyName) {
+      setStreamState("closed");
+      return;
+    }
+
+    const url = colonyWorkersApi.progressStreamUrl(colonyName, workerId);
     const es = new EventSource(url);
 
     es.addEventListener("open", () => setStreamState("open"));
@@ -1256,7 +1667,7 @@ function useProgressStream(sessionId: string, workerId: string) {
       es.close();
       setStreamState("closed");
     };
-  }, [sessionId, workerId]);
+  }, [colonyName, workerId]);
 
   return { snapshot, streamState, error };
 }

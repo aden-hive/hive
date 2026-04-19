@@ -27,14 +27,15 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
-import { useColony } from "@/context/ColonyContext";
 import { useQueenProfile } from "@/context/QueenProfileContext";
+import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 import ParallelSubagentBubble, {
   type SubagentGroup,
 } from "@/components/ParallelSubagentBubble";
 import {
   formatMessageTime,
   formatDayDividerLabel,
+  workerIdFromStreamId,
 } from "@/lib/chat-helpers";
 
 export interface ChatMessage {
@@ -111,6 +112,14 @@ interface ChatPanelProps {
   contextUsage?: Record<string, ContextUsageEntry>;
   /** One-shot composer prefill. Applied to the textarea whenever the value changes. */
   initialDraft?: string | null;
+  /** Queen profile this panel is attached to. When provided, clicking a
+   *  queen avatar/name opens that queen's profile panel directly —
+   *  no fragile name-based lookup against ``queenProfiles``. Nullable
+   *  to tolerate pages that render the panel before the queen is
+   *  resolved (e.g. new-chat bootstrap). */
+  queenProfileId?: string | null;
+  /** Queen ID — used to display the queen's avatar photo in messages */
+  queenId?: string;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -310,10 +319,13 @@ function InlineAskUserBubble({
   onSend,
   queenPhase,
   showQueenPhaseBadge = true,
+  queenProfileId,
+  queenAvatarUrl,
 }: {
   msg: ChatMessage;
   payload: AskUserInlinePayload;
   activeThread: string;
+  queenAvatarUrl?: string | null;
   onSend: (
     message: string,
     thread: string,
@@ -321,6 +333,7 @@ function InlineAskUserBubble({
   ) => void;
   queenPhase?: "independent" | "working" | "reviewing";
   showQueenPhaseBadge?: boolean;
+  queenProfileId?: string | null;
 }) {
   const [state, setState] = useState<"pending" | "submitted" | "dismissed">(
     "pending",
@@ -338,6 +351,8 @@ function InlineAskUserBubble({
         msg={msg}
         queenPhase={queenPhase}
         showQueenPhaseBadge={showQueenPhaseBadge}
+        queenProfileId={queenProfileId}
+        queenAvatarUrl={queenAvatarUrl}
       />
     );
   }
@@ -346,14 +361,26 @@ function InlineAskUserBubble({
   const color = getColor(msg.agent, msg.role);
   const thread = msg.thread || activeThread;
 
-  const { queenProfiles } = useColony();
   const { openQueenProfile } = useQueenProfile();
-  const queenProfileId = isQueen
-    ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
-    : null;
-  const handleQueenClick = queenProfileId
-    ? () => openQueenProfile(queenProfileId)
+  const { openColonyWorkers } = useColonyWorkers();
+  const resolvedQueenProfileId = isQueen ? queenProfileId ?? null : null;
+  const handleQueenClick = resolvedQueenProfileId
+    ? () => openQueenProfile(resolvedQueenProfileId)
     : undefined;
+  const workerId =
+    !isQueen && msg.role === "worker"
+      ? workerIdFromStreamId(msg.streamId)
+      : null;
+  const handleWorkerClick =
+    msg.role === "worker"
+      ? () => openColonyWorkers(workerId ?? undefined)
+      : undefined;
+  const handleAvatarClick = handleQueenClick ?? handleWorkerClick;
+  const avatarTitle = handleQueenClick
+    ? `View ${msg.agent}'s profile`
+    : handleWorkerClick
+      ? "Open worker in colony sidebar"
+      : undefined;
 
   const handleSingle = (answer: string) => {
     setState("submitted");
@@ -374,17 +401,17 @@ function InlineAskUserBubble({
   return (
     <div className="flex gap-3">
       <div
-        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-        style={{
+        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center overflow-hidden${handleAvatarClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+        style={isQueen && queenAvatarUrl ? undefined : {
           backgroundColor: `${color}18`,
           border: `1.5px solid ${color}35`,
           boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
         }}
-        onClick={handleQueenClick}
-        title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
+        onClick={handleAvatarClick}
+        title={avatarTitle}
       >
         {isQueen ? (
-          <Crown className="w-4 h-4" style={{ color }} />
+          <QueenAvatarIcon url={queenAvatarUrl ?? null} size={9} />
         ) : (
           <Cpu className="w-3.5 h-3.5" style={{ color }} />
         )}
@@ -439,26 +466,49 @@ function InlineAskUserBubble({
   );
 }
 
+function QueenAvatarIcon({ url, size }: { url: string | null; size: number }) {
+  const [ok, setOk] = useState(!!url);
+  const dim = size === 9 ? "w-9 h-9" : "w-7 h-7";
+  if (ok && url) {
+    return <img src={url} alt="" className={`${dim} rounded-xl object-cover`} onError={() => setOk(false)} />;
+  }
+  return <Crown className={size === 9 ? "w-4 h-4" : "w-3.5 h-3.5"} style={{ color: queenColor }} />;
+}
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
     queenPhase,
     showQueenPhaseBadge = true,
+    queenProfileId,
+    queenAvatarUrl,
   }: {
     msg: ChatMessage;
     queenPhase?: "independent" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
+    queenProfileId?: string | null;
+    queenAvatarUrl?: string | null;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
     const color = getColor(msg.agent, msg.role);
 
-    // Resolve queen profile ID so clicking avatar/name opens the profile panel
-    const { queenProfiles } = useColony();
+    // Clicking a queen avatar/name opens the queen profile panel. The
+    // owning page passes its queenProfileId down — we don't fall back
+    // to a name-match against ``queenProfiles`` because display names
+    // aren't unique or stable (colony chat uses static QUEEN_REGISTRY
+    // labels, queen-dm uses user-editable profile names; matching by
+    // name silently breaks when the profile is renamed or not listed).
     const { openQueenProfile } = useQueenProfile();
-    const queenProfileId = isQueen
-      ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
-      : null;
+    const { openColonyWorkers } = useColonyWorkers();
+    const resolvedQueenProfileId = isQueen ? queenProfileId ?? null : null;
+    // Worker messages: clicking the avatar opens the Colony Workers
+    // sidebar, pre-selecting this worker when its uuid is embedded in
+    // the streamId (parallel fan-out case).
+    const workerId =
+      !isQueen && msg.role === "worker"
+        ? workerIdFromStreamId(msg.streamId)
+        : null;
 
     if (msg.type === "run_divider") {
       return (
@@ -554,24 +604,34 @@ const MessageBubble = memo(
       );
     }
 
-    const handleQueenClick = queenProfileId
-      ? () => openQueenProfile(queenProfileId)
+    const handleQueenClick = resolvedQueenProfileId
+      ? () => openQueenProfile(resolvedQueenProfileId)
       : undefined;
+    const handleWorkerClick =
+      msg.role === "worker"
+        ? () => openColonyWorkers(workerId ?? undefined)
+        : undefined;
+    const handleAvatarClick = handleQueenClick ?? handleWorkerClick;
+    const avatarTitle = handleQueenClick
+      ? `View ${msg.agent}'s profile`
+      : handleWorkerClick
+        ? "Open worker in colony sidebar"
+        : undefined;
 
     return (
       <div className="flex gap-3">
         <div
-          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center${handleQueenClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-          style={{
+          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center overflow-hidden${handleAvatarClick ? " cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+          style={isQueen && queenAvatarUrl ? undefined : {
             backgroundColor: `${color}18`,
             border: `1.5px solid ${color}35`,
             boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
           }}
-          onClick={handleQueenClick}
-          title={handleQueenClick ? `View ${msg.agent}'s profile` : undefined}
+          onClick={handleAvatarClick}
+          title={avatarTitle}
         >
           {isQueen ? (
-            <Crown className="w-4 h-4" style={{ color }} />
+            <QueenAvatarIcon url={queenAvatarUrl ?? null} size={9} />
           ) : (
             <Cpu className="w-3.5 h-3.5" style={{ color }} />
           )}
@@ -649,6 +709,8 @@ export default function ChatPanel({
   contextUsage,
   supportsImages = true,
   initialDraft,
+  queenProfileId,
+  queenId,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -659,6 +721,7 @@ export default function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastAppliedDraftRef = useRef<string | null | undefined>(undefined);
+  const queenAvatarUrl = queenId ? `/api/queen/${queenId}/avatar` : null;
 
   useEffect(() => {
     if (!initialDraft || initialDraft === lastAppliedDraftRef.current) return;
@@ -1074,6 +1137,8 @@ export default function ChatPanel({
                   onSend={onSend}
                   queenPhase={queenPhase}
                   showQueenPhaseBadge={showQueenPhaseBadge}
+                  queenProfileId={queenProfileId}
+                  queenAvatarUrl={queenAvatarUrl}
                 />
               </div>
             );
@@ -1084,6 +1149,8 @@ export default function ChatPanel({
                 msg={msg}
                 queenPhase={queenPhase}
                 showQueenPhaseBadge={showQueenPhaseBadge}
+                queenProfileId={queenProfileId}
+                queenAvatarUrl={queenAvatarUrl}
               />
             </div>
           );
@@ -1093,14 +1160,14 @@ export default function ChatPanel({
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
           <div className="flex gap-3">
             <div
-              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{
+              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+              style={queenAvatarUrl ? undefined : {
                 backgroundColor: `${queenColor}18`,
                 border: `1.5px solid ${queenColor}35`,
                 boxShadow: `0 0 12px ${queenColor}20`,
               }}
             >
-              <Crown className="w-4 h-4" style={{ color: queenColor }} />
+              <QueenAvatarIcon url={queenAvatarUrl} size={9} />
             </div>
             <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">

@@ -10,6 +10,7 @@ from aiohttp import web
 
 from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.credentials.validation import validate_agent_credentials
+from framework.host.execution_manager import ExecutionAlreadyRunningError
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
@@ -101,6 +102,17 @@ def _resolve_queen_only_tools() -> frozenset[str]:
     return frozenset(derived | _QUEEN_LIFECYCLE_EXTRAS)
 
 
+def _execution_already_running_response(exc: ExecutionAlreadyRunningError) -> web.Response:
+    return web.json_response(
+        {
+            "error": str(exc),
+            "stream_id": exc.stream_id,
+            "active_execution_ids": exc.active_ids,
+        },
+        status=409,
+    )
+
+
 async def handle_trigger(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/trigger — start an execution.
 
@@ -142,11 +154,14 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if "resume_session_id" not in session_state:
         session_state["resume_session_id"] = session.id
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_point_id,
-        input_data,
-        session_state=session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_point_id,
+            input_data,
+            session_state=session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     # Cancel queen's in-progress LLM turn so it picks up the phase change cleanly
     if session.queen_executor:
@@ -435,11 +450,14 @@ async def handle_resume(request: web.Request) -> web.Response:
 
     input_data = state.get("input_data", {})
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_points[0].id,
-        input_data=input_data,
-        session_state=resume_session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_points[0].id,
+            input_data=input_data,
+            session_state=resume_session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     return web.json_response(
         {
@@ -466,6 +484,7 @@ async def handle_pause(request: web.Request) -> web.Response:
 
     runtime = session.colony_runtime
     cancelled = []
+    cancelling = []
 
     for colony_id in runtime.list_graphs():
         reg = runtime.get_graph_registration(colony_id)
@@ -482,9 +501,11 @@ async def handle_pause(request: web.Request) -> web.Response:
 
             for exec_id in list(stream.active_execution_ids):
                 try:
-                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
-                    if ok:
+                    outcome = await stream.cancel_execution(exec_id, reason="Execution paused by user")
+                    if outcome == "cancelled":
                         cancelled.append(exec_id)
+                    elif outcome == "cancelling":
+                        cancelling.append(exec_id)
                 except Exception:
                     pass
 
@@ -498,8 +519,9 @@ async def handle_pause(request: web.Request) -> web.Response:
 
     return web.json_response(
         {
-            "stopped": bool(cancelled),
+            "stopped": bool(cancelled) and not cancelling,
             "cancelled": cancelled,
+            "cancelling": cancelling,
             "timers_paused": True,
         }
     )
@@ -536,8 +558,9 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(execution_id, reason="Execution stopped by user")
-            if cancelled:
+            outcome = await stream.cancel_execution(execution_id, reason="Execution stopped by user")
+
+            if outcome == "cancelled":
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:
                     node = session.queen_executor.node_registry.get("queen")
@@ -552,8 +575,18 @@ async def handle_stop(request: web.Request) -> web.Response:
                 return web.json_response(
                     {
                         "stopped": True,
+                        "cancelling": False,
                         "execution_id": execution_id,
                     }
+                )
+            if outcome == "cancelling":
+                return web.json_response(
+                    {
+                        "stopped": False,
+                        "cancelling": True,
+                        "execution_id": execution_id,
+                    },
+                    status=202,
                 )
 
     return web.json_response({"stopped": False, "error": "Execution not found"}, status=404)
@@ -597,11 +630,14 @@ async def handle_replay(request: web.Request) -> web.Response:
         "run_id": _load_checkpoint_run_id(cp_path),
     }
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_points[0].id,
-        input_data={},
-        session_state=replay_session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_points[0].id,
+            input_data={},
+            session_state=replay_session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     return web.json_response(
         {
@@ -712,15 +748,71 @@ async def fork_session_into_colony(
     from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
-    from framework.agent_loop.types import AgentContext, AgentSpec
+    from framework.agent_loop.types import AgentContext
     from framework.host.progress_db import ensure_progress_db, seed_tasks
     from framework.server.session_manager import _queen_session_dir
 
-    queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
-    queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
+    # Diagnostic capture: when the fork fails here we want to know which
+    # piece of queen state was missing (executor cleared vs. node missing
+    # vs. _last_ctx never stamped). Without this, callers only see
+    # "'NoneType' object has no attribute 'node_registry'" with no hint
+    # whether the queen loop exited, is mid-revive, or ran a different
+    # path that never ran AgentLoop._execute_impl.
+    queen_executor = getattr(session, "queen_executor", None)
+    queen_task = getattr(session, "queen_task", None)
+    phase_state_dbg = getattr(session, "phase_state", None)
+    logger.info(
+        "[fork_session_into_colony] session=%s colony=%s "
+        "queen_executor=%s queen_task=%s queen_task_done=%s "
+        "phase=%s queen_name=%s",
+        session.id,
+        colony_name,
+        queen_executor,
+        queen_task,
+        queen_task.done() if queen_task is not None else None,
+        getattr(phase_state_dbg, "phase", None),
+        getattr(session, "queen_name", None),
+    )
 
+    if queen_executor is None:
+        raise RuntimeError(
+            f"queen_executor is None for session {session.id!r} — the "
+            "queen loop isn't running right now. Wait for the queen to "
+            "come back (or send her a chat message to revive her) and "
+            "retry create_colony. The skill folder is already written, "
+            "so the retry is free."
+        )
+
+    node_registry = getattr(queen_executor, "node_registry", None)
+    if not isinstance(node_registry, dict) or "queen" not in node_registry:
+        raise RuntimeError(
+            f"queen node is missing from the executor's registry for "
+            f"session {session.id!r} (registry keys="
+            f"{list(node_registry.keys()) if isinstance(node_registry, dict) else type(node_registry).__name__}"
+            "). The queen loop is in an initialization or teardown "
+            "window; retry after a moment."
+        )
+
+    queen_loop: AgentLoop = node_registry["queen"]
+    queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
+    if queen_ctx is None:
+        logger.warning(
+            "[fork_session_into_colony] queen_loop has no _last_ctx yet "
+            "(session=%s) — falling back to empty tool/skill snapshot; "
+            "the forked worker will inherit no tools.",
+            session.id,
+        )
+
+    # "is_new" keys off worker.json, not bare dir existence: the queen's
+    # create_colony tool now pre-creates colony_dir (so it can
+    # materialize the colony-scoped skill folder BEFORE the fork), which
+    # would wrongly flag every fresh colony as "already-exists" if we
+    # used ``not colony_dir.exists()``. A colony is "new" until its
+    # worker config has actually been written.
     colony_dir = Path.home() / ".hive" / "colonies" / colony_name
-    is_new = not colony_dir.exists()
+    worker_name = "worker"
+    worker_config_path = colony_dir / f"{worker_name}.json"
+    is_new = not worker_config_path.exists()
     colony_dir.mkdir(parents=True, exist_ok=True)
     (colony_dir / "data").mkdir(exist_ok=True)
 
@@ -730,9 +822,7 @@ async def fork_session_into_colony(
     db_path = await asyncio.to_thread(ensure_progress_db, colony_dir)
     seeded_task_ids: list[str] = []
     if tasks:
-        seeded_task_ids = await asyncio.to_thread(
-            seed_tasks, db_path, tasks, source="queen_create"
-        )
+        seeded_task_ids = await asyncio.to_thread(seed_tasks, db_path, tasks, source="queen_create")
         logger.info(
             "progress_db: seeded %d task(s) into colony '%s'",
             len(seeded_task_ids),
@@ -754,23 +844,20 @@ async def fork_session_into_colony(
                 source="create_colony_auto",
             )
             logger.info(
-                "progress_db: auto-seeded 1 task into colony '%s' "
-                "(task_id=%s, from single-task create_colony form)",
+                "progress_db: auto-seeded 1 task into colony '%s' (task_id=%s, from single-task create_colony form)",
                 colony_name,
                 seeded_task_ids[0] if seeded_task_ids else "?",
             )
         except Exception as exc:
             logger.warning(
-                "progress_db: auto-seed failed for colony '%s' (continuing "
-                "without a pre-seeded row): %s",
+                "progress_db: auto-seed failed for colony '%s' (continuing without a pre-seeded row): %s",
                 colony_name,
                 exc,
             )
 
-    # Fixed worker name -- sessions are the unit of parallelism, not workers
-    worker_name = "worker"
-
-    worker_config_path = colony_dir / f"{worker_name}.json"
+    # Fixed worker name and config path are already computed above so
+    # ``is_new`` can be derived from worker.json rather than the colony
+    # directory (see comment on the ``is_new`` block).
 
     # ── 1. Gather queen state ─────────────────────────────────────
     # Queen-lifecycle + agent-management tools are registered ONLY against
