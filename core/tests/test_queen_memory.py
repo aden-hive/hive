@@ -600,7 +600,10 @@ async def test_subscribe_reflection_triggers_runs_housekeeping_for_both_scopes(
     await asyncio.sleep(0.05)
 
     assert len(sub_ids) == 2
-    assert unified_short.await_count == 3
+    # With 5 turns and _SHORT_REFLECT_TURN_INTERVAL=3 plus the 5-minute
+    # cooldown, reflections fire on count=1 (first run, no gate) and
+    # count=3 (turn interval hit). Counts 2, 4, 5 are all gated out.
+    assert unified_short.await_count == 2
     unified_long.assert_not_awaited()
 
 
