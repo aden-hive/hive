@@ -98,10 +98,6 @@ For any editor, you can always rely on `make lint` and `make format` from the co
 
 The repository includes a `.claude/settings.json` hook that automatically runs `ruff check --fix` and `ruff format` after every file edit made by Claude Code. No setup needed — it works out of the box.
 
-### Cursor
-
-The `.cursorrules` file at the repo root tells Cursor's AI the project's style rules (line length, import order, quote style, etc.) so generated code follows convention.
-
 ### Codex CLI
 
 Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config). This file is tracked in git. Run `codex` in the repo root to use the configured MCP tools. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
@@ -137,7 +133,6 @@ make check    # Verify locally before pushing
 | `.pre-commit-config.yaml` | Pre-commit hook definitions |
 | `.vscode/settings.json` | VS Code ruff integration |
 | `.vscode/extensions.json` | Recommended VS Code extensions |
-| `.cursorrules` | AI assistant context |
 | `.claude/settings.json` | Claude Code post-edit hooks |
 
 The single source of truth for lint rules is the `[tool.ruff]` section in each package's `pyproject.toml`. All other configs (VS Code, pre-commit, Makefile, CI) reference these.
