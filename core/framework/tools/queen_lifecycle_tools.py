@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -798,7 +799,20 @@ def register_queen_lifecycle_tools(
         # Hard ceiling on a single fan-out call. A runaway queen requesting
         # thousands of parallel workers would starve memory and drown the
         # event loop; reject early with a clear error instead.
-        _RUN_PARALLEL_HARD_CAP = 64
+        # Laptop-safe default (8); override via HIVE_RUN_PARALLEL_HARD_CAP.
+        _RUN_PARALLEL_HARD_CAP = 8
+        _cap_env = os.environ.get("HIVE_RUN_PARALLEL_HARD_CAP")
+        if _cap_env:
+            try:
+                _parsed = int(_cap_env)
+                if _parsed > 0:
+                    _RUN_PARALLEL_HARD_CAP = _parsed
+            except ValueError:
+                logger.warning(
+                    "Invalid HIVE_RUN_PARALLEL_HARD_CAP=%r; using default %d",
+                    _cap_env,
+                    _RUN_PARALLEL_HARD_CAP,
+                )
         if len(tasks) > _RUN_PARALLEL_HARD_CAP:
             return json.dumps(
                 {

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import OrderedDict
 from collections.abc import Callable
@@ -73,9 +74,28 @@ def _format_spawn_task_message(task: str, input_data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read a positive int from env; fall back to default on missing/invalid."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    return value if value > 0 else default
+
+
+# Laptop-safe default. Each worker is a full AgentLoop (Claude SDK session +
+# tool catalog), so ~4 concurrent is the realistic ceiling on a dev machine.
+# Override via HIVE_MAX_CONCURRENT_WORKERS for servers.
+_DEFAULT_MAX_CONCURRENT_WORKERS = _env_int("HIVE_MAX_CONCURRENT_WORKERS", 4)
+
+
 @dataclass
 class ColonyConfig:
-    max_concurrent_workers: int = 100
+    max_concurrent_workers: int = _DEFAULT_MAX_CONCURRENT_WORKERS
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
