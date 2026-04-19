@@ -34,9 +34,15 @@ Follow these rules for reliable, efficient browser interaction.
 
 Use snapshot first for structure and ordinary controls; switch to
 screenshot when snapshot can't find or verify the target. Interaction
-tools (click/type/fill/scroll) return a snapshot automatically, so
-don't call `browser_snapshot` separately after an interaction unless
-you need a fresh view.
+tools (`browser_click`, `browser_type`, `browser_type_focused`,
+`browser_fill`, `browser_scroll`) wait 0.5 s for the page to settle
+after a successful action, then attach a fresh snapshot under the
+`snapshot` key of their result — so don't call `browser_snapshot`
+separately after an interaction unless you need a newer view. Tune
+with `auto_snapshot_mode`: `"default"` (full tree) is the default;
+`"simple"` trims unnamed structural nodes; `"interactive"` returns
+only controls (tightest token footprint); `"off"` skips the capture
+entirely — use when batching several interactions.
 
 Only fall back to `browser_get_text` for extracting small elements by
 CSS selector.
