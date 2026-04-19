@@ -33,9 +33,9 @@ All tools are prefixed with `browser_`:
 
 **`browser_snapshot`** — compact accessibility tree of interactive elements. Fast, cheap, good for static or form-heavy pages where the DOM matches what's visually rendered (documentation, simple dashboards, search results, settings pages).
 
-**`browser_screenshot`** — visual capture + metadata (`cssWidth`, `devicePixelRatio`, scale fields). **Use this on any complex SPA** — LinkedIn, Twitter/X, Reddit, Gmail, Notion, Slack, Discord, any site using shadow DOM, virtual scrolling, React reconciliation, or dynamic layout. On these pages, snapshot refs go stale in seconds, shadow contents aren't in the AX tree, and virtual-scrolled elements disappear from the tree entirely. Screenshot is the **only** reliable way to orient yourself.
+**`browser_screenshot`** — visual capture + metadata (`cssWidth`, `devicePixelRatio`, scale fields). Use this when `browser_snapshot` does not show the thing you need, when refs look stale, or when visual position/layout matters. This often happens on complex SPAs — LinkedIn, Twitter/X, Reddit, Gmail, Notion, Slack, Discord — and on sites using shadow DOM, virtual scrolling, React reconciliation, or dynamic layout.
 
-Neither tool is "preferred" universally — they're for different jobs. Default to snapshot on text-heavy static pages, screenshot on SPAs and anything shadow-DOM-heavy. Activate the `browser-automation` skill for the full decision tree.
+Neither tool is "preferred" universally — they're for different jobs. Start with snapshot for page structure and ordinary controls; use screenshot as the fallback when snapshot can't find or verify the visible target. Activate the `browser-automation` skill for the full decision tree.
 
 ## Coordinate rule
 
@@ -44,9 +44,9 @@ Every browser tool that takes or returns coordinates operates in **fractions of 
 ## System prompt tips for browser nodes
 
 ```
-1. On LinkedIn / X / Reddit / Gmail / any SPA — use browser_screenshot to orient,
-   not browser_snapshot. Shadow DOM and virtual scrolling make snapshots unreliable.
-2. For static pages (docs, forms, search results), browser_snapshot is fine.
+1. Start with browser_snapshot or the snapshot returned by the latest interaction.
+2. If the target is missing, ambiguous, stale, or visibly present but absent from the tree,
+   use browser_screenshot to orient and then click by fractional coordinates.
 3. Before typing into a rich-text editor (X compose, LinkedIn DM, Gmail, Reddit),
    click the input area first with browser_click_coordinate so React / Draft.js /
    Lexical register a native focus event, then use browser_type_focused(text=...)
@@ -66,7 +66,7 @@ Every browser tool that takes or returns coordinates operates in **fractions of 
   "tools": {"policy": "all"},
   "input_keys": ["search_url"],
   "output_keys": ["profiles"],
-  "system_prompt": "Navigate to the search URL via browser_navigate(wait_until='load', timeout_ms=20000). Wait 3s for SPA hydration. On LinkedIn, use browser_screenshot to see the page — browser_snapshot misses shadow-DOM and virtual-scrolled content. Paginate through results by scrolling and screenshotting; extract each profile card by reading its visible layout..."
+  "system_prompt": "Navigate to the search URL via browser_navigate(wait_until='load', timeout_ms=20000). Wait 3s for SPA hydration. Use the returned snapshot to look for result cards first. If the cards are missing, stale, or visually present but absent from the tree, use browser_screenshot to orient; paginate through results by scrolling and use screenshots only when the snapshot cannot find or verify the visible cards..."
 }
 ```
 

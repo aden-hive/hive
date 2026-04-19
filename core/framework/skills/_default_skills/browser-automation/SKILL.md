@@ -31,7 +31,7 @@ browser_shadow_query(...)  → rect     → same
 
 ## Screenshot + coordinates is shadow-agnostic — prefer it on shadow-heavy sites
 
-On sites that use Shadow DOM heavily (Reddit's faceplate Web Components, LinkedIn's `#interop-outlet` messaging overlay, some X custom elements), **coordinate-based operations reach elements that selector-based tools can't see.**
+Start with `browser_snapshot` when you need to inspect the page structure or find ordinary controls. If the snapshot does not show the thing you need, shows stale or misleading refs, or cannot prove where a visible target is, take `browser_screenshot` and use the screenshot + coordinate path. This is especially useful on sites that use Shadow DOM heavily
 
 Why:
 
@@ -114,7 +114,7 @@ Even after `wait_until="load"`, React/Vue SPAs often render their real chrome in
 
 - **Prefer `browser_snapshot` over `browser_get_text("body")`** — returns a compact ~1–5 KB accessibility tree vs 100+ KB of raw HTML.
 - Interaction tools (`browser_click`, `browser_type`, `browser_type_focused`, `browser_fill`, `browser_scroll`, etc.) return a page snapshot automatically in their result. Use it to decide your next action — do NOT call `browser_snapshot` separately after every action. Only call `browser_snapshot` when you need a fresh view without performing an action, or after setting `auto_snapshot=false`.
-- Complex pages (LinkedIn, Twitter/X, SPAs with virtual scrolling) have DOMs that don't match what's visually rendered — snapshot refs may be stale, missing, or misaligned with visible layout. On these pages, `browser_screenshot` is the only reliable way to orient yourself.
+- Complex pages (LinkedIn, Twitter/X, SPAs with virtual scrolling) can have DOMs that don't match what's visually rendered — snapshot refs may be stale, missing, or misaligned with visible layout. Try the available snapshot first; when the target is not present in that snapshot or visual position matters, switch to `browser_screenshot` to orient yourself.
 - Only fall back to `browser_get_text` for extracting specific small elements by CSS selector.
 
 ## Typing and keyboard input

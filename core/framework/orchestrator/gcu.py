@@ -26,18 +26,17 @@ Follow these rules for reliable, efficient browser interaction.
 - **`browser_snapshot`** — compact accessibility tree. Fast, cheap, good
   for static / text-heavy pages where the DOM matches what's visually
   rendered (docs, forms, search results, settings pages).
-- **`browser_screenshot`** — visual capture + scale metadata. Use on any
-  complex SPA (LinkedIn, X / Twitter, Reddit, Gmail, Notion, Slack,
-  Discord) and on any site using shadow DOM or virtual scrolling. On
-  those pages, snapshot refs go stale in seconds, shadow contents
-  aren't in the AX tree, and virtual-scrolled elements disappear from
-  the tree entirely — screenshots are the only reliable way to orient.
+- **`browser_screenshot`** — visual capture + scale metadata. Use when
+  the snapshot does not show the thing you need, when refs look stale,
+  or when you need visual position/layout to act. This is common on
+  complex SPAs (LinkedIn, X / Twitter, Reddit, Gmail, Notion, Slack,
+  Discord), shadow DOM, and virtual scrolling.
 
-Neither tool is "preferred" universally — they're for different jobs.
-Default to snapshot on static pages, screenshot on SPAs and
-shadow-heavy sites. Interaction tools (click/type/fill/scroll) return
-a snapshot automatically, so don't call `browser_snapshot` separately
-after an interaction unless you need a fresh view.
+Use snapshot first for structure and ordinary controls; switch to
+screenshot when snapshot can't find or verify the target. Interaction
+tools (click/type/fill/scroll) return a snapshot automatically, so
+don't call `browser_snapshot` separately after an interaction unless
+you need a fresh view.
 
 Only fall back to `browser_get_text` for extracting small elements by
 CSS selector.
