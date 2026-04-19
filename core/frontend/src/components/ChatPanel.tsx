@@ -27,7 +27,6 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
-import { useColony } from "@/context/ColonyContext";
 import { useQueenProfile } from "@/context/QueenProfileContext";
 import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 import ParallelSubagentBubble, {
@@ -113,6 +112,12 @@ interface ChatPanelProps {
   contextUsage?: Record<string, ContextUsageEntry>;
   /** One-shot composer prefill. Applied to the textarea whenever the value changes. */
   initialDraft?: string | null;
+  /** Queen profile this panel is attached to. When provided, clicking a
+   *  queen avatar/name opens that queen's profile panel directly —
+   *  no fragile name-based lookup against ``queenProfiles``. Nullable
+   *  to tolerate pages that render the panel before the queen is
+   *  resolved (e.g. new-chat bootstrap). */
+  queenProfileId?: string | null;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -312,6 +317,7 @@ function InlineAskUserBubble({
   onSend,
   queenPhase,
   showQueenPhaseBadge = true,
+  queenProfileId,
 }: {
   msg: ChatMessage;
   payload: AskUserInlinePayload;
@@ -323,6 +329,7 @@ function InlineAskUserBubble({
   ) => void;
   queenPhase?: "independent" | "working" | "reviewing";
   showQueenPhaseBadge?: boolean;
+  queenProfileId?: string | null;
 }) {
   const [state, setState] = useState<"pending" | "submitted" | "dismissed">(
     "pending",
@@ -340,6 +347,7 @@ function InlineAskUserBubble({
         msg={msg}
         queenPhase={queenPhase}
         showQueenPhaseBadge={showQueenPhaseBadge}
+        queenProfileId={queenProfileId}
       />
     );
   }
@@ -348,14 +356,11 @@ function InlineAskUserBubble({
   const color = getColor(msg.agent, msg.role);
   const thread = msg.thread || activeThread;
 
-  const { queenProfiles } = useColony();
   const { openQueenProfile } = useQueenProfile();
   const { openColonyWorkers } = useColonyWorkers();
-  const queenProfileId = isQueen
-    ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
-    : null;
-  const handleQueenClick = queenProfileId
-    ? () => openQueenProfile(queenProfileId)
+  const resolvedQueenProfileId = isQueen ? queenProfileId ?? null : null;
+  const handleQueenClick = resolvedQueenProfileId
+    ? () => openQueenProfile(resolvedQueenProfileId)
     : undefined;
   const workerId =
     !isQueen && msg.role === "worker"
@@ -461,22 +466,26 @@ const MessageBubble = memo(
     msg,
     queenPhase,
     showQueenPhaseBadge = true,
+    queenProfileId,
   }: {
     msg: ChatMessage;
     queenPhase?: "independent" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
+    queenProfileId?: string | null;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
     const color = getColor(msg.agent, msg.role);
 
-    // Resolve queen profile ID so clicking avatar/name opens the profile panel
-    const { queenProfiles } = useColony();
+    // Clicking a queen avatar/name opens the queen profile panel. The
+    // owning page passes its queenProfileId down — we don't fall back
+    // to a name-match against ``queenProfiles`` because display names
+    // aren't unique or stable (colony chat uses static QUEEN_REGISTRY
+    // labels, queen-dm uses user-editable profile names; matching by
+    // name silently breaks when the profile is renamed or not listed).
     const { openQueenProfile } = useQueenProfile();
     const { openColonyWorkers } = useColonyWorkers();
-    const queenProfileId = isQueen
-      ? queenProfiles.find((q) => q.name === msg.agent)?.id ?? null
-      : null;
+    const resolvedQueenProfileId = isQueen ? queenProfileId ?? null : null;
     // Worker messages: clicking the avatar opens the Colony Workers
     // sidebar, pre-selecting this worker when its uuid is embedded in
     // the streamId (parallel fan-out case).
@@ -579,8 +588,8 @@ const MessageBubble = memo(
       );
     }
 
-    const handleQueenClick = queenProfileId
-      ? () => openQueenProfile(queenProfileId)
+    const handleQueenClick = resolvedQueenProfileId
+      ? () => openQueenProfile(resolvedQueenProfileId)
       : undefined;
     const handleWorkerClick =
       msg.role === "worker"
@@ -684,6 +693,7 @@ export default function ChatPanel({
   contextUsage,
   supportsImages = true,
   initialDraft,
+  queenProfileId,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -1109,6 +1119,7 @@ export default function ChatPanel({
                   onSend={onSend}
                   queenPhase={queenPhase}
                   showQueenPhaseBadge={showQueenPhaseBadge}
+                  queenProfileId={queenProfileId}
                 />
               </div>
             );
@@ -1119,6 +1130,7 @@ export default function ChatPanel({
                 msg={msg}
                 queenPhase={queenPhase}
                 showQueenPhaseBadge={showQueenPhaseBadge}
+                queenProfileId={queenProfileId}
               />
             </div>
           );

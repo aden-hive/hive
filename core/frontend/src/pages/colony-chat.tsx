@@ -1398,6 +1398,7 @@ export default function ColonyChat() {
             onQuestionDismiss={handleQuestionDismiss}
             contextUsage={agentState.contextUsage}
             supportsImages={agentState.queenSupportsImages}
+            queenProfileId={colony?.queenProfileId ?? null}
           />
         </div>
 
