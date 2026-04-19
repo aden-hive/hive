@@ -10,6 +10,7 @@ from aiohttp import web
 
 from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.credentials.validation import validate_agent_credentials
+from framework.host.execution_manager import ExecutionAlreadyRunningError
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
@@ -101,6 +102,17 @@ def _resolve_queen_only_tools() -> frozenset[str]:
     return frozenset(derived | _QUEEN_LIFECYCLE_EXTRAS)
 
 
+def _execution_already_running_response(exc: ExecutionAlreadyRunningError) -> web.Response:
+    return web.json_response(
+        {
+            "error": str(exc),
+            "stream_id": exc.stream_id,
+            "active_execution_ids": exc.active_ids,
+        },
+        status=409,
+    )
+
+
 async def handle_trigger(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/trigger — start an execution.
 
@@ -142,11 +154,14 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if "resume_session_id" not in session_state:
         session_state["resume_session_id"] = session.id
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_point_id,
-        input_data,
-        session_state=session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_point_id,
+            input_data,
+            session_state=session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     # Cancel queen's in-progress LLM turn so it picks up the phase change cleanly
     if session.queen_executor:
@@ -435,11 +450,14 @@ async def handle_resume(request: web.Request) -> web.Response:
 
     input_data = state.get("input_data", {})
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_points[0].id,
-        input_data=input_data,
-        session_state=resume_session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_points[0].id,
+            input_data=input_data,
+            session_state=resume_session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     return web.json_response(
         {
@@ -466,6 +484,7 @@ async def handle_pause(request: web.Request) -> web.Response:
 
     runtime = session.colony_runtime
     cancelled = []
+    cancelling = []
 
     for colony_id in runtime.list_graphs():
         reg = runtime.get_graph_registration(colony_id)
@@ -482,24 +501,33 @@ async def handle_pause(request: web.Request) -> web.Response:
 
             for exec_id in list(stream.active_execution_ids):
                 try:
-                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
-                    if ok:
+                    outcome = await stream.cancel_execution(exec_id, reason="Execution paused by user")
+                    if outcome == "cancelled":
                         cancelled.append(exec_id)
+                    elif outcome == "cancelling":
+                        cancelling.append(exec_id)
                 except Exception:
                     pass
 
     # Pause timers so the next tick doesn't restart execution
     runtime.pause_timers()
 
+<<<<<<< HEAD
     # Switch to reviewing — workers stopped, queen now helps the user
     # interpret whatever they produced and decide next steps.
     if session.phase_state is not None:
         await session.phase_state.switch_to_reviewing(source="frontend")
+=======
+    # Only switch to staging once every execution has actually stopped.
+    if session.phase_state is not None and not cancelling:
+        await session.phase_state.switch_to_staging(source="frontend")
+>>>>>>> origin/main
 
     return web.json_response(
         {
-            "stopped": bool(cancelled),
+            "stopped": bool(cancelled) and not cancelling,
             "cancelled": cancelled,
+            "cancelling": cancelling,
             "timers_paused": True,
         }
     )
@@ -536,8 +564,9 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(execution_id, reason="Execution stopped by user")
-            if cancelled:
+            outcome = await stream.cancel_execution(execution_id, reason="Execution stopped by user")
+
+            if outcome == "cancelled":
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:
                     node = session.queen_executor.node_registry.get("queen")
@@ -552,8 +581,18 @@ async def handle_stop(request: web.Request) -> web.Response:
                 return web.json_response(
                     {
                         "stopped": True,
+                        "cancelling": False,
                         "execution_id": execution_id,
                     }
+                )
+            if outcome == "cancelling":
+                return web.json_response(
+                    {
+                        "stopped": False,
+                        "cancelling": True,
+                        "execution_id": execution_id,
+                    },
+                    status=202,
                 )
 
     return web.json_response({"stopped": False, "error": "Execution not found"}, status=404)
@@ -597,11 +636,14 @@ async def handle_replay(request: web.Request) -> web.Response:
         "run_id": _load_checkpoint_run_id(cp_path),
     }
 
-    execution_id = await session.colony_runtime.trigger(
-        entry_points[0].id,
-        input_data={},
-        session_state=replay_session_state,
-    )
+    try:
+        execution_id = await session.colony_runtime.trigger(
+            entry_points[0].id,
+            input_data={},
+            session_state=replay_session_state,
+        )
+    except ExecutionAlreadyRunningError as exc:
+        return _execution_already_running_response(exc)
 
     return web.json_response(
         {

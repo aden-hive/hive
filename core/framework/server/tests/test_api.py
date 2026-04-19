@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from framework.host.execution_manager import ExecutionAlreadyRunningError
 from framework.host.triggers import TriggerDefinition
 from framework.llm.model_catalog import get_models_catalogue
 from framework.server import (
@@ -89,8 +90,8 @@ class MockStream:
     _active_executors: dict = field(default_factory=dict)
     active_execution_ids: set = field(default_factory=set)
 
-    async def cancel_execution(self, execution_id: str, reason: str | None = None) -> bool:
-        return execution_id in self._execution_tasks
+    async def cancel_execution(self, execution_id: str, reason: str | None = None) -> str:
+        return "cancelled" if execution_id in self._execution_tasks else "not_found"
 
 
 @dataclass
@@ -781,6 +782,21 @@ class TestExecution:
             assert data["execution_id"] == "exec_test_123"
 
     @pytest.mark.asyncio
+    async def test_trigger_returns_409_when_execution_still_running(self):
+        session = _make_session()
+        session.colony_runtime.trigger = AsyncMock(side_effect=ExecutionAlreadyRunningError("default", ["session-1"]))
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/trigger",
+                json={"entry_point_id": "default", "input_data": {"msg": "hi"}},
+            )
+            assert resp.status == 409
+            data = await resp.json()
+            assert data["stream_id"] == "default"
+            assert data["active_execution_ids"] == ["session-1"]
+
+    @pytest.mark.asyncio
     async def test_trigger_not_found(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
@@ -918,6 +934,7 @@ class TestExecution:
             data = await resp.json()
             assert data["stopped"] is False
             assert data["cancelled"] == []
+            assert data["cancelling"] == []
             assert data["timers_paused"] is True
 
     @pytest.mark.asyncio
@@ -1027,6 +1044,22 @@ class TestStop:
             assert resp.status == 200
             data = await resp.json()
             assert data["stopped"] is True
+            assert data["cancelling"] is False
+
+    @pytest.mark.asyncio
+    async def test_stop_returns_accepted_while_execution_is_still_cancelling(self):
+        session = _make_session()
+        session.colony_runtime._mock_streams["default"].cancel_execution = AsyncMock(return_value="cancelling")
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/stop",
+                json={"execution_id": "exec_abc"},
+            )
+            assert resp.status == 202
+            data = await resp.json()
+            assert data["stopped"] is False
+            assert data["cancelling"] is True
 
     @pytest.mark.asyncio
     async def test_stop_not_found(self):

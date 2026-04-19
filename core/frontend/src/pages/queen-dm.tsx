@@ -854,7 +854,11 @@ export default function QueenDM() {
           }}
           supportsImages={true}
           initialDraft={initialDraft}
+<<<<<<< HEAD
           queenProfileId={queenId ?? null}
+=======
+          queenId={queenId}
+>>>>>>> origin/main
         />
       </div>
 
