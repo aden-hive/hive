@@ -2118,9 +2118,7 @@ class TestToolConcurrencyPartition:
 
 class TestReplayDetector:
     @pytest.mark.asyncio
-    async def test_replay_emits_event_and_prefixes_result(
-        self, tmp_path, runtime, node_spec, buffer
-    ):
+    async def test_replay_emits_event_and_prefixes_result(self, tmp_path, runtime, node_spec, buffer):
         """Re-emitting a tool call whose prior result succeeded fires the
         TOOL_CALL_REPLAY_DETECTED event and prepends a steer onto the stored
         result, but still executes the call (warn + execute)."""
@@ -2179,23 +2177,17 @@ class TestReplayDetector:
         # The stored tool result for the replay carries the steer prefix,
         # and the real execution output is preserved.
         parts = await store.read_parts()
-        tool_msgs = [
-            p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_2"
-        ]
+        tool_msgs = [p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_2"]
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["content"].startswith("[Replay detected: browser_setup")
         assert "fresh result for call_2" in tool_msgs[0]["content"]
 
         # The first call's result is untouched.
-        first = [
-            p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_1"
-        ]
+        first = [p for p in parts if p.get("role") == "tool" and p.get("tool_use_id") == "call_1"]
         assert first[0]["content"] == "fresh result for call_1"
 
     @pytest.mark.asyncio
-    async def test_replay_with_error_prior_does_not_fire(
-        self, tmp_path, runtime, node_spec, buffer
-    ):
+    async def test_replay_with_error_prior_does_not_fire(self, tmp_path, runtime, node_spec, buffer):
         """A prior call that errored does not count as a successful completion,
         so re-emitting it is legitimate (not a replay)."""
         node_spec.output_keys = []

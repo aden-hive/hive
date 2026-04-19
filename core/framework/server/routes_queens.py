@@ -249,11 +249,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     # queen_name == queen_id, but it has a worker loaded (colony_id /
     # worker_path set) and is the colony's chat, not the queen's DM.
     for session in manager.list_sessions():
-        if (
-            session.queen_name == queen_id
-            and session.colony_id is None
-            and session.worker_path is None
-        ):
+        if session.queen_name == queen_id and session.colony_id is None and session.worker_path is None:
             return web.json_response(
                 {
                     "session_id": session.id,

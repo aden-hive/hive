@@ -186,9 +186,7 @@ async def _probe_browser_bridge() -> dict:
     status_port = bridge_port + 1
 
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection("127.0.0.1", status_port), timeout=0.5
-        )
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", status_port), timeout=0.5)
         writer.write(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         await writer.drain()
         raw = await asyncio.wait_for(reader.read(512), timeout=0.5)

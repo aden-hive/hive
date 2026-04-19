@@ -167,13 +167,10 @@ def ensure_progress_db(colony_dir: Path) -> Path:
             con.executescript(_SCHEMA_V1)
             con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             con.execute(
-                "INSERT OR REPLACE INTO colony_meta(key, value, updated_at) "
-                "VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO colony_meta(key, value, updated_at) VALUES (?, ?, ?)",
                 ("schema_version", str(SCHEMA_VERSION), _now_iso()),
             )
-            logger.info(
-                "progress_db: initialized schema v%d at %s", SCHEMA_VERSION, db_path
-            )
+            logger.info("progress_db: initialized schema v%d at %s", SCHEMA_VERSION, db_path)
 
         reclaimed = _reclaim_stale_inner(con, stale_after_minutes=15)
         if reclaimed:
@@ -246,19 +243,14 @@ def _patch_worker_configs(colony_dir: Path, db_path: Path) -> int:
         data["input_data"] = input_data
 
         try:
-            worker_cfg.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            worker_cfg.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             patched += 1
         except OSError as e:
-            logger.warning(
-                "progress_db: failed to patch worker config %s: %s", worker_cfg, e
-            )
+            logger.warning("progress_db: failed to patch worker config %s: %s", worker_cfg, e)
 
     if patched:
         logger.info(
-            "progress_db: patched %d worker config(s) in colony '%s' with "
-            "db_path + colony_data_dir",
+            "progress_db: patched %d worker config(s) in colony '%s' with db_path + colony_data_dir",
             patched,
             colony_id,
         )
@@ -283,9 +275,7 @@ def ensure_all_colony_dbs(colonies_root: Path | None = None) -> list[Path]:
         try:
             initialized.append(ensure_progress_db(entry))
         except Exception as e:
-            logger.warning(
-                "progress_db: failed to ensure DB for colony '%s': %s", entry.name, e
-            )
+            logger.warning("progress_db: failed to ensure DB for colony '%s': %s", entry.name, e)
     return initialized
 
 
@@ -352,9 +342,7 @@ def seed_tasks(
 
             for step_seq, step in enumerate(task.get("steps") or [], start=1):
                 if not step.get("title"):
-                    raise ValueError(
-                        f"task[{idx}].steps[{step_seq - 1}] missing required 'title'"
-                    )
+                    raise ValueError(f"task[{idx}].steps[{step_seq - 1}] missing required 'title'")
                 con.execute(
                     """
                     INSERT INTO steps (id, task_id, seq, title, detail, status)
@@ -373,9 +361,7 @@ def seed_tasks(
                 key = sop.get("key")
                 description = sop.get("description")
                 if not key or not description:
-                    raise ValueError(
-                        f"task[{idx}].sop_items missing 'key' or 'description'"
-                    )
+                    raise ValueError(f"task[{idx}].sop_items missing 'key' or 'description'")
                 con.execute(
                     """
                     INSERT INTO sop_checklist
@@ -433,9 +419,7 @@ def enqueue_task(
     return ids[0]
 
 
-def _reclaim_stale_inner(
-    con: sqlite3.Connection, *, stale_after_minutes: int
-) -> int:
+def _reclaim_stale_inner(con: sqlite3.Connection, *, stale_after_minutes: int) -> int:
     """Reclaim stale claims. Runs inside an existing open connection.
 
     Two-step:

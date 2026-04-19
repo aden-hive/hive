@@ -496,6 +496,7 @@ async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> No
         await server.start()
         server.is_running = True
 
+
 def _update_meta_json(session_manager, manager_session_id, updates: dict) -> None:
     """Merge updates into the queen session's meta.json."""
     if session_manager is None or not manager_session_id:
@@ -615,8 +616,7 @@ def register_queen_lifecycle_tools(
                     )
             except Exception as exc:
                 logger.warning(
-                    "%s: compute_unavailable_tools raised, proceeding without "
-                    "credential-based tool filtering: %s",
+                    "%s: compute_unavailable_tools raised, proceeding without credential-based tool filtering: %s",
                     tool_label,
                     exc,
                 )
@@ -788,8 +788,8 @@ def register_queen_lifecycle_tools(
     # (and its SUBAGENT_REPORT still fires — explicit reports set right
     # before the stop are preserved).
 
-    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0       # soft timeout (10 min)
-    _RUN_PARALLEL_HARD_TIMEOUT_CAP = 3600.0     # absolute safety-net cap (1 hour)
+    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # soft timeout (10 min)
+    _RUN_PARALLEL_HARD_TIMEOUT_CAP = 3600.0  # absolute safety-net cap (1 hour)
 
     def _compute_hard_timeout(soft: float) -> float:
         """Default hard cutoff: max(4× soft, soft + 600), capped at 3600s."""
@@ -1026,8 +1026,7 @@ def register_queen_lifecycle_tools(
         if _colony_db_path:
             _pinned = sum(1 for tid in _enqueued_task_ids if tid)
             logger.info(
-                "run_parallel_workers: attached progress_db context to "
-                "%d spawn(s) (colony_id=%s, %d pinned task_ids)",
+                "run_parallel_workers: attached progress_db context to %d spawn(s) (colony_id=%s, %d pinned task_ids)",
                 len(normalised),
                 _colony_id,
                 _pinned,
@@ -1047,9 +1046,7 @@ def register_queen_lifecycle_tools(
         if phase_state is not None:
             try:
                 await phase_state.switch_to_working()
-                _update_meta_json(
-                    session_manager, manager_session_id, {"phase": "working"}
-                )
+                _update_meta_json(session_manager, manager_session_id, {"phase": "working"})
             except Exception as exc:
                 logger.warning(
                     "run_parallel_workers: phase transition to 'working' failed (non-fatal): %s",
@@ -1060,9 +1057,7 @@ def register_queen_lifecycle_tools(
         # it injects a "wrap up" message to every still-active worker
         # without an explicit report; at hard, it force-stops the stragglers.
         soft_timeout = timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT
-        hard_timeout_effective = (
-            hard_timeout if hard_timeout is not None else _compute_hard_timeout(soft_timeout)
-        )
+        hard_timeout_effective = hard_timeout if hard_timeout is not None else _compute_hard_timeout(soft_timeout)
         if hard_timeout_effective <= soft_timeout:
             hard_timeout_effective = soft_timeout + 60.0  # enforce at least a 60s grace
         try:
@@ -1263,10 +1258,14 @@ def register_queen_lifecycle_tools(
 
         body = skill_body if isinstance(skill_body, str) else ""
         if not body.strip():
-            return None, (
-                "skill_body is required — the operational procedure the "
-                "colony worker needs to run this job unattended"
-            ), False
+            return (
+                None,
+                (
+                    "skill_body is required — the operational procedure the "
+                    "colony worker needs to run this job unattended"
+                ),
+                False,
+            )
 
         # Optional supporting files (scripts/, references/, assets/…).
         # Each entry: {"path": "<relative>", "content": "<text>"}.
@@ -1289,18 +1288,10 @@ def register_queen_lifecycle_tools(
                 if rel_stripped.startswith("./"):
                     rel_stripped = rel_stripped[2:]
                 rel_path = Path(rel_stripped)
-                if (
-                    rel_stripped.startswith("/")
-                    or rel_path.is_absolute()
-                    or ".." in rel_path.parts
-                ):
-                    return None, (
-                        f"skill_files path '{rel_raw}' must be relative and inside the skill folder"
-                    ), False
+                if rel_stripped.startswith("/") or rel_path.is_absolute() or ".." in rel_path.parts:
+                    return None, (f"skill_files path '{rel_raw}' must be relative and inside the skill folder"), False
                 if rel_path.as_posix() == "SKILL.md":
-                    return None, (
-                        "skill_files must not contain SKILL.md — pass skill_body instead"
-                    ), False
+                    return None, ("skill_files must not contain SKILL.md — pass skill_body instead"), False
                 normalized_files.append((rel_path, content))
 
         target_root = colony_dir / ".hive" / "skills"
@@ -1322,9 +1313,7 @@ def register_queen_lifecycle_tools(
             target.mkdir(parents=True, exist_ok=False)
 
             body_norm = body.rstrip() + "\n"
-            skill_md_text = (
-                f"---\nname: {name}\ndescription: {desc}\n---\n\n{body_norm}"
-            )
+            skill_md_text = f"---\nname: {name}\ndescription: {desc}\n---\n\n{body_norm}"
             (target / "SKILL.md").write_text(skill_md_text, encoding="utf-8")
 
             for rel_path, file_content in normalized_files:
@@ -1723,9 +1712,7 @@ def register_queen_lifecycle_tools(
         """
         cn = (colony_name or "").strip()
         if not _COLONY_NAME_RE.match(cn):
-            return json.dumps(
-                {"error": "colony_name must be lowercase alphanumeric with underscores"}
-            )
+            return json.dumps({"error": "colony_name must be lowercase alphanumeric with underscores"})
 
         from pathlib import Path as _Path
 
@@ -1826,10 +1813,7 @@ def register_queen_lifecycle_tools(
                     },
                 },
                 "payload": {
-                    "description": (
-                        "Optional task-specific parameters. Stored as "
-                        "JSON in the 'payload' column."
-                    ),
+                    "description": ("Optional task-specific parameters. Stored as JSON in the 'payload' column."),
                 },
                 "priority": {
                     "type": "integer",

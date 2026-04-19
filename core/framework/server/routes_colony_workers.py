@@ -105,9 +105,7 @@ async def handle_list_workers(request: web.Request) -> web.Response:
             storage_path = Path(session_dir)
 
     if storage_path is not None:
-        workers.extend(
-            await asyncio.to_thread(_walk_historical_workers, storage_path, known_ids)
-        )
+        workers.extend(await asyncio.to_thread(_walk_historical_workers, storage_path, known_ids))
 
     return web.json_response({"workers": workers})
 
@@ -192,6 +190,7 @@ def _extract_historical_task(worker_dir: Path) -> str:
 
 
 # ── Skills & tools ─────────────────────────────────────────────────
+
 
 def _parsed_skill_to_dict(skill) -> dict:
     """Serialize a ParsedSkill for the frontend."""
@@ -284,6 +283,7 @@ async def handle_list_colony_tools(request: web.Request) -> web.Response:
 
 # ── Progress DB (tasks/steps) ──────────────────────────────────────
 
+
 def _resolve_progress_db_by_name(colony_name: str) -> Path | None:
     """Resolve a colony's progress.db path by directory name.
 
@@ -317,12 +317,8 @@ def _read_progress_snapshot(db_path: Path, worker_id: str | None) -> dict:
                 (worker_id,),
             ).fetchall()
         else:
-            task_rows = con.execute(
-                "SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 500"
-            ).fetchall()
-            step_rows = con.execute(
-                "SELECT * FROM steps ORDER BY task_id, seq LIMIT 2000"
-            ).fetchall()
+            task_rows = con.execute("SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 500").fetchall()
+            step_rows = con.execute("SELECT * FROM steps ORDER BY task_id, seq LIMIT 2000").fetchall()
         return {
             "tasks": [dict(r) for r in task_rows],
             "steps": [dict(r) for r in step_rows],
@@ -455,9 +451,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
         # required.
         while True:
             await asyncio.sleep(_PROGRESS_POLL_INTERVAL)
-            tasks, steps, new_since = await asyncio.to_thread(
-                _read_progress_upserts, db_path, worker_id, since
-            )
+            tasks, steps, new_since = await asyncio.to_thread(_read_progress_upserts, db_path, worker_id, since)
             if tasks or steps:
                 await _send("upsert", {"tasks": tasks, "steps": steps})
                 since = new_since
@@ -493,8 +487,7 @@ def _list_user_tables(con: sqlite3.Connection) -> list[str]:
     return [
         r["name"]
         for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
     ]
 
@@ -657,9 +650,7 @@ async def handle_table_rows(request: web.Request) -> web.Response:
     order_by = request.query.get("order_by") or None
     order_dir = request.query.get("order_dir", "asc")
 
-    result = await asyncio.to_thread(
-        _read_table_rows, db_path, table, limit, offset, order_by, order_dir
-    )
+    result = await asyncio.to_thread(_read_table_rows, db_path, table, limit, offset, order_by, order_dir)
     if "error" in result:
         return web.json_response(result, status=400)
     return web.json_response(result)
@@ -695,12 +686,8 @@ def register_routes(app: web.Application) -> None:
     """Register colony worker routes."""
     # Session-scoped — these read live runtime state from a session.
     app.router.add_get("/api/sessions/{session_id}/workers", handle_list_workers)
-    app.router.add_get(
-        "/api/sessions/{session_id}/colony/skills", handle_list_colony_skills
-    )
-    app.router.add_get(
-        "/api/sessions/{session_id}/colony/tools", handle_list_colony_tools
-    )
+    app.router.add_get("/api/sessions/{session_id}/colony/skills", handle_list_colony_skills)
+    app.router.add_get("/api/sessions/{session_id}/colony/tools", handle_list_colony_tools)
     # Colony-scoped — one progress.db per colony, no session indirection.
     app.router.add_get(
         "/api/colonies/{colony_name}/progress/snapshot",
@@ -710,9 +697,7 @@ def register_routes(app: web.Application) -> None:
         "/api/colonies/{colony_name}/progress/stream",
         handle_progress_stream,
     )
-    app.router.add_get(
-        "/api/colonies/{colony_name}/data/tables", handle_list_tables
-    )
+    app.router.add_get("/api/colonies/{colony_name}/data/tables", handle_list_tables)
     app.router.add_get(
         "/api/colonies/{colony_name}/data/tables/{table}/rows",
         handle_table_rows,

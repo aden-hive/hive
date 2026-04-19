@@ -124,9 +124,7 @@ _DEFAULT_BODY = (
 
 
 @pytest.mark.asyncio
-async def test_happy_path_emits_colony_created_event(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_happy_path_emits_colony_created_event(patched_home: Path, patched_fork: list[dict]) -> None:
     """Successful create_colony must publish a COLONY_CREATED event."""
     from framework.host.event_bus import AgentEvent, EventType
 
@@ -162,9 +160,7 @@ async def test_happy_path_emits_colony_created_event(
 
 
 @pytest.mark.asyncio
-async def test_happy_path_materializes_skill_under_colony_dir(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_happy_path_materializes_skill_under_colony_dir(patched_home: Path, patched_fork: list[dict]) -> None:
     """Inline skill content is written to ~/.hive/colonies/{colony}/.hive/skills/{name}/."""
     executor, session = _make_executor()
 
@@ -198,10 +194,7 @@ async def test_happy_path_materializes_skill_under_colony_dir(
     assert payload["skill_name"] == "honeycomb-api-protocol"
     assert payload["skill_replaced"] is False
 
-    installed = (
-        _colony_skill_path(patched_home, "honeycomb_research", "honeycomb-api-protocol")
-        / "SKILL.md"
-    )
+    installed = _colony_skill_path(patched_home, "honeycomb_research", "honeycomb-api-protocol") / "SKILL.md"
     assert installed.exists()
     text = installed.read_text(encoding="utf-8")
     assert text.startswith("---\n")
@@ -221,9 +214,7 @@ async def test_happy_path_materializes_skill_under_colony_dir(
 
 
 @pytest.mark.asyncio
-async def test_two_colonies_do_not_share_skill_namespace(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_two_colonies_do_not_share_skill_namespace(patched_home: Path, patched_fork: list[dict]) -> None:
     """A skill authored via create_colony is invisible to other colonies' worker dirs.
 
     This is the core isolation guarantee: colony A's create_colony call
@@ -267,9 +258,7 @@ async def test_two_colonies_do_not_share_skill_namespace(
 
 
 @pytest.mark.asyncio
-async def test_skill_files_are_written_alongside_skill_md(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_skill_files_are_written_alongside_skill_md(patched_home: Path, patched_fork: list[dict]) -> None:
     """skill_files entries land at the right relative paths."""
     executor, _ = _make_executor()
 
@@ -294,9 +283,7 @@ async def test_skill_files_are_written_alongside_skill_md(
 
 
 @pytest.mark.asyncio
-async def test_existing_skill_is_replaced(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_existing_skill_is_replaced(patched_home: Path, patched_fork: list[dict]) -> None:
     """Reusing a skill_name within the same colony replaces the old skill."""
     executor, _ = _make_executor()
 
@@ -496,9 +483,7 @@ async def test_skill_files_reject_skill_md_override(patched_home, patched_fork) 
 
 
 @pytest.mark.asyncio
-async def test_fork_failure_keeps_materialized_skill(
-    patched_home, monkeypatch
-) -> None:
+async def test_fork_failure_keeps_materialized_skill(patched_home, monkeypatch) -> None:
     """If the fork raises, the materialized skill stays under ~/.hive/skills/."""
 
     async def _failing_fork(**kwargs):
@@ -522,8 +507,6 @@ async def test_fork_failure_keeps_materialized_skill(
     assert "error" in payload
     assert "fork failed" in payload["error"]
     assert "skill_installed" in payload
-    installed = (
-        _colony_skill_path(patched_home, "will_fail", "durable-skill") / "SKILL.md"
-    )
+    installed = _colony_skill_path(patched_home, "will_fail", "durable-skill") / "SKILL.md"
     assert installed.exists()
     assert "hint" in payload

@@ -241,8 +241,7 @@ def _resolve_write_path(path: str) -> str:
         hv_common = ""
     if wr_common != WRITE_ROOT and hv_common != hive_dir:
         raise ValueError(
-            f"Access denied: resolved write path '{resolved}' escaped the "
-            f"allowed roots ('{WRITE_ROOT}', '{hive_dir}')."
+            f"Access denied: resolved write path '{resolved}' escaped the allowed roots ('{WRITE_ROOT}', '{hive_dir}')."
         )
     return resolved
 

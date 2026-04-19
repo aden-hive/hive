@@ -206,9 +206,7 @@ async def test_run_parallel_workers_tool_returns_immediately_and_emits_reports(
                 break
             await asyncio.sleep(0.1)
 
-        assert len(collected_reports) == 3, (
-            f"Expected 3 SUBAGENT_REPORT events, got {len(collected_reports)}"
-        )
+        assert len(collected_reports) == 3, f"Expected 3 SUBAGENT_REPORT events, got {len(collected_reports)}"
         statuses = sorted(r["status"] for r in collected_reports)
         summaries = sorted(r["summary"] for r in collected_reports)
         assert statuses == ["failed", "success", "success"]
@@ -427,9 +425,7 @@ async def test_explicit_report_survives_cancel(tmp_path: Path) -> None:
     """A worker that set _explicit_report right before being cancelled must
     emit a SUBAGENT_REPORT carrying the explicit payload, not the canned
     'Worker was cancelled' stub."""
-    llm = _ByTaskMockLLM(
-        by_task={"cancel-me": _report("success", "partial wrap-up", {"items_done": 3})}
-    )
+    llm = _ByTaskMockLLM(by_task={"cancel-me": _report("success", "partial wrap-up", {"items_done": 3})})
     colony = await _build_colony(tmp_path, llm, "cancel_survives")
 
     collected: list[dict] = []
@@ -449,9 +445,7 @@ async def test_explicit_report_survives_cancel(tmp_path: Path) -> None:
             if worker._explicit_report is not None:
                 break
             await asyncio.sleep(0.05)
-        assert worker._explicit_report is not None, (
-            "Worker never set _explicit_report — test precondition not met"
-        )
+        assert worker._explicit_report is not None, "Worker never set _explicit_report — test precondition not met"
 
         # Cancel the already-reported worker.
         await colony.stop_worker(ids[0])

@@ -28,19 +28,13 @@ _AUTO_SNAPSHOT_SETTLE_S = 0.5
 AutoSnapshotMode = Literal["default", "simple", "interactive", "off"]
 
 
-async def _attach_snapshot(
-    result: dict, bridge, target_tab: int, auto_snapshot_mode: str
-) -> dict:
+async def _attach_snapshot(result: dict, bridge, target_tab: int, auto_snapshot_mode: str) -> dict:
     """If the interaction succeeded and the caller opted into auto-snapshot,
     wait for the page to settle and attach an accessibility snapshot under
     the ``snapshot`` key using ``auto_snapshot_mode`` as the snapshot filter
     mode. ``"off"`` skips the capture entirely. Snapshot failures surface
     under ``snapshot_error`` and do NOT fail the interaction itself."""
-    if (
-        auto_snapshot_mode == "off"
-        or not isinstance(result, dict)
-        or not result.get("ok")
-    ):
+    if auto_snapshot_mode == "off" or not isinstance(result, dict) or not result.get("ok"):
         return result
     try:
         await asyncio.sleep(_AUTO_SNAPSHOT_SETTLE_S)

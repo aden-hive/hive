@@ -822,9 +822,7 @@ async def fork_session_into_colony(
     db_path = await asyncio.to_thread(ensure_progress_db, colony_dir)
     seeded_task_ids: list[str] = []
     if tasks:
-        seeded_task_ids = await asyncio.to_thread(
-            seed_tasks, db_path, tasks, source="queen_create"
-        )
+        seeded_task_ids = await asyncio.to_thread(seed_tasks, db_path, tasks, source="queen_create")
         logger.info(
             "progress_db: seeded %d task(s) into colony '%s'",
             len(seeded_task_ids),
@@ -846,15 +844,13 @@ async def fork_session_into_colony(
                 source="create_colony_auto",
             )
             logger.info(
-                "progress_db: auto-seeded 1 task into colony '%s' "
-                "(task_id=%s, from single-task create_colony form)",
+                "progress_db: auto-seeded 1 task into colony '%s' (task_id=%s, from single-task create_colony form)",
                 colony_name,
                 seeded_task_ids[0] if seeded_task_ids else "?",
             )
         except Exception as exc:
             logger.warning(
-                "progress_db: auto-seed failed for colony '%s' (continuing "
-                "without a pre-seeded row): %s",
+                "progress_db: auto-seed failed for colony '%s' (continuing without a pre-seeded row): %s",
                 colony_name,
                 exc,
             )

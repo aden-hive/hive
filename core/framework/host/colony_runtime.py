@@ -681,9 +681,7 @@ class ColonyRuntime:
                 _pre.load()
                 _spawn_catalog = _pre.skills_catalog_prompt
                 _spawn_skill_dirs = (
-                    list(_pre.allowlisted_dirs)
-                    if hasattr(_pre, "allowlisted_dirs")
-                    else self.skill_dirs
+                    list(_pre.allowlisted_dirs) if hasattr(_pre, "allowlisted_dirs") else self.skill_dirs
                 )
                 logger.info(
                     "spawn: pre-activated hive.colony-progress-tracker "
@@ -694,8 +692,7 @@ class ColonyRuntime:
                 )
             except Exception as exc:
                 logger.warning(
-                    "spawn: failed to pre-activate colony-progress-tracker "
-                    "skill, falling back to base catalog: %s",
+                    "spawn: failed to pre-activate colony-progress-tracker skill, falling back to base catalog: %s",
                     exc,
                 )
 

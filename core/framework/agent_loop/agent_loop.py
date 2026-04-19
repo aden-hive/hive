@@ -2557,9 +2557,7 @@ class AgentLoop(AgentProtocol):
             _legacy = self._config.llm_stream_inactivity_timeout_seconds
             if _legacy and _legacy > 0 and _legacy < _inter_event_limit:
                 _inter_event_limit = _legacy
-            _watchdog_active = (_ttft_limit and _ttft_limit > 0) or (
-                _inter_event_limit and _inter_event_limit > 0
-            )
+            _watchdog_active = (_ttft_limit and _ttft_limit > 0) or (_inter_event_limit and _inter_event_limit > 0)
             # Result of the watchdog: "ok" (stream finished), "ttft" (no first
             # event in budget), "inactive" (silence after first event).
             _watchdog_verdict: str = "ok"
@@ -2578,9 +2576,7 @@ class AgentLoop(AgentProtocol):
                     )
                     _check_interval = max(1.0, min(5.0, _tight / 2))
                     while True:
-                        done, _pending = await asyncio.wait(
-                            {self._stream_task}, timeout=_check_interval
-                        )
+                        done, _pending = await asyncio.wait({self._stream_task}, timeout=_check_interval)
                         if self._stream_task in done:
                             break
                         now = time.monotonic()
@@ -2598,11 +2594,7 @@ class AgentLoop(AgentProtocol):
                             # Post-first-event silence. A stream that produced
                             # events and then went quiet is a real stall.
                             idle = now - _stream_last_event_at
-                            if (
-                                _inter_event_limit
-                                and _inter_event_limit > 0
-                                and idle >= _inter_event_limit
-                            ):
+                            if _inter_event_limit and _inter_event_limit > 0 and idle >= _inter_event_limit:
                                 _watchdog_verdict = "inactive"
                                 _watchdog_elapsed = idle
                                 _watchdog_limit = _inter_event_limit

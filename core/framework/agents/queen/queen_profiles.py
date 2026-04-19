@@ -1173,9 +1173,7 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
-def format_queen_identity_prompt(
-    profile: dict[str, Any], *, max_examples: int | None = None
-) -> str:
+def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int | None = None) -> str:
     """Convert a queen profile into a high-dimensional character prompt.
 
     Uses the 5-pillar character construction system: core identity,
