@@ -1,10 +1,29 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { User } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import type { QueenProfileSummary, Colony } from "@/types/colony";
 import { getColonyIcon } from "@/lib/colony-registry";
 import QueenProfilePanel from "@/components/QueenProfilePanel";
+
+/* ── User avatar (CEO card) ──────────────────────────────────────────── */
+
+function UserAvatar({ initials, avatarVersion }: { initials: string; avatarVersion: number }) {
+  const [hasAvatar, setHasAvatar] = useState(true);
+  const url = `/api/config/profile/avatar?v=${avatarVersion}`;
+  useEffect(() => setHasAvatar(true), [avatarVersion]);
+  return (
+    <div className="w-12 h-12 rounded-full bg-primary/15 mx-auto mb-3 flex items-center justify-center overflow-hidden">
+      {hasAvatar ? (
+        <img src={url} alt="" className="w-full h-full object-cover" onError={() => setHasAvatar(false)} />
+      ) : initials ? (
+        <span className="text-sm font-bold text-primary">{initials}</span>
+      ) : (
+        <User className="w-5 h-5 text-primary" />
+      )}
+    </div>
+  );
+}
 
 /* ── Colony tag (clickable link to colony chat) ───────────────────────── */
 
@@ -22,6 +41,20 @@ function ColonyTag({ colony }: { colony: Colony }) {
 }
 
 /* ── Queen card in the org grid ───────────────────────────────────────── */
+
+function QueenAvatar({ queenId, name, size = "w-11 h-11" }: { queenId: string; name: string; size?: string }) {
+  const [hasAvatar, setHasAvatar] = useState(true);
+  const url = `/api/queen/${queenId}/avatar`;
+  return (
+    <div className={`${size} rounded-full bg-primary/15 flex items-center justify-center overflow-hidden`}>
+      {hasAvatar ? (
+        <img src={url} alt={name} className="w-full h-full object-cover" onError={() => setHasAvatar(false)} />
+      ) : (
+        <span className="text-sm font-bold text-primary">{name.charAt(0)}</span>
+      )}
+    </div>
+  );
+}
 
 function QueenCard({
   queen,
@@ -48,10 +81,8 @@ function QueenCard({
             : "border-border/60 hover:border-primary/30 hover:bg-primary/[0.03]"
         }`}
       >
-        <div className="w-11 h-11 rounded-full bg-primary/15 flex items-center justify-center mb-2.5">
-          <span className="text-sm font-bold text-primary">
-            {queen.name.charAt(0)}
-          </span>
+        <div className="mb-2.5">
+          <QueenAvatar queenId={queen.id} name={queen.name} />
         </div>
         <span className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
           {queen.name}
@@ -79,7 +110,7 @@ function QueenCard({
 /* ── Main org chart page ──────────────────────────────────────────────── */
 
 export default function OrgChart() {
-  const { queenProfiles, colonies, userProfile } = useColony();
+  const { queenProfiles, colonies, userProfile, userAvatarVersion } = useColony();
   const [selectedQueenId, setSelectedQueenId] = useState<string | null>(null);
 
   // Pan & zoom state
@@ -172,15 +203,7 @@ export default function OrgChart() {
           <div className="min-w-max px-6 pt-16 pb-10 mx-auto flex flex-col items-center">
             {/* CEO card */}
             <div className="rounded-xl border border-border/60 bg-card px-8 py-5 text-center">
-              <div className="w-12 h-12 rounded-full bg-primary/15 mx-auto mb-3 flex items-center justify-center">
-                {initials ? (
-                  <span className="text-sm font-bold text-primary">
-                    {initials}
-                  </span>
-                ) : (
-                  <User className="w-5 h-5 text-primary" />
-                )}
-              </div>
+              <UserAvatar initials={initials} avatarVersion={userAvatarVersion} />
               <div className="font-semibold text-sm text-foreground">
                 {userProfile.displayName || "You"}
               </div>

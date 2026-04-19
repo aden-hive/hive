@@ -50,6 +50,7 @@ CONTENT_ROLES: frozenset[str] = frozenset(
         "columnheader",
         "gridcell",
         "heading",
+        "img",
         "listitem",
         "main",
         "navigation",

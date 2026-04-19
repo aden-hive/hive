@@ -274,9 +274,12 @@ class TestReportToParent:
             worker = colony.get_worker(worker_ids[0])
             assert worker is not None
 
-            # Wait for the worker's background task to finish
+            # Wait for the worker to finish AND for the SUBAGENT_REPORT event
+            # to propagate. On Windows the event loop scheduling differs from
+            # POSIX, so a worker can be marked inactive a few ticks before the
+            # subscriber callback runs. Waiting on both avoids that race.
             deadline = asyncio.get_event_loop().time() + 5.0
-            while worker.is_active and asyncio.get_event_loop().time() < deadline:
+            while (worker.is_active or len(reports) == 0) and asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(0.05)
             assert not worker.is_active, "Worker did not finish within timeout"
 

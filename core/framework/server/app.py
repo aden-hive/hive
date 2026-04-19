@@ -318,7 +318,11 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_execution import register_routes as register_execution_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_messages import register_routes as register_message_routes
+<<<<<<< HEAD
     from framework.server.routes_colony_workers import register_routes as register_colony_worker_routes
+=======
+    from framework.server.routes_prompts import register_routes as register_prompt_routes
+>>>>>>> origin/main
     from framework.server.routes_queens import register_routes as register_queen_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
     from framework.server.routes_workers import register_routes as register_worker_routes
@@ -332,7 +336,11 @@ def create_app(model: str | None = None) -> web.Application:
     register_worker_routes(app)
     register_log_routes(app)
     register_queen_routes(app)
+<<<<<<< HEAD
     register_colony_worker_routes(app)
+=======
+    register_prompt_routes(app)
+>>>>>>> origin/main
 
     # Static file serving — Option C production mode
     # If frontend/dist/ exists, serve built frontend files on /

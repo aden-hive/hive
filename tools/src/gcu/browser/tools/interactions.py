@@ -606,10 +606,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
                 "ok": False,
-                "error": (
-                    f"Coords ({x}, {y}) look like pixels. This tool expects "
-                    "fractions 0..1 of the viewport."
-                ),
+                "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_hover_coordinate", params, result=result)
             return result
@@ -687,10 +684,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         if x > 1.5 or y > 1.5 or x < -0.1 or y < -0.1:
             result = {
                 "ok": False,
-                "error": (
-                    f"Coords ({x}, {y}) look like pixels. This tool expects "
-                    "fractions 0..1 of the viewport."
-                ),
+                "error": (f"Coords ({x}, {y}) look like pixels. This tool expects fractions 0..1 of the viewport."),
             }
             log_tool_call("browser_press_at", params, result=result)
             return result

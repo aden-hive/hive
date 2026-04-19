@@ -45,8 +45,9 @@ class TestAnnotateSnapshot:
     def test_skips_structural_roles(self):
         annotated, ref_map = annotate_snapshot(SAMPLE_SNAPSHOT)
         roles_in_map = {entry.role for entry in ref_map.values()}
-        # navigation, main, list, listitem, paragraph are structural — no refs
-        assert "navigation" not in roles_in_map
+        # main (unnamed), list, listitem (unnamed), paragraph are structural — no refs.
+        # Note: navigation is a landmark role and now gets a ref when named, so it
+        # is not asserted absent here.
         assert "main" not in roles_in_map
         assert "list" not in roles_in_map
         assert "listitem" not in roles_in_map
