@@ -15,6 +15,16 @@ interface ColonyWorkersContextValue {
   sessionId: string | null;
   setSessionId: (sessionId: string | null) => void;
 
+  /** The colony directory name (e.g. ``linkedin_honeycomb_messaging``)
+   *  the panel is attached to. Comes from ``LiveSession.colony_id`` —
+   *  legacy naming, but it's the on-disk directory under
+   *  ``~/.hive/colonies/`` and the URL segment for the colony-scoped
+   *  endpoints (progress + data). Required separately from sessionId
+   *  because the URL slug is mangled by ``slugToColonyId`` and can't
+   *  be reverse-derived. */
+  colonyName: string | null;
+  setColonyName: (colonyName: string | null) => void;
+
   /** User dismissal: flipped by the panel's close button. Reset when
    *  sessionId changes (so the panel re-opens on the next colony visit
    *  / tab-switch) or when the header toggle re-requests it. */
@@ -36,6 +46,7 @@ const ColonyWorkersContext = createContext<ColonyWorkersContextValue | null>(nul
 
 export function ColonyWorkersProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionIdState] = useState<string | null>(null);
+  const [colonyName, setColonyName] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [triggers, setTriggers] = useState<GraphNode[]>([]);
 
@@ -58,6 +69,8 @@ export function ColonyWorkersProvider({ children }: { children: ReactNode }) {
       value={{
         sessionId,
         setSessionId,
+        colonyName,
+        setColonyName,
         dismissed,
         toggleColonyWorkers,
         triggers,

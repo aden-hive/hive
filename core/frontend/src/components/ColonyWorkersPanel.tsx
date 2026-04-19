@@ -39,6 +39,11 @@ import { DataGrid, type SortDir } from "@/components/data-grid";
 
 interface ColonyWorkersPanelProps {
   sessionId: string;
+  /** Colony directory name (e.g. ``linkedin_honeycomb_messaging``) for
+   *  the colony-scoped progress + data endpoints. ``null`` when the
+   *  attached session isn't bound to a colony — those tabs render
+   *  empty rather than fire requests with an invalid name. */
+  colonyName: string | null;
   onClose: () => void;
 }
 
@@ -81,6 +86,7 @@ function fmtIso(ts: string | null | undefined): string {
 
 export default function ColonyWorkersPanel({
   sessionId,
+  colonyName,
   onClose,
 }: ColonyWorkersPanelProps) {
   const [tab, setTab] = useState<TabKey>("sessions");
@@ -153,11 +159,13 @@ export default function ColonyWorkersPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === "sessions" && <SessionsTab sessionId={sessionId} />}
+        {tab === "sessions" && (
+          <SessionsTab sessionId={sessionId} colonyName={colonyName} />
+        )}
         {tab === "triggers" && <TriggersTab sessionId={sessionId} />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
         {tab === "tools" && <ToolsTab sessionId={sessionId} />}
-        {tab === "data" && <DataTab sessionId={sessionId} />}
+        {tab === "data" && <DataTab colonyName={colonyName} />}
       </div>
     </aside>
   );
@@ -468,7 +476,13 @@ function ToolGroup({ label, items }: { label: string; items: ColonyTool[] }) {
 
 // ── Sessions tab ───────────────────────────────────────────────────────
 
-function SessionsTab({ sessionId }: { sessionId: string }) {
+function SessionsTab({
+  sessionId,
+  colonyName,
+}: {
+  sessionId: string;
+  colonyName: string | null;
+}) {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -564,7 +578,7 @@ function SessionsTab({ sessionId }: { sessionId: string }) {
   if (selected) {
     return (
       <WorkerDetail
-        sessionId={sessionId}
+        colonyName={colonyName}
         worker={selectedWorker}
         workerId={selected}
         onBack={() => setSelected(null)}
@@ -1000,7 +1014,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
  *  if the count lags the live data by a few seconds. */
 const TABLES_POLL_MS = 5000;
 
-function DataTab({ sessionId }: { sessionId: string }) {
+function DataTab({ colonyName }: { colonyName: string | null }) {
   const [tables, setTables] = useState<TableOverview[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(true);
@@ -1008,12 +1022,17 @@ function DataTab({ sessionId }: { sessionId: string }) {
 
   const refreshTables = useCallback(
     (opts: { silent?: boolean } = {}) => {
+      if (!colonyName) {
+        setTables([]);
+        setLoadingTables(false);
+        return Promise.resolve();
+      }
       if (!opts.silent) {
         setLoadingTables(true);
         setTablesError(null);
       }
       return colonyDataApi
-        .listTables(sessionId)
+        .listTables(colonyName)
         .then((r) => {
           setTables(r.tables);
           // Auto-select the first table when none chosen yet so the user
@@ -1030,7 +1049,7 @@ function DataTab({ sessionId }: { sessionId: string }) {
           if (!opts.silent) setLoadingTables(false);
         });
     },
-    [sessionId],
+    [colonyName],
   );
 
   useEffect(() => {
@@ -1047,6 +1066,14 @@ function DataTab({ sessionId }: { sessionId: string }) {
     }, TABLES_POLL_MS);
     return () => clearInterval(id);
   }, [refreshTables]);
+
+  if (!colonyName) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-8 px-4">
+        This session isn't bound to a colony yet — no progress.db to view.
+      </p>
+    );
+  }
 
   return (
     <div className="px-4 py-3">
@@ -1097,7 +1124,7 @@ function DataTab({ sessionId }: { sessionId: string }) {
           {selected && (
             <TableView
               key={selected}
-              sessionId={sessionId}
+              colonyName={colonyName}
               table={selected}
               onAnyEdit={() => {
                 // Row counts can change via cascading triggers or NULL→value
@@ -1161,11 +1188,11 @@ function mergeRowsByPk(
 }
 
 function TableView({
-  sessionId,
+  colonyName,
   table,
   onAnyEdit,
 }: {
-  sessionId: string;
+  colonyName: string;
   table: string;
   onAnyEdit: () => void;
 }) {
@@ -1191,7 +1218,7 @@ function TableView({
         setError(null);
       }
       colonyDataApi
-        .listRows(sessionId, table, {
+        .listRows(colonyName, table, {
           limit: DATA_PAGE_SIZE,
           offset,
           orderBy,
@@ -1214,7 +1241,7 @@ function TableView({
           if (!opts.silent && myId === reqIdRef.current) setLoading(false);
         });
     },
-    [sessionId, table, offset, orderBy, orderDir],
+    [colonyName, table, offset, orderBy, orderDir],
   );
 
   // Initial + on-parameter-change load (user-initiated, shows spinner).
@@ -1248,7 +1275,7 @@ function TableView({
 
   const handleEdit = useCallback(
     async (pk: Record<string, CellValue>, column: string, newValue: CellValue) => {
-      await colonyDataApi.updateRow(sessionId, table, {
+      await colonyDataApi.updateRow(colonyName, table, {
         pk,
         updates: { [column]: newValue },
       });
@@ -1268,7 +1295,7 @@ function TableView({
       });
       onAnyEdit();
     },
-    [sessionId, table, onAnyEdit],
+    [colonyName, table, onAnyEdit],
   );
 
   if (error) {
@@ -1340,12 +1367,12 @@ function TableView({
 // ── Worker detail view (inside Sessions tab) ───────────────────────────
 
 function WorkerDetail({
-  sessionId,
+  colonyName,
   worker,
   workerId,
   onBack,
 }: {
-  sessionId: string;
+  colonyName: string | null;
   worker: WorkerSummary | null | undefined;
   workerId: string;
   onBack: () => void;
@@ -1405,20 +1432,20 @@ function WorkerDetail({
       {isHistorical ? (
         <HistoricalWorkerPlaceholder workerId={workerId} />
       ) : (
-        <LiveWorkerProgress sessionId={sessionId} workerId={workerId} />
+        <LiveWorkerProgress colonyName={colonyName} workerId={workerId} />
       )}
     </div>
   );
 }
 
 function LiveWorkerProgress({
-  sessionId,
+  colonyName,
   workerId,
 }: {
-  sessionId: string;
+  colonyName: string | null;
   workerId: string;
 }) {
-  const { snapshot, streamState, error } = useProgressStream(sessionId, workerId);
+  const { snapshot, streamState, error } = useProgressStream(colonyName, workerId);
   return (
     <>
       <div className="flex items-center justify-between mb-1.5">
@@ -1554,7 +1581,7 @@ function ProgressView({ snapshot }: { snapshot: ProgressSnapshot }) {
 
 // ── Hook: live progress via SSE ────────────────────────────────────────
 
-function useProgressStream(sessionId: string, workerId: string) {
+function useProgressStream(colonyName: string | null, workerId: string) {
   const [snapshot, setSnapshot] = useState<ProgressSnapshot>({ tasks: [], steps: [] });
   const [streamState, setStreamState] = useState<"connecting" | "open" | "closed" | "error">(
     "connecting",
@@ -1566,7 +1593,14 @@ function useProgressStream(sessionId: string, workerId: string) {
     setError(null);
     setStreamState("connecting");
 
-    const url = colonyWorkersApi.progressStreamUrl(sessionId, workerId);
+    // Skip the SSE connection entirely if the session isn't bound to a
+    // colony — we'd just hit a 400 on every reconnect attempt.
+    if (!colonyName) {
+      setStreamState("closed");
+      return;
+    }
+
+    const url = colonyWorkersApi.progressStreamUrl(colonyName, workerId);
     const es = new EventSource(url);
 
     es.addEventListener("open", () => setStreamState("open"));
@@ -1609,7 +1643,7 @@ function useProgressStream(sessionId: string, workerId: string) {
       es.close();
       setStreamState("closed");
     };
-  }, [sessionId, workerId]);
+  }, [colonyName, workerId]);
 
   return { snapshot, streamState, error };
 }

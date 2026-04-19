@@ -125,6 +125,13 @@ async function restoreSessionMessages(
 
 interface AgentState {
   sessionId: string | null;
+  /** Colony directory name (e.g. ``linkedin_honeycomb_messaging``) —
+   *  the value used for the colony-scoped progress + data endpoints.
+   *  Comes from ``LiveSession.colony_id`` (the legacy field name; it's
+   *  the on-disk directory under ``~/.hive/colonies/``). Distinct from
+   *  the URL's ``colonyId`` route param, which is a display-mangled
+   *  slug. Null for queen-DM sessions not bound to a colony. */
+  colonyDirName: string | null;
   loading: boolean;
   ready: boolean;
   queenReady: boolean;
@@ -163,6 +170,7 @@ interface AgentState {
 function defaultAgentState(): AgentState {
   return {
     sessionId: null,
+    colonyDirName: null,
     loading: true,
     ready: false,
     queenReady: false,
@@ -524,6 +532,7 @@ export default function ColonyChat() {
 
       updateState({
         sessionId: session.session_id,
+        colonyDirName: session.colony_id,
         displayName,
         queenPhase: initialPhase,
         queenSupportsImages: session.queen_supports_images !== false,
@@ -1270,8 +1279,11 @@ export default function ColonyChat() {
   // Mirror live triggers into the shared context so the tabbed
   // ColonyWorkersPanel (rendered at the layout level) can render the
   // Triggers tab without having to re-subscribe to the session SSE.
-  const { setTriggers: setCtxTriggers, setSessionId: setCtxSessionId } =
-    useColonyWorkers();
+  const {
+    setTriggers: setCtxTriggers,
+    setSessionId: setCtxSessionId,
+    setColonyName: setCtxColonyName,
+  } = useColonyWorkers();
   useEffect(() => {
     setCtxTriggers(triggers);
     return () => setCtxTriggers([]);
@@ -1285,6 +1297,17 @@ export default function ColonyChat() {
     setCtxSessionId(agentState.sessionId ?? null);
     return () => setCtxSessionId(null);
   }, [agentState.sessionId, setCtxSessionId]);
+
+  // Publish the colony directory name (e.g. ``linkedin_honeycomb_messaging``)
+  // alongside the session id. The panel's progress + data tabs route by
+  // colony name, not session — one progress.db per colony, independent
+  // of which session is open. Comes from ``LiveSession.colony_id`` (the
+  // on-disk directory) rather than the URL slug, which is mangled by
+  // ``slugToColonyId``.
+  useEffect(() => {
+    setCtxColonyName(agentState.colonyDirName ?? null);
+    return () => setCtxColonyName(null);
+  }, [agentState.colonyDirName, setCtxColonyName]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 

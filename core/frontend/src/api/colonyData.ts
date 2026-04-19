@@ -39,15 +39,19 @@ export interface UpdateRowRequest {
 }
 
 export const colonyDataApi = {
-  /** List user tables in the colony's progress.db with row counts. */
-  listTables: (sessionId: string) =>
+  /** List user tables in the colony's progress.db with row counts.
+   *
+   *  Routed by colony directory name (not session) because progress.db
+   *  is per-colony — one DB serves every session for that colony, and
+   *  the data is reachable even when no session is live. */
+  listTables: (colonyName: string) =>
     api.get<{ tables: TableOverview[] }>(
-      `/sessions/${sessionId}/colony/data/tables`,
+      `/colonies/${encodeURIComponent(colonyName)}/data/tables`,
     ),
 
   /** Paginated rows for a table. Server enforces limit ≤ 500. */
   listRows: (
-    sessionId: string,
+    colonyName: string,
     table: string,
     opts: {
       limit?: number;
@@ -63,14 +67,14 @@ export const colonyDataApi = {
     if (opts.orderDir) params.set("order_dir", opts.orderDir);
     const qs = params.toString();
     return api.get<TableRowsResponse>(
-      `/sessions/${sessionId}/colony/data/tables/${encodeURIComponent(table)}/rows${qs ? `?${qs}` : ""}`,
+      `/colonies/${encodeURIComponent(colonyName)}/data/tables/${encodeURIComponent(table)}/rows${qs ? `?${qs}` : ""}`,
     );
   },
 
   /** Update a single row by primary key. Returns {updated: 0|1}. */
-  updateRow: (sessionId: string, table: string, body: UpdateRowRequest) =>
+  updateRow: (colonyName: string, table: string, body: UpdateRowRequest) =>
     api.patch<{ updated: number }>(
-      `/sessions/${sessionId}/colony/data/tables/${encodeURIComponent(table)}/rows`,
+      `/colonies/${encodeURIComponent(colonyName)}/data/tables/${encodeURIComponent(table)}/rows`,
       body,
     ),
 };

@@ -87,17 +87,19 @@ export const colonyWorkersApi = {
   listTools: (sessionId: string) =>
     api.get<{ tools: ColonyTool[] }>(`/sessions/${sessionId}/colony/tools`),
 
-  /** Snapshot of progress.db tasks + steps, optionally filtered by worker_id. */
-  progressSnapshot: (sessionId: string, workerId?: string) => {
+  /** Snapshot of progress.db tasks + steps, optionally filtered by
+   *  worker_id. Routed by colony directory name (not session) because
+   *  progress.db is per-colony. */
+  progressSnapshot: (colonyName: string, workerId?: string) => {
     const qs = workerId ? `?worker_id=${encodeURIComponent(workerId)}` : "";
     return api.get<ProgressSnapshot>(
-      `/sessions/${sessionId}/colony/progress/snapshot${qs}`,
+      `/colonies/${encodeURIComponent(colonyName)}/progress/snapshot${qs}`,
     );
   },
 
   /** Build the URL for the live progress SSE stream. */
-  progressStreamUrl: (sessionId: string, workerId?: string): string => {
+  progressStreamUrl: (colonyName: string, workerId?: string): string => {
     const qs = workerId ? `?worker_id=${encodeURIComponent(workerId)}` : "";
-    return `/api/sessions/${sessionId}/colony/progress/stream${qs}`;
+    return `/api/colonies/${encodeURIComponent(colonyName)}/progress/stream${qs}`;
   },
 };

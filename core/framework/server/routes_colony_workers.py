@@ -6,25 +6,35 @@ profile panel. Distinct from ``routes_workers.py``, which deals with
 *graph nodes* inside a worker definition rather than live worker
 instances.
 
+Session-scoped (bound to a live session's runtime):
 - GET /api/sessions/{session_id}/workers            — live + completed workers
 - GET /api/sessions/{session_id}/colony/skills      — colony's shared skills catalog
 - GET /api/sessions/{session_id}/colony/tools       — colony's default tools
-- GET /api/sessions/{session_id}/colony/progress/snapshot — progress.db tasks/steps snapshot
-- GET /api/sessions/{session_id}/colony/progress/stream   — SSE feed of upserts (polled)
-- GET /api/sessions/{session_id}/colony/data/tables       — list user tables in progress.db
-- GET /api/sessions/{session_id}/colony/data/tables/{table}/rows — paginated rows
-- PATCH /api/sessions/{session_id}/colony/data/tables/{table}/rows — edit a row
+
+Colony-scoped (bound to the on-disk colony directory, independent of any
+live session — one colony has exactly one progress.db):
+- GET /api/colonies/{colony_name}/progress/snapshot — progress.db tasks/steps snapshot
+- GET /api/colonies/{colony_name}/progress/stream   — SSE feed of upserts (polled)
+- GET /api/colonies/{colony_name}/data/tables       — list user tables in progress.db
+- GET /api/colonies/{colony_name}/data/tables/{table}/rows — paginated rows
+- PATCH /api/colonies/{colony_name}/data/tables/{table}/rows — edit a row
 """
 
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
 from aiohttp import web
 
 from framework.server.app import resolve_session
+
+# Same validation used by create_colony — keep them in sync. Blocks path
+# traversal (``..``) and shell-special chars; the endpoint would 400 on
+# anything else anyway, but validating early avoids a disk hit.
+_COLONY_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 logger = logging.getLogger(__name__)
 
@@ -274,14 +284,15 @@ async def handle_list_colony_tools(request: web.Request) -> web.Response:
 
 # ── Progress DB (tasks/steps) ──────────────────────────────────────
 
-def _resolve_progress_db(session) -> Path | None:
-    """Resolve the colony's progress.db path for ``session``.
+def _resolve_progress_db_by_name(colony_name: str) -> Path | None:
+    """Resolve a colony's progress.db path by directory name.
 
-    Returns ``None`` if the session is not bound to a colony yet or if
-    the DB file doesn't exist.
+    Returns ``None`` when the name fails validation or the file does not
+    exist. Both conditions render as an empty Data tab in the UI rather
+    than a hard error so an operator can open the panel before any
+    workers have actually run.
     """
-    colony_name = getattr(session, "colony_name", None)
-    if not colony_name:
+    if not _COLONY_NAME_RE.match(colony_name):
         return None
     db_path = Path.home() / ".hive" / "colonies" / colony_name / "data" / "progress.db"
     return db_path if db_path.exists() else None
@@ -321,15 +332,12 @@ def _read_progress_snapshot(db_path: Path, worker_id: str | None) -> dict:
 
 
 async def handle_progress_snapshot(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/colony/progress/snapshot
+    """GET /api/colonies/{colony_name}/progress/snapshot
 
     Optional ?worker_id=... to filter to rows touched by a specific worker.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    db_path = _resolve_progress_db(session)
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         return web.json_response({"tasks": [], "steps": []})
 
@@ -394,7 +402,7 @@ def _read_progress_upserts(
 
 
 async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
-    """GET /api/sessions/{session_id}/colony/progress/stream
+    """GET /api/colonies/{colony_name}/progress/stream
 
     SSE feed that emits ``snapshot`` once (current state) followed by
     ``upsert`` events whenever a task/step row changes. Polls the DB
@@ -402,10 +410,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
     workers use for writes doesn't fire SQLite's update hook on our
     connection, so polling is the robust option.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
+    colony_name = request.match_info["colony_name"]
     worker_id = request.query.get("worker_id") or None
 
     resp = web.StreamResponse(
@@ -423,7 +428,7 @@ async def handle_progress_stream(request: web.Request) -> web.StreamResponse:
         payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
         await resp.write(payload.encode("utf-8"))
 
-    db_path = _resolve_progress_db(session)
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         await _send("snapshot", {"tasks": [], "steps": []})
         await _send("end", {"reason": "no_progress_db"})
@@ -625,11 +630,9 @@ def _update_table_row(
 
 
 async def handle_list_tables(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/colony/data/tables"""
-    session, err = resolve_session(request)
-    if err:
-        return err
-    db_path = _resolve_progress_db(session)
+    """GET /api/colonies/{colony_name}/data/tables"""
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         return web.json_response({"tables": []})
     tables = await asyncio.to_thread(_read_tables_overview, db_path)
@@ -637,11 +640,9 @@ async def handle_list_tables(request: web.Request) -> web.Response:
 
 
 async def handle_table_rows(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/colony/data/tables/{table}/rows"""
-    session, err = resolve_session(request)
-    if err:
-        return err
-    db_path = _resolve_progress_db(session)
+    """GET /api/colonies/{colony_name}/data/tables/{table}/rows"""
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         return web.json_response({"error": "no progress.db"}, status=404)
 
@@ -665,14 +666,12 @@ async def handle_table_rows(request: web.Request) -> web.Response:
 
 
 async def handle_update_row(request: web.Request) -> web.Response:
-    """PATCH /api/sessions/{session_id}/colony/data/tables/{table}/rows
+    """PATCH /api/colonies/{colony_name}/data/tables/{table}/rows
 
     Body: ``{"pk": {col: value, ...}, "updates": {col: value, ...}}``.
     """
-    session, err = resolve_session(request)
-    if err:
-        return err
-    db_path = _resolve_progress_db(session)
+    colony_name = request.match_info["colony_name"]
+    db_path = _resolve_progress_db_by_name(colony_name)
     if db_path is None:
         return web.json_response({"error": "no progress.db"}, status=404)
 
@@ -694,6 +693,7 @@ async def handle_update_row(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register colony worker routes."""
+    # Session-scoped — these read live runtime state from a session.
     app.router.add_get("/api/sessions/{session_id}/workers", handle_list_workers)
     app.router.add_get(
         "/api/sessions/{session_id}/colony/skills", handle_list_colony_skills
@@ -701,22 +701,23 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/sessions/{session_id}/colony/tools", handle_list_colony_tools
     )
+    # Colony-scoped — one progress.db per colony, no session indirection.
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/progress/snapshot",
+        "/api/colonies/{colony_name}/progress/snapshot",
         handle_progress_snapshot,
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/progress/stream",
+        "/api/colonies/{colony_name}/progress/stream",
         handle_progress_stream,
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/data/tables", handle_list_tables
+        "/api/colonies/{colony_name}/data/tables", handle_list_tables
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/colony/data/tables/{table}/rows",
+        "/api/colonies/{colony_name}/data/tables/{table}/rows",
         handle_table_rows,
     )
     app.router.add_patch(
-        "/api/sessions/{session_id}/colony/data/tables/{table}/rows",
+        "/api/colonies/{colony_name}/data/tables/{table}/rows",
         handle_update_row,
     )
