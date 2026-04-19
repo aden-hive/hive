@@ -337,7 +337,7 @@
           "label": "MiMo V2 Pro - Xiaomi multimodal",
           "recommended": true,
           "max_tokens": 64000,
-          "max_context_tokens": 872000
+          "max_context_tokens": 240000
         }
       ]
     }
