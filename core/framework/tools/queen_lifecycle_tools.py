@@ -46,13 +46,10 @@ from typing import TYPE_CHECKING, Any
 from framework.credentials.models import CredentialError
 from framework.host.event_bus import AgentEvent, EventType
 from framework.loader.preload_validation import credential_errors_to_json
-from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
     classify_flowchart_node,
-    load_flowchart_file,
     save_flowchart_file,
-    synthesize_draft_from_runtime,
 )
 
 if TYPE_CHECKING:
@@ -1901,8 +1898,6 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
-<<<<<<< HEAD
-=======
     # --- stop_worker_and_review --------------------------------------------------
 
     async def stop_worker_and_review() -> str:
@@ -2862,7 +2857,6 @@ def register_queen_lifecycle_tools(
     )
     registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
     tools_registered += 1
->>>>>>> origin/main
 
     # --- get_worker_status -----------------------------------------------------
 

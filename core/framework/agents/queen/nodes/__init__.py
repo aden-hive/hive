@@ -4,7 +4,6 @@ import re
 
 from framework.orchestrator import NodeSpec
 
-
 # Wraps prompt sections that should only be shown to vision-capable models.
 # Content inside `<!-- vision-only -->...<!-- /vision-only -->` is kept for
 # vision models and stripped for text-only models. Applied once per session

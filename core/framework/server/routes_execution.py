@@ -512,16 +512,10 @@ async def handle_pause(request: web.Request) -> web.Response:
     # Pause timers so the next tick doesn't restart execution
     runtime.pause_timers()
 
-<<<<<<< HEAD
     # Switch to reviewing — workers stopped, queen now helps the user
     # interpret whatever they produced and decide next steps.
     if session.phase_state is not None:
         await session.phase_state.switch_to_reviewing(source="frontend")
-=======
-    # Only switch to staging once every execution has actually stopped.
-    if session.phase_state is not None and not cancelling:
-        await session.phase_state.switch_to_staging(source="frontend")
->>>>>>> origin/main
 
     return web.json_response(
         {
@@ -754,7 +748,7 @@ async def fork_session_into_colony(
     from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
-    from framework.agent_loop.types import AgentContext, AgentSpec
+    from framework.agent_loop.types import AgentContext
     from framework.host.progress_db import ensure_progress_db, seed_tasks
     from framework.server.session_manager import _queen_session_dir
 

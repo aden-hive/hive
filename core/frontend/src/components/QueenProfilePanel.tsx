@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import { useState, useEffect, useCallback, useRef } from "react";
-=======
-import { useState, useEffect, useRef } from "react";
->>>>>>> origin/main
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { X, MessageSquare, Crown, ChevronRight, Briefcase, Award, Pencil, Check, Loader2, Camera } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
@@ -119,7 +115,6 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
   const name = profile?.name ?? summary?.name ?? "Queen";
   const title = profile?.title ?? summary?.title ?? "";
 
-<<<<<<< HEAD
   // ── Resizable width ──────────────────────────────────────────────────
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 600;
@@ -153,17 +148,6 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
     document.body.style.userSelect = "none";
   }, [width]);
 
-  return (
-    <aside
-      className="flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto relative"
-      style={{ width }}
-    >
-      {/* Drag handle */}
-      <div
-        onMouseDown={onDragStart}
-        className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10"
-      />
-=======
   const inputCls = "w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40";
   const textareaCls = `${inputCls} resize-none`;
 
@@ -198,8 +182,15 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
   );
 
   return (
-    <aside className="w-[340px] flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto overscroll-contain">
->>>>>>> origin/main
+    <aside
+      className="flex-shrink-0 border-l border-border/60 bg-card overflow-y-auto overscroll-contain relative"
+      style={{ width }}
+    >
+      {/* Drag handle */}
+      <div
+        onMouseDown={onDragStart}
+        className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10"
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">

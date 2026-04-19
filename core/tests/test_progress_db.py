@@ -11,13 +11,12 @@ import pytest
 
 from framework.host.progress_db import (
     SCHEMA_VERSION,
+    enqueue_task,
     ensure_all_colony_dbs,
     ensure_progress_db,
-    enqueue_task,
     reclaim_stale,
     seed_tasks,
 )
-
 
 # ----------------------------------------------------------------------
 # Schema / init

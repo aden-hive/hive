@@ -680,7 +680,11 @@ class ColonyRuntime:
                 )
                 _pre.load()
                 _spawn_catalog = _pre.skills_catalog_prompt
-                _spawn_skill_dirs = list(_pre.allowlisted_dirs) if hasattr(_pre, "allowlisted_dirs") else self.skill_dirs
+                _spawn_skill_dirs = (
+                    list(_pre.allowlisted_dirs)
+                    if hasattr(_pre, "allowlisted_dirs")
+                    else self.skill_dirs
+                )
                 logger.info(
                     "spawn: pre-activated hive.colony-progress-tracker "
                     "(catalog %d → %d chars) for worker with db_path=%s",
