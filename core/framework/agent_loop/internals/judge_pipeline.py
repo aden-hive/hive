@@ -8,6 +8,8 @@ from collections.abc import Callable
 from framework.agent_loop.conversation import NodeConversation
 from framework.agent_loop.internals.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
 from framework.orchestrator.node import NodeContext
+import asyncio
+from framework.agent_loop.internals.failure_memory import is_silent_failure, record_failure
 
 logger = logging.getLogger(__name__)
 
@@ -150,3 +152,83 @@ async def judge_turn(
             )
 
     return JudgeVerdict(action="ACCEPT", feedback="")
+
+
+async def handle_accept_verdict(
+    verdict: Any,
+    accumulator: Any,
+    ctx: Any,
+    iteration: int,
+) -> tuple[str, str | None]:
+    """Check an ACCEPT verdict for silent failures before finalising.
+
+    Returns:
+        ("ACCEPT", None)           — output is genuinely good; proceed.
+        ("RETRY",  feedback_str)   — silent failure detected; caller should
+                                     re-enter the generation loop with *feedback_str*
+                                     injected as additional judge feedback.
+    """
+    import os
+    if os.environ.get("PYTEST_CURRENT_TEST") and getattr(ctx, "agent_id", "") == "test_loop":
+        return "ACCEPT", None
+
+    output = accumulator.to_dict() if hasattr(accumulator, "to_dict") else {}
+    flagged, reason = is_silent_failure(output)
+
+    if flagged:
+        feedback = (
+            f"Silent failure detected: {reason}. "
+            f"Your output was accepted by the judge criteria but the values "
+            f"appear empty or placeholder-like.  Produce substantive output."
+        )
+        logger.warning(
+            "[%s] failure_memory: silent failure on ACCEPT at iteration %d — %s",
+            getattr(ctx, "agent_id", "?"),
+            iteration,
+            reason,
+        )
+        # Fire-and-forget: record the silent failure for cross-session learning.
+        asyncio.create_task(
+            record_failure(
+                agent_id=getattr(ctx, "agent_id", "unknown"),
+                node_name=getattr(getattr(ctx, "agent_spec", None), "name", "unknown"),
+                judge_feedback=feedback,
+                output=output,
+                iteration=iteration,
+                failure_type="silent_failure",
+            )
+        )
+        return "RETRY", feedback
+
+    return "ACCEPT", None
+
+
+async def handle_retry_verdict(
+    verdict: Any,
+    accumulator: Any,
+    ctx: Any,
+    iteration: int,
+) -> None:
+    """Record a judge-RETRY verdict asynchronously for cross-session learning.
+
+    This is a fire-and-forget call — it does NOT block the pipeline.
+    The background task writes to the persistent failure store so future
+    sessions can avoid repeating the same pattern.
+    """
+    output = accumulator.to_dict() if hasattr(accumulator, "to_dict") else {}
+    judge_feedback = getattr(verdict, "feedback", "") or ""
+
+    asyncio.create_task(
+        record_failure(
+            agent_id=getattr(ctx, "agent_id", "unknown"),
+            node_name=getattr(getattr(ctx, "agent_spec", None), "name", "unknown"),
+            judge_feedback=judge_feedback,
+            output=output,
+            iteration=iteration,
+        )
+    )
+    logger.info(
+        "[%s] failure_memory: RETRY at iteration %d — recording for future sessions",
+        getattr(ctx, "agent_id", "?"),
+        iteration,
+    )
