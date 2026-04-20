@@ -1173,6 +1173,37 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def _as_clean_text(value: Any) -> str:
+    """Return a stripped string, or an empty string for non-string values."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _sentence(value: Any) -> str:
+    text = _as_clean_text(value)
+    if not text:
+        return ""
+    return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
+def _profile_text_to_instruction(text: Any) -> str:
+    instruction = _sentence(text)
+    replacements = {
+        "She thrives": "You thrive",
+        "she thrives": "you thrive",
+        "She's ": "You are ",
+        "she's ": "you are ",
+        "She is ": "You are ",
+        "she is ": "you are ",
+        "She ": "You ",
+        "she ": "you ",
+        "Her ": "Your ",
+        "her ": "your ",
+    }
+    for old, new in replacements.items():
+        instruction = instruction.replace(old, new)
+    return instruction
+
+
 def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int | None = None) -> str:
     """Convert a queen profile into a high-dimensional character prompt.
 
@@ -1199,35 +1230,35 @@ def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int |
     sections: list[str] = []
 
     # Pillar 1: Core identity
-    sections.append(f"<core_identity>\nName: {name}, Identity: {title}.\n{core}\n</core_identity>")
+    sections.append(f"<core_identity>\nYou are {name}, {title}.\n{core}\n</core_identity>")
 
     # Pillar 2: Hidden background (behavioral engine, never surfaced)
     if bg:
         sections.append(
-            f"<hidden_background>\n"
-            f"(Strictly hidden from users -- acts as your underlying "
-            f"behavioral engine)\n"
+            "<hidden_background>\n"
+            "(Strictly hidden from users -- acts as your underlying "
+            "behavioral engine)\n"
             f"- Past Wound: {bg.get('past_wound', '')}\n"
             f"- Deep Motive: {bg.get('deep_motive', '')}\n"
             f"- Behavioral Mapping: {bg.get('behavioral_mapping', '')}\n"
-            f"</hidden_background>"
+            "</hidden_background>"
         )
 
     # Pillar 3: Psychological profile
     if psych:
         sections.append(
-            f"<psychological_profile>\n"
-            f"- Social Masks & Boundaries: "
+            "<psychological_profile>\n"
+            "- Social Masks & Boundaries: "
             f"{psych.get('social_masks', '')}\n"
-            f"- Anti-Stereotype Rules: "
-            f"{psych.get('anti_stereotype', '')}\n"
-            f"</psychological_profile>"
+            "- Anti-Stereotype Rules: "
+            f"{_profile_text_to_instruction(psych.get('anti_stereotype'))}\n"
+            "</psychological_profile>"
         )
 
     # Pillar 4: Behavior rules
     trigger_lines = []
     for t in triggers:
-        trigger_lines.append(f"  - [{t.get('trigger', '')}]: {t.get('reaction', '')}")
+        trigger_lines.append(f"  - [{t.get('trigger', '')}]: {_profile_text_to_instruction(t.get('reaction'))}")
     sections.append(
         "<behavior_rules>\n"
         "- Before each response, internally assess:\n"
