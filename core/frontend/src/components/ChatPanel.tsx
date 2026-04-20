@@ -1006,6 +1006,19 @@ export default function ChatPanel({
           // it. Break so the grouping stops and the queen pill
           // renders inline.
           if (m.type === "tool_status" && m.role === "queen") break;
+          // Trigger banner — scheduler/webhook fire marking a new
+          // queen turn. Must not fold into a stale worker run that
+          // happens to precede it (see also MessageBubble's
+          // ``type === "trigger"`` render at the amber banner).
+          if (m.type === "trigger") break;
+          // Other session-wide banners: colony link, inherited block,
+          // system notices — none of these belong inside a worker run.
+          if (
+            m.type === "colony_link" ||
+            m.type === "inherited_block" ||
+            m.type === "system"
+          )
+            break;
           // Subagent message — different group type, stop here
           if (m.nodeId?.includes(":subagent:")) break;
 
