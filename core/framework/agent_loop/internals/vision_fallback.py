@@ -203,9 +203,7 @@ async def caption_tool_image(
     # with "LLM Provider NOT provided."
     from framework.llm.litellm import rewrite_proxy_model
 
-    rewritten_model, rewritten_base, extra_headers = rewrite_proxy_model(
-        model, api_key, api_base
-    )
+    rewritten_model, rewritten_base, extra_headers = rewrite_proxy_model(model, api_key, api_base)
 
     kwargs: dict[str, Any] = {
         "model": rewritten_model,

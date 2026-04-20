@@ -803,5 +803,14 @@ class CredentialStore:
             return cls(storage=local_storage, **kwargs)
 
         except Exception as e:
-            logger.warning(f"Failed to setup Aden sync: {e}. Using local storage.")
-            return cls(storage=local_storage, **kwargs)
+            from .models import CredentialError
+
+            logger.error(
+                "Aden sync initialization failed with ADEN_API_KEY configured: %s",
+                e,
+            )
+            raise CredentialError(
+                f"Failed to initialize Aden sync: {e}. "
+                "ADEN_API_KEY is set but the sync provider could not start. "
+                "Fix the configuration or unset ADEN_API_KEY to use local storage."
+            ) from e
