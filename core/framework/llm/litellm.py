@@ -2294,7 +2294,21 @@ class LiteLLMProvider(LLMProvider):
                     )
                     await asyncio.sleep(wait)
                     continue
-                yield StreamErrorEvent(error=str(e), recoverable=False)
+                logger.error(
+                    "[stream] %s: rate limit exhausted after %d attempts: %s",
+                    self.model,
+                    RATE_LIMIT_MAX_RETRIES,
+                    e,
+                )
+                yield StreamErrorEvent(
+                    error=(
+                        f"Rate limit exceeded for model '{self.model}'. "
+                        f"All {RATE_LIMIT_MAX_RETRIES} retry attempts exhausted. "
+                        "Please wait before retrying, reduce request frequency, "
+                        "or check your quota."
+                    ),
+                    recoverable=False,
+                )
                 return
 
             except Exception as e:
