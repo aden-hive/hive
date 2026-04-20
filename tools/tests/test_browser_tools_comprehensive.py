@@ -411,19 +411,19 @@ class TestTabLifecycle:
                 assert close_result.get("ok") is True
 
     @pytest.mark.asyncio
-    async def test_tab_focus_switching(self, mcp: FastMCP, mock_bridge: MagicMock):
-        """Test switching focus between tabs."""
+    async def test_tab_activate_switching(self, mcp: FastMCP, mock_bridge: MagicMock):
+        """Test switching the active tab."""
         mock_bridge.activate_tab = AsyncMock(return_value={"ok": True})
 
         register_tab_tools(mcp)
-        browser_focus = mcp._tool_manager._tools["browser_focus"].fn
+        browser_activate_tab = mcp._tool_manager._tools["browser_activate_tab"].fn
 
         with patch("gcu.browser.tools.tabs.get_bridge", return_value=mock_bridge):
             with patch(
                 "gcu.browser.tools.tabs._get_context",
                 return_value={"groupId": 1, "activeTabId": 100},
             ):
-                result = await browser_focus(tab_id=200)
+                result = await browser_activate_tab(tab_id=200)
 
         assert result.get("ok") is True
         mock_bridge.activate_tab.assert_awaited_once_with(200)

@@ -1,5 +1,5 @@
 """
-Browser tab management tools - tabs, open, close, focus.
+Browser tab management tools - tabs, open, close, activate.
 
 All operations go through the Beeline extension - no Playwright required.
 """
@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from ..bridge import get_bridge
 from ..session import _active_profile
@@ -232,16 +233,33 @@ def register_tab_tools(mcp: FastMCP) -> None:
             return result
 
     @mcp.tool()
-    async def browser_focus(tab_id: int, profile: str | None = None) -> dict:
+    async def browser_activate_tab(
+        tab_id: Annotated[
+            int,
+            Field(
+                description=(
+                    "REQUIRED. Integer Chrome tab ID of the tab to switch to. "
+                    "Must be a concrete integer (not null). "
+                    "Call browser_tabs first to list available tabs and their IDs."
+                ),
+            ),
+        ],
+        profile: str | None = None,
+    ) -> dict:
         """
-        Focus a browser tab.
+        Switch the active browser tab to the given tab ID.
+
+        Use this to bring an existing tab to the foreground before interacting
+        with it. The ``tab_id`` argument is required and must be an integer
+        returned by ``browser_tabs``; passing null/None is not supported (use
+        ``browser_tabs`` to discover a valid ID first).
 
         Args:
-            tab_id: Chrome tab ID to focus
+            tab_id: Chrome tab ID to activate. Required integer.
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with focus status
+            Dict with activation status
         """
         start = time.perf_counter()
         params = {"tab_id": tab_id, "profile": profile}
@@ -249,13 +267,13 @@ def register_tab_tools(mcp: FastMCP) -> None:
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
             result = {"ok": False, "error": "Browser extension not connected"}
-            log_tool_call("browser_focus", params, result=result)
+            log_tool_call("browser_activate_tab", params, result=result)
             return result
 
         ctx = _get_context(profile)
         if not ctx:
             result = {"ok": False, "error": "Browser not started. Call browser_start first."}
-            log_tool_call("browser_focus", params, result=result)
+            log_tool_call("browser_activate_tab", params, result=result)
             return result
 
         try:
@@ -263,7 +281,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
             ctx["activeTabId"] = tab_id
             result = {"ok": True, "tabId": tab_id}
             log_tool_call(
-                "browser_focus",
+                "browser_activate_tab",
                 params,
                 result=result,
                 duration_ms=(time.perf_counter() - start) * 1000,
@@ -271,7 +289,12 @@ def register_tab_tools(mcp: FastMCP) -> None:
             return result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call("browser_focus", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
+            log_tool_call(
+                "browser_activate_tab",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
             return result
 
     @mcp.tool()

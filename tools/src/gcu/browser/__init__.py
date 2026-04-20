@@ -42,7 +42,7 @@ def register_tools(mcp: FastMCP) -> None:
 
     Tools are organized into categories:
     - Lifecycle: browser_start, browser_stop, browser_status
-    - Tabs: browser_tabs, browser_open, browser_close, browser_focus
+    - Tabs: browser_tabs, browser_open, browser_close, browser_activate_tab
     - Navigation: browser_navigate, browser_go_back, browser_go_forward, browser_reload
     - Inspection: browser_screenshot, browser_snapshot, browser_console
     - Interactions: browser_click, browser_click_coordinate, browser_type, browser_type_focused,
