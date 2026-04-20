@@ -1573,6 +1573,14 @@ def register_queen_lifecycle_tools(
                             "skill_name": installed_skill.name if installed_skill else None,
                             "skill_replaced": skill_replaced,
                             "task": (task or "").strip(),
+                            # "in_progress" means the inherited
+                            # transcript is still being compacted in
+                            # the background; opening the colony will
+                            # block on that until it finishes. "skipped"
+                            # means no compaction was needed.
+                            "compaction_status": fork_result.get(
+                                "compaction_status", "skipped"
+                            ),
                         },
                     )
                 )
@@ -1649,6 +1657,11 @@ def register_queen_lifecycle_tools(
                 "skill_replaced": skill_replaced,
                 "db_path": fork_result.get("db_path"),
                 "tasks_seeded": len(fork_result.get("task_ids") or []),
+                # Transcript compaction runs in the background; opening
+                # the colony blocks on this marker until it finishes.
+                "compaction_status": fork_result.get(
+                    "compaction_status", "skipped"
+                ),
             }
         )
 

@@ -379,6 +379,13 @@ export function replayEvent(
  * Replay an entire event array and return a deduplicated, chronologically
  * sorted ChatMessage list. Used by cold-restore paths so refreshed
  * sessions match the live stream exactly.
+ *
+ * If the events stream contains a ``colony_fork_marker`` event (emitted
+ * by ``fork_session_into_colony`` after compacting the parent transcript),
+ * every message produced from events PRECEDING the marker is folded into
+ * a single ``inherited_block`` ChatMessage. The colony page renders that
+ * block as a collapsible widget so the inherited DM history is one click
+ * away without dominating the colony's own chat.
  */
 export function replayEventsToMessages(
   events: AgentEvent[],
@@ -388,14 +395,71 @@ export function replayEventsToMessages(
   const state = newReplayState();
   // Upsert by id — later emissions for the same pill replace earlier ones.
   const byId = new Map<string, ChatMessage>();
+
+  // Track the marker (if any) and which message ids belong to the
+  // inherited prefix. A single fork can only happen once per session so
+  // we only need to remember the first marker we encounter.
+  let markerEvent: AgentEvent | null = null;
+  let markerCreatedAt: number | null = null;
+  const inheritedIds = new Set<string>();
+
   for (const evt of events) {
+    if (evt.type === "colony_fork_marker") {
+      if (markerEvent === null) {
+        markerEvent = evt;
+        markerCreatedAt = evt.timestamp
+          ? new Date(evt.timestamp).getTime()
+          : Date.now();
+        // Snapshot every id seen so far — those are the ones to fold
+        // into the inherited block.
+        for (const id of byId.keys()) inheritedIds.add(id);
+      }
+      continue;
+    }
     for (const m of replayEvent(state, evt, thread, agentDisplayName)) {
       byId.set(m.id, m);
     }
   }
-  return Array.from(byId.values()).sort(
+
+  const all = Array.from(byId.values()).sort(
     (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
   );
+
+  if (markerEvent === null || inheritedIds.size === 0) return all;
+
+  const inherited: ChatMessage[] = [];
+  const native: ChatMessage[] = [];
+  for (const msg of all) {
+    if (inheritedIds.has(msg.id)) inherited.push(msg);
+    else native.push(msg);
+  }
+  if (inherited.length === 0) return all;
+
+  const markerData = markerEvent.data || {};
+  const block: ChatMessage = {
+    id: `inherited-block-${markerEvent.timestamp || "fork"}`,
+    agent: "System",
+    agentColor: "",
+    type: "inherited_block",
+    content: JSON.stringify({
+      parent_session_id: markerData.parent_session_id ?? null,
+      fork_time: markerData.fork_time ?? markerEvent.timestamp ?? null,
+      summary_preview: markerData.summary_preview ?? "",
+      inherited_message_count:
+        typeof markerData.inherited_message_count === "number"
+          ? markerData.inherited_message_count
+          : inherited.length,
+      messages: inherited,
+    }),
+    timestamp: markerEvent.timestamp || "",
+    thread,
+    // Place the block at the marker's timestamp so it sorts immediately
+    // before the first native message (the marker is always written
+    // AFTER the inherited content).
+    createdAt: markerCreatedAt ?? inherited[inherited.length - 1].createdAt ?? 0,
+  };
+
+  return [block, ...native];
 }
 
 type QueenPhase = "planning" | "building" | "staging" | "running" | "independent";

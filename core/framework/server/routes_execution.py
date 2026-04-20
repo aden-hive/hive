@@ -16,6 +16,11 @@ from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
 
+# Strong refs to background fork-finalize tasks (compaction + worker-conv
+# copy) so asyncio doesn't GC them mid-run. fork_session_into_colony
+# schedules into this set and the done-callback evicts on completion.
+_BACKGROUND_FORK_TASKS: set[asyncio.Task[None]] = set()
+
 
 def _load_checkpoint_run_id(cp_path) -> str | None:
     try:
@@ -763,36 +768,122 @@ async def handle_mark_colony_spawned(request: web.Request) -> web.Response:
     )
 
 
+async def _compact_queen_conversation_in_place(
+    *,
+    queen_dir: Any,
+    queen_ctx: Any,
+    queen_loop: Any,
+    inherited_from: str | None = None,
+) -> tuple[int, int, str] | None:
+    """Compact ``queen_dir/conversations`` into one summary message in place.
+
+    Reads ``parts/`` via :class:`FileConversationStore`, runs
+    :func:`llm_compact` with ``preserve_user_messages=True``, wipes
+    ``parts/`` + ``partials/`` and writes a single ``user``-role
+    :class:`Message` (seq 0) tagged with ``inherited_from`` when provided,
+    then resets ``cursor.json`` to ``next_seq=1``.  ``events.jsonl`` is
+    NOT touched — callers decide whether to wipe it (compact-and-fork)
+    or append a boundary marker (colony fork).
+
+    Returns ``(messages_compacted, summary_chars, summary_text)`` on
+    success, or ``None`` when there is nothing to do (no LLM ctx, no
+    conversation directory, or no messages on disk).  Raises on LLM or
+    filesystem failure so the caller can decide between user-facing
+    error response (compact-and-fork) and silent fall-through (colony
+    fork keeps the raw transcript).
+    """
+    import shutil as _shutil
+
+    from framework.agent_loop.conversation import Message
+    from framework.agent_loop.internals.compaction import llm_compact
+    from framework.storage.conversation_store import FileConversationStore
+
+    if queen_ctx is None or getattr(queen_ctx, "llm", None) is None:
+        return None
+
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return None
+
+    src_store = FileConversationStore(convs_dir)
+    raw_parts = await src_store.read_parts()
+    messages: list[Message] = []
+    for part in raw_parts:
+        try:
+            messages.append(Message.from_storage_dict(part))
+        except (KeyError, TypeError):
+            # Skip malformed parts; the summary still covers everything else.
+            logger.warning("compact_in_place: skipping malformed part %r", part)
+            continue
+    if not messages:
+        return None
+
+    max_ctx_tokens = 180_000
+    loop_cfg = getattr(queen_loop, "_config", None)
+    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
+        max_ctx_tokens = int(loop_cfg.max_context_tokens)
+
+    summary = await llm_compact(
+        queen_ctx,
+        messages,
+        accumulator=None,
+        max_context_tokens=max_ctx_tokens,
+        preserve_user_messages=True,
+    )
+
+    parts_dir = convs_dir / "parts"
+    partials_dir = convs_dir / "partials"
+
+    def _wipe_stores() -> None:
+        if parts_dir.exists():
+            _shutil.rmtree(parts_dir)
+        if partials_dir.exists():
+            _shutil.rmtree(partials_dir)
+
+    await asyncio.to_thread(_wipe_stores)
+
+    summary_msg = Message(
+        seq=0,
+        role="user",
+        content=summary,
+        inherited_from=inherited_from,
+    )
+    dest_store = FileConversationStore(convs_dir)
+    await dest_store.write_part(0, summary_msg.to_storage_dict())
+    await dest_store.write_cursor({"next_seq": 1})
+
+    return (len(messages), len(summary), summary)
+
+
 async def handle_compact_and_fork(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/compact-and-fork -- compact + new session.
 
     The locked-by-colony-spawn UI calls this when the user clicks "compact
     + start a new session with the same queen". The flow:
 
-    1. Read the queen's full conversation off disk.
-    2. Run the LLM compactor with ``preserve_user_messages=True`` so every
-       user turn survives verbatim into the summary.
-    3. Mint a fresh session ID, copy the old queen-session dir to the new
-       location, then replace the conversation parts with a single
-       summary message and reset the cursor. The new session starts with
-       a clean event log.
-    4. Spin up a live session bound to the new dir using the same queen
-       identity. The OLD session stays alive but locked; the user
-       navigates to the new session in the response.
+    1. Mint a fresh session ID and copy the old queen-session dir to it.
+    2. Run the shared :func:`_compact_queen_conversation_in_place` helper
+       on the copy, which reads the parts, runs the LLM compactor with
+       ``preserve_user_messages=True``, and replaces ``parts/`` with a
+       single summary message.
+    3. Wipe ``events.jsonl`` so the new session presents a clean SSE
+       replay (the parent's events would otherwise show up in the new
+       chat as ghost history).
+    4. Update meta.json (clear the parent's lock, record provenance) and
+       spin up the live session.
+
+    The OLD session stays alive but locked; the user navigates to the
+    new session via the response.
     """
-    import asyncio
     import shutil
     import time as _time
     from datetime import datetime as _dt
 
-    from framework.agent_loop.conversation import Message
-    from framework.agent_loop.internals.compaction import llm_compact
     from framework.agent_loop.types import AgentContext
     from framework.server.session_manager import (
         _generate_session_id,
         _queen_session_dir,
     )
-    from framework.storage.conversation_store import FileConversationStore
 
     session, err = resolve_session(request)
     if err:
@@ -822,51 +913,6 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
         )
 
     queen_name = session.queen_name or "default"
-    convs_dir = queen_dir / "conversations"
-    if not convs_dir.exists():
-        return web.json_response(
-            {"error": "queen has no conversation history yet"},
-            status=400,
-        )
-
-    src_store = FileConversationStore(convs_dir)
-    raw_parts = await src_store.read_parts()
-    messages: list[Message] = []
-    for part in raw_parts:
-        try:
-            messages.append(Message.from_storage_dict(part))
-        except (KeyError, TypeError):
-            # Skip malformed parts rather than failing the whole compaction;
-            # the summary will note the gap if needed.
-            logger.warning("compact_and_fork: skipping malformed part %r", part)
-            continue
-    if not messages:
-        return web.json_response(
-            {"error": "queen conversation is empty -- nothing to compact"},
-            status=400,
-        )
-
-    # Run the LLM compactor with preserve_user_messages so the new session
-    # carries every user turn forward. Failures here are user-visible
-    # because the whole point of the action is the compacted summary.
-    try:
-        max_ctx_tokens = 180_000
-        loop_cfg = getattr(queen_node, "_config", None)
-        if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
-            max_ctx_tokens = int(loop_cfg.max_context_tokens)
-        summary = await llm_compact(
-            queen_ctx,
-            messages,
-            accumulator=None,
-            max_context_tokens=max_ctx_tokens,
-            preserve_user_messages=True,
-        )
-    except Exception as exc:
-        logger.exception("compact_and_fork: llm_compact failed")
-        return web.json_response(
-            {"error": f"compaction failed: {exc}"},
-            status=500,
-        )
 
     new_session_id = _generate_session_id()
     new_dir = _queen_session_dir(new_session_id, queen_name)
@@ -886,31 +932,37 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
             status=500,
         )
 
-    # Replace parts/ with the single compacted summary; clear partials and
-    # the event log so the new session presents a clean SSE replay.
-    new_parts_dir = new_dir / "conversations" / "parts"
-    new_partials_dir = new_dir / "conversations" / "partials"
-    new_events_path = new_dir / "events.jsonl"
-
-    def _cleanup_forked_dir() -> None:
-        if new_parts_dir.exists():
-            shutil.rmtree(new_parts_dir)
-        if new_partials_dir.exists():
-            shutil.rmtree(new_partials_dir)
-        if new_events_path.exists():
-            new_events_path.unlink()
-
+    # Compact in place against the COPY so the source DM is untouched.
+    # Failures here are user-visible — the whole point of the action is
+    # the compacted summary.
     try:
-        await asyncio.to_thread(_cleanup_forked_dir)
-    except OSError:
-        logger.warning("compact_and_fork: cleanup of forked dir partial-failed", exc_info=True)
+        result = await _compact_queen_conversation_in_place(
+            queen_dir=new_dir,
+            queen_ctx=queen_ctx,
+            queen_loop=queen_node,
+            inherited_from=None,  # this IS the new live session, not an inheritance
+        )
+    except Exception as exc:
+        logger.exception("compact_and_fork: compaction failed")
+        return web.json_response(
+            {"error": f"compaction failed: {exc}"},
+            status=500,
+        )
+    if result is None:
+        return web.json_response(
+            {"error": "queen conversation is empty -- nothing to compact"},
+            status=400,
+        )
+    messages_compacted, summary_chars, _summary_text = result
 
-    # Write the summary as message seq 0 so the new queen wakes up with a
-    # single user-role primer that contains everything she needs.
-    summary_msg = Message(seq=0, role="user", content=summary)
-    dest_store = FileConversationStore(new_dir / "conversations")
-    await dest_store.write_part(0, summary_msg.to_storage_dict())
-    await dest_store.write_cursor({"next_seq": 1})
+    # Clean partials are already gone; also wipe events.jsonl so the new
+    # session's SSE replay starts fresh (the helper deliberately leaves
+    # events.jsonl alone so the colony-fork path can append a marker).
+    new_events_path = new_dir / "events.jsonl"
+    try:
+        await asyncio.to_thread(lambda: new_events_path.exists() and new_events_path.unlink())
+    except OSError:
+        logger.warning("compact_and_fork: failed to wipe events.jsonl", exc_info=True)
 
     # Update meta.json: clear the lock and record provenance.
     new_meta_path = new_dir / "meta.json"
@@ -952,8 +1004,8 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
             "new_session_id": new_session.id,
             "queen_id": queen_name,
             "compacted_from": session.id,
-            "summary_chars": len(summary),
-            "messages_compacted": len(messages),
+            "summary_chars": summary_chars,
+            "messages_compacted": messages_compacted,
         }
     )
 
@@ -1003,6 +1055,97 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         return web.json_response({"error": f"colony fork failed: {e}"}, status=500)
 
     return web.json_response(result)
+
+
+async def _compact_inherited_conversation(
+    *,
+    dest_queen_dir: Any,
+    queen_ctx: Any,
+    queen_loop: Any,
+    source_session_id: str,
+) -> None:
+    """Compact a freshly-forked colony's inherited transcript in place.
+
+    Thin wrapper over :func:`_compact_queen_conversation_in_place` that
+    tags the resulting summary message with ``inherited_from`` and
+    appends a ``colony_fork_marker`` event to the colony's
+    ``events.jsonl`` so the frontend can group + collapse everything
+    that preceded the fork.
+
+    Called from ``fork_session_into_colony`` after the parent queen
+    session directory has been copied into the colony's queue dir.
+
+    Fail-soft: any exception (compaction, write, marker append) logs a
+    warning and leaves the directory as the raw copytree wrote it.  The
+    colony still works; it just inherits the full DM transcript instead
+    of the summary.
+    """
+    import json as _json
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+
+    try:
+        result = await _compact_queen_conversation_in_place(
+            queen_dir=dest_queen_dir,
+            queen_ctx=queen_ctx,
+            queen_loop=queen_loop,
+            inherited_from=source_session_id,
+        )
+    except Exception:
+        logger.warning(
+            "compact_inherited: compaction failed; leaving raw transcript",
+            exc_info=True,
+        )
+        return
+
+    if result is None:
+        # No queen ctx, no parts on disk, or empty conversation. Nothing
+        # to compact and nothing to mark — the colony will just open with
+        # an empty chat (or whatever raw state was copied).
+        logger.info(
+            "compact_inherited: nothing to compact for colony forked from %s",
+            source_session_id,
+        )
+        return
+
+    messages_compacted, summary_chars, summary_text = result
+
+    # Append the boundary marker to the colony's events.jsonl so the
+    # frontend can group + collapse everything that came before.  The
+    # marker carries the parent session id and a short summary preview
+    # so the collapsed widget has something to label itself with even
+    # before the user expands it.
+    fork_iso = _datetime.now(_UTC).isoformat()
+    marker = {
+        "type": "colony_fork_marker",
+        "stream_id": "queen",
+        "data": {
+            "parent_session_id": source_session_id,
+            "fork_time": fork_iso,
+            "summary_preview": summary_text[:240],
+            "inherited_message_count": messages_compacted,
+        },
+        "timestamp": fork_iso,
+    }
+    events_path = dest_queen_dir / "events.jsonl"
+
+    def _append_marker() -> None:
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(events_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(marker) + "\n")
+
+    try:
+        await asyncio.to_thread(_append_marker)
+    except OSError:
+        logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
+
+    logger.info(
+        "compact_inherited: compacted %d parent message(s) -> 1 summary "
+        "(%d chars) for colony forked from %s",
+        messages_compacted,
+        summary_chars,
+        source_session_id,
+    )
 
 
 async def fork_session_into_colony(
@@ -1296,6 +1439,11 @@ async def fork_session_into_colony(
         dest_meta["queen_id"] = queen_name
         dest_meta["forked_from"] = session.id
         dest_meta["colony_fork"] = True  # exclude from queen DM history
+        # Clear any colony_spawned lock that came over from the parent meta —
+        # it was the PARENT session that locked, not this freshly-forked one.
+        dest_meta.pop("colony_spawned", None)
+        dest_meta.pop("spawned_colony_name", None)
+        dest_meta.pop("spawned_colony_at", None)
         dest_meta_path.write_text(json.dumps(dest_meta, ensure_ascii=False), encoding="utf-8")
         logger.info(
             "Duplicated queen session %s -> %s for colony '%s'",
@@ -1303,15 +1451,110 @@ async def fork_session_into_colony(
             colony_session_id,
             colony_name,
         )
-        # Copy queen conversations into worker storage so the worker
-        # starts with the queen's full context.
-        worker_storage = Path.home() / ".hive" / "agents" / colony_name / worker_name
-        worker_storage.mkdir(parents=True, exist_ok=True)
-        worker_conv_dir = worker_storage / "conversations"
-        source_conv_dir = dest_queen_dir / "conversations"
-        if source_conv_dir.exists():
-            await asyncio.to_thread(shutil.copytree, source_conv_dir, worker_conv_dir, dirs_exist_ok=True)
-            logger.info("Copied queen conversations to worker storage %s", worker_conv_dir)
+
+        # ── 3a. Compact the inherited conversation (fire-and-forget) ──
+        # The colony queen doesn't need the full DM transcript — that
+        # transcript was about REACHING the decision to fork, which is
+        # now settled. Compaction replaces the copied parts with a
+        # single summary message tagged ``inherited_from``.
+        #
+        # Compaction issues an LLM call that can legitimately exceed
+        # the 60s tool-call timeout, so we schedule it (plus the
+        # downstream worker-storage copy) as a background task and
+        # return immediately. A compaction_status.json marker in
+        # dest_queen_dir lets a subsequent colony session-load await
+        # completion before reading the conversation files (see
+        # session_manager.create_session_with_worker_colony).
+        #
+        # Fail-soft: any exception is logged and recorded in the
+        # marker; the colony still works with the raw transcript.
+        from framework.server import compaction_status
+
+        compaction_status.mark_in_progress(dest_queen_dir)
+
+        _worker_storage = Path.home() / ".hive" / "agents" / colony_name / worker_name
+        _dest_queen_dir = dest_queen_dir
+        _queen_ctx = queen_ctx
+        _queen_loop = queen_loop
+        _source_session_id = session.id
+
+        # Wall-clock cap on the background compaction's LLM call.
+        # Without this a hung/misbehaving model (seen with local
+        # endpoints) leaves compaction_status="in_progress" forever and
+        # the colony-open await_completion waste its full poll window
+        # before giving up. When this fires we still fall through to
+        # the worker-storage copy below so the colony opens with the
+        # raw transcript instead of empty state.
+        _COMPACTION_TIMEOUT_SECONDS = 180.0
+
+        async def _finalize_fork() -> None:
+            compaction_error: str | None = None
+            try:
+                await asyncio.wait_for(
+                    _compact_inherited_conversation(
+                        dest_queen_dir=_dest_queen_dir,
+                        queen_ctx=_queen_ctx,
+                        queen_loop=_queen_loop,
+                        source_session_id=_source_session_id,
+                    ),
+                    timeout=_COMPACTION_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                compaction_error = (
+                    f"compaction timed out after {_COMPACTION_TIMEOUT_SECONDS:.0f}s "
+                    "(falling back to raw transcript)"
+                )
+                logger.warning(
+                    "fork_session_into_colony: %s for %s",
+                    compaction_error,
+                    _dest_queen_dir,
+                )
+            except Exception as exc:
+                compaction_error = f"compaction failed: {exc}"
+                logger.warning(
+                    "fork_session_into_colony: %s for %s "
+                    "(falling back to raw transcript)",
+                    compaction_error,
+                    _dest_queen_dir,
+                    exc_info=True,
+                )
+
+            # Worker storage copy runs regardless of the compaction
+            # outcome. If compaction succeeded, the worker gets the
+            # summary; if it failed / timed out, dest_queen_dir still
+            # has the raw transcript from the earlier copytree and the
+            # worker gets that. Without this copy-on-failure the worker
+            # would open to empty state on every compaction hiccup.
+            try:
+                _worker_storage.mkdir(parents=True, exist_ok=True)
+                worker_conv_dir = _worker_storage / "conversations"
+                source_conv_dir = _dest_queen_dir / "conversations"
+                if source_conv_dir.exists():
+                    await asyncio.to_thread(
+                        shutil.copytree,
+                        source_conv_dir,
+                        worker_conv_dir,
+                        dirs_exist_ok=True,
+                    )
+                    logger.info(
+                        "Copied queen conversations to worker storage %s",
+                        worker_conv_dir,
+                    )
+            except Exception:
+                logger.warning(
+                    "fork_session_into_colony: worker-storage copy failed for %s",
+                    _worker_storage,
+                    exc_info=True,
+                )
+
+            if compaction_error:
+                compaction_status.mark_failed(_dest_queen_dir, compaction_error)
+            else:
+                compaction_status.mark_done(_dest_queen_dir)
+
+        _bg_task = asyncio.create_task(_finalize_fork())
+        _BACKGROUND_FORK_TASKS.add(_bg_task)
+        _bg_task.add_done_callback(_BACKGROUND_FORK_TASKS.discard)
     else:
         logger.warning(
             "Queen session dir %s not found, colony will start fresh",
@@ -1371,6 +1614,14 @@ async def fork_session_into_colony(
         "is_new": is_new,
         "db_path": str(db_path),
         "task_ids": seeded_task_ids,
+        # "in_progress" when a background compactor was scheduled above,
+        # "skipped" when the source queen dir was missing (nothing to
+        # compact). Frontend uses this to decide whether to display a
+        # "preparing colony…" state while session-load blocks on the
+        # compaction marker.
+        "compaction_status": (
+            "in_progress" if source_queen_dir.exists() else "skipped"
+        ),
     }
 
 

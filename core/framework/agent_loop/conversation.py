@@ -56,6 +56,11 @@ class Message:
     # from a crashed or watchdog-cancelled stream. Signals that the original
     # turn never finished — the model may or may not choose to redo it.
     truncated: bool = False
+    # When non-None, identifies the parent session id this message was
+    # carried over from — used by fork_session_into_colony on the single
+    # compacted-summary message it writes when a colony is born from a
+    # queen DM. Presence of the field IS the "inherited" signal.
+    inherited_from: str | None = None
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -121,6 +126,8 @@ class Message:
             d["is_system_nudge"] = self.is_system_nudge
         if self.truncated:
             d["truncated"] = self.truncated
+        if self.inherited_from is not None:
+            d["inherited_from"] = self.inherited_from
         return d
 
     @classmethod
@@ -140,6 +147,7 @@ class Message:
             run_id=data.get("run_id"),
             is_system_nudge=data.get("is_system_nudge", False),
             truncated=data.get("truncated", False),
+            inherited_from=data.get("inherited_from"),
         )
 
 

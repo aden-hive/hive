@@ -51,7 +51,8 @@ export interface ChatMessage {
     | "tool_status"
     | "worker_input_request"
     | "run_divider"
-    | "colony_link";
+    | "colony_link"
+    | "inherited_block";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -136,6 +137,11 @@ interface ChatPanelProps {
   onCompactAndFork?: () => void;
   /** When true, disable the compact-and-fork button (request in flight). */
   compactingAndForking?: boolean;
+  /** Called when the user clicks "Start new session" on the locked view.
+   *  Should create a fresh session for the same queen without compacting. */
+  onStartNewSession?: () => void;
+  /** When true, disable the start-new-session button (request in flight). */
+  startingNewSession?: boolean;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -490,6 +496,72 @@ function InlineAskUserBubble({
   );
 }
 
+function InheritedBlock({
+  content,
+  renderMessage,
+}: {
+  content: string;
+  renderMessage: (msg: ChatMessage) => React.ReactNode;
+}) {
+  // Default to collapsed — the colony's own conversation is what the
+  // user navigated for; the inherited DM transcript is one click away.
+  const [open, setOpen] = useState(false);
+  let parsed: {
+    parent_session_id?: string | null;
+    fork_time?: string | null;
+    summary_preview?: string;
+    inherited_message_count?: number;
+    messages?: ChatMessage[];
+  } = {};
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    // fall through to a degraded "Inherited from previous chat" affordance
+  }
+  const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+  const count =
+    typeof parsed.inherited_message_count === "number"
+      ? parsed.inherited_message_count
+      : messages.length;
+  const preview = (parsed.summary_preview || "").trim();
+
+  return (
+    <div className="my-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 text-[11px] text-muted-foreground bg-muted/30 hover:bg-muted/50 px-3 py-2 rounded-md border border-border/40 transition-colors"
+      >
+        <span className="font-medium">
+          {open ? "▼" : "▶"} Inherited from previous queen DM
+        </span>
+        <span className="text-muted-foreground/70">
+          ({count} message{count === 1 ? "" : "s"})
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-2 pl-3 border-l-2 border-border/40 space-y-2">
+          {messages.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground italic px-2 py-1">
+              {preview || "No messages preserved."}
+            </div>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className="opacity-80">
+                {renderMessage(m)}
+              </div>
+            ))
+          )}
+        </div>
+      ) : preview ? (
+        <div className="mt-1 text-[11px] text-muted-foreground/80 italic px-3 line-clamp-2">
+          {preview}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function QueenAvatarIcon({ url, size }: { url: string | null; size: number }) {
   const [ok, setOk] = useState(!!url);
   const dim = size === 9 ? "w-9 h-9" : "w-7 h-7";
@@ -598,6 +670,24 @@ const MessageBubble = memo(
             </span>
           </Link>
         </div>
+      );
+    }
+
+    if (msg.type === "inherited_block") {
+      return (
+        <InheritedBlock
+          content={msg.content}
+          renderMessage={(inner) => (
+            <MessageBubble
+              msg={inner}
+              queenPhase={queenPhase}
+              showQueenPhaseBadge={showQueenPhaseBadge}
+              queenProfileId={queenProfileId}
+              queenAvatarUrl={queenAvatarUrl}
+              onColonyLinkClick={onColonyLinkClick}
+            />
+          )}
+        />
       );
     }
 
@@ -750,6 +840,8 @@ export default function ChatPanel({
   queenDisplayName,
   onCompactAndFork,
   compactingAndForking,
+  onStartNewSession,
+  startingNewSession,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -1364,24 +1456,50 @@ export default function ChatPanel({
               {queenDisplayName || "this queen"}, compact this session and start
               a fresh one.
             </p>
-            <button
-              type="button"
-              onClick={onCompactAndFork}
-              disabled={!onCompactAndFork || compactingAndForking}
-              className="inline-flex items-center gap-2 text-xs font-medium text-primary-foreground bg-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-full transition-opacity"
-            >
-              {compactingAndForking ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Compacting…</span>
-                </>
-              ) : (
-                <span>
-                  Compact & start new session
-                  {queenDisplayName ? ` with ${queenDisplayName}` : ""}
-                </span>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={onCompactAndFork}
+                disabled={
+                  !onCompactAndFork ||
+                  compactingAndForking ||
+                  startingNewSession
+                }
+                className="inline-flex items-center gap-2 text-xs font-medium text-primary-foreground bg-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-full transition-opacity"
+              >
+                {compactingAndForking ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Compacting…</span>
+                  </>
+                ) : (
+                  <span>
+                    Compact & start new session
+                    {queenDisplayName ? ` with ${queenDisplayName}` : ""}
+                  </span>
+                )}
+              </button>
+              {onStartNewSession && (
+                <button
+                  type="button"
+                  onClick={onStartNewSession}
+                  disabled={startingNewSession || compactingAndForking}
+                  className="inline-flex items-center gap-2 text-xs font-medium text-foreground bg-muted hover:bg-muted/70 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-full transition-colors"
+                >
+                  {startingNewSession ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Starting…</span>
+                    </>
+                  ) : (
+                    <span>
+                      Start new session
+                      {queenDisplayName ? ` with ${queenDisplayName}` : ""}
+                    </span>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
           </div>
         </div>
       ) : pendingQuestions &&

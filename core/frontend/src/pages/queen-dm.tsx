@@ -950,6 +950,8 @@ export default function QueenDM() {
           queenDisplayName={queenName}
           onCompactAndFork={handleCompactAndFork}
           compactingAndForking={compactingAndForking}
+          onStartNewSession={handleCreateNewSession}
+          startingNewSession={creatingNewSession}
         />
       </div>
 

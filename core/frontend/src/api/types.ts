@@ -271,6 +271,7 @@ export type EventTypeName =
   | "colony_created"
   | "credentials_required"
   | "queen_phase_changed"
+  | "colony_fork_marker"
   | "subagent_report"
   | "trigger_available"
   | "trigger_activated"

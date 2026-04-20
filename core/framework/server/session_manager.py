@@ -419,6 +419,27 @@ class SessionManager:
             if existing.worker_path and str(existing.worker_path) == str(agent_path):
                 return existing
 
+        # When the queen forked this colony, the inherited DM transcript
+        # is compacted in the background (see fork_session_into_colony).
+        # Block here until that compactor finishes so _load_worker_core
+        # reads the compacted summary — not the raw transcript (which
+        # would defeat the fork's purpose). Bounded wait: on timeout we
+        # proceed anyway so a stuck compactor can't brick the colony.
+        if queen_resume_from:
+            try:
+                from framework.server import compaction_status
+
+                await compaction_status.await_completion(
+                    _find_queen_session_dir(queen_resume_from),
+                    timeout=180.0,
+                )
+            except Exception:
+                logger.debug(
+                    "await_compaction failed for %s — proceeding",
+                    queen_resume_from,
+                    exc_info=True,
+                )
+
         session = await self._create_session_core(
             session_id=_colony_session_id or queen_resume_from,
             model=model,
