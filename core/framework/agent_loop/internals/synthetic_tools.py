@@ -91,64 +91,37 @@ def sanitize_ask_user_inputs(
     return q, recovered
 
 
-ask_user_prompt = (
-    "You MUST call this tool whenever you need the user's response. "
-    "Always call it after greeting the user, asking a question, or "
-    "requesting approval. Do NOT call it for status updates or "
-    "summaries that don't require a response.\n\n"
-    "USAGE:\n"
-    "Pass a 'questions' array with 1-8 entries. Each entry has an "
-    "'id' (short identifier used in the user's reply), a 'prompt' "
-    "(the question text), and optional 'options' (2-3 predefined "
-    "choices). For a single question, pass a one-item array. For "
-    "several clarifications, batch them in one call so the user can "
-    "answer everything in one interaction instead of going back and "
-    "forth — ALWAYS prefer a batch over multiple sequential calls.\n\n"
-    "STRUCTURE RULES (CRITICAL):\n"
-    "- The 'prompt' field is PLAIN TEXT shown to the user. Do NOT "
-    "include XML tags, pseudo-tags like </question>, or option lists "
-    "in the prompt string. The UI does not parse them — they render "
-    "as raw text and look broken.\n"
-    "- The 'options' parameter is the ONLY way to render buttons. "
-    "If you want buttons, put them in the 'options' array, not in "
-    "the prompt string. Do NOT write 'OPTIONS: [...]', "
-    "'_options: [...]', or any inline list inside 'prompt'.\n"
-    "- Each prompt must read as a single clean sentence with no "
-    "markup. Example: 'What would you like to do?' — not "
-    "'What would you like to do?</question>'.\n\n"
-    "OPTIONS GUIDANCE:\n"
-    "Include 2-3 predefined options in most cases. The UI "
-    "automatically appends an 'Other' free-text input after your "
-    "options, so NEVER include catch-all options like 'Custom idea', "
-    "'Something else', 'Other', or 'None of the above' — the UI "
-    "handles that. When the question primarily needs a typed answer "
-    "but you must include options, make one option signal that "
-    "typing is expected (e.g. \"I'll type my response\"). Omit "
-    "options ONLY when the question demands a free-form answer the "
-    "user must type out (e.g. 'Describe your agent idea', 'Paste "
-    "the error message'). Workers MUST always provide options — "
-    "only the queen may ask free-form questions.\n\n"
-    "IMPORTANT: Do NOT repeat the questions in your text response — "
-    "the widget renders them. Keep your text to a brief intro only.\n\n"
-    "SINGLE-QUESTION EXAMPLE:\n"
-    '{"questions": [{"id": "next", "prompt": "What would you like '
-    'to do?", "options": ["Build a new agent", '
-    '"Modify existing agent", "Run tests"]}]}\n\n'
-    "BATCH EXAMPLE:\n"
-    '{"questions": ['
-    '{"id": "scope", "prompt": "What scope?", '
-    '"options": ["Full", "Partial"]}, '
-    '{"id": "format", "prompt": "Output format?", '
-    '"options": ["PDF", "CSV", "JSON"]}, '
-    '{"id": "details", "prompt": "Any special requirements?"}'
-    "]}\n\n"
-    "FREE-FORM EXAMPLE (queen only):\n"
-    '{"questions": [{"id": "idea", "prompt": "Describe the agent '
-    'you want to build."}]}\n\n'
-    "WRONG (do NOT do this — buttons will not render):\n"
-    '{"questions": [{"id": "q", "prompt": "What now?</question>\\n'
-    '_OPTIONS: [\\"A\\", \\"B\\"]"}]}'
-)
+ask_user_prompt = """\
+Use this tool when you need to ask the user questions during execution. Reach for it when:
+
+- The task is ambiguous and the user needs to choose an approach
+- You need missing information to continue
+- You want approval before taking a meaningful action
+- A decision has real trade-offs the user should weigh in on
+- You want post-task feedback, or to offer saving a skill or updating memory
+
+Usage notes:
+- Users will always be able to select "Other" to provide custom text input
+- Use multiSelect: true to allow multiple answers to be selected for a question
+- If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
+- Call this tool whenever you need the user's response.
+- The prompt field must be plain text only.
+- Do not include XML, pseudo-tags, or inline option lists inside prompt.
+- Omit options only when the question truly requires a free-form response the user must type out, such as describing an idea or pasting an error message.
+- Do not repeat the questions in your normal text response. The widget renders them, so keep any surrounding text to a brief intro only.
+Example — single question with options:
+{"questions": [{"id": "next", "prompt": "What would you like to do?", "options": ["Build a new agent (Recommended)", "Modify existing agent", "Run tests"]}]}
+
+Example — batch:
+{"questions": [
+  {"id": "scope", "prompt": "What scope?", "options": ["Full", "Partial"]},
+  {"id": "format", "prompt": "Output format?", "options": ["PDF", "CSV", "JSON"]},
+  {"id": "details", "prompt": "Any special requirements?"}
+]}
+
+Example — free-form (queen only):
+{"questions": [{"id": "idea", "prompt": "Describe the agent you want to build."}]}
+"""
 
 
 def build_ask_user_tool() -> Tool:
