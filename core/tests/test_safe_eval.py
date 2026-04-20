@@ -3,8 +3,9 @@
 Covers: literals, data structures, arithmetic, comparisons, boolean logic
 (including short-circuit semantics), variable lookup, subscript/attribute
 access, whitelisted function calls, method calls, ternary expressions,
-chained comparisons, and security boundaries (private attrs, disallowed
-AST nodes, disallowed function calls).
+chained comparisons, security boundaries (private attrs, disallowed
+AST nodes, disallowed function calls), and resource limits (large
+collection results, deep visitor recursion).
 """
 
 import pytest
@@ -567,6 +568,34 @@ class TestSecurity:
     def test_empty_expression_raises(self):
         with pytest.raises(SyntaxError):
             safe_eval("")
+
+
+# ---------------------------------------------------------------------------
+# Resource limits (memory / evaluation depth)
+# ---------------------------------------------------------------------------
+
+
+class TestResourceLimits:
+    """Guards against untrusted expressions exhausting memory or the AST visitor stack."""
+
+    def test_list_repeat_exceeds_max_collection_size(self):
+        with pytest.raises(ValueError, match="collection size exceeds limit"):
+            safe_eval("[0] * 100001")
+
+    def test_int_times_list_exceeds_max_collection_size(self):
+        with pytest.raises(ValueError, match="collection size exceeds limit"):
+            safe_eval("100001 * [0]")
+
+    def test_recursion_depth_exceeded_on_deep_attribute_chain(self):
+        """Very deep attribute access must fail before blowing the Python stack."""
+
+        class Chain:
+            def __getattr__(self, name: str) -> Chain:
+                return self
+
+        expr = "a" + ".x" * 105
+        with pytest.raises(ValueError, match="Recursion depth limit exceeded"):
+            safe_eval(expr, {"a": Chain()})
 
 
 # ---------------------------------------------------------------------------
