@@ -12,7 +12,8 @@ import { queensApi } from "@/api/queens";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { AgentEvent, HistorySession } from "@/api/types";
 import {
-  sseEventToChatMessage,
+  newReplayState,
+  replayEvent,
   replayEventsToMessages,
 } from "@/lib/chat-helpers";
 import { useColony } from "@/context/ColonyContext";
@@ -46,9 +47,6 @@ export default function QueenDM() {
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
   const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0 });
-  const [, setActiveToolCalls] = useState<
-    Record<string, { name: string; done: boolean }>
-  >({});
   const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(
@@ -70,14 +68,7 @@ export default function QueenDM() {
   );
   const [compactingAndForking, setCompactingAndForking] = useState(false);
 
-  const turnCounterRef = useRef(0);
-  // Maps tool_use_id → the pill message ID and tool name that was created for it.
-  // Survives turn counter resets so deferred completions (e.g. ask_user) can
-  // find and update the correct pill even after llm_turn_complete bumps the counter.
-  const toolUseToPillRef = useRef<
-    Record<string, { msgId: string; name: string }>
-  >({});
-  const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
+  const replayStateRef = useRef(newReplayState());
   const [queenPhase, setQueenPhase] = useState<
     "independent" | "incubating" | "working" | "reviewing"
   >("independent");
@@ -92,17 +83,54 @@ export default function QueenDM() {
     setPendingOptions(null);
     setPendingQuestions(null);
     setAwaitingInput(false);
-    setActiveToolCalls({});
     setQueenPhase("independent");
     setTokenUsage({ input: 0, output: 0 });
     setInitialDraft(null);
     setColonySpawned(false);
     setSpawnedColonyName(null);
     setCompactingAndForking(false);
-    turnCounterRef.current = 0;
-    toolUseToPillRef.current = {};
-    queenIterTextRef.current = {};
+    replayStateRef.current = newReplayState();
   }, []);
+
+  const upsertMessage = useCallback(
+    (chatMsg: ChatMessage, options?: { reconcileOptimisticUser?: boolean }) => {
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === chatMsg.id);
+        if (idx >= 0) {
+          return prev.map((m, i) =>
+            i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
+          );
+        }
+        if (options?.reconcileOptimisticUser && chatMsg.type === "user") {
+          const incomingTs = chatMsg.createdAt ?? Date.now();
+          const matchIdx = prev.findIndex(
+            (m) =>
+              m.type === "user" &&
+              m.content === chatMsg.content &&
+              Math.abs(incomingTs - (m.createdAt ?? incomingTs)) <= 15000,
+          );
+          if (matchIdx !== -1) {
+            return prev.map((m, i) =>
+              i === matchIdx ? { ...m, id: chatMsg.id, queued: undefined } : m,
+            );
+          }
+        }
+
+        const ts = chatMsg.createdAt ?? Date.now();
+        let insertIdx = prev.length - 1;
+        while (insertIdx >= 0 && (prev[insertIdx].createdAt ?? 0) > ts) {
+          insertIdx--;
+        }
+        if (insertIdx === -1 || insertIdx === prev.length - 1) {
+          return [...prev, chatMsg];
+        }
+        const next = [...prev];
+        next.splice(insertIdx + 1, 0, chatMsg);
+        return next;
+      });
+    },
+    [],
+  );
 
   const restoreMessages = useCallback(
     async (sid: string, cancelled: () => boolean) => {
@@ -114,7 +142,15 @@ export default function QueenDM() {
         // Use the stateful replay so tool_status pills are synthesized
         // the same way the live SSE handler does — without this the
         // refreshed queen DM shows zero tool activity.
-        const restored = replayEventsToMessages(events, "queen-dm", queenName);
+        const replayState = newReplayState();
+        const restored = replayEventsToMessages(
+          events,
+          "queen-dm",
+          queenName,
+          undefined,
+          replayState,
+        );
+        replayStateRef.current = replayState;
 
         // Show a banner if the server truncated older events.
         const droppedCount = Math.max(0, total - returned);
@@ -492,14 +528,17 @@ export default function QueenDM() {
     (_agentType: string, event: AgentEvent) => {
       const isQueen = event.stream_id === "queen";
       if (!isQueen) return;
+      const emittedMessages = replayEvent(
+        replayStateRef.current,
+        event,
+        "queen-dm",
+        queenName,
+      );
 
       switch (event.type) {
         case "execution_started":
-          turnCounterRef.current++;
           setIsTyping(true);
           setQueenReady(true);
-          setActiveToolCalls({});
-          toolUseToPillRef.current = {};
           // Clear queued flag on all user messages now that the queen is processing
           setMessages((prev) => {
             if (!prev.some((m) => m.queued)) return prev;
@@ -513,8 +552,6 @@ export default function QueenDM() {
           break;
 
         case "llm_turn_complete":
-          turnCounterRef.current++;
-          setActiveToolCalls({});
           if (event.data) {
             const inp = (event.data.input_tokens as number) || 0;
             const out = (event.data.output_tokens as number) || 0;
@@ -524,48 +561,7 @@ export default function QueenDM() {
 
         case "client_output_delta":
         case "llm_text_delta": {
-          const chatMsg = sseEventToChatMessage(
-            event,
-            "queen-dm",
-            queenName,
-            turnCounterRef.current,
-          );
-          if (chatMsg) {
-            if (event.execution_id) {
-              const iter = event.data?.iteration ?? 0;
-              const inner = (event.data?.inner_turn as number) ?? 0;
-              const iterKey = `${event.execution_id}:${iter}`;
-              if (!queenIterTextRef.current[iterKey]) {
-                queenIterTextRef.current[iterKey] = {};
-              }
-              const snapshot =
-                (event.data?.snapshot as string) ||
-                (event.data?.content as string) ||
-                "";
-              queenIterTextRef.current[iterKey][inner] = snapshot;
-              const parts = queenIterTextRef.current[iterKey];
-              const sorted = Object.keys(parts)
-                .map(Number)
-                .sort((a, b) => a - b);
-              chatMsg.content = sorted.map((k) => parts[k]).join("\n");
-              chatMsg.id = `queen-stream-${event.execution_id}-${iter}`;
-            }
-            chatMsg.role = "queen";
-
-            setMessages((prev) => {
-              const idx = prev.findIndex((m) => m.id === chatMsg.id);
-              if (idx >= 0) {
-                // Preserve the original createdAt so the displayed timestamp
-                // doesn't tick forward as new deltas stream in.
-                return prev.map((m, i) =>
-                  i === idx
-                    ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt }
-                    : m,
-                );
-              }
-              return [...prev, chatMsg];
-            });
-          }
+          for (const msg of emittedMessages) upsertMessage(msg);
           setIsStreaming(true);
           break;
         }
@@ -594,34 +590,8 @@ export default function QueenDM() {
         }
 
         case "client_input_received": {
-          const chatMsg = sseEventToChatMessage(
-            event,
-            "queen-dm",
-            queenName,
-            turnCounterRef.current,
-          );
-          if (chatMsg) {
-            setMessages((prev) => {
-              // Reconcile optimistic user message. A matching echo from
-              // the backend means the queen has now received this
-              // message, so drop the "queued" indicator (it was set when
-              // the user sent while the queen was still busy).
-              if (chatMsg.type === "user" && prev.length > 0) {
-                const idx = prev.findIndex(
-                  (m) =>
-                    m.type === "user" &&
-                    m.content === chatMsg.content &&
-                    Math.abs((chatMsg.createdAt ?? 0) - (m.createdAt ?? 0)) <=
-                      15000,
-                );
-                if (idx !== -1) {
-                  return prev.map((m, i) =>
-                    i === idx ? { ...m, id: chatMsg.id, queued: undefined } : m,
-                  );
-                }
-              }
-              return [...prev, chatMsg];
-            });
+          for (const msg of emittedMessages) {
+            upsertMessage(msg, { reconcileOptimisticUser: true });
           }
           break;
         }
@@ -676,133 +646,12 @@ export default function QueenDM() {
         }
 
         case "tool_call_started": {
-          const toolName = (event.data?.tool_name as string) || "unknown";
-          const toolUseId = (event.data?.tool_use_id as string) || "";
-          const sid = event.stream_id;
-          const execId = event.execution_id || "exec";
-          const eventCreatedAt = event.timestamp
-            ? new Date(event.timestamp).getTime()
-            : Date.now();
-
-          // Track which pill message this tool belongs to so deferred
-          // completions (ask_user) can find it after the turn counter changes.
-          const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
-          toolUseToPillRef.current[toolUseId] = { msgId, name: toolName };
-
-          setActiveToolCalls((prev) => {
-            const newActive = {
-              ...prev,
-              [toolUseId]: { name: toolName, done: false },
-            };
-            const tools = Object.entries(newActive).map(([, t]) => ({
-              name: t.name,
-              done: t.done,
-            }));
-            const allDone = tools.length > 0 && tools.every((t) => t.done);
-            const toolMsg: ChatMessage = {
-              id: msgId,
-              agent: queenName,
-              agentColor: "",
-              content: JSON.stringify({ tools, allDone }),
-              timestamp: "",
-              type: "tool_status",
-              role: "queen",
-              thread: "queen-dm",
-              createdAt: eventCreatedAt,
-              nodeId: event.node_id || undefined,
-              executionId: event.execution_id || undefined,
-              streamId: sid || undefined,
-            };
-            setMessages((prevMsgs) => {
-              const idx = prevMsgs.findIndex((m) => m.id === msgId);
-              if (idx >= 0) {
-                return prevMsgs.map((m, i) =>
-                  i === idx ? { ...toolMsg, createdAt: m.createdAt ?? toolMsg.createdAt } : m,
-                );
-              }
-              // Insert in sorted position by createdAt
-              const ts = toolMsg.createdAt ?? Date.now();
-              let insertIdx = prevMsgs.length - 1;
-              while (insertIdx >= 0 && (prevMsgs[insertIdx].createdAt ?? 0) > ts) {
-                insertIdx--;
-              }
-              if (insertIdx === -1 || insertIdx === prevMsgs.length - 1) {
-                return [...prevMsgs, toolMsg];
-              }
-              const next = [...prevMsgs];
-              next.splice(insertIdx + 1, 0, toolMsg);
-              return next;
-            });
-            return newActive;
-          });
+          for (const msg of emittedMessages) upsertMessage(msg);
           break;
         }
 
         case "tool_call_completed": {
-          const toolUseId = (event.data?.tool_use_id as string) || "";
-
-          // Look up the original pill message this tool belongs to.
-          // For deferred completions (ask_user), the turn counter and
-          // activeToolCalls have already been reset by llm_turn_complete,
-          // so we rely on the ref recorded during tool_call_started.
-          const tracked = toolUseToPillRef.current[toolUseId];
-          delete toolUseToPillRef.current[toolUseId];
-
-          // Mark done in activeToolCalls if still present (normal case)
-          setActiveToolCalls((prev) => {
-            if (!prev[toolUseId]) return prev;
-            return {
-              ...prev,
-              [toolUseId]: { ...prev[toolUseId], done: true },
-            };
-          });
-
-          // Determine the correct pill message ID
-          const sid = event.stream_id;
-          const execId = event.execution_id || "exec";
-          const pillMsgId =
-            tracked?.msgId ??
-            `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
-          const toolName = tracked?.name;
-
-          // Update the pill message content directly
-          setMessages((prevMsgs) => {
-            const idx = prevMsgs.findIndex((m) => m.id === pillMsgId);
-            if (idx < 0) return prevMsgs;
-
-            try {
-              const parsed = JSON.parse(prevMsgs[idx].content);
-              const tools: { name: string; done: boolean }[] =
-                parsed.tools || [];
-
-              if (toolName) {
-                let marked = false;
-                for (let i = 0; i < tools.length; i++) {
-                  if (
-                    tools[i].name === toolName &&
-                    !tools[i].done &&
-                    !marked
-                  ) {
-                    tools[i] = { ...tools[i], done: true };
-                    marked = true;
-                  }
-                }
-              }
-
-              const allDone =
-                tools.length > 0 && tools.every((t) => t.done);
-              return prevMsgs.map((m, i) =>
-                i === idx
-                  ? {
-                      ...m,
-                      content: JSON.stringify({ tools, allDone }),
-                    }
-                  : m,
-              );
-            } catch {
-              return prevMsgs;
-            }
-          });
+          for (const msg of emittedMessages) upsertMessage(msg);
           break;
         }
 
@@ -810,7 +659,7 @@ export default function QueenDM() {
           break;
       }
     },
-    [queenName, refresh],
+    [queenName, refresh, upsertMessage],
   );
 
   const sseSessions = useMemo((): Record<string, string> => {
@@ -885,8 +734,7 @@ export default function QueenDM() {
       await executionApi.cancelQueen(sessionId);
       setIsTyping(false);
       setIsStreaming(false);
-      setActiveToolCalls({});
-      toolUseToPillRef.current = {};
+      replayStateRef.current = newReplayState();
       // Clear queued flags since the queen is now idle
       setMessages((prev) => {
         if (!prev.some((m) => m.queued)) return prev;

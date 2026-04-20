@@ -12,9 +12,11 @@ import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent } from "@/api/types";
 import {
-  sseEventToChatMessage,
   formatAgentDisplayName,
+  newReplayState,
+  replayEvent,
   replayEventsToMessages,
+  type ReplayState,
 } from "@/lib/chat-helpers";
 import {
   resolveInitialColonyPhase,
@@ -47,6 +49,7 @@ function truncate(s: string, max: number): string {
 
 type SessionRestoreResult = {
   messages: ChatMessage[];
+  replayState: ReplayState;
   restoredPhase: "independent" | "incubating" | "working" | "reviewing" | null;
   truncated: boolean;
   droppedCount: number;
@@ -82,7 +85,14 @@ async function restoreSessionMessages(
         }
       }
 
-      const messages = replayEventsToMessages(events, thread, agentDisplayName, queenDisplayName);
+      const replayState = newReplayState();
+      const messages = replayEventsToMessages(
+        events,
+        thread,
+        agentDisplayName,
+        queenDisplayName,
+        replayState,
+      );
       // Stamp the latest phase on every queen message so the UI's
       // phase-badge rendering matches what the live path would have
       // displayed at the time of the refresh.
@@ -111,6 +121,7 @@ async function restoreSessionMessages(
       }
       return {
         messages,
+        replayState,
         restoredPhase: runningPhase ?? null,
         truncated,
         droppedCount,
@@ -119,7 +130,13 @@ async function restoreSessionMessages(
   } catch {
     // Event log not available
   }
-  return { messages: [], restoredPhase: null, truncated: false, droppedCount: 0 };
+  return {
+    messages: [],
+    replayState: newReplayState(),
+    restoredPhase: null,
+    truncated: false,
+    droppedCount: 0,
+  };
 }
 
 // ── Agent backend state ──────────────────────────────────────────────────────
@@ -156,7 +173,6 @@ interface AgentState {
   queenIsTyping: boolean;
   workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
-  activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
   pendingQuestion: string | null;
   pendingOptions: string[] | null;
   pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
@@ -190,7 +206,6 @@ function defaultAgentState(): AgentState {
     queenIsTyping: false,
     workerIsTyping: false,
     llmSnapshots: {},
-    activeToolCalls: {},
     pendingQuestion: null,
     pendingOptions: null,
     pendingQuestions: null,
@@ -305,18 +320,11 @@ export default function ColonyChat() {
   const agentStateRef = useRef(agentState);
   agentStateRef.current = agentState;
 
-  const turnCounterRef = useRef<Record<string, number>>({});
+  const replayStateRef = useRef(newReplayState());
   // Timestamp of the latest restored message — SSE events older than this
   // are duplicates from the ring-buffer replay and should be skipped.
   const restoreCutoffRef = useRef<number>(0);
-  // Maps tool_use_id → the pill message ID and tool name that was created for it.
-  // Survives turn counter resets so deferred completions (e.g. ask_user) can
-  // find and update the correct pill even after the counter changes.
-  const toolUseToPillRef = useRef<
-    Record<string, { msgId: string; name: string }>
-  >({});
   const queenPhaseRef = useRef<string>("independent");
-  const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const suppressIntroRef = useRef(false);
   const loadingRef = useRef(false);
 
@@ -491,6 +499,7 @@ export default function ColonyChat() {
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.colony_name || agentPath);
       let restoredMessages: ChatMessage[] = [];
+      let restoredReplayState: ReplayState | null = null;
       const reusePrefetchedRestore = shouldUsePrefetchedColonyRestore(
         coldRestoreId,
         session.session_id,
@@ -507,10 +516,12 @@ export default function ColonyChat() {
         if (restored.messages.length > 0) {
           restoredMessages = restored.messages;
         }
+        restoredReplayState = restored.replayState;
         restoredPhase = restored.restoredPhase;
       } else if (prefetchedRestore) {
         if (reusePrefetchedRestore) {
           restoredMessages = prefetchedRestore.messages;
+          restoredReplayState = prefetchedRestore.replayState;
           restoredPhase = prefetchedRestore.restoredPhase;
         } else {
           // The backend corrected the resume target to the colony's forked
@@ -523,8 +534,13 @@ export default function ColonyChat() {
             queenInfo.name,
           );
           restoredMessages = restored.messages;
+          restoredReplayState = restored.replayState;
           restoredPhase = restored.restoredPhase;
         }
+      }
+
+      if (restoredReplayState) {
+        replayStateRef.current = restoredReplayState;
       }
 
       if (restoredMessages.length > 0) {
@@ -580,10 +596,8 @@ export default function ColonyChat() {
       setMessages([]);
       setGraphNodes([]);
       setAgentState(defaultAgentState());
-      turnCounterRef.current = {};
-      toolUseToPillRef.current = {};
+      replayStateRef.current = newReplayState();
       queenPhaseRef.current = "independent";
-      queenIterTextRef.current = {};
       suppressIntroRef.current = false;
       restoreCutoffRef.current = 0;
       loadingRef.current = false;
@@ -600,11 +614,7 @@ export default function ColonyChat() {
       const suppressQueenMessages = isQueen && suppressIntroRef.current;
       const state = agentStateRef.current;
       const agentDisplayName = state.displayName;
-      const displayName = isQueen ? queenInfo.name : agentDisplayName || undefined;
-      const role = isQueen ? ("queen" as const) : ("worker" as const);
       const ts = fmtLogTs(event.timestamp);
-      const turnKey = streamId;
-      const currentTurn = turnCounterRef.current[turnKey] ?? 0;
       const eventCreatedAt = event.timestamp
         ? new Date(event.timestamp).getTime()
         : Date.now();
@@ -619,11 +629,17 @@ export default function ColonyChat() {
       }
 
       const shouldMarkQueenReady = isQueen && !state.queenReady;
+      const emittedMessages = replayEvent(
+        replayStateRef.current,
+        event,
+        agentPath,
+        agentDisplayName || undefined,
+        queenInfo.name,
+      );
 
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
-            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateState({
               isTyping: true,
               queenIsTyping: true,
@@ -645,7 +661,6 @@ export default function ColonyChat() {
                 createdAt: eventCreatedAt,
               });
             }
-            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateState({
               isTyping: true,
               isStreaming: false,
@@ -655,7 +670,6 @@ export default function ColonyChat() {
               nodeLogs: {},
               subagentReports: [],
               llmSnapshots: {},
-              activeToolCalls: {},
               pendingQuestion: null,
               pendingOptions: null,
               pendingQuestions: null,
@@ -692,37 +706,15 @@ export default function ColonyChat() {
         case "client_input_received":
         case "client_input_requested":
         case "llm_text_delta": {
-          const chatMsg = sseEventToChatMessage(event, agentPath, displayName, currentTurn);
-          if (chatMsg && !suppressQueenMessages) {
-            // Merge queen inner_turns within same iteration
-            if (
-              isQueen &&
-              (event.type === "client_output_delta" || event.type === "llm_text_delta") &&
-              event.execution_id
-            ) {
-              const iter = event.data?.iteration ?? 0;
-              const inner = (event.data?.inner_turn as number) ?? 0;
-              const iterKey = `${event.execution_id}:${iter}`;
-              if (!queenIterTextRef.current[iterKey]) {
-                queenIterTextRef.current[iterKey] = {};
+          if (!suppressQueenMessages) {
+            for (const msg of emittedMessages) {
+              if (isQueen) {
+                msg.phase = queenPhaseRef.current as ChatMessage["phase"];
               }
-              const snapshot =
-                (event.data?.snapshot as string) || (event.data?.content as string) || "";
-              queenIterTextRef.current[iterKey][inner] = snapshot;
-              const parts = queenIterTextRef.current[iterKey];
-              const sorted = Object.keys(parts)
-                .map(Number)
-                .sort((a, b) => a - b);
-              chatMsg.content = sorted.map((k) => parts[k]).join("\n");
-              chatMsg.id = `queen-stream-${event.execution_id}-${iter}`;
+              upsertMessage(msg, {
+                reconcileOptimisticUser: event.type === "client_input_received",
+              });
             }
-            if (isQueen) {
-              chatMsg.role = role;
-              chatMsg.phase = queenPhaseRef.current as ChatMessage["phase"];
-            }
-            upsertMessage(chatMsg, {
-              reconcileOptimisticUser: event.type === "client_input_received",
-            });
           }
 
           if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
@@ -806,8 +798,7 @@ export default function ColonyChat() {
         }
 
         case "node_loop_started":
-          turnCounterRef.current[turnKey] = currentTurn + 1;
-          updateState({ isTyping: true, activeToolCalls: {} });
+          updateState({ isTyping: true });
           if (!isQueen && event.node_id) {
             const existing = graphNodes.find((n) => n.id === event.node_id);
             const isRevisit = existing?.status === "complete";
@@ -819,11 +810,9 @@ export default function ColonyChat() {
           break;
 
         case "node_loop_iteration":
-          turnCounterRef.current[turnKey] = currentTurn + 1;
           if (isQueen) {
             updateState({
               isStreaming: false,
-              activeToolCalls: {},
               awaitingInput: false,
               pendingQuestion: null,
               pendingOptions: null,
@@ -834,7 +823,6 @@ export default function ColonyChat() {
             updateState({
               isStreaming: false,
               workerIsTyping: true,
-              activeToolCalls: {},
               awaitingInput: false,
               pendingQuestion: null,
               pendingOptions: null,
@@ -903,41 +891,13 @@ export default function ColonyChat() {
               );
             }
 
-            const toolName = (event.data?.tool_name as string) || "unknown";
-            const toolUseId = (event.data?.tool_use_id as string) || "";
-
-            const sid = event.stream_id;
-            // Track which pill message this tool belongs to so deferred
-            // completions (ask_user) can find it after the turn counter changes.
-            toolUseToPillRef.current[toolUseId] = {
-              msgId: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-              name: toolName,
-            };
-            setAgentState((prev) => {
-              const newActive = {
-                ...prev.activeToolCalls,
-                [toolUseId]: { name: toolName, done: false, streamId: sid },
-              };
-              const tools = Object.values(newActive)
-                .filter((t) => t.streamId === sid)
-                .map((t) => ({ name: t.name, done: t.done }));
-              const allDone = tools.length > 0 && tools.every((t) => t.done);
-              upsertMessage({
-                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: agentDisplayName || event.node_id || "Agent",
-                agentColor: "",
-                content: JSON.stringify({ tools, allDone }),
-                timestamp: "",
-                type: "tool_status",
-                role,
-                thread: agentPath,
-                createdAt: eventCreatedAt,
-                nodeId: event.node_id || undefined,
-                executionId: event.execution_id || undefined,
-                streamId: sid || undefined,
-              });
-              return { ...prev, isStreaming: false, activeToolCalls: newActive };
-            });
+            for (const msg of emittedMessages) {
+              if (msg.role === "queen") {
+                msg.phase = queenPhaseRef.current as ChatMessage["phase"];
+              }
+              upsertMessage(msg);
+            }
+            updateState({ isStreaming: false });
           }
           break;
         }
@@ -945,7 +905,6 @@ export default function ColonyChat() {
         case "tool_call_completed": {
           if (event.node_id) {
             const toolName = (event.data?.tool_name as string) || "unknown";
-            const toolUseId = (event.data?.tool_use_id as string) || "";
             const isError = event.data?.is_error as boolean | undefined;
             const result = event.data?.result as string | undefined;
             if (isError) {
@@ -958,74 +917,12 @@ export default function ColonyChat() {
               appendNodeLog(event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
-            // Look up the original pill message this tool belongs to.
-            // For deferred completions (ask_user), the turn counter and
-            // activeToolCalls have already been reset, so we rely on the
-            // ref recorded during tool_call_started.
-            const tracked = toolUseToPillRef.current[toolUseId];
-            delete toolUseToPillRef.current[toolUseId];
-
-            const sid = event.stream_id;
-
-            // Mark done in activeToolCalls if still present (normal case)
-            setAgentState((prev) => {
-              if (!prev.activeToolCalls[toolUseId]) return prev;
-              return {
-                ...prev,
-                activeToolCalls: {
-                  ...prev.activeToolCalls,
-                  [toolUseId]: {
-                    ...prev.activeToolCalls[toolUseId],
-                    done: true,
-                  },
-                },
-              };
-            });
-
-            // Determine the correct pill message ID
-            const pillMsgId =
-              tracked?.msgId ??
-              `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`;
-            const trackedName = tracked?.name;
-
-            // Update the pill message content directly
-            setMessages((prevMsgs) => {
-              const idx = prevMsgs.findIndex((m) => m.id === pillMsgId);
-              if (idx < 0) return prevMsgs;
-
-              try {
-                const parsed = JSON.parse(prevMsgs[idx].content);
-                const tools: { name: string; done: boolean }[] =
-                  parsed.tools || [];
-
-                if (trackedName) {
-                  let marked = false;
-                  for (let i = 0; i < tools.length; i++) {
-                    if (
-                      tools[i].name === trackedName &&
-                      !tools[i].done &&
-                      !marked
-                    ) {
-                      tools[i] = { ...tools[i], done: true };
-                      marked = true;
-                    }
-                  }
-                }
-
-                const allDone =
-                  tools.length > 0 && tools.every((t) => t.done);
-                return prevMsgs.map((m, i) =>
-                  i === idx
-                    ? {
-                        ...m,
-                        content: JSON.stringify({ tools, allDone }),
-                      }
-                    : m,
-                );
-              } catch {
-                return prevMsgs;
+            for (const msg of emittedMessages) {
+              if (msg.role === "queen") {
+                msg.phase = queenPhaseRef.current as ChatMessage["phase"];
               }
-            });
+              upsertMessage(msg);
+            }
           }
           break;
         }

@@ -3,6 +3,7 @@ import {
   extractLastPhase,
   sseEventToChatMessage,
   formatAgentDisplayName,
+  replayEventsToMessages,
 } from "./chat-helpers";
 import type { AgentEvent } from "@/api/types";
 
@@ -415,6 +416,104 @@ describe("sseEventToChatMessage", () => {
     });
     const result = sseEventToChatMessage(event, "t", "My Agent");
     expect(result!.agent).toBe("System");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// replayEventsToMessages
+// ---------------------------------------------------------------------------
+
+describe("replayEventsToMessages", () => {
+  it("merges queen inner turns from the same iteration into one restored bubble", () => {
+    const events = [
+      makeEvent({
+        type: "client_output_delta",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-1",
+        timestamp: "2026-04-20T12:45:25.234Z",
+        data: {
+          snapshot: "I will create the ERD.",
+          iteration: 0,
+          inner_turn: 0,
+        },
+      }),
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-1",
+        timestamp: "2026-04-20T12:45:25.238Z",
+        data: {
+          tool_name: "write_file",
+          tool_use_id: "tool-1",
+        },
+      }),
+      makeEvent({
+        type: "tool_call_completed",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-1",
+        timestamp: "2026-04-20T12:45:25.250Z",
+        data: {
+          tool_name: "write_file",
+          tool_use_id: "tool-1",
+          result: "ok",
+        },
+      }),
+      makeEvent({
+        type: "client_output_delta",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-1",
+        timestamp: "2026-04-20T12:46:07.911Z",
+        data: {
+          snapshot: "Saved to `database_erd.md`.",
+          iteration: 0,
+          inner_turn: 2,
+        },
+      }),
+    ];
+
+    const restored = replayEventsToMessages(events, "queen-dm", "Alexandra");
+    const queenMessages = restored.filter(
+      (m) => m.role === "queen" && !m.type,
+    );
+
+    expect(queenMessages).toHaveLength(1);
+    expect(queenMessages[0].id).toBe("queen-stream-session-1-0");
+    expect(queenMessages[0].content).toBe(
+      "I will create the ERD.\nSaved to `database_erd.md`.",
+    );
+    expect(queenMessages[0].createdAt).toBe(
+      new Date("2026-04-20T12:45:25.234Z").getTime(),
+    );
+  });
+
+  it("keeps worker inner turns as distinct restored bubbles", () => {
+    const events = [
+      makeEvent({
+        type: "llm_text_delta",
+        stream_id: "worker",
+        node_id: "research",
+        execution_id: "session-1",
+        data: { snapshot: "First pass", iteration: 0, inner_turn: 0 },
+      }),
+      makeEvent({
+        type: "llm_text_delta",
+        stream_id: "worker",
+        node_id: "research",
+        execution_id: "session-1",
+        data: { snapshot: "After tool", iteration: 0, inner_turn: 1 },
+      }),
+    ];
+
+    const restored = replayEventsToMessages(events, "agent", "Research Agent");
+
+    expect(restored.map((m) => m.id)).toEqual([
+      "stream-session-1-0-research",
+      "stream-session-1-0-t1-research",
+    ]);
   });
 });
 

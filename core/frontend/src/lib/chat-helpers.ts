@@ -262,10 +262,16 @@ export interface ReplayState {
     { name: string; done: boolean; streamId: string }
   >;
   toolUseToPill: Record<string, { msgId: string; name: string }>;
+  queenIterText: Record<string, Record<number, string>>;
 }
 
 export function newReplayState(): ReplayState {
-  return { turnCounters: {}, activeToolCalls: {}, toolUseToPill: {} };
+  return {
+    turnCounters: {},
+    activeToolCalls: {},
+    toolUseToPill: {},
+    queenIterText: {},
+  };
 }
 
 /**
@@ -305,14 +311,14 @@ export function replayEvent(
 
   const out: ChatMessage[] = [];
 
-  // Update state machine BEFORE the generic converter runs so the
-  // regular message emitted for this event sees the post-update
-  // counter (matches live handler ordering at colony-chat.tsx:525).
+  // Update state machine BEFORE the generic converter runs so regular
+  // messages and synthesized tool pills use the same turn counters in
+  // both live SSE handling and cold replay.
   switch (event.type) {
     case "execution_started":
       state.turnCounters[turnKey] = currentTurn + 1;
-      // New execution for a worker resets its active tools, mirroring
-      // the live handler's setAgentState at colony-chat.tsx:566.
+      // New execution for a worker resets its active tools so stale
+      // tool pills from a previous run cannot bleed into the next run.
       if (!isQueen) {
         const keepActive: typeof state.activeToolCalls = {};
         for (const [k, v] of Object.entries(state.activeToolCalls)) {
@@ -396,7 +402,27 @@ export function replayEvent(
     state.turnCounters[turnKey] ?? 0,
   );
   if (msg) {
-    if (isQueen) msg.role = "queen";
+    if (isQueen) {
+      msg.role = "queen";
+      if (
+        event.execution_id &&
+        (event.type === "client_output_delta" || event.type === "llm_text_delta")
+      ) {
+        const iter = (event.data?.iteration as number | undefined) ?? 0;
+        const inner = (event.data?.inner_turn as number | undefined) ?? 0;
+        const iterKey = `${event.execution_id}:${iter}`;
+        if (!state.queenIterText[iterKey]) {
+          state.queenIterText[iterKey] = {};
+        }
+        state.queenIterText[iterKey][inner] = msg.content;
+        const parts = state.queenIterText[iterKey];
+        const sorted = Object.keys(parts)
+          .map(Number)
+          .sort((a, b) => a - b);
+        msg.content = sorted.map((k) => parts[k]).join("\n");
+        msg.id = `queen-stream-${event.execution_id}-${iter}`;
+      }
+    }
     out.push(msg);
   }
 
@@ -420,8 +446,8 @@ export function replayEventsToMessages(
   thread: string,
   agentDisplayName: string | undefined,
   queenDisplayName?: string,
+  state: ReplayState = newReplayState(),
 ): ChatMessage[] {
-  const state = newReplayState();
   // Upsert by id — later emissions for the same pill replace earlier ones.
   const byId = new Map<string, ChatMessage>();
 
@@ -446,7 +472,11 @@ export function replayEventsToMessages(
       continue;
     }
     for (const m of replayEvent(state, evt, thread, agentDisplayName, queenDisplayName)) {
-      byId.set(m.id, m);
+      const previous = byId.get(m.id);
+      byId.set(
+        m.id,
+        previous ? { ...m, createdAt: previous.createdAt ?? m.createdAt } : m,
+      );
     }
   }
 
