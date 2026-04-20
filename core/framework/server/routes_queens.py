@@ -23,6 +23,7 @@ from framework.agents.queen.queen_profiles import (
     update_queen_profile,
 )
 from framework.config import QUEENS_DIR
+from framework.server.app import safe_path_segment
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ def _transform_profile_for_api(profile: dict) -> dict:
 
 async def handle_get_profile(request: web.Request) -> web.Response:
     """GET /api/queen/{queen_id}/profile — get full queen profile."""
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     ensure_default_queens()
     try:
         profile = load_queen_profile(queen_id)
@@ -198,7 +199,7 @@ def _reverse_transform_for_yaml(body: dict) -> dict:
 
 async def handle_update_profile(request: web.Request) -> web.Response:
     """PATCH /api/queen/{queen_id}/profile — update queen profile fields."""
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     try:
         body = await request.json()
     except Exception:
@@ -231,7 +232,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     """
     from framework.server.session_manager import SessionManager
 
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     manager: SessionManager = request.app["manager"]
 
     ensure_default_queens()
@@ -325,7 +326,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
 
 async def handle_select_queen_session(request: web.Request) -> web.Response:
     """POST /api/queen/{queen_id}/session/select -- resume a specific queen session."""
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     manager = request.app["manager"]
 
     ensure_default_queens()
@@ -338,7 +339,7 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
     target_session_id = body.get("session_id")
     if not isinstance(target_session_id, str) or not target_session_id.strip():
         return web.json_response({"error": "session_id is required"}, status=400)
-    target_session_id = target_session_id.strip()
+    target_session_id = safe_path_segment(target_session_id.strip())
 
     if not _session_belongs_to_queen(manager, target_session_id, queen_id):
         return web.json_response(
@@ -378,7 +379,7 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
 
 async def handle_new_queen_session(request: web.Request) -> web.Response:
     """POST /api/queen/{queen_id}/session/new -- create a fresh queen session."""
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     manager = request.app["manager"]
 
     ensure_default_queens()
@@ -421,7 +422,7 @@ async def handle_upload_avatar(request: web.Request) -> web.Response:
     """
     from framework.config import QUEENS_DIR
 
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     queen_dir = QUEENS_DIR / queen_id
     if not (queen_dir / "profile.yaml").exists():
         return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
@@ -475,7 +476,7 @@ async def handle_get_avatar(request: web.Request) -> web.Response:
     """GET /api/queen/{queen_id}/avatar — serve queen avatar image."""
     from framework.config import QUEENS_DIR
 
-    queen_id = request.match_info["queen_id"]
+    queen_id = safe_path_segment(request.match_info["queen_id"])
     queen_dir = QUEENS_DIR / queen_id
 
     # Find avatar file with any supported extension
