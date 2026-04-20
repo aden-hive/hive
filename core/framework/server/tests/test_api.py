@@ -1517,6 +1517,65 @@ class TestCredentials:
             assert data["credentials"] == []
 
     @pytest.mark.asyncio
+    async def test_list_credentials_skips_unreadable_encrypted_entry(self):
+        from pydantic import SecretStr
+
+        from framework.credentials.models import CredentialDecryptionError, CredentialKey, CredentialObject
+
+        class BrokenStore:
+            def list_credentials(self):
+                return ["good_cred", "bad_cred"]
+
+            def get_credential(self, credential_id, refresh_if_needed=False):
+                if credential_id == "bad_cred":
+                    raise CredentialDecryptionError("bad encrypted file")
+                return CredentialObject(
+                    id=credential_id,
+                    keys={"api_key": CredentialKey(name="api_key", value=SecretStr("secret"))},
+                )
+
+        app = create_app()
+        app["credential_store"] = BrokenStore()
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/credentials")
+            assert resp.status == 200
+            data = await resp.json()
+
+        assert [c["credential_id"] for c in data["credentials"]] == ["good_cred"]
+        assert data["unreadable_credentials"] == ["bad_cred"]
+        assert "secret" not in json.dumps(data)
+
+    @pytest.mark.asyncio
+    async def test_get_credential_unreadable_returns_recoverable_conflict(self):
+        from framework.credentials.models import CredentialDecryptionError
+
+        class BrokenStore:
+            def get_credential(self, credential_id, refresh_if_needed=False):
+                raise CredentialDecryptionError("bad encrypted file")
+
+        app = create_app()
+        app["credential_store"] = BrokenStore()
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/credentials/bad_cred")
+            data = await resp.json()
+
+        assert resp.status == 409
+        assert data["credential_id"] == "bad_cred"
+        assert data["recoverable"] is True
+
+    def test_specs_availability_treats_decryption_error_as_unavailable(self):
+        from framework.credentials.models import CredentialDecryptionError
+        from framework.server.routes_credentials import _is_available_for_specs
+
+        class BrokenStore:
+            def is_available(self, credential_id):
+                raise CredentialDecryptionError("bad encrypted file")
+
+        assert _is_available_for_specs(BrokenStore(), "exa_search") is False
+
+    @pytest.mark.asyncio
     async def test_save_and_list_credential(self):
         app = self._make_app()
         async with TestClient(TestServer(app)) as client:

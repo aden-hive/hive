@@ -19,6 +19,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _ALLOWED_AGENT_ROOTS: tuple[Path, ...] | None = None
 
 
+def _has_encrypted_credentials() -> bool:
+    """Return True when an encrypted credential store already exists on disk."""
+    cred_dir = Path.home() / ".hive" / "credentials" / "credentials"
+    return cred_dir.is_dir() and any(cred_dir.glob("*.enc"))
+
+
 def _get_allowed_agent_roots() -> tuple[Path, ...]:
     """Return resolved allowed root directories for agent loading.
 
@@ -275,17 +281,26 @@ def create_app(model: str | None = None) -> web.Application:
 
         # Auto-generate credential key for web-only users who never ran the TUI
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
-            try:
-                from framework.credentials.key_storage import generate_and_save_credential_key
+            if _has_encrypted_credentials():
+                logger.warning(
+                    "HIVE_CREDENTIAL_KEY is missing but encrypted credentials already exist; "
+                    "not generating a replacement key because it would not decrypt existing credentials"
+                )
+            else:
+                try:
+                    from framework.credentials.key_storage import generate_and_save_credential_key
 
-                generate_and_save_credential_key()
-                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key")
-            except Exception as exc:
-                logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
+                    generate_and_save_credential_key()
+                    logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key")
+                except Exception as exc:
+                    logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
         # Local server startup should not wait on an eager Aden sync.
         # The store can still fetch/refresh credentials on demand.
-        credential_store = CredentialStore.with_aden_sync(auto_sync=False)
+        if not os.environ.get("HIVE_CREDENTIAL_KEY") and _has_encrypted_credentials():
+            credential_store = CredentialStore.with_env_storage()
+        else:
+            credential_store = CredentialStore.with_aden_sync(auto_sync=False)
     except Exception:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
         credential_store = CredentialStore.for_testing({})

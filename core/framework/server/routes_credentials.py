@@ -7,7 +7,7 @@ import os
 from aiohttp import web
 from pydantic import SecretStr
 
-from framework.credentials.models import CredentialKey, CredentialObject
+from framework.credentials.models import CredentialDecryptionError, CredentialKey, CredentialObject
 from framework.credentials.store import CredentialStore
 from framework.server.app import validate_agent_path
 
@@ -84,23 +84,52 @@ def _credential_to_dict(cred: CredentialObject) -> dict:
     }
 
 
+def _is_available_for_specs(store: CredentialStore, credential_id: str) -> bool:
+    """Best-effort availability check for the repair UI.
+
+    The credential settings page must stay reachable even when an encrypted
+    file was written with the wrong key or is otherwise unreadable.
+    """
+    try:
+        return store.is_available(credential_id)
+    except CredentialDecryptionError as exc:
+        logger.warning("Credential '%s' is unreadable; marking unavailable in specs: %s", credential_id, exc)
+        return False
+
+
 async def handle_list_credentials(request: web.Request) -> web.Response:
     """GET /api/credentials — list all credential metadata (no secrets)."""
     store = _get_store(request)
     cred_ids = store.list_credentials()
     credentials = []
+    unreadable = []
     for cid in cred_ids:
-        cred = store.get_credential(cid, refresh_if_needed=False)
+        try:
+            cred = store.get_credential(cid, refresh_if_needed=False)
+        except CredentialDecryptionError as exc:
+            logger.warning("Credential '%s' is unreadable while listing credentials: %s", cid, exc)
+            unreadable.append(cid)
+            continue
         if cred:
             credentials.append(_credential_to_dict(cred))
-    return web.json_response({"credentials": credentials})
+    return web.json_response({"credentials": credentials, "unreadable_credentials": unreadable})
 
 
 async def handle_get_credential(request: web.Request) -> web.Response:
     """GET /api/credentials/{credential_id} — get single credential metadata."""
     credential_id = request.match_info["credential_id"]
     store = _get_store(request)
-    cred = store.get_credential(credential_id, refresh_if_needed=False)
+    try:
+        cred = store.get_credential(credential_id, refresh_if_needed=False)
+    except CredentialDecryptionError:
+        return web.json_response(
+            {
+                "error": f"Credential '{credential_id}' could not be decrypted",
+                "credential_id": credential_id,
+                "recoverable": True,
+            },
+            status=409,
+        )
     if cred is None:
         return web.json_response({"error": f"Credential '{credential_id}' not found"}, status=404)
     return web.json_response(_credential_to_dict(cred))
@@ -393,7 +422,7 @@ async def handle_list_specs(request: web.Request) -> web.Response:
             if spec.aden_supported and not spec.direct_api_key_supported:
                 available = len(accounts) > 0
             else:
-                available = store.is_available(cred_id)
+                available = _is_available_for_specs(store, cred_id)
             specs.append(
                 {
                     "credential_name": name,
