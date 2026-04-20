@@ -196,6 +196,15 @@ class EdgeSpec(BaseModel):
                 expr_vars or "none matched",
             )
             return result
+        except NameError as e:
+            # Variable not found — likely a typo in condition_expr.
+            # Raise loudly so developers can fix the expression.
+            available = [k for k in context if k not in ("true", "false")]
+            raise ValueError(
+                f"Edge '{self.id}' condition references undefined variable: {e}. "
+                f"Expression: {self.condition_expr!r}. "
+                f"Available context keys: {available}"
+            ) from e
         except Exception as e:
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
