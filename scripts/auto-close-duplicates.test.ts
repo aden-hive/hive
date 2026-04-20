@@ -4,6 +4,8 @@
  * (circular-dup and self-ref prevention).
  */
 import { describe, expect, test } from "bun:test";
+import { describe, it, expect, vi } from 'vitest';
+import { ResearchAgent } from '../src/examples/ResearchAgent';
 import {
   authorDisagreedWithDupe,
   decideAutoClose,
@@ -257,5 +259,37 @@ describe("decideAutoClose", () => {
       async () => ({ state: "OPEN" } as { state: string })
     );
     expect(result).toBe(null);
+    
+
+describe('Research and Summary Agent Pipeline', () => {
+  const agent = new ResearchAgent();
+
+  it('should validate academic indexing in the review node', async () => {
+    const rawData = "Recent VLA findings in robotics.";
+    const analysis = await agent.analyticalNode(rawData);
+    
+    expect(analysis.citations).toContain('Scholar');
+    expect(analysis.feasibility).toBeDefined();
+  });
+
+  it('should generate a valid Markdown summary for MVP planning', async () => {
+    const analysis = {
+      trends: ['Laplace Control'],
+      citations: ['Web of Science 2026'],
+      feasibility: 'High'
+    };
+    
+    const summary = await agent.summaryNode(analysis);
+    expect(summary).toContain('## MVP Summary');
+    expect(summary).toContain('Findings');
+  });
+
+  it('should handle search tool failures gracefully', async () => {
+    vi.spyOn(agent, 'gatheringNode').mockRejectedValue(new Error('API Limit'));
+    
+    await expect(agent.run('Robotics Vision')).rejects.toThrow('API Limit');
+  });
+});
+
   });
 });
