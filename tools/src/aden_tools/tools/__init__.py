@@ -48,6 +48,7 @@ from .cloudflare_tool import register_tools as register_cloudflare
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
+from .currency_exchange_tool import register_tools as register_currency_exchange
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -266,6 +267,7 @@ def _register_unverified(
     register_duckduckgo(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
+    register_currency_exchange(mcp)
 
     # --- Credentials required ---
     register_airtable(mcp, credentials=credentials)
