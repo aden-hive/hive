@@ -307,6 +307,10 @@ export default function ColonyChat() {
   >({});
   const queenPhaseRef = useRef<string>("independent");
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
+  // Flipped true by the auto-flush path; consumed by the next empty-prompt
+  // client_input_requested so we don't flicker the typing bubble off while
+  // the queen is about to resume on the flushed input.
+  const queenAboutToResumeRef = useRef(false);
   const suppressIntroRef = useRef(false);
   const loadingRef = useRef(false);
 
@@ -731,16 +735,29 @@ export default function ColonyChat() {
               : null;
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
-              updateState({
-                awaitingInput: true,
-                isTyping: false,
-                isStreaming: false,
-                queenIsTyping: false,
-                pendingQuestion: prompt || null,
-                pendingOptions: options,
-                pendingQuestions: questions,
-                pendingQuestionSource: "queen",
-              });
+              // An empty-prompt client_input_requested means the queen parked
+              // in auto-wait. If we just auto-flushed a queued message, our
+              // inject will unblock her in a moment — skip flipping isTyping
+              // off so the thinking bubble doesn't flicker.
+              if (
+                queenAboutToResumeRef.current &&
+                !prompt &&
+                !options &&
+                !questions
+              ) {
+                queenAboutToResumeRef.current = false;
+              } else {
+                updateState({
+                  awaitingInput: true,
+                  isTyping: false,
+                  isStreaming: false,
+                  queenIsTyping: false,
+                  pendingQuestion: prompt || null,
+                  pendingOptions: options,
+                  pendingQuestions: questions,
+                  pendingQuestionSource: "queen",
+                });
+              }
             }
           }
 
@@ -1214,10 +1231,10 @@ export default function ColonyChat() {
   } = usePendingQueue({
     sendToBackend,
     setMessages,
-    onFlushStart: useCallback(
-      () => updateState({ isTyping: true, queenIsTyping: true }),
-      [updateState],
-    ),
+    onFlushStart: useCallback(() => {
+      updateState({ isTyping: true, queenIsTyping: true });
+      queenAboutToResumeRef.current = true;
+    }, [updateState]),
   });
 
   // Reset the queue whenever we navigate to a different colony (or to

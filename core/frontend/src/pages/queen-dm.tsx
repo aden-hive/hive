@@ -69,6 +69,10 @@ export default function QueenDM() {
     Record<string, { msgId: string; name: string }>
   >({});
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
+  // Flipped true by the auto-flush path; consumed by the next empty-prompt
+  // client_input_requested so we don't flicker the typing bubble off while
+  // the queen is about to resume on the flushed input.
+  const queenAboutToResumeRef = useRef(false);
   const [queenPhase, setQueenPhase] = useState<
     "independent" | "working" | "reviewing"
   >("independent");
@@ -511,6 +515,19 @@ export default function QueenDM() {
                 options?: string[];
               }[])
             : null;
+          // An empty-prompt client_input_requested means the queen parked
+          // in auto-wait. If we just auto-flushed a queued message, our
+          // inject will unblock her in a moment — skip flipping isTyping
+          // off so the thinking bubble doesn't flicker.
+          if (
+            queenAboutToResumeRef.current &&
+            !prompt &&
+            !options &&
+            !questions
+          ) {
+            queenAboutToResumeRef.current = false;
+            break;
+          }
           setAwaitingInput(true);
           setIsTyping(false);
           setIsStreaming(false);
@@ -529,6 +546,19 @@ export default function QueenDM() {
           );
           if (chatMsg) {
             setMessages((prev) => {
+              // Dedup by id first. During ?new=1 bootstrap, restoreMessages
+              // and SSE replay race to land the same server-echoed bubble
+              // (both derive id from the event timestamp). Without this,
+              // if restoreMessages lands first the reconciler below misses
+              // (executionId is already set) and SSE appends a duplicate.
+              const existingIdx = prev.findIndex((m) => m.id === chatMsg.id);
+              if (existingIdx !== -1) {
+                return prev.map((m, i) =>
+                  i === existingIdx
+                    ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt }
+                    : m,
+                );
+              }
               // Reconcile an optimistic user bubble with the server echo.
               // Optimistics have no executionId; server echoes do. Match the
               // oldest unreconciled optimistic with the same content — that's
@@ -775,7 +805,10 @@ export default function QueenDM() {
   } = usePendingQueue({
     sendToBackend,
     setMessages,
-    onFlushStart: useCallback(() => setIsTyping(true), []),
+    onFlushStart: useCallback(() => {
+      setIsTyping(true);
+      queenAboutToResumeRef.current = true;
+    }, []),
   });
 
   // Reset the queue whenever we navigate to a different queen. The hook
