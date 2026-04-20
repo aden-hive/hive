@@ -80,7 +80,8 @@ _INCUBATING_APPROVAL_GUIDANCE = (
     "MCP servers the worker needs that you haven't discussed. You don't "
     "need to cover every example — only the items that actually matter "
     "for this colony, and only the ones the user hasn't already implied. "
-    "Use ask_user / ask_user_multiple to fill the real gaps. "
+    "Use ask_user (batch several questions into one call when you have "
+    "multiple gaps) to fill the real ones. "
     "If, while sorting these out, you decide the spec isn't ready, call "
     "cancel_incubation and we go back to INDEPENDENT."
 )

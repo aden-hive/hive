@@ -450,7 +450,15 @@ class TestQueenInteractionBlocking:
             scenarios=[
                 tool_call_scenario(
                     "ask_user",
-                    {"question": "Waiting...", "options": ["Continue", "Stop"]},
+                    {
+                        "questions": [
+                            {
+                                "id": "q1",
+                                "prompt": "Waiting...",
+                                "options": ["Continue", "Stop"],
+                            }
+                        ]
+                    },
                     tool_use_id="ask_1",
                 ),
             ]
@@ -476,7 +484,15 @@ class TestQueenInteractionBlocking:
             scenarios=[
                 tool_call_scenario(
                     "ask_user",
-                    {"question": "Hello!", "options": ["Yes", "No"]},
+                    {
+                        "questions": [
+                            {
+                                "id": "q1",
+                                "prompt": "Hello!",
+                                "options": ["Yes", "No"],
+                            }
+                        ]
+                    },
                     tool_use_id="ask_1",
                 ),
             ]
@@ -577,7 +593,6 @@ class TestQueenInteractionBlocking:
         for call in llm.stream_calls:
             tool_names = [t.name for t in (call["tools"] or [])]
             assert "ask_user" not in tool_names
-            assert "ask_user_multiple" not in tool_names
             assert "escalate" in tool_names
 
     @pytest.mark.asyncio
@@ -755,7 +770,10 @@ class TestCrashRecovery:
                     "type": "function",
                     "function": {
                         "name": "ask_user",
-                        "arguments": '{"question":"What city?","options":["Seattle","Chicago"]}',
+                        "arguments": (
+                            '{"questions":[{"id":"city","prompt":"What city?",'
+                            '"options":["Seattle","Chicago"]}]}'
+                        ),
                     },
                 }
             ],
@@ -767,9 +785,13 @@ class TestCrashRecovery:
                 "iteration": 4,
                 "next_seq": conv.next_seq,
                 "pending_input": {
-                    "prompt": "What city?",
-                    "options": ["Seattle", "Chicago"],
-                    "questions": None,
+                    "questions": [
+                        {
+                            "id": "city",
+                            "prompt": "What city?",
+                            "options": ["Seattle", "Chicago"],
+                        }
+                    ],
                     "emit_client_request": True,
                 },
             }
@@ -809,7 +831,7 @@ class TestCrashRecovery:
         assert result.success is True
         assert llm._call_index == 0
         assert len(input_events) == 1
-        assert input_events[0].data["prompt"] == "What city?"
+        assert input_events[0].data["questions"][0]["prompt"] == "What city?"
 
     @pytest.mark.asyncio
     @pytest.mark.skip(

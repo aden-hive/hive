@@ -113,10 +113,18 @@ def install_worker_escalation_routing(
         queen_node = session.queen_executor.node_registry.get("queen") if session.queen_executor is not None else None
         if queen_node is None or not hasattr(queen_node, "inject_event"):
             if session.event_bus is not None:
+                # Stream the handoff text so the human sees the worker's
+                # question, then request input so the reply input appears.
+                await session.event_bus.emit_client_output_delta(
+                    stream_id="queen",
+                    node_id="queen",
+                    content=handoff,
+                    snapshot=handoff,
+                    execution_id=session.id,
+                )
                 await session.event_bus.emit_client_input_requested(
                     stream_id="queen",
                     node_id="queen",
-                    prompt=handoff,
                     execution_id=session.id,
                 )
             return

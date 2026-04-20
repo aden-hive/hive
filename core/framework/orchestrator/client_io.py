@@ -89,10 +89,12 @@ class ActiveNodeClientIO(NodeClientIO):
         self._input_result = None
 
         if self._event_bus is not None:
+            # `prompt` is consumed by the caller separately (callers emit
+            # it as a text delta when needed). The event only carries the
+            # structured questions payload for widget rendering.
             await self._event_bus.emit_client_input_requested(
                 stream_id=self.node_id,
                 node_id=self.node_id,
-                prompt=prompt,
                 execution_id=self._execution_id or None,
             )
 

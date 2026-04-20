@@ -66,7 +66,6 @@ from framework.agent_loop.internals.stall_detector import (
     ngram_similarity,
 )
 from framework.agent_loop.internals.synthetic_tools import (
-    build_ask_user_multiple_tool,
     build_ask_user_tool,
     build_escalate_tool,
     build_report_to_parent_tool,
@@ -608,8 +607,6 @@ class AgentLoop(AgentProtocol):
         tools = list(ctx.available_tools)
         if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
-            if stream_id == "queen" or stream_id == "overseer":
-                tools.append(self._build_ask_user_multiple_tool())
         # Workers (parallel ephemeral agents) get escalate + report_to_parent.
         # The overseer is client-facing like the queen and has neither.
         if stream_id not in ("queen", "judge", "overseer"):
@@ -754,8 +751,6 @@ class AgentLoop(AgentProtocol):
                     )
                     got_input = await self._await_user_input(
                         ctx,
-                        prompt=str(pending_input_state.get("prompt", "")),
-                        options=pending_input_state.get("options"),
                         questions=pending_input_state.get("questions"),
                         emit_client_request=bool(pending_input_state.get("emit_client_request", True)),
                     )
@@ -789,7 +784,6 @@ class AgentLoop(AgentProtocol):
             if ctx.dynamic_tools_provider is not None:
                 _synthetic_names = {
                     "ask_user",
-                    "ask_user_multiple",
                     "escalate",
                 }
                 synthetic = [t for t in tools if t.name in _synthetic_names]
@@ -863,8 +857,6 @@ class AgentLoop(AgentProtocol):
                         turn_tokens,
                         logged_tool_calls,
                         user_input_requested,
-                        ask_user_prompt,
-                        ask_user_options,
                         queen_input_requested,
                         request_system_prompt,
                         request_messages,
@@ -1080,7 +1072,7 @@ class AgentLoop(AgentProtocol):
                                 inner_turn=0,
                             )
                         await conversation.add_assistant_message(visible_error)
-                        await self._await_user_input(ctx, prompt="")
+                        await self._await_user_input(ctx)
                         _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
 
@@ -1129,7 +1121,7 @@ class AgentLoop(AgentProtocol):
             if _turn_cancelled:
                 logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
                 if ctx.supports_direct_user_io:
-                    await self._await_user_input(ctx, prompt="")
+                    await self._await_user_input(ctx)
                 continue  # back to top of for-iteration loop
 
             # Queen non-transient LLM failures wait for user input and then
@@ -1260,7 +1252,7 @@ class AgentLoop(AgentProtocol):
                             iteration,
                             _consecutive_empty_turns,
                         )
-                        await self._await_user_input(ctx, prompt="")
+                        await self._await_user_input(ctx)
                         _consecutive_empty_turns = 0
                     else:
                         await conversation.add_user_message(
@@ -1336,7 +1328,6 @@ class AgentLoop(AgentProtocol):
                 if tc.get("tool_name")
                 not in (
                     "ask_user",
-                    "ask_user_multiple",
                     "escalate",
                 )
             ]
@@ -1384,7 +1375,7 @@ class AgentLoop(AgentProtocol):
                         recent_responses.clear()
                     elif ctx.supports_direct_user_io:
                         await conversation.add_user_message(warning_msg)
-                        await self._await_user_input(ctx, prompt=doom_desc)
+                        await self._await_user_input(ctx)
                         recent_tool_fingerprints.clear()
                         recent_responses.clear()
                     else:
@@ -1507,11 +1498,9 @@ class AgentLoop(AgentProtocol):
             # conversation — they flow through without blocking.
             _cf_block = False
             _cf_auto = False
-            _cf_prompt = ""
             if ctx.supports_direct_user_io:
                 if user_input_requested:
                     _cf_block = True
-                    _cf_prompt = ask_user_prompt
                 elif stream_id == "queen" and not real_tool_results and not outputs_set:
                     # Auto-block: only for the queen (conversational node).
                     # Workers are autonomous — they block only on explicit
@@ -1614,13 +1603,13 @@ class AgentLoop(AgentProtocol):
                     iteration,
                     _cf_auto,
                 )
-                # Check for multi-question batch from ask_user_multiple
-                multi_qs = getattr(self, "_pending_multi_questions", None)
-                self._pending_multi_questions = None
+                # Pull the pending questions array set by the ask_user
+                # handler (a 1-item list for a single question, 2-8 for a
+                # batch). None for auto-block turns with no explicit ask.
+                pending_qs = getattr(self, "_pending_questions", None)
+                self._pending_questions = None
                 pending_input_state = {
-                    "prompt": _cf_prompt,
-                    "options": ask_user_options,
-                    "questions": multi_qs,
+                    "questions": pending_qs,
                     "emit_client_request": True,
                 }
                 await self._write_cursor(
@@ -1634,11 +1623,9 @@ class AgentLoop(AgentProtocol):
                 )
                 got_input = await self._await_user_input(
                     ctx,
-                    prompt=_cf_prompt,
-                    options=ask_user_options,
-                    questions=multi_qs,
+                    questions=pending_qs,
                 )
-                # Emit deferred tool_call_completed for ask_user / ask_user_multiple
+                # Emit deferred tool_call_completed for ask_user
                 deferred = getattr(self, "_deferred_tool_complete", None)
                 if deferred:
                     self._deferred_tool_complete = None
@@ -1803,7 +1790,7 @@ class AgentLoop(AgentProtocol):
                     recent_tool_fingerprints=recent_tool_fingerprints,
                     pending_input=pending_input_state,
                 )
-                got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
+                got_input = await self._await_user_input(ctx, emit_client_request=False)
                 logger.info(
                     "[%s] iter=%d: queen wait unblocked, got_input=%s",
                     node_id,
@@ -2195,9 +2182,7 @@ class AgentLoop(AgentProtocol):
     async def _await_user_input(
         self,
         ctx: AgentContext,
-        prompt: str = "",
         *,
-        options: list[str] | None = None,
         questions: list[dict] | None = None,
         emit_client_request: bool = True,
     ) -> bool:
@@ -2210,11 +2195,11 @@ class AgentLoop(AgentProtocol):
           before the judge runs.
 
         Args:
-            options: Optional predefined choices for the user (from ask_user).
-                Passed through to the CLIENT_INPUT_REQUESTED event so the
-                frontend can render a QuestionWidget with buttons.
-            questions: Optional list of question dicts for ask_user_multiple.
-                Each dict has id, prompt, and optional options.
+            questions: Optional list of question dicts from ask_user. Each
+                dict has id, prompt, and optional options. Passed through to
+                the CLIENT_INPUT_REQUESTED event so the frontend can render
+                the appropriate widget (QuestionWidget for one, else
+                MultiQuestionWidget).
             emit_client_request: When False, wait silently without publishing
                 CLIENT_INPUT_REQUESTED. Used for worker waits where input is
                 expected from the queen via inject_message().
@@ -2243,9 +2228,7 @@ class AgentLoop(AgentProtocol):
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.agent_id,
                 node_id=ctx.agent_id,
-                prompt=prompt,
                 execution_id=ctx.execution_id or "",
-                options=options,
                 questions=questions,
             )
 
@@ -2277,8 +2260,6 @@ class AgentLoop(AgentProtocol):
         dict[str, int],
         list[dict],
         bool,
-        str,
-        list[str] | None,
         bool,
         str,
         list[dict[str, Any]],
@@ -2287,8 +2268,7 @@ class AgentLoop(AgentProtocol):
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested, ask_user_prompt, ask_user_options, queen_input_requested,
-        system_prompt, messages, reported_to_parent).
+        user_input_requested, queen_input_requested, system_prompt, messages, reported_to_parent).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
@@ -2317,8 +2297,6 @@ class AgentLoop(AgentProtocol):
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
-        ask_user_prompt = ""
-        ask_user_options: list[str] | None = None
         queen_input_requested = False
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
@@ -2808,8 +2786,6 @@ class AgentLoop(AgentProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
-                    ask_user_prompt,
-                    ask_user_options,
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
@@ -2892,54 +2868,94 @@ class AgentLoop(AgentProtocol):
 
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
-                    ask_user_prompt = tc.tool_input.get("question", "")
-                    raw_options = tc.tool_input.get("options", None)
-
-                    # Self-heal: some model families (notably the queen
-                    # profile prompt poisoning the output style) cram
-                    # the options inside the question string as a
-                    # pseudo-XML blob like:
-                    #
-                    #   "What do you want to do?</question>\n_OPTIONS:
-                    #    [\"De-risk\", \"Add\", \"Short\"]"
-                    #
-                    # When that happens the question text leaks
-                    # </question> and _OPTIONS: into the chat UI and
-                    # the buttons never appear. Detect + repair.
+                    # The consolidated tool always takes a `questions`
+                    # array (1-8 entries). A single-entry array is the
+                    # common case; longer arrays batch several questions
+                    # into one turn so the user answers them all at once.
                     from framework.agent_loop.internals.synthetic_tools import (
                         sanitize_ask_user_inputs,
                     )
 
-                    ask_user_prompt, recovered_options = sanitize_ask_user_inputs(ask_user_prompt, raw_options)
-                    if recovered_options is not None and raw_options is None:
-                        raw_options = recovered_options
-                    # Defensive: ensure options is a list of strings.
-                    # Smaller models sometimes send a string instead of
-                    # an array — try to recover gracefully.
-                    ask_user_options: list[str] | None = None
-                    if isinstance(raw_options, list):
-                        ask_user_options = [str(o) for o in raw_options if o]
-                    elif isinstance(raw_options, str) and raw_options.strip():
-                        # Try JSON parse first (e.g. '["a","b"]')
-                        try:
-                            parsed = json.loads(raw_options)
-                            if isinstance(parsed, list):
-                                ask_user_options = [str(o) for o in parsed if o]
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                    if ask_user_options is not None and len(ask_user_options) < 2:
-                        ask_user_options = None  # fall back to free-text input
-
-                    # Workers MUST provide at least 2 options — no free-text
-                    # questions allowed.  Only the queen may omit options.
-                    if ask_user_options is None and stream_id != "queen":
+                    raw_questions = tc.tool_input.get("questions", None)
+                    if not isinstance(raw_questions, list) or not raw_questions:
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
                             content=(
-                                "ERROR: options are required. Provide at least "
-                                "2 predefined choices in the 'options' array. "
-                                'Example: {"question": "...", "options": '
-                                '["Yes", "No"]}'
+                                "ERROR: ask_user requires a non-empty "
+                                "'questions' array. Each entry must have "
+                                "{id, prompt, options?}. Example: "
+                                '{"questions": [{"id": "q1", "prompt": '
+                                '"What now?", "options": ["A", "B"]}]}'
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Normalize + self-heal each question entry. Some
+                    # model families cram options inside the prompt as a
+                    # pseudo-XML blob like "What now?</question>\n
+                    # _OPTIONS: [\"A\", \"B\"]". sanitize_ask_user_inputs
+                    # strips the tag and recovers the inline options.
+                    questions: list[dict] = []
+                    for i, q in enumerate(raw_questions):
+                        if not isinstance(q, dict):
+                            continue
+                        qid = str(q.get("id", f"q{i + 1}"))
+                        raw_prompt = q.get("prompt", q.get("question", ""))
+                        raw_opts = q.get("options", None)
+                        cleaned_prompt, recovered_opts = sanitize_ask_user_inputs(raw_prompt, raw_opts)
+                        if recovered_opts is not None and raw_opts is None:
+                            raw_opts = recovered_opts
+
+                        opts: list[str] | None = None
+                        if isinstance(raw_opts, list):
+                            opts = [str(o) for o in raw_opts if o]
+                        elif isinstance(raw_opts, str) and raw_opts.strip():
+                            # Defensive: smaller models sometimes send a
+                            # JSON-encoded string instead of an array.
+                            try:
+                                parsed = json.loads(raw_opts)
+                                if isinstance(parsed, list):
+                                    opts = [str(o) for o in parsed if o]
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        if opts is not None and len(opts) < 2:
+                            opts = None  # fall back to free-text
+
+                        questions.append(
+                            {
+                                "id": qid,
+                                "prompt": cleaned_prompt,
+                                **({"options": opts} if opts else {}),
+                            }
+                        )
+
+                    if not questions:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: no valid question objects in "
+                                "'questions'. Each entry must be an "
+                                "object with 'id' and 'prompt'."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Workers MUST provide options on every question —
+                    # free-text asks are queen-only.
+                    if stream_id != "queen" and any("options" not in q for q in questions):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: options are required on every "
+                                "question for worker nodes. Provide at "
+                                "least 2 predefined choices in the "
+                                "'options' array of each question."
                             ),
                             is_error=True,
                         )
@@ -2949,77 +2965,31 @@ class AgentLoop(AgentProtocol):
 
                     user_input_requested = True
 
-                    # Free-form ask_user (no options): stream the question
-                    # text as a chat message so the user can see it.  When
-                    # options are present the QuestionWidget shows the
-                    # question, but without options nothing renders it.
-                    if ask_user_options is None and ask_user_prompt and ctx.emits_client_io:
+                    # Single free-form question: stream the prompt as a
+                    # chat message so the user sees it. Widget-rendered
+                    # cases (single-with-options, multi) draw their own
+                    # question text, so no text delta is needed.
+                    if (
+                        len(questions) == 1
+                        and "options" not in questions[0]
+                        and questions[0]["prompt"]
+                        and ctx.emits_client_io
+                    ):
+                        _q_text = questions[0]["prompt"]
                         await self._publish_text_delta(
                             stream_id,
                             node_id,
-                            content=ask_user_prompt,
-                            snapshot=ask_user_prompt,
+                            content=_q_text,
+                            snapshot=_q_text,
                             ctx=ctx,
                             execution_id=execution_id,
                             iteration=iteration,
                             inner_turn=inner_turn,
                         )
 
-                    result = ToolResult(
-                        tool_use_id=tc.tool_use_id,
-                        content="Waiting for user input...",
-                        is_error=False,
-                    )
-                    results_by_id[tc.tool_use_id] = result
-
-                elif tc.tool_name == "ask_user_multiple":
-                    # --- Framework-level ask_user_multiple ---
-                    raw_questions = tc.tool_input.get("questions", [])
-                    if not isinstance(raw_questions, list) or len(raw_questions) < 2:
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=(
-                                "ERROR: questions must be an array of at "
-                                "least 2 question objects. Use ask_user "
-                                "for single questions."
-                            ),
-                            is_error=True,
-                        )
-                        results_by_id[tc.tool_use_id] = result
-                        user_input_requested = False
-                        continue
-
-                    # Normalize each question entry
-                    questions: list[dict] = []
-                    for i, q in enumerate(raw_questions):
-                        if not isinstance(q, dict):
-                            continue
-                        qid = str(q.get("id", f"q{i + 1}"))
-                        prompt = str(q.get("prompt", ""))
-                        opts = q.get("options", None)
-                        if isinstance(opts, list):
-                            opts = [str(o) for o in opts if o]
-                            if len(opts) < 2:
-                                opts = None
-                        else:
-                            opts = None
-                        questions.append(
-                            {
-                                "id": qid,
-                                "prompt": prompt,
-                                **({"options": opts} if opts else {}),
-                            }
-                        )
-
-                    user_input_requested = True
-
-                    # Store as multi-question prompt/options for
-                    # the event emission path
-                    ask_user_prompt = ""
-                    ask_user_options = None
-                    # Pass the full questions list via a special
-                    # key that the event emitter picks up
-                    self._pending_multi_questions = questions
+                    # Stash the normalized questions list for the
+                    # blocking path (§1612) + event emission.
+                    self._pending_questions = questions
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -3338,7 +3308,6 @@ class AgentLoop(AgentProtocol):
                 # Build log entries for real tools (exclude synthetic tools)
                 if tc.tool_name not in (
                     "ask_user",
-                    "ask_user_multiple",
                     "escalate",
                 ):
                     tool_entry = {
@@ -3376,7 +3345,7 @@ class AgentLoop(AgentProtocol):
                     image_content=image_content,
                     is_skill_content=result.is_skill_content,
                 )
-                if tc.tool_name in ("ask_user", "ask_user_multiple") and user_input_requested and not result.is_error:
+                if tc.tool_name == "ask_user" and user_input_requested and not result.is_error:
                     # Defer tool_call_completed until after user responds
                     self._deferred_tool_complete = {
                         "stream_id": stream_id,
@@ -3457,8 +3426,6 @@ class AgentLoop(AgentProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
-                    ask_user_prompt,
-                    ask_user_options,
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
@@ -3509,8 +3476,6 @@ class AgentLoop(AgentProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
-                    ask_user_prompt,
-                    ask_user_options,
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
@@ -3529,10 +3494,6 @@ class AgentLoop(AgentProtocol):
     def _build_ask_user_tool(self) -> Tool:
         """Build the synthetic ask_user tool. Delegates to synthetic_tools module."""
         return build_ask_user_tool()
-
-    def _build_ask_user_multiple_tool(self) -> Tool:
-        """Build the synthetic ask_user_multiple tool. Delegates to synthetic_tools module."""
-        return build_ask_user_multiple_tool()
 
     def _build_escalate_tool(self) -> Tool:
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""

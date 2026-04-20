@@ -83,14 +83,22 @@ async def test_worker_handoff_queen_dead_falls_back_to_client_input() -> None:
     session = _make_session(bus)
     # No queen_executor attached.
 
-    captured = []
+    captured_output = []
+    captured_input_req = []
 
-    async def _capture(event):
-        captured.append(event)
+    async def _capture_output(event):
+        captured_output.append(event)
+
+    async def _capture_input(event):
+        captured_input_req.append(event)
 
     bus.subscribe(
+        event_types=[EventType.CLIENT_OUTPUT_DELTA],
+        handler=_capture_output,
+    )
+    bus.subscribe(
         event_types=[EventType.CLIENT_INPUT_REQUESTED],
-        handler=_capture,
+        handler=_capture_input,
     )
     install_worker_escalation_routing(session)
 
@@ -101,7 +109,11 @@ async def test_worker_handoff_queen_dead_falls_back_to_client_input() -> None:
         request_id="req-dead",
     )
 
-    assert any("[WORKER_ESCALATION]" in (e.data or {}).get("prompt", "") for e in captured)
+    # The handoff text now arrives as a CLIENT_OUTPUT_DELTA (so the user
+    # sees it in chat) followed by an empty CLIENT_INPUT_REQUESTED that
+    # makes the reply input appear.
+    assert any("[WORKER_ESCALATION]" in (e.data or {}).get("content", "") for e in captured_output)
+    assert len(captured_input_req) == 1
     # Entry still recorded — queen may come back online and drain it.
     assert "req-dead" in session.pending_escalations
 

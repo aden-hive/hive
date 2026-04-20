@@ -845,7 +845,7 @@ class TestOpenRouterToolCompatFallback:
         )
         tools = [
             Tool(
-                name="ask_user_multiple",
+                name="choose_one",
                 description="Ask the user a multiple-choice question",
                 parameters={
                     "properties": {
@@ -862,7 +862,7 @@ class TestOpenRouterToolCompatFallback:
         compat_response.choices = [MagicMock()]
         compat_response.choices[0].message.content = (
             "<|tool_call_start|>"
-            "[ask_user_multiple(options=['Quartet Collaborator', 'Project Advisor'], "
+            "[choose_one(options=['Quartet Collaborator', 'Project Advisor'], "
             "question='Who are you?', prompt='Who are you?')]"
             "<|tool_call_end|>"
         )
@@ -894,7 +894,7 @@ class TestOpenRouterToolCompatFallback:
 
         tool_calls = [event for event in first_events if isinstance(event, ToolCallEvent)]
         assert len(tool_calls) == 1
-        assert tool_calls[0].tool_name == "ask_user_multiple"
+        assert tool_calls[0].tool_name == "choose_one"
         assert tool_calls[0].tool_input == {
             "options": ["Quartet Collaborator", "Project Advisor"],
             "question": "Who are you?",

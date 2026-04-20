@@ -914,24 +914,22 @@ class EventBus:
         self,
         stream_id: str,
         node_id: str,
-        prompt: str = "",
         execution_id: str | None = None,
-        options: list[str] | None = None,
         questions: list[dict] | None = None,
     ) -> None:
         """Emit a user-input request for interactive queen turns.
 
         Args:
-            options: Optional predefined choices for the user (1-3 items).
-                     The frontend appends an "Other" free-text option
-                     automatically.
-            questions: Optional list of question dicts for multi-question
-                       batches (from ask_user_multiple). Each dict has id,
-                       prompt, and optional options.
+            questions: Optional list of question dicts from ``ask_user``.
+                Each dict has ``id``, ``prompt``, and optional ``options``
+                (2-3 predefined choices). The frontend renders the
+                QuestionWidget for a single-entry list and the
+                MultiQuestionWidget for 2+ entries. Free-text asks (no
+                options) stream the prompt separately as a chat message;
+                auto-block turns have no questions at all and fall back
+                to the normal text input.
         """
-        data: dict[str, Any] = {"prompt": prompt}
-        if options:
-            data["options"] = options
+        data: dict[str, Any] = {}
         if questions:
             data["questions"] = questions
         await self.publish(

@@ -173,8 +173,6 @@ interface AgentState {
   queenIsTyping: boolean;
   workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
-  pendingQuestion: string | null;
-  pendingOptions: string[] | null;
   pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
   pendingQuestionSource: "queen" | null;
   contextUsage: Record<
@@ -206,8 +204,6 @@ function defaultAgentState(): AgentState {
     queenIsTyping: false,
     workerIsTyping: false,
     llmSnapshots: {},
-    pendingQuestion: null,
-    pendingOptions: null,
     pendingQuestions: null,
     pendingQuestionSource: null,
     contextUsage: {},
@@ -670,8 +666,6 @@ export default function ColonyChat() {
               nodeLogs: {},
               subagentReports: [],
               llmSnapshots: {},
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -691,8 +685,6 @@ export default function ColonyChat() {
               awaitingInput: false,
               workerInputMessageId: null,
               llmSnapshots: {},
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -735,21 +727,16 @@ export default function ColonyChat() {
           }
 
           if (event.type === "client_input_requested") {
-            const rawOptions = event.data?.options;
-            const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
             const rawQuestions = event.data?.questions;
             const questions = Array.isArray(rawQuestions)
               ? (rawQuestions as { id: string; prompt: string; options?: string[] }[])
               : null;
             if (isQueen) {
-              const prompt = (event.data?.prompt as string) || "";
               updateState({
                 awaitingInput: true,
                 isTyping: false,
                 isStreaming: false,
                 queenIsTyping: false,
-                pendingQuestion: prompt || null,
-                pendingOptions: options,
                 pendingQuestions: questions,
                 pendingQuestionSource: "queen",
               });
@@ -763,8 +750,6 @@ export default function ColonyChat() {
               queenIsTyping: false,
               workerIsTyping: false,
               awaitingInput: false,
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -780,8 +765,6 @@ export default function ColonyChat() {
               queenIsTyping: false,
               workerIsTyping: false,
               awaitingInput: false,
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -814,8 +797,6 @@ export default function ColonyChat() {
             updateState({
               isStreaming: false,
               awaitingInput: false,
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -824,8 +805,6 @@ export default function ColonyChat() {
               isStreaming: false,
               workerIsTyping: true,
               awaitingInput: false,
-              pendingQuestion: null,
-              pendingOptions: null,
               pendingQuestions: null,
               pendingQuestionSource: null,
             });
@@ -1157,8 +1136,6 @@ export default function ColonyChat() {
     (text: string, _thread: string, images?: ImageContent[]) => {
       if (agentState.pendingQuestionSource === "queen") {
         updateState({
-          pendingQuestion: null,
-          pendingOptions: null,
           pendingQuestions: null,
           pendingQuestionSource: null,
         });
@@ -1200,46 +1177,33 @@ export default function ColonyChat() {
   );
 
   const handleQueenQuestionAnswer = useCallback(
-    (answer: string) => {
-      updateState({
-        pendingQuestion: null,
-        pendingOptions: null,
-        pendingQuestions: null,
-        pendingQuestionSource: null,
-      });
-      handleSend(answer, agentPath);
-    },
-    [agentPath, handleSend, updateState],
-  );
-
-  const handleMultiQuestionAnswer = useCallback(
     (answers: Record<string, string>) => {
       updateState({
-        pendingQuestion: null,
-        pendingOptions: null,
         pendingQuestions: null,
         pendingQuestionSource: null,
       });
-      const lines = Object.entries(answers).map(([id, answer]) => `[${id}]: ${answer}`);
-      handleSend(lines.join("\n"), agentPath);
+      const entries = Object.entries(answers);
+      const payload =
+        entries.length === 1
+          ? entries[0][1]
+          : entries.map(([id, answer]) => `[${id}]: ${answer}`).join("\n");
+      handleSend(payload, agentPath);
     },
     [agentPath, handleSend, updateState],
   );
 
   const handleQuestionDismiss = useCallback(() => {
     if (!agentState.sessionId) return;
-    const question = agentState.pendingQuestion || "";
+    const firstPrompt = agentState.pendingQuestions?.[0]?.prompt ?? "";
     updateState({
-      pendingQuestion: null,
-      pendingOptions: null,
       pendingQuestions: null,
       pendingQuestionSource: null,
       awaitingInput: false,
     });
     executionApi
-      .chat(agentState.sessionId, `[User dismissed the question: "${question}"]`)
+      .chat(agentState.sessionId, `[User dismissed the question: "${firstPrompt}"]`)
       .catch(() => {});
-  }, [agentState.sessionId, agentState.pendingQuestion, updateState]);
+  }, [agentState.sessionId, agentState.pendingQuestions, updateState]);
 
   const triggers = useMemo(
     () => graphNodes.filter((n) => n.nodeType === "trigger"),
@@ -1360,11 +1324,8 @@ export default function ColonyChat() {
             isBusy={agentState.queenIsTyping ?? false}
             disabled={agentState.loading || !agentState.queenReady}
             queenPhase={agentState.queenPhase}
-            pendingQuestion={agentState.awaitingInput ? agentState.pendingQuestion : null}
-            pendingOptions={agentState.awaitingInput ? agentState.pendingOptions : null}
             pendingQuestions={agentState.awaitingInput ? agentState.pendingQuestions : null}
             onQuestionSubmit={handleQueenQuestionAnswer}
-            onMultiQuestionSubmit={handleMultiQuestionAnswer}
             onQuestionDismiss={handleQuestionDismiss}
             contextUsage={agentState.contextUsage}
             supportsImages={agentState.queenSupportsImages}

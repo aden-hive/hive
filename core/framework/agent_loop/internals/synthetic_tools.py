@@ -91,108 +91,86 @@ def sanitize_ask_user_inputs(
     return q, recovered
 
 
+ask_user_prompt = (
+    "You MUST call this tool whenever you need the user's response. "
+    "Always call it after greeting the user, asking a question, or "
+    "requesting approval. Do NOT call it for status updates or "
+    "summaries that don't require a response.\n\n"
+    "USAGE:\n"
+    "Pass a 'questions' array with 1-8 entries. Each entry has an "
+    "'id' (short identifier used in the user's reply), a 'prompt' "
+    "(the question text), and optional 'options' (2-3 predefined "
+    "choices). For a single question, pass a one-item array. For "
+    "several clarifications, batch them in one call so the user can "
+    "answer everything in one interaction instead of going back and "
+    "forth — ALWAYS prefer a batch over multiple sequential calls.\n\n"
+    "STRUCTURE RULES (CRITICAL):\n"
+    "- The 'prompt' field is PLAIN TEXT shown to the user. Do NOT "
+    "include XML tags, pseudo-tags like </question>, or option lists "
+    "in the prompt string. The UI does not parse them — they render "
+    "as raw text and look broken.\n"
+    "- The 'options' parameter is the ONLY way to render buttons. "
+    "If you want buttons, put them in the 'options' array, not in "
+    "the prompt string. Do NOT write 'OPTIONS: [...]', "
+    "'_options: [...]', or any inline list inside 'prompt'.\n"
+    "- Each prompt must read as a single clean sentence with no "
+    "markup. Example: 'What would you like to do?' — not "
+    "'What would you like to do?</question>'.\n\n"
+    "OPTIONS GUIDANCE:\n"
+    "Include 2-3 predefined options in most cases. The UI "
+    "automatically appends an 'Other' free-text input after your "
+    "options, so NEVER include catch-all options like 'Custom idea', "
+    "'Something else', 'Other', or 'None of the above' — the UI "
+    "handles that. When the question primarily needs a typed answer "
+    "but you must include options, make one option signal that "
+    "typing is expected (e.g. \"I'll type my response\"). Omit "
+    "options ONLY when the question demands a free-form answer the "
+    "user must type out (e.g. 'Describe your agent idea', 'Paste "
+    "the error message'). Workers MUST always provide options — "
+    "only the queen may ask free-form questions.\n\n"
+    "IMPORTANT: Do NOT repeat the questions in your text response — "
+    "the widget renders them. Keep your text to a brief intro only.\n\n"
+    "SINGLE-QUESTION EXAMPLE:\n"
+    '{"questions": [{"id": "next", "prompt": "What would you like '
+    'to do?", "options": ["Build a new agent", '
+    '"Modify existing agent", "Run tests"]}]}\n\n'
+    "BATCH EXAMPLE:\n"
+    '{"questions": ['
+    '{"id": "scope", "prompt": "What scope?", '
+    '"options": ["Full", "Partial"]}, '
+    '{"id": "format", "prompt": "Output format?", '
+    '"options": ["PDF", "CSV", "JSON"]}, '
+    '{"id": "details", "prompt": "Any special requirements?"}'
+    "]}\n\n"
+    "FREE-FORM EXAMPLE (queen only):\n"
+    '{"questions": [{"id": "idea", "prompt": "Describe the agent '
+    'you want to build."}]}\n\n'
+    "WRONG (do NOT do this — buttons will not render):\n"
+    '{"questions": [{"id": "q", "prompt": "What now?</question>\\n'
+    '_OPTIONS: [\\"A\\", \\"B\\"]"}]}'
+)
+
+
 def build_ask_user_tool() -> Tool:
     """Build the synthetic ask_user tool for explicit user-input requests.
 
-    The queen calls ask_user() when it needs to pause and wait
-    for user input.  Text-only turns WITHOUT ask_user flow through without
-    blocking, allowing progress updates and summaries to stream freely.
+    The queen calls ask_user() when it needs to pause and wait for user
+    input. Accepts an array of 1-8 questions — a single question for the
+    common case, or a batch when several clarifications are needed at once.
+    Text-only turns WITHOUT ask_user flow through without blocking, allowing
+    progress updates and summaries to stream freely.
     """
     return Tool(
         name="ask_user",
-        description=(
-            "You MUST call this tool whenever you need the user's response. "
-            "Always call it after greeting the user, asking a question, or "
-            "requesting approval. Do NOT call it for status updates or "
-            "summaries that don't require a response.\n\n"
-            "STRUCTURE RULES (CRITICAL):\n"
-            "- The 'question' field is PLAIN TEXT shown to the user. Do NOT "
-            "include XML tags, pseudo-tags like </question>, or option lists "
-            "in the question string. The UI does not parse them — they "
-            "render as raw text and look broken.\n"
-            "- The 'options' parameter is the ONLY way to render buttons. "
-            "If you want buttons, put them in the 'options' array, not in "
-            "the question string. Do NOT write 'OPTIONS: [...]', "
-            "'_options: [...]', or any inline list inside 'question'.\n"
-            "- The question text must read as a single clean prompt with "
-            "no markup. Example: 'What would you like to do?' — not "
-            "'What would you like to do?</question>'.\n\n"
-            "USAGE:\n"
-            "Always include 2-3 predefined options. The UI automatically "
-            "appends an 'Other' free-text input after your options, so NEVER "
-            "include catch-all options like 'Custom idea', 'Something else', "
-            "'Other', or 'None of the above' — the UI handles that. "
-            "When the question primarily needs a typed answer but you must "
-            "include options, make one option signal that typing is expected "
-            "(e.g. 'I\\'ll type my response'). This helps users discover the "
-            "free-text input. "
-            "The ONLY exception: omit options when the question demands a "
-            "free-form answer the user must type out (e.g. 'Describe your "
-            "agent idea', 'Paste the error message').\n\n"
-            "CORRECT EXAMPLE:\n"
-            '{"question": "What would you like to do?", "options": '
-            '["Build a new agent", "Modify existing agent", "Run tests"]}\n\n'
-            "FREE-FORM EXAMPLE:\n"
-            '{"question": "Describe the agent you want to build."}\n\n'
-            "WRONG (do NOT do this — buttons will not render):\n"
-            '{"question": "What now?</question>\\n_OPTIONS: [\\"A\\", \\"B\\"]"}'
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": "The question or prompt shown to the user.",
-                },
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "2-3 specific predefined choices. Include in most cases. "
-                        'Example: ["Option A", "Option B", "Option C"]. '
-                        "The UI always appends an 'Other' free-text input, so "
-                        "do NOT include catch-alls like 'Custom idea' or 'Other'. "
-                        "Omit ONLY when the user must type a free-form answer."
-                    ),
-                    "minItems": 2,
-                    "maxItems": 3,
-                },
-            },
-            "required": ["question"],
-        },
-    )
-
-
-def build_ask_user_multiple_tool() -> Tool:
-    """Build the synthetic ask_user_multiple tool for batched questions.
-
-    Queen-only tool that presents multiple questions at once so the user
-    can answer them all in a single interaction rather than one at a time.
-    """
-    return Tool(
-        name="ask_user_multiple",
-        description=(
-            "Ask the user multiple questions at once. Use this instead of "
-            "ask_user when you have 2 or more questions to ask in the same "
-            "turn — it lets the user answer everything in one go rather than "
-            "going back and forth. Each question can have its own predefined "
-            "options (2-3 choices) or be free-form. The UI renders all "
-            "questions together with a single Submit button. "
-            "ALWAYS prefer this over ask_user when you have multiple things "
-            "to clarify. "
-            "IMPORTANT: Do NOT repeat the questions in your text response — "
-            "the widget renders them. Keep your text to a brief intro only. "
-            '{"questions": ['
-            '  {"id": "scope", "prompt": "What scope?", "options": ["Full", "Partial"]},'
-            '  {"id": "format", "prompt": "Output format?", "options": ["PDF", "CSV", "JSON"]},'
-            '  {"id": "details", "prompt": "Any special requirements?"}'
-            "]}"
-        ),
+        description=ask_user_prompt,
         parameters={
             "type": "object",
             "properties": {
                 "questions": {
                     "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "description": "List of questions to present to the user.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -218,9 +196,6 @@ def build_ask_user_multiple_tool() -> Tool:
                         },
                         "required": ["id", "prompt"],
                     },
-                    "minItems": 2,
-                    "maxItems": 8,
-                    "description": "List of questions to present to the user.",
                 },
             },
             "required": ["questions"],

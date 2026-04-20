@@ -52,7 +52,6 @@ _WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
         "set_output",
         "escalate",
         "ask_user",
-        "ask_user_multiple",
     }
 )
 

@@ -95,18 +95,17 @@ interface ChatPanelProps {
   supportsImages?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
-  /** Pending question from ask_user — replaces textarea when present */
-  pendingQuestion?: string | null;
-  /** Options for the pending question */
-  pendingOptions?: string[] | null;
-  /** Multiple questions from ask_user_multiple */
+  /** Pending questions from ask_user. A single-entry list renders
+   *  QuestionWidget; 2+ entries render MultiQuestionWidget; a single
+   *  entry with no options falls through to the normal text input so
+   *  the user can type a free-form reply. */
   pendingQuestions?:
     | { id: string; prompt: string; options?: string[] }[]
     | null;
-  /** Called when user submits an answer to the pending question */
-  onQuestionSubmit?: (answer: string, isOther: boolean) => void;
-  /** Called when user submits answers to multiple questions */
-  onMultiQuestionSubmit?: (answers: Record<string, string>) => void;
+  /** Called when the user answers pending questions. Keys are question
+   *  ids, values are the chosen/typed answer. Called for both single
+   *  and multi-question flows. */
+  onQuestionSubmit?: (answers: Record<string, string>) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
@@ -278,19 +277,16 @@ export function ToolActivityRow({ content }: { content: string }) {
 }
 
 // --- Inline ask_user fallback ---------------------------------------------
-// Sometimes the model prints the ask_user / ask_user_multiple payload as
-// regular assistant text instead of invoking the tool. We detect that
-// payload here and render a QuestionWidget / MultiQuestionWidget inline so
-// the user still gets the nice button UI. Submissions are sent back as a
-// regular user message via onSend (there is no pending backend state to
-// fulfill, so we treat it like the user answering in chat).
+// Sometimes the model prints the ask_user payload as regular assistant
+// text instead of invoking the tool. We detect that payload here and
+// render a QuestionWidget / MultiQuestionWidget inline so the user still
+// gets the nice button UI. Submissions are sent back as a regular user
+// message via onSend (there is no pending backend state to fulfill, so
+// we treat it like the user answering in chat).
 
-type AskUserInlinePayload =
-  | { kind: "single"; question: string; options: string[] }
-  | {
-      kind: "multi";
-      questions: { id: string; prompt: string; options?: string[] }[];
-    };
+type AskUserInlinePayload = {
+  questions: { id: string; prompt: string; options?: string[] }[];
+};
 
 function detectAskUserPayload(content: string): AskUserInlinePayload | null {
   if (!content) return null;
@@ -314,44 +310,48 @@ function detectAskUserPayload(content: string): AskUserInlinePayload | null {
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as Record<string, unknown>;
 
-  // ask_user_multiple: { questions: [{ id, prompt, options? }, ...] }
+  // Normalize to the unified ask_user shape:
+  //   { questions: [{ id, prompt, options? }, ...] }
+  // Accept either the array form directly, or a legacy single-question
+  // shape { question, options } that models occasionally still emit —
+  // it gets wrapped into a one-entry array.
+  let raw: unknown[] | null = null;
   if (Array.isArray(obj.questions)) {
-    const raw = obj.questions as unknown[];
-    if (raw.length < 1 || raw.length > 8) return null;
-    const questions: { id: string; prompt: string; options?: string[] }[] = [];
-    for (let i = 0; i < raw.length; i++) {
-      const q = raw[i];
-      if (!q || typeof q !== "object") return null;
-      const qo = q as Record<string, unknown>;
-      const prompt =
-        typeof qo.prompt === "string"
-          ? qo.prompt
-          : typeof qo.question === "string"
-            ? qo.question
-            : null;
-      if (!prompt) return null;
-      const id = typeof qo.id === "string" && qo.id ? qo.id : `q${i}`;
-      let options: string[] | undefined;
-      if (
-        Array.isArray(qo.options) &&
-        qo.options.every((o) => typeof o === "string")
-      ) {
-        options = qo.options as string[];
-      }
-      questions.push({ id, prompt, options });
+    raw = obj.questions as unknown[];
+  } else if (typeof obj.question === "string" || typeof obj.prompt === "string") {
+    raw = [obj];
+  }
+  if (!raw || raw.length < 1 || raw.length > 8) return null;
+
+  const questions: { id: string; prompt: string; options?: string[] }[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const q = raw[i];
+    if (!q || typeof q !== "object") return null;
+    const qo = q as Record<string, unknown>;
+    const prompt =
+      typeof qo.prompt === "string"
+        ? qo.prompt
+        : typeof qo.question === "string"
+          ? qo.question
+          : null;
+    if (!prompt) return null;
+    const id = typeof qo.id === "string" && qo.id ? qo.id : `q${i}`;
+    let options: string[] | undefined;
+    if (
+      Array.isArray(qo.options) &&
+      qo.options.every((o) => typeof o === "string")
+    ) {
+      options = qo.options as string[];
     }
-    return { kind: "multi", questions };
+    questions.push({ id, prompt, options });
   }
 
-  // ask_user: { question: string, options: string[] }
-  const question = typeof obj.question === "string" ? obj.question : null;
-  const options =
-    Array.isArray(obj.options) &&
-    obj.options.every((o) => typeof o === "string")
-      ? (obj.options as string[])
-      : null;
-  if (!question || !options || options.length < 2) return null;
-  return { kind: "single", question, options };
+  // Require either a multi-question batch or a single-with-options
+  // payload — a single free-form prompt isn't worth a widget.
+  if (questions.length === 1 && !(questions[0].options && questions[0].options.length >= 2)) {
+    return null;
+  }
+  return { questions };
 }
 
 function InlineAskUserBubble({
@@ -424,14 +424,13 @@ function InlineAskUserBubble({
       ? "Open worker in colony sidebar"
       : undefined;
 
-  const handleSingle = (answer: string) => {
+  const handleSubmit = (answers: Record<string, string>) => {
     setState("submitted");
-    onSend(answer, thread);
-  };
-
-  const handleMulti = (answers: Record<string, string>) => {
-    setState("submitted");
-    if (payload.kind !== "multi") return;
+    if (payload.questions.length === 1) {
+      const only = payload.questions[0];
+      onSend(answers[only.id] ?? "", thread);
+      return;
+    }
     // Format answers as a readable, numbered list for the outgoing message.
     const lines = payload.questions.map((q, i) => {
       const a = answers[q.id] ?? "";
@@ -482,19 +481,21 @@ function InlineAskUserBubble({
             );
           })()}
         </div>
-        {payload.kind === "single" ? (
-          <QuestionWidget
-            inline
-            question={payload.question}
-            options={payload.options}
-            onSubmit={handleSingle}
-            onDismiss={() => setState("dismissed")}
-          />
-        ) : (
+        {payload.questions.length >= 2 ? (
           <MultiQuestionWidget
             inline
             questions={payload.questions}
-            onSubmit={handleMulti}
+            onSubmit={handleSubmit}
+            onDismiss={() => setState("dismissed")}
+          />
+        ) : (
+          <QuestionWidget
+            inline
+            question={payload.questions[0].prompt}
+            options={payload.questions[0].options ?? []}
+            onSubmit={(answer) =>
+              handleSubmit({ [payload.questions[0].id]: answer })
+            }
             onDismiss={() => setState("dismissed")}
           />
         )}
@@ -869,11 +870,8 @@ export default function ChatPanel({
   activeThread,
   disabled,
   onCancel,
-  pendingQuestion,
-  pendingOptions,
   pendingQuestions,
   onQuestionSubmit,
-  onMultiQuestionSubmit,
   onQuestionDismiss,
   queenPhase,
   showQueenPhaseBadge = true,
@@ -1222,7 +1220,7 @@ export default function ChatPanel({
     if (stickToBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [threadMessages, pendingQuestion, isWaiting, isWorkerWaiting]);
+  }, [threadMessages, pendingQuestions, isWaiting, isWorkerWaiting]);
 
   // Always start pinned to bottom when switching threads
   useEffect(() => {
@@ -1508,18 +1506,24 @@ export default function ChatPanel({
           </div>
         </div>
       ) : pendingQuestions &&
-      pendingQuestions.length >= 2 &&
-      onMultiQuestionSubmit ? (
+        pendingQuestions.length >= 2 &&
+        onQuestionSubmit ? (
         <MultiQuestionWidget
           questions={pendingQuestions}
-          onSubmit={onMultiQuestionSubmit}
+          onSubmit={onQuestionSubmit}
           onDismiss={onQuestionDismiss}
         />
-      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      ) : pendingQuestions &&
+        pendingQuestions.length === 1 &&
+        pendingQuestions[0].options &&
+        pendingQuestions[0].options.length >= 2 &&
+        onQuestionSubmit ? (
         <QuestionWidget
-          question={pendingQuestion}
-          options={pendingOptions}
-          onSubmit={onQuestionSubmit}
+          question={pendingQuestions[0].prompt}
+          options={pendingQuestions[0].options}
+          onSubmit={(answer) =>
+            onQuestionSubmit({ [pendingQuestions[0].id]: answer })
+          }
           onDismiss={onQuestionDismiss}
         />
       ) : (

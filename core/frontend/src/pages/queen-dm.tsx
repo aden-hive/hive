@@ -40,8 +40,6 @@ export default function QueenDM() {
   const [queenReady, setQueenReady] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-  const [pendingOptions, setPendingOptions] = useState<string[] | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
@@ -79,8 +77,6 @@ export default function QueenDM() {
     setQueenReady(false);
     setIsTyping(false);
     setIsStreaming(false);
-    setPendingQuestion(null);
-    setPendingOptions(null);
     setPendingQuestions(null);
     setAwaitingInput(false);
     setQueenPhase("independent");
@@ -567,11 +563,6 @@ export default function QueenDM() {
         }
 
         case "client_input_requested": {
-          const prompt = (event.data?.prompt as string) || "";
-          const rawOptions = event.data?.options;
-          const options = Array.isArray(rawOptions)
-            ? (rawOptions as string[])
-            : null;
           const rawQuestions = event.data?.questions;
           const questions = Array.isArray(rawQuestions)
             ? (rawQuestions as {
@@ -583,8 +574,6 @@ export default function QueenDM() {
           setAwaitingInput(true);
           setIsTyping(false);
           setIsStreaming(false);
-          setPendingQuestion(prompt || null);
-          setPendingOptions(options);
           setPendingQuestions(questions);
           break;
         }
@@ -674,8 +663,7 @@ export default function QueenDM() {
     (text: string, _thread: string, images?: ImageContent[]) => {
       if (awaitingInput) {
         setAwaitingInput(false);
-        setPendingQuestion(null);
-        setPendingOptions(null);
+        setPendingQuestions(null);
       }
 
       const isQueenBusy = isTyping;
@@ -705,24 +693,16 @@ export default function QueenDM() {
   );
 
   const handleQuestionAnswer = useCallback(
-    (answer: string) => {
-      setAwaitingInput(false);
-      setPendingQuestion(null);
-      setPendingOptions(null);
-      handleSend(answer, "queen-dm");
-    },
-    [handleSend],
-  );
-
-  const handleMultiQuestionAnswer = useCallback(
     (answers: Record<string, string>) => {
       setAwaitingInput(false);
-      setPendingQuestion(null);
-      setPendingOptions(null);
       setPendingQuestions(null);
-      const formatted = Object.entries(answers)
-        .map(([id, val]) => `${id}: ${val}`)
-        .join("\n");
+      // For a single question, send just the answer text. For a batch,
+      // send "id: answer" lines so the agent can map replies back.
+      const entries = Object.entries(answers);
+      const formatted =
+        entries.length === 1
+          ? entries[0][1]
+          : entries.map(([id, val]) => `${id}: ${val}`).join("\n");
       handleSend(formatted, "queen-dm");
     },
     [handleSend],
@@ -772,15 +752,11 @@ export default function QueenDM() {
           disabled={loading || !queenReady}
           queenPhase={queenPhase}
           showQueenPhaseBadge
-          pendingQuestion={awaitingInput ? pendingQuestion : null}
-          pendingOptions={awaitingInput ? pendingOptions : null}
           pendingQuestions={awaitingInput ? pendingQuestions : null}
           onQuestionSubmit={handleQuestionAnswer}
-          onMultiQuestionSubmit={handleMultiQuestionAnswer}
           onQuestionDismiss={() => {
             setAwaitingInput(false);
-            setPendingQuestion(null);
-            setPendingOptions(null);
+            setPendingQuestions(null);
           }}
           supportsImages={true}
           initialDraft={initialDraft}

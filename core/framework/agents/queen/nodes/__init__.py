@@ -138,7 +138,9 @@ You have full coding tools (read/write/edit/search/run) and MCP tools \
 Execute the user's task directly using conversation and tools. \
 You are the agent. \
 If you need a structured choice or approval gate, always use \
-ask_user or ask_user_multiple; otherwise ask in plain prose. \
+``ask_user``; otherwise ask in plain prose. ``ask_user`` takes a \
+``questions`` array — pass a single entry for one question, or batch \
+several entries when you have multiple clarifications. \
 \
 When the user clearly wants persistent / recurring / headless work that \
 needs to outlive THIS chat (e.g. "every morning", "monitor X and alert \
@@ -166,8 +168,9 @@ in your tools doc lists the kinds of things to think about (concurrency, \
 schedule, result-tracking, failure handling, credentials). Treat that \
 list as prompts for YOUR judgement — only ask the user about the items \
 that actually matter for THIS colony and that the conversation hasn't \
-already settled. Use ``ask_user`` / ``ask_user_multiple`` for the gaps; \
-plain prose for everything else.
+already settled. Use ``ask_user`` (pass a ``questions`` array — batch \
+several entries for multi-question turns) for the gaps; plain prose for \
+everything else.
 
 If you realise mid-incubation that the spec isn't ready (user changed \
 their mind, you're missing more than a couple of details, the work \
@@ -281,8 +284,9 @@ The conversation that got you here probably did NOT cover all of:
 
 These are PROMPTS for your judgement, not a required checklist. Cover \
 the items that actually matter for THIS colony, and only the ones the \
-user hasn't already implied. Use ``ask_user`` / ``ask_user_multiple`` \
-for gaps that need a real answer; skip the rest.
+user hasn't already implied. Use ``ask_user`` (batch several questions \
+into one call when you have multiple gaps) for answers you need; skip \
+the rest.
 
 ## Commit
 - create_colony(colony_name, task, skill_name, skill_description, \
@@ -421,8 +425,9 @@ Check recall memory for name / role / past topics and weave them into \
 a 1–2 sentence in-character greeting, then wait.
 - On a clear ask (build, edit, run, investigate, search), call the \
 appropriate tool on the same turn — don't narrate intent and stop.
-- Use `ask_user` / `ask_user_multiple` only for structured choices \
-(approvals, 2–4 concrete options like "Postgres or SQLite?"). \
+- Use `ask_user` only for structured choices (approvals, 2–4 concrete \
+options like "Postgres or SQLite?"). Pass a single-entry ``questions`` \
+array for one question or a multi-entry array to batch several. \
 Free-form questions belong in prose; reaching for `ask_user` on \
 every reply blocks natural conversation.
 - Images attached by the user are analyzed directly via your vision \

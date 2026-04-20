@@ -22,7 +22,13 @@ intake_node = NodeSpec(
 You are a meeting scheduler assistant.
 
 **STEP 1 — Use ask_user to collect meeting details:**
-1. Call ask_user to ask for: attendee email, meeting duration (minutes), and meeting title
+1. Call ask_user with a batch of three questions in one call — one
+   entry each for attendee email, meeting duration (minutes), and
+   meeting title. Example: ask_user({"questions": [
+     {"id": "email", "prompt": "Attendee email?"},
+     {"id": "duration", "prompt": "Meeting duration (minutes)?"},
+     {"id": "title", "prompt": "Meeting title?"}
+   ]})
 2. Wait for the user's response before proceeding
 
 **STEP 2 — After user provides all details, call set_output:**
