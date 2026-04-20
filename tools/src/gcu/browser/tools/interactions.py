@@ -64,11 +64,7 @@ async def _build_visual_response(result: dict, bridge, target_tab: int | None) -
         shot = await bridge.screenshot(target_tab, full_page=False)
         if not shot.get("ok"):
             return [text_block]
-        highlights = (
-            [_interaction_highlights[target_tab]]
-            if target_tab in _interaction_highlights
-            else None
-        )
+        highlights = [_interaction_highlights[target_tab]] if target_tab in _interaction_highlights else None
         data, _ = await asyncio.to_thread(
             _resize_and_annotate,
             shot["data"],

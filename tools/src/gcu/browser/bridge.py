@@ -469,11 +469,13 @@ class BeelineBridge:
                     parsed = json.loads(payload)
                 except Exception:
                     parsed = {"_raw": payload}
-                write_log({
-                    "type": "viewport_event",
-                    "tab_id": tab_id,
-                    **parsed,
-                })
+                write_log(
+                    {
+                        "type": "viewport_event",
+                        "tab_id": tab_id,
+                        **parsed,
+                    }
+                )
                 return
 
             # Attach-time canary → attach_canary (proves extension
@@ -483,11 +485,13 @@ class BeelineBridge:
                     parsed = json.loads(payload)
                 except Exception:
                     parsed = {"_raw": payload}
-                write_log({
-                    "type": "attach_canary",
-                    "tab_id": tab_id,
-                    **parsed,
-                })
+                write_log(
+                    {
+                        "type": "attach_canary",
+                        "tab_id": tab_id,
+                        **parsed,
+                    }
+                )
                 return
 
             # Everything else — keep a compact row so we can tell
@@ -503,24 +507,28 @@ class BeelineBridge:
                     compact.append(v[:120])
                 elif v is not None:
                     compact.append(str(v)[:120])
-            write_log({
-                "type": "cdp_event",
-                "tab_id": tab_id,
-                "method": method,
-                "level": params.get("type"),
-                "args": compact,
-            })
+            write_log(
+                {
+                    "type": "cdp_event",
+                    "tab_id": tab_id,
+                    "method": method,
+                    "level": params.get("type"),
+                    "args": compact,
+                }
+            )
             return
 
         # Other forwarded events (Page.lifecycleEvent, frameResized,
         # frameNavigated, Target.targetInfoChanged) are rare and high
         # signal — keep the full param dict but truncate strings.
-        write_log({
-            "type": "cdp_event",
-            "tab_id": tab_id,
-            "method": method,
-            "params": params,
-        })
+        write_log(
+            {
+                "type": "cdp_event",
+                "tab_id": tab_id,
+                "method": method,
+                "params": params,
+            }
+        )
 
         # Main-frame navigation wipes the previous document's scripts.
         # Our [hive_vp] probe's event listeners die with it. Reinstall
@@ -541,6 +549,7 @@ class BeelineBridge:
         if method == "Page.frameResized" and tab_id is not None:
             try:
                 from .tools.inspection import _viewport_sizes
+
                 _viewport_sizes.pop(tab_id, None)
             except Exception:
                 pass
@@ -550,6 +559,7 @@ class BeelineBridge:
         current document of ``tab_id``. Called from sync context
         inside ``_handle_cdp_event``, so we create a task on the
         running loop. Failures are silent."""
+
         async def _do() -> None:
             try:
                 # The new document's global scope doesn't have
@@ -566,6 +576,7 @@ class BeelineBridge:
                 )
             except Exception:
                 pass
+
         try:
             asyncio.get_event_loop().create_task(_do())
         except RuntimeError:
@@ -868,8 +879,7 @@ class BeelineBridge:
                 {
                     "expression": (
                         "console.info('[hive_attach_canary]', "
-                        "JSON.stringify({tabId: "
-                        + str(tab_id) + ", ts: Date.now()}))"
+                        "JSON.stringify({tabId: " + str(tab_id) + ", ts: Date.now()}))"
                     ),
                     "returnByValue": True,
                     "awaitPromise": False,
@@ -1379,9 +1389,7 @@ class BeelineBridge:
             # `(function(){ return (...)(x,y) })()` and the value
             # actually comes back — without it the wrapper drops
             # the result on the floor (returns undefined).
-            probe_result = await self.evaluate(
-                tab_id, f"return ({_HIT_ELEMENT_JS})({x}, {y})"
-            )
+            probe_result = await self.evaluate(tab_id, f"return ({_HIT_ELEMENT_JS})({x}, {y})")
             hit_probe = (probe_result or {}).get("result")
         except Exception:
             hit_probe = None
@@ -1410,16 +1418,19 @@ class BeelineBridge:
         if hit_probe is not None:
             try:
                 from .telemetry import write_log
-                write_log({
-                    "type": "click_hit_probe",
-                    "tab_id": tab_id,
-                    "intended": {"x": x, "y": y},
-                    "viewport": hit_probe.get("viewport"),
-                    "hit": hit_probe.get("hit"),
-                    "stack": hit_probe.get("stack"),
-                    "sweep": hit_probe.get("sweep"),
-                    "offsetInRect": hit_probe.get("offsetInRect"),
-                })
+
+                write_log(
+                    {
+                        "type": "click_hit_probe",
+                        "tab_id": tab_id,
+                        "intended": {"x": x, "y": y},
+                        "viewport": hit_probe.get("viewport"),
+                        "hit": hit_probe.get("hit"),
+                        "stack": hit_probe.get("stack"),
+                        "sweep": hit_probe.get("sweep"),
+                        "offsetInRect": hit_probe.get("offsetInRect"),
+                    }
+                )
             except Exception:
                 pass
         return resp
