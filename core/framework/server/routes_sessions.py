@@ -29,6 +29,7 @@ from aiohttp import web
 
 from framework.server.app import (
     resolve_session,
+    safe_path_segment,
     validate_agent_path,
 )
 from framework.server.session_manager import SessionManager
@@ -198,7 +199,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     This lets the frontend detect a server restart and restore message history.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -255,7 +256,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
 async def handle_stop_session(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id} — stop a session entirely."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     stopped = await manager.stop_session(session_id)
     if not stopped:
@@ -278,7 +279,7 @@ async def handle_load_colony(request: web.Request) -> web.Response:
     Body: {"agent_path": "...", "colony_id": "..." (optional), "model": "..." (optional)}
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     body = await request.json()
 
     agent_path = body.get("agent_path")
@@ -317,7 +318,7 @@ async def handle_load_colony(request: web.Request) -> web.Response:
 async def handle_unload_colony(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id}/colony — unload colony, keep queen alive."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     removed = await manager.unload_colony(session_id)
     if not removed:
@@ -343,7 +344,7 @@ async def handle_unload_colony(request: web.Request) -> web.Response:
 async def handle_session_stats(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/stats — runtime statistics."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -359,7 +360,7 @@ async def handle_session_stats(request: web.Request) -> web.Response:
 async def handle_session_entry_points(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/entry-points — list entry points."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -508,7 +509,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
             await _start_trigger_webhook(session, trigger_id, tdef)
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
-        session_id = request.match_info["session_id"]
+        session_id = safe_path_segment(request.match_info["session_id"])
         await _persist_active_triggers(session, session_id)
 
     _save_trigger_to_agent(session, trigger_id, tdef)
@@ -588,7 +589,7 @@ async def handle_activate_trigger(request: web.Request) -> web.Response:
 
     tdef.active = True
     session.active_trigger_ids.add(trigger_id)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     await _persist_active_triggers(session, session_id)
 
     bus = getattr(session, "event_bus", None)
@@ -649,7 +650,7 @@ async def handle_deactivate_trigger(request: web.Request) -> web.Response:
 
     from framework.tools.queen_lifecycle_tools import _persist_active_triggers
 
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     await _persist_active_triggers(session, session_id)
 
     bus = getattr(session, "event_bus", None)
@@ -673,7 +674,7 @@ async def handle_deactivate_trigger(request: web.Request) -> web.Response:
 async def handle_session_colonies(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/colonies — list loaded colonies."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -719,7 +720,7 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     events; before this cap, restoring on page-mount shipped the whole thing
     down the wire and blocked the UI for seconds.
     """
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     try:
         limit = int(request.query.get("limit", str(_EVENTS_HISTORY_DEFAULT_LIMIT)))
@@ -819,7 +820,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
     This is the frontend 'delete from history' action.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     # Stop the live session if it exists (best-effort)
     if manager.get_session(session_id):
@@ -919,7 +920,7 @@ async def handle_delete_agent(request: web.Request) -> web.Response:
 async def handle_reveal_session_folder(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/reveal — open session data folder in the OS file manager."""
     manager: SessionManager = request.app["manager"]
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     session = manager.get_session(session_id)
     storage_session_id = (session.queen_resume_from or session.id) if session else session_id

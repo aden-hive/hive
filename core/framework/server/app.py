@@ -78,7 +78,7 @@ def resolve_session(request: web.Request):
     Returns (session, None) on success or (None, error_response) on failure.
     """
     manager: SessionManager = request.app["manager"]
-    sid = request.match_info["session_id"]
+    sid = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(sid)
     if not session:
         return None, web.json_response({"error": f"Session '{sid}' not found"}, status=404)
