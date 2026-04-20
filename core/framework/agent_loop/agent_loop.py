@@ -1927,6 +1927,11 @@ class AgentLoop(AgentProtocol):
                 real_tool_results,
                 iteration,
             )
+            if verdict.action == "ACCEPT":
+                verdict_action, verdict_feedback = await handle_accept_verdict(verdict, accumulator, ctx, iteration)
+                if verdict_action == "RETRY":
+                    verdict = type(verdict)(action="RETRY", feedback=verdict_feedback)
+
             fb_preview = (verdict.feedback or "")[:200]
             logger.info(
                 "[%s] iter=%d: judge verdict=%s feedback=%r",
@@ -1949,89 +1954,85 @@ class AgentLoop(AgentProtocol):
             )
 
             if verdict.action == "ACCEPT":
-                verdict_action, verdict_feedback = await handle_accept_verdict(verdict, accumulator, ctx, iteration)
-                if verdict_action == "RETRY":
-                    verdict = type(verdict)(action="RETRY", feedback=verdict_feedback)
-                else:
-                    # Check for missing output keys
-                    missing = self._get_missing_output_keys(
-                        accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
+                # Check for missing output keys
+                missing = self._get_missing_output_keys(
+                    accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
+                )
+                if missing and self._judge is not None:
+                    hint = (
+                        f"Task incomplete. Required outputs not yet produced: {missing}. "
+                        f"Follow your system prompt instructions to complete the work."
                     )
-                    if missing and self._judge is not None:
-                        hint = (
-                            f"Task incomplete. Required outputs not yet produced: {missing}. "
-                            f"Follow your system prompt instructions to complete the work."
-                        )
-                        logger.info(
-                            "[%s] iter=%d: ACCEPT but missing keys %s",
-                            node_id,
-                            iteration,
-                            missing,
-                        )
-                        await conversation.add_user_message(hint)
-                        # Gap D: log ACCEPT-with-missing-keys as RETRY
-                        _retry_count += 1
-                        if ctx.runtime_logger:
-                            iter_latency_ms = int((time.time() - iter_start) * 1000)
-                            ctx.runtime_logger.log_step(
-                                node_id=node_id,
-                                node_type="event_loop",
-                                step_index=iteration,
-                                verdict="RETRY",
-                                verdict_feedback=(f"Judge accepted but missing output keys: {missing}"),
-                                tool_calls=logged_tool_calls,
-                                llm_text=assistant_text,
-                                input_tokens=turn_tokens.get("input", 0),
-                                output_tokens=turn_tokens.get("output", 0),
-                                latency_ms=iter_latency_ms,
-                            )
-                        continue
-
-                    # Exit point 5: Judge ACCEPT — log step + log_node_complete
-                    # Write outputs to data buffer
-                    for key, value in accumulator.to_dict().items():
-                        ctx.input_data[key] = value
-
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
-                    latency_ms = int((time.time() - start_time) * 1000)
-                    _accept_count += 1
+                    logger.info(
+                        "[%s] iter=%d: ACCEPT but missing keys %s",
+                        node_id,
+                        iteration,
+                        missing,
+                    )
+                    await conversation.add_user_message(hint)
+                    # Gap D: log ACCEPT-with-missing-keys as RETRY
+                    _retry_count += 1
                     if ctx.runtime_logger:
                         iter_latency_ms = int((time.time() - iter_start) * 1000)
                         ctx.runtime_logger.log_step(
                             node_id=node_id,
                             node_type="event_loop",
                             step_index=iteration,
-                            verdict="ACCEPT",
-                            verdict_feedback=verdict.feedback or "",
+                            verdict="RETRY",
+                            verdict_feedback=(f"Judge accepted but missing output keys: {missing}"),
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
-                        ctx.runtime_logger.log_node_complete(
-                            node_id=node_id,
-                            node_name=ctx.agent_spec.name,
-                            node_type="event_loop",
-                            success=True,
-                            total_steps=iteration + 1,
-                            tokens_used=total_input_tokens + total_output_tokens,
-                            input_tokens=total_input_tokens,
-                            output_tokens=total_output_tokens,
-                            latency_ms=latency_ms,
-                            exit_status="success",
-                            accept_count=_accept_count,
-                            retry_count=_retry_count,
-                            escalate_count=_escalate_count,
-                            continue_count=_continue_count,
-                        )
-                    return AgentResult(
-                        success=True,
-                        output=accumulator.to_dict(),
-                        tokens_used=total_input_tokens + total_output_tokens,
-                        latency_ms=latency_ms,
-                        conversation=None,
+                    continue
+
+                # Exit point 5: Judge ACCEPT — log step + log_node_complete
+                # Write outputs to data buffer
+                for key, value in accumulator.to_dict().items():
+                    ctx.input_data[key] = value
+
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
+                latency_ms = int((time.time() - start_time) * 1000)
+                _accept_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="ACCEPT",
+                        verdict_feedback=verdict.feedback or "",
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
                     )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.agent_spec.name,
+                        node_type="event_loop",
+                        success=True,
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="success",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
+                return AgentResult(
+                    success=True,
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                    conversation=None,
+                )
 
             elif verdict.action == "ESCALATE":
                 # Exit point 6: Judge ESCALATE — log step + log_node_complete

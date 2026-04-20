@@ -331,11 +331,11 @@ class TestConcurrency:
         # All records returned must have a valid occurrence_count.
         assert all(r.occurrence_count >= 1 for r in results)
 
-        # Read back and verify total occurrences sum to exactly N.
+        # Read back and verify same-pattern writes upsert into one record.
         from framework.agent_loop.internals.failure_memory import _load_records_sync
         records = _load_records_sync(mem_dir)
-        total = sum(r.occurrence_count for r in records)
-        assert total == N, f"Expected {N} total occurrences, got {total}"
+        assert len(records) == 1
+        assert records[0].occurrence_count == N
 
     @pytest.mark.asyncio
     async def test_concurrent_different_patterns(self, mem_dir):
@@ -523,26 +523,34 @@ class TestRuleProposals:
 
 class TestEnvConfig:
     def test_env_threshold_override(self, monkeypatch):
-        monkeypatch.setenv("HIVE_FM_RULE_THRESHOLD", "7")
-        # Re-import to pick up the env change (constants are module-level).
         import importlib
         import framework.agent_loop.internals.failure_memory as fm
+
+        with monkeypatch.context() as m:
+            m.setenv("HIVE_FM_RULE_THRESHOLD", "7")
+            importlib.reload(fm)
+            assert fm._RULE_PROPOSAL_THRESHOLD == 7
+
         importlib.reload(fm)
-        assert fm._RULE_PROPOSAL_THRESHOLD == 7
-        importlib.reload(fm)  # restore
 
     def test_env_max_age_override(self, monkeypatch):
-        monkeypatch.setenv("HIVE_FM_MAX_AGE_DAYS", "7")
         import importlib
         import framework.agent_loop.internals.failure_memory as fm
-        importlib.reload(fm)
-        assert fm._MAX_RECORD_AGE_SECONDS == 7 * 24 * 3600
+
+        with monkeypatch.context() as m:
+            m.setenv("HIVE_FM_MAX_AGE_DAYS", "7")
+            importlib.reload(fm)
+            assert fm._MAX_RECORD_AGE_SECONDS == 7 * 24 * 3600
+
         importlib.reload(fm)
 
     def test_env_similarity_threshold(self, monkeypatch):
-        monkeypatch.setenv("HIVE_FM_SIMILARITY_THRESHOLD", "0.5")
         import importlib
         import framework.agent_loop.internals.failure_memory as fm
-        importlib.reload(fm)
-        assert fm._TASK_SIMILARITY_THRESHOLD == 0.5
+
+        with monkeypatch.context() as m:
+            m.setenv("HIVE_FM_SIMILARITY_THRESHOLD", "0.5")
+            importlib.reload(fm)
+            assert fm._TASK_SIMILARITY_THRESHOLD == 0.5
+
         importlib.reload(fm)

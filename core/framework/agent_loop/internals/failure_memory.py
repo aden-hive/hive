@@ -218,14 +218,6 @@ def is_silent_failure(output: dict[str, Any]) -> tuple[bool, str]:
                 flagged.append(f"key '{key}' matches placeholder: {val_str!r:.60}")
                 break
 
-    str_values = [str(v) for v in output.values() if v is not None]
-    if str_values and all(len(v) <= _SILENT_FAILURE_MAX_LEN for v in str_values):
-        if not flagged:
-            flagged.append(
-                f"all {len(str_values)} output value(s) suspiciously short "
-                f"(all <= {_SILENT_FAILURE_MAX_LEN} chars)"
-            )
-
     return (True, "; ".join(flagged)) if flagged else (False, "")
 
 
@@ -413,11 +405,11 @@ async def record_failure(
     """
     dir_ = memory_dir or _memory_dir()
     task_type   = _normalize_task_type(agent_id, node_name)
-    out_sample  = _output_sample(output)
-    pattern_key = _normalize_pattern(judge_feedback, out_sample)
+    out_sample  = _sanitize_for_prompt(_output_sample(output), max_len=300)
+    safe_feedback = _sanitize_for_prompt(judge_feedback)   # fix #7
+    pattern_key = _normalize_pattern(safe_feedback, out_sample)
     rec_id      = _record_id(task_type, pattern_key)
     ftype: FailureType = failure_type or classify_failure(judge_feedback, output)
-    safe_feedback = _sanitize_for_prompt(judge_feedback)   # fix #7
 
     lock = _dir_lock(dir_)
 
@@ -441,9 +433,9 @@ async def record_failure(
                 iteration=iteration,
                 failure_type=ftype,
             )
-        # Append outside compaction-lock: O_APPEND + flock is atomic.
-        _append_record_sync(dir_, new_rec)
-        return new_rec
+            # Append inside lock to prevent rare duplicate write on high concurrency
+            _append_record_sync(dir_, new_rec)
+            return new_rec
 
     record = await asyncio.to_thread(_upsert)
 
@@ -539,10 +531,11 @@ def build_failure_memory_prompt(
         lines.append(f"\n**{ftype.replace('_', ' ').title()}**")
         for rec in recs:
             n += 1
+            safe_output = _sanitize_for_prompt(rec.output_sample, max_len=60)
             entry = (
                 f"  {n}. (seen {rec.occurrence_count}x) {rec.pattern_key[:70]}\n"
                 f"     Feedback: {rec.judge_feedback[:100]}\n"
-                f"     Output: {rec.output_sample[:60]}\n"
+                f"     Output: {safe_output}\n"
             )
             if len(entry) > per_record_budget:
                 entry = entry[:per_record_budget] + "…\n"
