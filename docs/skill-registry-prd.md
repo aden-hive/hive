@@ -189,11 +189,13 @@ Hive implements the standard three-tier loading model:
 **Behavioral instruction** injected alongside the catalog:
 
 ```
-The following skills provide specialized instructions for specific tasks.
-When a task matches a skill's description, read the SKILL.md at the listed
-location to load the full instructions before proceeding.
-When a skill references relative paths, resolve them against the skill's
-directory (the parent of SKILL.md) and use absolute paths in tool calls.
+## Skills (mandatory)
+Before replying: scan <available_skills> <description> entries.
+- If exactly one skill clearly applies: read its SKILL.md at <location> with `read_file`, then follow it.
+- If multiple could apply: choose the most specific one, then read/follow it.
+- If none clearly apply: do not read any SKILL.md.
+- When a selected skill references a relative path, resolve it against the
+  skill directory (parent of SKILL.md) and use that absolute path in tool commands.
 ```
 
 ### 4.4 Skill Activation
