@@ -9,6 +9,7 @@ import {
   Loader2,
   Paperclip,
   X,
+  Zap,
 } from "lucide-react";
 import WorkerRunBubble from "@/components/WorkerRunBubble";
 import type { WorkerRunGroup } from "@/components/WorkerRunBubble";
@@ -90,6 +91,12 @@ interface ChatPanelProps {
   supportsImages?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
+  /** Called when the user steers a queued message into the current turn —
+   *  the message is sent to the backend immediately so it influences the
+   *  agent after the next tool call completes. */
+  onSteer?: (messageId: string) => void;
+  /** Called when the user cancels a still-queued (not-yet-sent) message. */
+  onCancelQueued?: (messageId: string) => void;
   /** Pending question from ask_user — replaces textarea when present */
   pendingQuestion?: string | null;
   /** Options for the pending question */
@@ -482,12 +489,16 @@ const MessageBubble = memo(
     showQueenPhaseBadge = true,
     queenProfileId,
     queenAvatarUrl,
+    onSteer,
+    onCancelQueued,
   }: {
     msg: ChatMessage;
     queenPhase?: "independent" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
     queenProfileId?: string | null;
     queenAvatarUrl?: string | null;
+    onSteer?: (messageId: string) => void;
+    onCancelQueued?: (messageId: string) => void;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
@@ -574,9 +585,9 @@ const MessageBubble = memo(
 
     if (isUser) {
       return (
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-1">
           <div
-            className={`max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " animate-pulse opacity-80" : ""}`}
+            className={`max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " ring-1 ring-amber-500/50" : ""}`}
           >
             {msg.images && msg.images.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
@@ -595,11 +606,42 @@ const MessageBubble = memo(
             )}
             {(msg.queued || msg.createdAt) && (
               <div className="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-60">
-                {msg.queued && <span>queued</span>}
+                {msg.queued && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
+                    queued
+                  </span>
+                )}
                 {msg.createdAt && <span>{formatMessageTime(msg.createdAt)}</span>}
               </div>
             )}
           </div>
+          {msg.queued && (onSteer || onCancelQueued) && (
+            <div className="flex items-center gap-1.5">
+              {onSteer && (
+                <button
+                  type="button"
+                  onClick={() => onSteer(msg.id)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
+                  title="Send now — influence the current turn after the next tool call"
+                >
+                  <Zap className="w-3 h-3" />
+                  Steer
+                </button>
+              )}
+              {onCancelQueued && (
+                <button
+                  type="button"
+                  onClick={() => onCancelQueued(msg.id)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted/60 text-muted-foreground hover:bg-muted border border-border transition-colors"
+                  title="Remove this queued message"
+                >
+                  <X className="w-3 h-3" />
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -685,8 +727,11 @@ const MessageBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.phase === next.msg.phase &&
+    prev.msg.queued === next.msg.queued &&
     prev.queenPhase === next.queenPhase &&
-    prev.showQueenPhaseBadge === next.showQueenPhaseBadge,
+    prev.showQueenPhaseBadge === next.showQueenPhaseBadge &&
+    prev.onSteer === next.onSteer &&
+    prev.onCancelQueued === next.onCancelQueued,
 );
 
 export default function ChatPanel({
@@ -698,6 +743,8 @@ export default function ChatPanel({
   activeThread,
   disabled,
   onCancel,
+  onSteer,
+  onCancelQueued,
   pendingQuestion,
   pendingOptions,
   pendingQuestions,
@@ -1151,6 +1198,8 @@ export default function ChatPanel({
                 showQueenPhaseBadge={showQueenPhaseBadge}
                 queenProfileId={queenProfileId}
                 queenAvatarUrl={queenAvatarUrl}
+                onSteer={onSteer}
+                onCancelQueued={onCancelQueued}
               />
             </div>
           );
@@ -1384,30 +1433,47 @@ export default function ChatPanel({
                 }
               }}
               placeholder={
-                disabled ? "Connecting to agent..." : "Message Queen Bee..."
+                disabled
+                  ? "Connecting to agent..."
+                  : isBusy
+                    ? "Queue a message — or click Steer to inject now..."
+                    : "Message Queen Bee..."
               }
               disabled={disabled}
               className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
             />
-            {isBusy && onCancel ? (
+            {isBusy && onCancel && (
               <button
                 type="button"
                 onClick={onCancel}
+                title="Stop the queen's current turn"
                 className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
               >
                 <Square className="w-4 h-4" />
               </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={
-                  (!input.trim() && pendingImages.length === 0) || disabled
-                }
-                className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
-              >
-                <Send className="w-4 h-4" />
-              </button>
             )}
+            <button
+              type="submit"
+              disabled={
+                (!input.trim() && pendingImages.length === 0) || disabled
+              }
+              title={
+                isBusy
+                  ? "Queue message — sent after the current turn, or click Steer on the bubble to send now"
+                  : "Send"
+              }
+              className={`p-2 rounded-lg disabled:opacity-30 hover:opacity-90 transition-opacity ${
+                isBusy
+                  ? "bg-amber-500/20 text-amber-600 border border-amber-500/40"
+                  : "bg-primary text-primary-foreground"
+              }`}
+            >
+              {isBusy ? (
+                <Zap className="w-4 h-4" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </form>
       )}
