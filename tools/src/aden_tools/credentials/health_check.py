@@ -1045,6 +1045,47 @@ class LushaHealthChecker:
             )
 
 
+class PrometheusHealthChecker:
+    """Health checker for Prometheus (no authentication)."""
+
+    TIMEOUT = 5.0
+
+    def check(self, base_url: str) -> HealthCheckResult:
+        """
+        Validate Prometheus by hitting /-/ready endpoint.
+        """
+        url = base_url.rstrip("/") + "/-/ready"
+
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(url)
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Prometheus is healthy",
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Prometheus returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Prometheus health check timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Prometheus: {e}",
+                details={"error": str(e)},
+            )
+
+
 # --- New checkers using BaseHttpHealthChecker ---
 
 
@@ -1342,6 +1383,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "notion_token": NotionHealthChecker(),
     "pinecone": PineconeHealthChecker(),
     "pipedrive": PipedriveHealthChecker(),
+    "prometheus": PrometheusHealthChecker(),
     "resend": ResendHealthChecker(),
     "serpapi": SerpApiHealthChecker(),
     "slack": SlackHealthChecker(),
