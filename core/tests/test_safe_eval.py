@@ -586,16 +586,30 @@ class TestResourceLimits:
         with pytest.raises(ValueError, match="collection size exceeds limit"):
             safe_eval("100001 * [0]")
 
+    def test_list_concatenation_exceeds_max_collection_size(self):
+        """Sequence concatenation must also respect MAX_COLLECTION_SIZE."""
+        with pytest.raises(ValueError, match="collection size exceeds limit"):
+            safe_eval("[0] * 100000 + [1]")
+
     def test_recursion_depth_exceeded_on_deep_attribute_chain(self):
         """Very deep attribute access must fail before blowing the Python stack."""
 
         class Chain:
-            def __getattr__(self, name: str) -> Chain:
+            def __getattr__(self, name: str) -> "Chain":
                 return self
 
         expr = "a" + ".x" * 105
         with pytest.raises(ValueError, match="Recursion depth limit exceeded"):
             safe_eval(expr, {"a": Chain()})
+
+    def test_dict_dot_access_cannot_call_dict_stored_callable(self):
+        """Dict keys must not be callable just because method name is in whitelist."""
+        # state.lower() should fail if state is a dict with a "lower" key,
+        # because dicts don't natively have a .lower() method.
+        # This prevents: state = {"lower": os.system}; safe_eval("state.lower('rm -rf /')")
+        state = {"lower": lambda x: "hacked"}
+        with pytest.raises(ValueError, match="not allowed"):
+            safe_eval("state.lower()", {"state": state})
 
 
 # ---------------------------------------------------------------------------

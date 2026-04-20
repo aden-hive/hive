@@ -48,6 +48,14 @@ def _safe_mul(left: Any, right: Any) -> Any:
     return operator.mul(left, right)
 
 
+def _safe_add(left: Any, right: Any) -> Any:
+    # Prevent memory exhaustion via sequence concatenation (e.g. [0]*100000 + [1])
+    if isinstance(left, (list, str, tuple, bytes)) and isinstance(right, (list, str, tuple, bytes)):
+        if len(left) + len(right) > MAX_COLLECTION_SIZE:
+            raise ValueError(f"Resulting collection size exceeds limit ({MAX_COLLECTION_SIZE})")
+    return operator.add(left, right)
+
+
 def _timeout_message(timeout_ms: int) -> str:
     return f"safe_eval exceeded {timeout_ms}ms execution timeout"
 
@@ -99,7 +107,7 @@ def _execution_timeout(timeout_ms: int | None):
 
 # Safe operators whitelist
 SAFE_OPERATORS = {
-    ast.Add: operator.add,
+    ast.Add: _safe_add,
     ast.Sub: operator.sub,
     ast.Mult: _safe_mul,
     ast.Div: operator.truediv,
@@ -293,43 +301,41 @@ class SafeEvalVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> Any:
         _check_timeout(self.deadline, self.timeout_ms)
         # Only allow calling whitelisted functions
-        func = self.visit(node.func)
-
-        # Check if the function object itself is in our whitelist values
-        # This is tricky because `func` is the actual function object,
-        # but we also want to verify it came from a safe place.
-        # Easier: Check if node.func is a Name and that name is in SAFE_FUNCTIONS.
 
         is_safe = False
         if isinstance(node.func, ast.Name):
+            # Global function: check name against whitelist
             if node.func.id in SAFE_FUNCTIONS:
                 is_safe = True
+                func = self.visit(node.func)
 
-        # Also allow methods on objects if they are safe?
-        # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)
-        # For now, restrict to SAFE_FUNCTIONS whitelist for global calls and deny method calls
-        # unless we explicitly add safe methods.
-        # Allowing method calls on strings/lists (split, join, get) is commonly needed.
-
-        if isinstance(node.func, ast.Attribute):
-            # Method call.
-            # Allow basic safe methods?
-            # For security, start strict. Only helper functions.
-            # Re-visiting: User might want 'output.get("key")'.
+        elif isinstance(node.func, ast.Attribute):
+            # Method call: verify method exists on the receiver type before calling.
+            # This prevents dict["lower"] = malicious_callable from being callable
+            # just because "lower" is in the method whitelist.
+            receiver = self.visit(node.func.value)
             method_name = node.func.attr
-            if method_name in [
-                "get",
-                "keys",
-                "values",
-                "items",
-                "lower",
-                "upper",
-                "strip",
-                "split",
-            ]:
-                is_safe = True
+            receiver_type = type(receiver)
 
-        if not is_safe and func not in SAFE_FUNCTIONS.values():
+            # Only allow methods that actually exist on the receiver type
+            safe_methods_by_type = {
+                str: {"lower", "upper", "strip", "split"},
+                list: {"get"},  # lists don't have .get, but keep structure flexible
+                dict: {"get", "keys", "values", "items"},
+                tuple: set(),
+                bytes: {"decode"},
+            }
+
+            allowed_methods = safe_methods_by_type.get(receiver_type, set())
+            if method_name in allowed_methods and hasattr(receiver_type, method_name):
+                is_safe = True
+                func = getattr(receiver, method_name)
+            else:
+                func = None
+        else:
+            func = None
+
+        if not is_safe:
             raise ValueError("Call to function/method is not allowed")
 
         args = [self.visit(arg) for arg in node.args]
