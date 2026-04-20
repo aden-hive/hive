@@ -111,6 +111,12 @@ class Session:
     # tool unlocked. The mode is the canonical discriminator for storage
     # path, tool exposure, and SSE filtering — see the Phase 2 plan.
     mode: Literal["dm", "colony"] = "dm"
+    # Set to True after the user clicks the COLONY_CREATED system message
+    # in this DM. Locks the chat input — the user must compact+fork into a
+    # fresh session before continuing the conversation. Persisted in
+    # meta.json so the lock survives server restarts.
+    colony_spawned: bool = False
+    spawned_colony_name: str | None = None
 
 
 class SessionManager:
@@ -1319,6 +1325,13 @@ class SessionManager:
                 _new_meta["agent_path"] = str(session.worker_path)
             _existing_meta.update(_new_meta)
             _meta_path.write_text(json.dumps(_existing_meta), encoding="utf-8")
+            # Hydrate colony-spawned lock state from meta.json so the lock
+            # survives server restart / cold-resume into a live session.
+            if _existing_meta.get("colony_spawned") is True:
+                session.colony_spawned = True
+                _spawned_name = _existing_meta.get("spawned_colony_name")
+                if isinstance(_spawned_name, str):
+                    session.spawned_colony_name = _spawned_name
         except OSError:
             pass
 
@@ -1694,6 +1707,8 @@ class SessionManager:
         # Read extra metadata written at session start
         agent_name: str | None = None
         agent_path: str | None = None
+        colony_spawned: bool = False
+        spawned_colony_name: str | None = None
         meta_path = queen_dir / "meta.json"
         if meta_path.exists():
             try:
@@ -1701,6 +1716,10 @@ class SessionManager:
                 agent_name = meta.get("agent_name")
                 agent_path = meta.get("agent_path")
                 created_at = meta.get("created_at") or created_at
+                colony_spawned = bool(meta.get("colony_spawned"))
+                _spawned = meta.get("spawned_colony_name")
+                if isinstance(_spawned, str):
+                    spawned_colony_name = _spawned
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -1712,6 +1731,8 @@ class SessionManager:
             "created_at": created_at,
             "agent_name": agent_name,
             "agent_path": agent_path,
+            "colony_spawned": colony_spawned,
+            "spawned_colony_name": spawned_colony_name,
         }
 
     @staticmethod

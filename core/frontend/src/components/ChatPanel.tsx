@@ -120,6 +120,22 @@ interface ChatPanelProps {
   queenProfileId?: string | null;
   /** Queen ID — used to display the queen's avatar photo in messages */
   queenId?: string;
+  /** Called when the user clicks a `colony_link` system message. Receives
+   *  the colony name. The parent should call markColonySpawned + flip
+   *  ``colonySpawned`` to lock the input. The Link still navigates. */
+  onColonyLinkClick?: (colonyName: string) => void;
+  /** When true, the composer is replaced with a "compact + new session"
+   *  button — set by the parent after the user opens a spawned colony. */
+  colonySpawned?: boolean;
+  /** Name of the colony that locked this DM (shown on the locked button). */
+  spawnedColonyName?: string | null;
+  /** Display label for the queen on the locked button (e.g. "Charlotte"). */
+  queenDisplayName?: string;
+  /** Called when the user clicks the locked-state button. Should compact
+   *  the current session and navigate to the new one. */
+  onCompactAndFork?: () => void;
+  /** When true, disable the compact-and-fork button (request in flight). */
+  compactingAndForking?: boolean;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -482,12 +498,14 @@ const MessageBubble = memo(
     showQueenPhaseBadge = true,
     queenProfileId,
     queenAvatarUrl,
+    onColonyLinkClick,
   }: {
     msg: ChatMessage;
     queenPhase?: "independent" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
     queenProfileId?: string | null;
     queenAvatarUrl?: string | null;
+    onColonyLinkClick?: (colonyName: string) => void;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
@@ -535,7 +553,9 @@ const MessageBubble = memo(
     if (msg.type === "colony_link") {
       // Rendered when the queen calls create_colony() and the backend
       // emits a COLONY_CREATED event. Gives the user a clickable card
-      // that navigates to the new colony page.
+      // that navigates to the new colony page. Clicking also locks the
+      // queen DM (mark-colony-spawned) so the user must compact + fork
+      // before continuing this conversation.
       let parsed: {
         colony_name?: string;
         is_new?: boolean;
@@ -557,6 +577,11 @@ const MessageBubble = memo(
         <div className="flex justify-center py-2">
           <Link
             to={href}
+            onClick={() => {
+              if (colonyName && onColonyLinkClick) {
+                onColonyLinkClick(colonyName);
+              }
+            }}
             className="inline-flex items-center gap-2 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-full border border-primary/20 transition-colors"
           >
             <span>🏛️</span>
@@ -711,6 +736,12 @@ export default function ChatPanel({
   initialDraft,
   queenProfileId,
   queenId,
+  onColonyLinkClick,
+  colonySpawned,
+  spawnedColonyName,
+  queenDisplayName,
+  onCompactAndFork,
+  compactingAndForking,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -1151,6 +1182,7 @@ export default function ChatPanel({
                 showQueenPhaseBadge={showQueenPhaseBadge}
                 queenProfileId={queenProfileId}
                 queenAvatarUrl={queenAvatarUrl}
+                onColonyLinkClick={onColonyLinkClick}
               />
             </div>
           );
@@ -1308,8 +1340,43 @@ export default function ChatPanel({
         );
       })()}
 
-      {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestions &&
+      {/* Input area — colony-spawned lock replaces everything; question widget
+          replaces textarea when a question is pending */}
+      {colonySpawned ? (
+        <div className="p-4 border-t border-border/50 bg-muted/20">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <p className="text-xs text-muted-foreground max-w-md">
+              This conversation spawned colony{" "}
+              {spawnedColonyName ? (
+                <strong className="text-foreground">{spawnedColonyName}</strong>
+              ) : (
+                "a colony"
+              )}
+              . To keep chatting with{" "}
+              {queenDisplayName || "this queen"}, compact this session and start
+              a fresh one.
+            </p>
+            <button
+              type="button"
+              onClick={onCompactAndFork}
+              disabled={!onCompactAndFork || compactingAndForking}
+              className="inline-flex items-center gap-2 text-xs font-medium text-primary-foreground bg-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-full transition-opacity"
+            >
+              {compactingAndForking ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Compacting…</span>
+                </>
+              ) : (
+                <span>
+                  Compact & start new session
+                  {queenDisplayName ? ` with ${queenDisplayName}` : ""}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : pendingQuestions &&
       pendingQuestions.length >= 2 &&
       onMultiQuestionSubmit ? (
         <MultiQuestionWidget

@@ -20,6 +20,11 @@ export interface LiveSession {
   queen_id?: string | null;
   /** Selected queen display name (e.g. "Alexandra") */
   queen_name?: string | null;
+  /** True after the user has clicked into a colony spawned from this DM —
+   *  /chat returns 409 until the user compacts and forks into a new session. */
+  colony_spawned?: boolean;
+  /** Name of the colony that locked this session (set with colony_spawned). */
+  spawned_colony_name?: string | null;
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }

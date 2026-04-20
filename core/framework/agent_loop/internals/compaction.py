@@ -371,6 +371,7 @@ async def llm_compact(
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
+    preserve_user_messages: bool = False,
 ) -> str:
     """Summarise *messages* with LLM, splitting recursively if too large.
 
@@ -378,6 +379,11 @@ async def llm_compact(
     rejects the call with a context-length error, the messages are split
     in half and each half is summarised independently.  Tool history is
     appended once at the top-level call (``_depth == 0``).
+
+    When ``preserve_user_messages`` is True, the prompt and system message
+    are amplified to instruct the LLM to keep every user message verbatim
+    and in full — used by the manual /compact-and-fork endpoint where the
+    user wants their voice carried into the new session intact.
     """
     from framework.agent_loop.conversation import extract_tool_call_history
     from framework.agent_loop.internals.tool_result_handler import is_context_too_large_error
@@ -401,6 +407,7 @@ async def llm_compact(
             char_limit=char_limit,
             max_depth=max_depth,
             max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
         )
     else:
         prompt = build_llm_compaction_prompt(
@@ -408,17 +415,30 @@ async def llm_compact(
             accumulator,
             formatted,
             max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
         )
+        if preserve_user_messages:
+            system_msg = (
+                "You are a conversation compactor for an AI agent. "
+                "Write a detailed summary that allows the agent to "
+                "continue its work. CRITICAL: reproduce every user "
+                "message verbatim and in full inside the 'User Messages' "
+                "section — do not paraphrase, truncate, or merge them. "
+                "Assistant turns and tool results may be summarised, but "
+                "user input is sacred."
+            )
+        else:
+            system_msg = (
+                "You are a conversation compactor for an AI agent. "
+                "Write a detailed summary that allows the agent to "
+                "continue its work. Preserve user-stated rules, "
+                "constraints, and account/identity preferences verbatim."
+            )
         summary_budget = max(1024, max_context_tokens // 2)
         try:
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
-                system=(
-                    "You are a conversation compactor for an AI agent. "
-                    "Write a detailed summary that allows the agent to "
-                    "continue its work. Preserve user-stated rules, "
-                    "constraints, and account/identity preferences verbatim."
-                ),
+                system=system_msg,
                 max_tokens=summary_budget,
             )
             summary = response.content
@@ -437,6 +457,7 @@ async def llm_compact(
                     char_limit=char_limit,
                     max_depth=max_depth,
                     max_context_tokens=max_context_tokens,
+                    preserve_user_messages=preserve_user_messages,
                 )
             else:
                 raise
@@ -459,6 +480,7 @@ async def _llm_compact_split(
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
+    preserve_user_messages: bool = False,
 ) -> str:
     """Split messages in half and summarise each half independently."""
     mid = max(1, len(messages) // 2)
@@ -470,6 +492,7 @@ async def _llm_compact_split(
         char_limit=char_limit,
         max_depth=max_depth,
         max_context_tokens=max_context_tokens,
+        preserve_user_messages=preserve_user_messages,
     )
     s2 = await llm_compact(
         ctx,
@@ -479,6 +502,7 @@ async def _llm_compact_split(
         char_limit=char_limit,
         max_depth=max_depth,
         max_context_tokens=max_context_tokens,
+        preserve_user_messages=preserve_user_messages,
     )
     return s1 + "\n\n" + s2
 
@@ -510,6 +534,7 @@ def build_llm_compaction_prompt(
     formatted_messages: str,
     *,
     max_context_tokens: int = 128_000,
+    preserve_user_messages: bool = False,
 ) -> str:
     """Build prompt for LLM compaction targeting 50% of token budget.
 
@@ -539,6 +564,18 @@ def build_llm_compaction_prompt(
     target_chars = target_tokens * 4
     node_ctx = "\n".join(ctx_lines)
 
+    user_messages_section = (
+        "6. **User Messages** — Reproduce EVERY user message verbatim and "
+        "in full, in chronological order, each on its own line prefixed "
+        "with the message index (e.g. \"[U1] ...\"). Do NOT paraphrase, "
+        "summarise, merge, or omit any user message. Preserve markdown, "
+        "code fences, whitespace, and punctuation exactly as the user "
+        "wrote them.\n"
+        if preserve_user_messages
+        else "6. **User Messages** — Preserve ALL user-stated rules, constraints, "
+        "identity preferences, and account details verbatim.\n"
+    )
+
     return (
         "You are compacting an AI agent's conversation history. "
         "The agent is still working and needs to continue.\n\n"
@@ -559,8 +596,7 @@ def build_llm_compaction_prompt(
         "resolved. Include root causes so the agent doesn't repeat them.\n"
         "5. **Problem Solving Efforts** — Approaches tried, dead ends hit, "
         "and reasoning behind the current strategy.\n"
-        "6. **User Messages** — Preserve ALL user-stated rules, constraints, "
-        "identity preferences, and account details verbatim.\n"
+        f"{user_messages_section}"
         "7. **Pending Tasks** — Work remaining, outputs still needed, and "
         "any blockers.\n"
         "8. **Current Work** — The most recent action taken and the immediate "

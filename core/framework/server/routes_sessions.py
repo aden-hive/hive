@@ -63,6 +63,8 @@ def _session_to_live_dict(session) -> dict:
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
         "queen_id": getattr(phase_state, "queen_id", None) if phase_state else None,
         "queen_name": (phase_state.queen_profile or {}).get("name") if phase_state else None,
+        "colony_spawned": getattr(session, "colony_spawned", False),
+        "spawned_colony_name": getattr(session, "spawned_colony_name", None),
     }
 
 

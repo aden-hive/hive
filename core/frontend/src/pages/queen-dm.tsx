@@ -59,6 +59,15 @@ export default function QueenDM() {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneColonyName, setCloneColonyName] = useState("");
   const [cloneTask, setCloneTask] = useState("");
+  // Colony-spawned lock state. Once a colony has been spawned from this DM
+  // and the user clicked into it, /chat is rejected server-side and the
+  // composer is replaced with a "compact + new session" button. Hydrated
+  // from the session detail and updated optimistically on click.
+  const [colonySpawned, setColonySpawned] = useState(false);
+  const [spawnedColonyName, setSpawnedColonyName] = useState<string | null>(
+    null,
+  );
+  const [compactingAndForking, setCompactingAndForking] = useState(false);
 
   const turnCounterRef = useRef(0);
   // Maps tool_use_id → the pill message ID and tool name that was created for it.
@@ -85,6 +94,9 @@ export default function QueenDM() {
     setActiveToolCalls({});
     setQueenPhase("independent");
     setInitialDraft(null);
+    setColonySpawned(false);
+    setSpawnedColonyName(null);
+    setCompactingAndForking(false);
     turnCounterRef.current = 0;
     toolUseToPillRef.current = {};
     queenIterTextRef.current = {};
@@ -304,6 +316,65 @@ export default function QueenDM() {
       cancelled = true;
     };
   }, [queenId, sessionId]);
+
+  // Hydrate the colony-spawned lock from the session detail whenever the
+  // session ID changes. The /sessions/{id} response carries colony_spawned
+  // (live) and the cold-info path returns the same field after a server
+  // restart, so the same fetch covers both states.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    sessionsApi
+      .get(sessionId)
+      .then((data) => {
+        if (cancelled) return;
+        const locked = Boolean(
+          (data as { colony_spawned?: boolean }).colony_spawned,
+        );
+        const name =
+          (data as { spawned_colony_name?: string | null })
+            .spawned_colony_name ?? null;
+        setColonySpawned(locked);
+        setSpawnedColonyName(name);
+      })
+      .catch(() => {
+        // Non-fatal — lock simply won't activate until the user navigates back.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  const handleColonyLinkClick = useCallback(
+    (colonyName: string) => {
+      if (!sessionId || !colonyName) return;
+      // Optimistically lock so the textarea swaps to the button before the
+      // user navigates back. Backend persists the same flag in meta.json so
+      // a refresh would re-hydrate the locked state anyway.
+      setColonySpawned(true);
+      setSpawnedColonyName(colonyName);
+      executionApi.markColonySpawned(sessionId, colonyName).catch(() => {
+        // Revert on failure so the user isn't stranded with no composer.
+        setColonySpawned(false);
+        setSpawnedColonyName(null);
+      });
+    },
+    [sessionId],
+  );
+
+  const handleCompactAndFork = useCallback(async () => {
+    if (!sessionId || compactingAndForking || !queenId) return;
+    setCompactingAndForking(true);
+    try {
+      const result = await executionApi.compactAndFork(sessionId);
+      // Navigate to the freshly-forked session for the same queen. Replacing
+      // the URL keeps the back button on the home/history page rather than
+      // bouncing back to the now-locked DM.
+      setSearchParams({ session: result.new_session_id }, { replace: true });
+    } catch {
+      setCompactingAndForking(false);
+    }
+  }, [sessionId, compactingAndForking, queenId, setSearchParams]);
 
   const handleColonySpawn = useCallback(async () => {
     if (!sessionId || spawning) return;
@@ -856,6 +927,12 @@ export default function QueenDM() {
           initialDraft={initialDraft}
           queenProfileId={queenId ?? null}
           queenId={queenId}
+          onColonyLinkClick={handleColonyLinkClick}
+          colonySpawned={colonySpawned}
+          spawnedColonyName={spawnedColonyName}
+          queenDisplayName={queenName}
+          onCompactAndFork={handleCompactAndFork}
+          compactingAndForking={compactingAndForking}
         />
       </div>
 

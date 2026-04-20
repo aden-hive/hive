@@ -217,6 +217,25 @@ async def handle_chat(request: web.Request) -> web.Response:
         logger.debug("[handle_chat] Session resolution failed: %s", err)
         return err
 
+    # Sessions that have spawned a colony are locked: the user must compact +
+    # fork into a fresh session before continuing the conversation. Frontend
+    # surfaces this as a button instead of the textarea, but enforce server-
+    # side too so the lock can't be bypassed by a stale tab or scripted call.
+    if getattr(session, "colony_spawned", False):
+        return web.json_response(
+            {
+                "error": "session_locked",
+                "reason": "colony_spawned",
+                "spawned_colony_name": getattr(session, "spawned_colony_name", None),
+                "message": (
+                    "This session is locked because a colony has been "
+                    "spawned from it. Compact and start a new session "
+                    "with the same queen to continue."
+                ),
+            },
+            status=409,
+        )
+
     body = await request.json()
     message = body.get("message", "")
     display_message = body.get("display_message")
@@ -663,6 +682,262 @@ async def handle_cancel_queen(request: web.Request) -> web.Response:
     return web.json_response({"cancelled": True})
 
 
+async def handle_mark_colony_spawned(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/mark-colony-spawned -- lock the queen DM.
+
+    Called by the frontend the first time the user clicks the
+    COLONY_CREATED system message. Persists ``colony_spawned: true`` and
+    ``spawned_colony_name`` into the queen session's ``meta.json`` so the
+    lock survives server restart, and caches the same on the live Session
+    object so subsequent /chat calls in this process can be rejected
+    immediately without disk I/O.
+
+    Body: ``{"colony_name": "..."}``
+    """
+    from datetime import datetime as _dt
+
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    body = await request.json() if request.can_read_body else {}
+    colony_name = (body.get("colony_name") or "").strip()
+    if not colony_name:
+        return web.json_response({"error": "colony_name is required"}, status=400)
+
+    queen_dir = getattr(session, "queen_dir", None)
+    if queen_dir is None:
+        return web.json_response(
+            {"error": "queen session directory is not set on this session"},
+            status=503,
+        )
+
+    meta_path = queen_dir / "meta.json"
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            meta = {}
+
+    meta["colony_spawned"] = True
+    meta["spawned_colony_name"] = colony_name
+    meta["spawned_colony_at"] = _dt.now(UTC).isoformat()
+
+    try:
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    except OSError as exc:
+        logger.exception("mark_colony_spawned: failed to persist meta.json")
+        return web.json_response({"error": f"failed to persist: {exc}"}, status=500)
+
+    session.colony_spawned = True
+    session.spawned_colony_name = colony_name
+
+    return web.json_response(
+        {
+            "session_id": session.id,
+            "colony_spawned": True,
+            "spawned_colony_name": colony_name,
+        }
+    )
+
+
+async def handle_compact_and_fork(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/compact-and-fork -- compact + new session.
+
+    The locked-by-colony-spawn UI calls this when the user clicks "compact
+    + start a new session with the same queen". The flow:
+
+    1. Read the queen's full conversation off disk.
+    2. Run the LLM compactor with ``preserve_user_messages=True`` so every
+       user turn survives verbatim into the summary.
+    3. Mint a fresh session ID, copy the old queen-session dir to the new
+       location, then replace the conversation parts with a single
+       summary message and reset the cursor. The new session starts with
+       a clean event log.
+    4. Spin up a live session bound to the new dir using the same queen
+       identity. The OLD session stays alive but locked; the user
+       navigates to the new session in the response.
+    """
+    import asyncio
+    import shutil
+    import time as _time
+    from datetime import datetime as _dt
+
+    from framework.agent_loop.conversation import Message
+    from framework.agent_loop.internals.compaction import llm_compact
+    from framework.agent_loop.types import AgentContext
+    from framework.server.session_manager import (
+        _generate_session_id,
+        _queen_session_dir,
+    )
+    from framework.storage.conversation_store import FileConversationStore
+
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    queen_dir = getattr(session, "queen_dir", None)
+    if queen_dir is None or not queen_dir.exists():
+        return web.json_response(
+            {"error": "queen session directory not found"},
+            status=404,
+        )
+
+    queen_executor = getattr(session, "queen_executor", None)
+    if queen_executor is None:
+        return web.json_response({"error": "queen is not running"}, status=503)
+    queen_node = queen_executor.node_registry.get("queen") if queen_executor else None
+    queen_ctx: AgentContext | None = getattr(queen_node, "_last_ctx", None) if queen_node else None
+    if queen_ctx is None or queen_ctx.llm is None:
+        return web.json_response(
+            {
+                "error": (
+                    "queen context not yet stamped (no LLM available for "
+                    "compaction). Send a message to the queen and retry."
+                )
+            },
+            status=503,
+        )
+
+    queen_name = session.queen_name or "default"
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return web.json_response(
+            {"error": "queen has no conversation history yet"},
+            status=400,
+        )
+
+    src_store = FileConversationStore(convs_dir)
+    raw_parts = await src_store.read_parts()
+    messages: list[Message] = []
+    for part in raw_parts:
+        try:
+            messages.append(Message.from_storage_dict(part))
+        except (KeyError, TypeError):
+            # Skip malformed parts rather than failing the whole compaction;
+            # the summary will note the gap if needed.
+            logger.warning("compact_and_fork: skipping malformed part %r", part)
+            continue
+    if not messages:
+        return web.json_response(
+            {"error": "queen conversation is empty -- nothing to compact"},
+            status=400,
+        )
+
+    # Run the LLM compactor with preserve_user_messages so the new session
+    # carries every user turn forward. Failures here are user-visible
+    # because the whole point of the action is the compacted summary.
+    try:
+        max_ctx_tokens = 180_000
+        loop_cfg = getattr(queen_node, "_config", None)
+        if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
+            max_ctx_tokens = int(loop_cfg.max_context_tokens)
+        summary = await llm_compact(
+            queen_ctx,
+            messages,
+            accumulator=None,
+            max_context_tokens=max_ctx_tokens,
+            preserve_user_messages=True,
+        )
+    except Exception as exc:
+        logger.exception("compact_and_fork: llm_compact failed")
+        return web.json_response(
+            {"error": f"compaction failed: {exc}"},
+            status=500,
+        )
+
+    new_session_id = _generate_session_id()
+    new_dir = _queen_session_dir(new_session_id, queen_name)
+    if new_dir.exists():
+        # Defensively: same-second collision would clobber another session.
+        return web.json_response(
+            {"error": f"new session dir collision: {new_dir}"},
+            status=500,
+        )
+
+    try:
+        await asyncio.to_thread(shutil.copytree, queen_dir, new_dir)
+    except OSError as exc:
+        logger.exception("compact_and_fork: copytree failed")
+        return web.json_response(
+            {"error": f"failed to fork session dir: {exc}"},
+            status=500,
+        )
+
+    # Replace parts/ with the single compacted summary; clear partials and
+    # the event log so the new session presents a clean SSE replay.
+    new_parts_dir = new_dir / "conversations" / "parts"
+    new_partials_dir = new_dir / "conversations" / "partials"
+    new_events_path = new_dir / "events.jsonl"
+
+    def _cleanup_forked_dir() -> None:
+        if new_parts_dir.exists():
+            shutil.rmtree(new_parts_dir)
+        if new_partials_dir.exists():
+            shutil.rmtree(new_partials_dir)
+        if new_events_path.exists():
+            new_events_path.unlink()
+
+    try:
+        await asyncio.to_thread(_cleanup_forked_dir)
+    except OSError:
+        logger.warning("compact_and_fork: cleanup of forked dir partial-failed", exc_info=True)
+
+    # Write the summary as message seq 0 so the new queen wakes up with a
+    # single user-role primer that contains everything she needs.
+    summary_msg = Message(seq=0, role="user", content=summary)
+    dest_store = FileConversationStore(new_dir / "conversations")
+    await dest_store.write_part(0, summary_msg.to_storage_dict())
+    await dest_store.write_cursor({"next_seq": 1})
+
+    # Update meta.json: clear the lock and record provenance.
+    new_meta_path = new_dir / "meta.json"
+    new_meta: dict = {}
+    if new_meta_path.exists():
+        try:
+            new_meta = json.loads(new_meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            new_meta = {}
+    new_meta.pop("colony_spawned", None)
+    new_meta.pop("spawned_colony_name", None)
+    new_meta.pop("spawned_colony_at", None)
+    new_meta["queen_id"] = queen_name
+    new_meta["compacted_from"] = session.id
+    new_meta["compacted_at"] = _dt.now(UTC).isoformat()
+    new_meta["created_at"] = _time.time()
+    try:
+        new_meta_path.write_text(json.dumps(new_meta), encoding="utf-8")
+    except OSError:
+        logger.warning("compact_and_fork: failed to write new meta.json", exc_info=True)
+
+    manager: Any = request.app["manager"]
+    try:
+        new_session = await manager.create_session(
+            session_id=None,
+            queen_resume_from=new_session_id,
+            queen_name=queen_name,
+            initial_phase="independent",
+        )
+    except Exception as exc:
+        logger.exception("compact_and_fork: create_session failed for forked id %s", new_session_id)
+        return web.json_response(
+            {"error": f"failed to start forked session: {exc}"},
+            status=500,
+        )
+
+    return web.json_response(
+        {
+            "new_session_id": new_session.id,
+            "queen_id": queen_name,
+            "compacted_from": session.id,
+            "summary_chars": len(summary),
+            "messages_compacted": len(messages),
+        }
+    )
+
+
 async def handle_colony_spawn(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/colony-spawn -- fork queen session into a colony.
 
@@ -1085,3 +1360,11 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/replay", handle_replay)
     app.router.add_get("/api/sessions/{session_id}/goal-progress", handle_goal_progress)
     app.router.add_post("/api/sessions/{session_id}/colony-spawn", handle_colony_spawn)
+    app.router.add_post(
+        "/api/sessions/{session_id}/mark-colony-spawned",
+        handle_mark_colony_spawned,
+    )
+    app.router.add_post(
+        "/api/sessions/{session_id}/compact-and-fork",
+        handle_compact_and_fork,
+    )
