@@ -93,6 +93,8 @@ Use Hive when the bottleneck is no longer the model but the harness around it:
 
 ## Quick Start
 
+For a full beginner guide see docs/quickstart.md for better navigation.
+
 ### Prerequisites
 
 - Python 3.11+ for agent development
