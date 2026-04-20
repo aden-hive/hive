@@ -142,6 +142,10 @@ interface ChatPanelProps {
   onStartNewSession?: () => void;
   /** When true, disable the start-new-session button (request in flight). */
   startingNewSession?: boolean;
+  /** Cumulative LLM token usage for this session */
+  tokenUsage?: { input: number; output: number };
+  /** Optional action element rendered on the right side of the "Conversation" header */
+  headerAction?: React.ReactNode;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -427,7 +431,7 @@ function InlineAskUserBubble({
         style={isQueen && queenAvatarUrl ? undefined : {
           backgroundColor: `${color}18`,
           border: `1.5px solid ${color}35`,
-          boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
+          boxShadow: isQueen ? `0 0 6px ${color}10` : undefined,
         }}
         onClick={handleAvatarClick}
         title={avatarTitle}
@@ -748,7 +752,7 @@ const MessageBubble = memo(
           style={isQueen && queenAvatarUrl ? undefined : {
             backgroundColor: `${color}18`,
             border: `1.5px solid ${color}35`,
-            boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
+            boxShadow: isQueen ? `0 0 6px ${color}10` : undefined,
           }}
           onClick={handleAvatarClick}
           title={avatarTitle}
@@ -842,6 +846,8 @@ export default function ChatPanel({
   compactingAndForking,
   onStartNewSession,
   startingNewSession,
+  tokenUsage,
+  headerAction,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -1204,6 +1210,7 @@ export default function ChatPanel({
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
           Conversation
         </p>
+        {headerAction && <div className="ml-auto">{headerAction}</div>}
       </div>
 
       {/* Messages */}
@@ -1296,7 +1303,7 @@ export default function ChatPanel({
               style={queenAvatarUrl ? undefined : {
                 backgroundColor: `${queenColor}18`,
                 border: `1.5px solid ${queenColor}35`,
-                boxShadow: `0 0 12px ${queenColor}20`,
+                boxShadow: `0 0 6px ${queenColor}10`,
               }}
             >
               <QueenAvatarIcon url={queenAvatarUrl} size={9} />
@@ -1351,90 +1358,31 @@ export default function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* Context window usage bar — sits between messages and input */}
+      {/* Context & token usage — compact inline stats */}
       {(() => {
-        if (!contextUsage) return null;
-        const queenUsage = contextUsage["__queen__"];
-        const workerEntries = Object.entries(contextUsage).filter(
-          ([k]) => k !== "__queen__",
-        );
-        const workerUsage =
-          workerEntries.length > 0
-            ? workerEntries.reduce(
-                (best, [, v]) => (v.usagePct > best.usagePct ? v : best),
-                workerEntries[0][1],
-              )
-            : undefined;
-        if (!queenUsage && !workerUsage) return null;
+        const fmt = (tokens: number) => tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+        const color = (pct: number) => pct >= 90 ? "text-red-400" : pct >= 70 ? "text-orange-400" : "text-muted-foreground/50";
+
+        let queenUsage: ContextUsageEntry | undefined;
+        if (contextUsage) {
+          queenUsage = contextUsage["__queen__"];
+        }
+
+        const hasContext = !!queenUsage;
+        const hasTokens = tokenUsage && (tokenUsage.input > 0 || tokenUsage.output > 0);
+        if (!hasContext && !hasTokens) return null;
+
         return (
-          <div className="flex items-center gap-3 mx-4 px-3 py-1 rounded-lg bg-muted/30 border border-border/20 group/ctx flex-shrink-0">
+          <div className="flex items-center justify-end gap-3 mx-4 px-2 py-0.5 flex-shrink-0 text-[10px] text-muted-foreground/50 tabular-nums">
             {queenUsage && (
-              <div
-                className="flex items-center gap-2 flex-1 min-w-0"
-                title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}
-              >
-                <Crown
-                  className="w-3 h-3 flex-shrink-0"
-                  style={{ color: "hsl(45,95%,58%)" }}
-                />
-                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
-                  <div
-                    className="h-full rounded-full transition-all duration-500 ease-out"
-                    style={{
-                      width: `${Math.min(queenUsage.usagePct, 100)}%`,
-                      backgroundColor:
-                        queenUsage.usagePct >= 90
-                          ? "hsl(0,65%,55%)"
-                          : queenUsage.usagePct >= 70
-                            ? "hsl(35,90%,55%)"
-                            : "hsl(45,95%,58%)",
-                    }}
-                  />
-                </div>
-                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                  <span className="group-hover/ctx:hidden">
-                    {queenUsage.usagePct}%
-                  </span>
-                  <span className="hidden group-hover/ctx:inline">
-                    {(queenUsage.estimatedTokens / 1000).toFixed(1)}k /{" "}
-                    {(queenUsage.maxTokens / 1000).toFixed(0)}k
-                  </span>
-                </span>
-              </div>
+              <span className={color(queenUsage.usagePct)} title={`${queenUsage.messageCount} messages`}>
+                Context: {fmt(queenUsage.estimatedTokens)}/{fmt(queenUsage.maxTokens)}
+              </span>
             )}
-            {workerUsage && (
-              <div
-                className="flex items-center gap-2 flex-1 min-w-0"
-                title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}
-              >
-                <Cpu
-                  className="w-3 h-3 flex-shrink-0"
-                  style={{ color: "hsl(220,60%,55%)" }}
-                />
-                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
-                  <div
-                    className="h-full rounded-full transition-all duration-500 ease-out"
-                    style={{
-                      width: `${Math.min(workerUsage.usagePct, 100)}%`,
-                      backgroundColor:
-                        workerUsage.usagePct >= 90
-                          ? "hsl(0,65%,55%)"
-                          : workerUsage.usagePct >= 70
-                            ? "hsl(35,90%,55%)"
-                            : "hsl(220,60%,55%)",
-                    }}
-                  />
-                </div>
-                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                  <span className="group-hover/ctx:hidden">
-                    {workerUsage.usagePct}%
-                  </span>
-                  <span className="hidden group-hover/ctx:inline">
-                    {(workerUsage.estimatedTokens / 1000).toFixed(1)}k /{" "}
-                    {(workerUsage.maxTokens / 1000).toFixed(0)}k
-                  </span>
-                </span>
-              </div>
+            {hasTokens && (
+              <span title="LLM tokens used this session (input + output)">
+                Tokens: {fmt(tokenUsage!.input + tokenUsage!.output)}
+              </span>
             )}
           </div>
         );

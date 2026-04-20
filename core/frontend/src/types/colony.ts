@@ -11,6 +11,10 @@ export interface Colony {
   sessionCount: number;
   runCount: number;
   queenName: string;
+  createdAt: string | null;
+  lastActive: string | null;
+  task: string;
+  icon: string | null;
 }
 
 export interface QueenBee {

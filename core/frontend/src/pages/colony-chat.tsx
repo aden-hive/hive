@@ -56,6 +56,7 @@ async function restoreSessionMessages(
   sessionId: string,
   thread: string,
   agentDisplayName: string,
+  queenDisplayName?: string,
 ): Promise<SessionRestoreResult> {
   try {
     const { events, truncated, total, returned } =
@@ -81,7 +82,7 @@ async function restoreSessionMessages(
         }
       }
 
-      const messages = replayEventsToMessages(events, thread, agentDisplayName);
+      const messages = replayEventsToMessages(events, thread, agentDisplayName, queenDisplayName);
       // Stamp the latest phase on every queen message so the UI's
       // phase-badge rendering matches what the live path would have
       // displayed at the time of the refresh.
@@ -204,7 +205,7 @@ function defaultAgentState(): AgentState {
 export default function ColonyChat() {
   const { colonyId } = useParams<{ colonyId: string }>();
   const location = useLocation();
-  const { colonies, markVisited, refresh: refreshColonies } = useColony();
+  const { colonies, queenProfiles, markVisited, refresh: refreshColonies } = useColony();
   const { setActions } = useHeaderActions();
   const { toggleColonyWorkers } = useColonyWorkers();
 
@@ -219,7 +220,14 @@ export default function ColonyChat() {
   const colony = colonies.find((c) => c.id === colonyId);
   const agentPath = colony?.agentPath ?? routeState.agentPath ?? "";
   const slug = agentPath ? agentSlug(agentPath) : "";
-  const queenInfo = getQueenForAgent(slug);
+  const fallbackQueenInfo = getQueenForAgent(slug);
+  // Resolve queen name from the linked queen profile, falling back to registry
+  const linkedQueenProfile = colony?.queenProfileId
+    ? queenProfiles.find((q) => q.id === colony.queenProfileId)
+    : null;
+  const queenInfo = linkedQueenProfile
+    ? { name: linkedQueenProfile.name, role: linkedQueenProfile.title }
+    : fallbackQueenInfo;
   const colonyName = colony?.name ?? colonyId ?? "Colony";
 
   // Mark colony as visited when navigating to it
@@ -298,6 +306,9 @@ export default function ColonyChat() {
   agentStateRef.current = agentState;
 
   const turnCounterRef = useRef<Record<string, number>>({});
+  // Timestamp of the latest restored message — SSE events older than this
+  // are duplicates from the ring-buffer replay and should be skipped.
+  const restoreCutoffRef = useRef<number>(0);
   // Maps tool_use_id → the pill message ID and tool name that was created for it.
   // Survives turn counter resets so deferred completions (e.g. ask_user) can
   // find and update the correct pill even after the counter changes.
@@ -465,6 +476,7 @@ export default function ColonyChat() {
             coldRestoreId,
             agentPath,
             displayName,
+            queenInfo.name,
           );
         }
 
@@ -490,6 +502,7 @@ export default function ColonyChat() {
           session.session_id,
           agentPath,
           displayName,
+          queenInfo.name,
         );
         if (restored.messages.length > 0) {
           restoredMessages = restored.messages;
@@ -507,6 +520,7 @@ export default function ColonyChat() {
             session.session_id,
             agentPath,
             displayName,
+            queenInfo.name,
           );
           restoredMessages = restored.messages;
           restoredPhase = restored.restoredPhase;
@@ -516,6 +530,9 @@ export default function ColonyChat() {
       if (restoredMessages.length > 0) {
         restoredMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
         setMessages(restoredMessages);
+        // Record the latest restored timestamp so SSE replay duplicates are skipped
+        const maxTs = Math.max(...restoredMessages.map((m) => m.createdAt ?? 0));
+        restoreCutoffRef.current = maxTs;
       }
 
       const initialPhase = resolveInitialColonyPhase({
@@ -568,6 +585,7 @@ export default function ColonyChat() {
       queenPhaseRef.current = "independent";
       queenIterTextRef.current = {};
       suppressIntroRef.current = false;
+      restoreCutoffRef.current = 0;
       loadingRef.current = false;
       loadSession();
     }
@@ -590,6 +608,16 @@ export default function ColonyChat() {
       const eventCreatedAt = event.timestamp
         ? new Date(event.timestamp).getTime()
         : Date.now();
+
+      // Skip SSE replay events that were already restored from history
+      if (
+        restoreCutoffRef.current > 0 &&
+        eventCreatedAt <= restoreCutoffRef.current &&
+        (event.type === "client_output_delta" || event.type === "llm_text_delta" || event.type === "client_input_received")
+      ) {
+        return;
+      }
+
       const shouldMarkQueenReady = isQueen && !state.queenReady;
 
       switch (event.type) {
@@ -1399,6 +1427,7 @@ export default function ColonyChat() {
             contextUsage={agentState.contextUsage}
             supportsImages={agentState.queenSupportsImages}
             queenProfileId={colony?.queenProfileId ?? null}
+            queenId={colony?.queenProfileId ?? undefined}
           />
         </div>
 

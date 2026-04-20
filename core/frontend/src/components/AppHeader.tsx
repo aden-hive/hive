@@ -4,7 +4,7 @@ import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
 import { useModel } from "@/context/ModelContext";
 import { getQueenForAgent } from "@/lib/colony-registry";
-import { Crown, KeyRound, Network, ChevronDown } from "lucide-react";
+import { Crown, Component, KeyRound, Network, ChevronDown } from "lucide-react";
 import SettingsModal from "@/components/SettingsModal";
 
 function UserAvatarButton({ initials, onClick, avatarVersion }: { initials: string; onClick: () => void; avatarVersion: number }) {
@@ -63,15 +63,14 @@ export default function AppHeader({ onOpenQueenProfile }: AppHeaderProps) {
     const colonyId = colonyMatch[1];
     const colony = colonies.find((c) => c.id === colonyId);
     title = colony?.name ?? colonyId;
-    // Show queen profile button when the colony has a linked queen profile
     if (colony?.queenProfileId) {
       const profile = queenProfiles.find((q) => q.id === colony.queenProfileId);
       if (profile) {
         queenIdForProfile = profile.id;
         queenTitle = profile.title ?? null;
-        icon = <Crown className="w-4 h-4 text-primary" />;
       }
     }
+    icon = <Component className="w-4 h-4 text-primary" />;
   } else if (queenMatch) {
     const queenId = queenMatch[1];
     const profile = queenProfiles.find((q) => q.id === queenId);

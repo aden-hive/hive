@@ -47,6 +47,8 @@ class AgentEntry:
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
     last_active: str | None = None
+    created_at: str | None = None
+    icon: str | None = None
     workers: list[WorkerEntry] = field(default_factory=list)
 
 
@@ -209,13 +211,25 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             name = config_fallback_name
             desc = ""
 
-            # Read colony metadata for queen provenance
+            # Read colony metadata for queen provenance and timestamps
             colony_queen_name = ""
+            colony_created_at: str | None = None
+            colony_icon: str | None = None
             metadata_path = path / "metadata.json"
             if metadata_path.exists():
                 try:
                     mdata = json.loads(metadata_path.read_text(encoding="utf-8"))
                     colony_queen_name = mdata.get("queen_name", "")
+                    colony_created_at = mdata.get("created_at")
+                    colony_icon = mdata.get("icon")
+                except Exception:
+                    pass
+            # Fallback: use directory creation time if metadata lacks created_at
+            if not colony_created_at:
+                try:
+                    from datetime import datetime, timezone
+                    stat = path.stat()
+                    colony_created_at = datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc).isoformat()
                 except Exception:
                     pass
 
@@ -256,6 +270,8 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     tool_count=tool_count,
                     tags=[],
                     last_active=_get_last_active(path),
+                    created_at=colony_created_at,
+                    icon=colony_icon,
                     workers=worker_entries,
                 )
             )

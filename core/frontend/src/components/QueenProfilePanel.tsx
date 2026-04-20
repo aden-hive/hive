@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { X, MessageSquare, Crown, ChevronRight, Briefcase, Award, Pencil, Check, Loader2, Camera } from "lucide-react";
+import { X, MessageSquare, Crown, ChevronRight, Briefcase, Award, Pencil, Check, Loader2, Camera, Plus } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { queensApi, type QueenProfile } from "@/api/queens";
+import { executionApi } from "@/api/execution";
 import { compressImage } from "@/lib/image-utils";
 import type { Colony } from "@/types/colony";
+import { slugToColonyId } from "@/lib/colony-registry";
 
 interface QueenProfilePanelProps {
   queenId: string;
@@ -109,6 +111,33 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
       console.error("Failed to upload avatar:", err);
     } finally {
       setUploadingAvatar(false);
+    }
+  };
+
+  // Colony creation
+  const [colonyDialogOpen, setColonyDialogOpen] = useState(false);
+  const [colonyName, setColonyName] = useState("");
+  const [colonyTask, setColonyTask] = useState("");
+  const [creatingColony, setCreatingColony] = useState(false);
+
+  const handleCreateColony = async () => {
+    const cname = colonyName.trim();
+    if (!cname || creatingColony) return;
+    setCreatingColony(true);
+    try {
+      // Create a fresh queen session, then fork it into a colony
+      const { session_id } = await queensApi.createNewSession(queenId, colonyTask.trim() || undefined);
+      await executionApi.colonySpawn(session_id, cname, colonyTask.trim() || undefined);
+      setColonyDialogOpen(false);
+      setColonyName("");
+      setColonyTask("");
+      refresh();
+      onClose();
+      navigate(`/colony/${slugToColonyId(cname)}`);
+    } catch (err) {
+      console.error("Failed to create colony:", err);
+    } finally {
+      setCreatingColony(false);
     }
   };
 
@@ -268,13 +297,18 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
               </button>
             </div>
 
-            {!alreadyInQueenPm && (
+            <div className="flex items-center gap-2 mb-6">
               <button onClick={() => { navigate(`/queen/${queenId}`); onClose(); }}
-                className="w-full flex items-center justify-center gap-2 rounded-lg border border-border/60 py-2.5 text-sm font-medium text-foreground hover:bg-muted/40 mb-6">
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-border/60 py-2.5 text-sm font-medium text-foreground hover:bg-muted/40">
                 <MessageSquare className="w-4 h-4" />
-                Message {name}
+                Message
               </button>
-            )}
+              <button onClick={() => setColonyDialogOpen(true)}
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/[0.04] py-2.5 text-sm font-medium text-primary hover:bg-primary/[0.08]">
+                <Plus className="w-4 h-4" />
+                Create Colony
+              </button>
+            </div>
 
             {profile?.summary && (
               <div className="mb-6">
@@ -340,6 +374,44 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
           </>
         )}
       </div>
+
+      {/* Create Colony dialog */}
+      {colonyDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !creatingColony && setColonyDialogOpen(false)} />
+          <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-foreground">Create Colony</h2>
+            <p className="text-[11px] text-muted-foreground">
+              Create a new colony managed by {name}. The queen will bootstrap it with tools and context.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Colony name <span className="text-primary">*</span></label>
+                <input type="text" value={colonyName} autoFocus
+                  onChange={(e) => setColonyName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                  placeholder="e.g. research_team"
+                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Task <span className="text-muted-foreground/40">(optional)</span></label>
+                <input type="text" value={colonyTask} onChange={(e) => setColonyTask(e.target.value)}
+                  placeholder="Describe what this colony should work on"
+                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setColonyDialogOpen(false); setColonyName(""); setColonyTask(""); }} disabled={creatingColony}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50">
+                Cancel
+              </button>
+              <button onClick={handleCreateColony} disabled={creatingColony || !colonyName.trim()}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                {creatingColony ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
