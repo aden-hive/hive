@@ -63,12 +63,9 @@ _QUEEN_INCUBATING_TOOLS = [
     "list_directory",
     "search_files",
     "run_command",
-    # Trigger management: phase-branched in queen_lifecycle_tools.py to
-    # buffer drafts onto phase_state.pending_triggers, then drained into
-    # the colony's triggers.json by create_colony post-fork.
-    "set_trigger",
-    "remove_trigger",
-    "list_triggers",
+    # Schedule lives on the colony, not on the queen session — pass it
+    # inline as create_colony(triggers=[...]) instead of staging through
+    # set_trigger here.
     "create_colony",
     "cancel_incubation",
 ]
@@ -91,10 +88,6 @@ _QUEEN_WORKING_TOOLS = [
     "stop_worker",
     # Fan out more tasks while workers are still running
     "run_parallel_workers",
-    # Trigger management
-    "set_trigger",
-    "remove_trigger",
-    "list_triggers",
 ]
 
 # Reviewing phase: workers have finished. Queen summarises results,
@@ -184,6 +177,14 @@ If you realise mid-incubation that the spec isn't ready (user changed \
 their mind, you're missing more than a couple of details, the work \
 turned out to be one-shot after all), call ``cancel_incubation`` — \
 no harm, you go back to INDEPENDENT and can retry later.
+
+If the user explicitly asks for something UNRELATED to the current \
+colony being drafted (a side question, a one-shot task, a different \
+problem), don't try to handle it from this limited tool surface. Call \
+``cancel_incubation`` first to switch back to INDEPENDENT where you \
+have the full toolkit, handle their request there, and re-enter \
+INCUBATING later via ``start_incubating_colony`` when they want to \
+resume the colony spec.
 """
 
 _queen_role_working = """\
@@ -201,9 +202,10 @@ What you DO in this phase:
 - Intervene when a worker is clearly off course (inject_message) or \
   needs to stop (stop_worker).
 - Make SPEC-COMPATIBLE adjustments when the user asks — fan out MORE \
-  of the same work (run_parallel_workers), or tweak the schedule \
-  (set_trigger / remove_trigger / list_triggers). These are tweaks to \
-  the spec the user already approved, not redesigns.
+  of the same work (run_parallel_workers). This is a tweak to the spec \
+  the user already approved, not a redesign. Scheduled / recurring \
+  work belongs to a colony; if the user wants to add or change a \
+  schedule, that's a new colony.
 
 What you DO NOT do in this phase:
 - Redesign the colony. If the user asks for something fundamentally \
@@ -269,24 +271,6 @@ work. Available:
 details before you commit (e.g. peek at an existing skill in \
 ~/.hive/skills/, sanity-check an API URL).
 
-## Schedule the colony (drafted now, written on commit)
-- set_trigger(trigger_id, trigger_type, trigger_config, task) — Stage a \
-  schedule for the colony. Validated immediately (cron syntax / interval \
-  shape) but NOT activated yet — buffered onto the incubation context \
-  and written to ``triggers.json`` by create_colony so it auto-starts on \
-  first colony load. Repeated calls with the same trigger_id replace \
-  the prior draft.
-- list_triggers() — Inspect the buffered drafts.
-- remove_trigger(trigger_id) — Drop a draft from the buffer.
-- ``trigger_type`` is "timer" (with ``trigger_config={"cron": "..."}`` \
-  or ``{"interval_minutes": N}``) or "webhook" (with \
-  ``trigger_config={"path": "/hooks/..."}``).
-- ``task`` describes what the worker should do when the trigger fires; \
-  this is REQUIRED — a trigger with no task can't fire usefully. It's \
-  separate from create_colony's ``task`` argument because the trigger \
-  task is one-shot per fire, while create_colony's ``task`` is the \
-  worker's overall purpose.
-
 ## Approved → operational checklist (use your judgement, ask only what's missing)
 The conversation that got you here probably did NOT cover all of:
 - Concurrency: how many tasks should run in parallel? Single-fire?
@@ -306,11 +290,12 @@ for gaps that need a real answer; skip the rest.
 
 ## Commit
 - create_colony(colony_name, task, skill_name, skill_description, \
-  skill_body, skill_files?, tasks?, concurrency_hint?) — Fork this \
-  session into the colony. **Atomic call — pass the skill INLINE.** Do \
-  NOT write SKILL.md with write_file beforehand; this tool materialises \
-  the folder for you and then forks. Reusing an existing skill_name \
-  within the colony replaces that skill with your latest content.
+  skill_body, skill_files?, tasks?, concurrency_hint?, triggers?) — \
+  Fork this session into the colony. **Atomic call — pass the skill \
+  AND the schedule INLINE.** Do NOT write SKILL.md with write_file \
+  beforehand; this tool materialises the folder for you and then \
+  forks. Reusing an existing skill_name within the colony replaces \
+  that skill with your latest content.
 - The ``task`` must be FULL and self-contained — the worker has zero \
   memory of THIS chat at run time.
 - The ``skill_body`` must be FULL and self-contained — capture the \
@@ -320,9 +305,18 @@ for gaps that need a real answer; skip the rest.
   many worker processes typically run in parallel for this colony \
   (e.g. 1 for "send digest", 5 for a fan-out). Baked into worker.json \
   for the future colony queen to consult; not enforced.
-- Any triggers you staged with ``set_trigger`` during this incubation \
-  are written to ``triggers.json`` as part of the commit and \
-  auto-start on first colony load.
+- ``triggers`` (optional array) — the colony's schedule, written \
+  inline to ``triggers.json`` and auto-started on first colony load. \
+  Pass this when the work is recurring / event-driven; omit for \
+  colonies the user will run by clicking start. Each entry: \
+  ``{id, trigger_type, trigger_config, task}`` where trigger_type is \
+  "timer" (config ``{cron: "0 9 * * *"}`` or ``{interval_minutes: N}``) \
+  or "webhook" (config ``{path: "/hooks/..."}``). Each entry's \
+  ``task`` is what the worker does when THAT trigger fires — separate \
+  from the colony-wide ``task`` argument, which is the worker's \
+  overall purpose. Validated up front — a bad cron, missing task, or \
+  malformed webhook path fails the call before anything is written, \
+  so you can retry with corrected input.
 - After this returns, the chat is over: the session locks immediately \
   and the user gets a "compact and start a new session with you" \
   button. So make your call to create_colony the last thing you do — \
@@ -334,6 +328,11 @@ for gaps that need a real answer; skip the rest.
   changed their mind, you discovered the work is actually one-shot, \
   more than a couple of details still need to be worked out). Returns \
   you to INDEPENDENT with the full toolkit; no fork happens.
+- Also call cancel_incubation() if the user explicitly pivots to \
+  something UNRELATED to this colony (side question, one-shot ask, \
+  different problem). You can't serve that from this narrow toolkit — \
+  drop back to INDEPENDENT, handle it, then re-enter incubation via \
+  start_incubating_colony when they're ready to resume the spec.
 """
 
 _queen_tools_working = """
@@ -358,10 +357,9 @@ operational, not editorial.
 - run_parallel_workers(tasks, timeout?) — Fan out MORE of the same \
   work. Use when the user wants additional units of an already-defined \
   job, NOT for new scope. Each task string must be fully self-contained.
-- set_trigger / remove_trigger / list_triggers — Tweak the schedule \
-  the user already approved during incubation. Adding a follow-up \
-  trigger for the same colony is fine; redesigning the colony's \
-  purpose is not.
+- Scheduled / recurring work belongs to a colony, not this session. \
+  If the user wants to add or change a schedule, that's a new colony \
+  born from a fresh chat via start_incubating_colony.
 
 ## Read-only inspection
 - read_file, list_directory, search_files, run_command

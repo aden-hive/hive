@@ -86,6 +86,7 @@ def patched_fork(monkeypatch):
         colony_name: str,
         task: str,
         tasks: list[dict] | None = None,
+        concurrency_hint: int | None = None,
     ) -> dict:
         calls.append(
             {
@@ -93,6 +94,7 @@ def patched_fork(monkeypatch):
                 "colony_name": colony_name,
                 "task": task,
                 "tasks": tasks,
+                "concurrency_hint": concurrency_hint,
             }
         )
         return {

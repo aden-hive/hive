@@ -156,15 +156,6 @@ class QueenPhaseState:
     # without having to remember it from the tool result.
     incubating_colony_name: str | None = None
     incubating_intended_purpose: str | None = None
-    # Trigger configs the queen drafted during incubation. set_trigger /
-    # remove_trigger / list_triggers buffer here when phase=="incubating"
-    # because the colony directory + worker runtime don't exist yet —
-    # there's nothing live to attach a timer/webhook to. ``create_colony``
-    # drains this list into ``{colony_dir}/triggers.json`` after the fork
-    # so the triggers auto-start the next time the colony is loaded.
-    # Cleared on switch_to_independent so failed/cancelled incubations
-    # don't leak into a future incubation attempt.
-    pending_triggers: list = field(default_factory=list)  # list[dict]
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
@@ -310,13 +301,8 @@ class QueenPhaseState:
             return
         self.phase = "independent"
         # Clear stale incubation context so a future incubation starts fresh.
-        # This includes the trigger buffer — a cancelled or successful
-        # incubation should not leak its drafted triggers into the next
-        # attempt (successful create_colony already drained them; cancel
-        # never committed them).
         self.incubating_colony_name = None
         self.incubating_intended_purpose = None
-        self.pending_triggers = []
         tool_names = [t.name for t in self.independent_tools]
         logger.info("Queen phase → independent (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
@@ -1434,6 +1420,80 @@ def register_queen_lifecycle_tools(
 
         return target, None, replaced
 
+    def _validate_triggers(raw: Any) -> tuple[list[dict] | None, str | None]:
+        """Validate and normalize the ``triggers`` argument for create_colony.
+
+        Mirrors the per-type validation that ``set_trigger`` applied when it
+        buffered drafts during incubation. Returns (normalized_list, error).
+        On success error is None. Empty / missing input yields ([], None).
+        """
+        if raw is None:
+            return [], None
+        if not isinstance(raw, list):
+            return None, "triggers must be an array"
+        normalized: list[dict] = []
+        seen_ids: set[str] = set()
+        for idx, entry in enumerate(raw):
+            if not isinstance(entry, dict):
+                return None, f"triggers[{idx}] must be an object"
+            tid = (entry.get("id") or "").strip() if isinstance(entry.get("id"), str) else ""
+            if not tid:
+                return None, f"triggers[{idx}] missing non-empty 'id'"
+            if tid in seen_ids:
+                return None, f"triggers[{idx}] duplicate id '{tid}'"
+            seen_ids.add(tid)
+            t_type = entry.get("trigger_type")
+            if t_type not in ("timer", "webhook"):
+                return None, f"triggers[{idx}] trigger_type must be 'timer' or 'webhook' (got {t_type!r})"
+            t_config = entry.get("trigger_config") or {}
+            if not isinstance(t_config, dict):
+                return None, f"triggers[{idx}] trigger_config must be an object"
+            task_str = entry.get("task")
+            if not isinstance(task_str, str) or not task_str.strip():
+                return None, (
+                    f"triggers[{idx}] ('{tid}') needs a non-empty 'task' "
+                    "— what the worker should do when this trigger fires"
+                )
+            if t_type == "timer":
+                cron_expr = t_config.get("cron")
+                interval = t_config.get("interval_minutes")
+                if cron_expr:
+                    try:
+                        from croniter import croniter
+
+                        if not croniter.is_valid(cron_expr):
+                            return None, f"triggers[{idx}] ('{tid}') invalid cron expression: {cron_expr}"
+                    except ImportError:
+                        return None, (
+                            f"triggers[{idx}] ('{tid}') croniter package not installed — "
+                            "cannot validate cron expression."
+                        )
+                elif interval is not None:
+                    if not isinstance(interval, (int, float)) or interval <= 0:
+                        return None, f"triggers[{idx}] ('{tid}') interval_minutes must be > 0, got {interval}"
+                else:
+                    return None, (
+                        f"triggers[{idx}] ('{tid}') timer trigger needs 'cron' or "
+                        "'interval_minutes' in trigger_config."
+                    )
+            else:  # webhook
+                path = (t_config.get("path") or "").strip() if isinstance(t_config.get("path"), str) else ""
+                if not path or not path.startswith("/"):
+                    return None, (
+                        f"triggers[{idx}] ('{tid}') webhook trigger requires 'path' "
+                        "starting with '/' in trigger_config (e.g. '/hooks/github')."
+                    )
+            normalized.append(
+                {
+                    "id": tid,
+                    "trigger_type": t_type,
+                    "trigger_config": t_config,
+                    "task": task_str.strip(),
+                    "name": entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name").strip() else tid,
+                }
+            )
+        return normalized, None
+
     async def create_colony(
         *,
         colony_name: str,
@@ -1444,6 +1504,7 @@ def register_queen_lifecycle_tools(
         skill_files: list[dict] | None = None,
         tasks: list[dict] | None = None,
         concurrency_hint: int | None = None,
+        triggers: list[dict] | None = None,
     ) -> str:
         """Create a colony and materialize its skill folder in one atomic call.
 
@@ -1474,6 +1535,22 @@ def register_queen_lifecycle_tools(
         if not _COLONY_NAME_RE.match(cn):
             return json.dumps(
                 {"error": ("colony_name must be lowercase alphanumeric with underscores (e.g. 'honeycomb_research').")}
+            )
+
+        # Validate triggers up front so a bad cron / webhook path fails fast,
+        # before we materialize the skill folder or fork the session.
+        validated_triggers, trig_err = _validate_triggers(triggers)
+        if trig_err is not None:
+            return json.dumps(
+                {
+                    "error": trig_err,
+                    "hint": (
+                        "Each trigger needs id, trigger_type ('timer' or "
+                        "'webhook'), trigger_config, and task. Timer: "
+                        "{cron: '...'} or {interval_minutes: N}. Webhook: "
+                        "{path: '/hooks/...'}."
+                    ),
+                }
             )
 
         # Pre-create the colony dir so the skill can be materialized
@@ -1590,6 +1667,28 @@ def register_queen_lifecycle_tools(
                     exc_info=True,
                 )
 
+        # Write triggers.json from the validated arg so the colony's
+        # timers/webhooks auto-start when session_manager loads the colony.
+        # Runs regardless of phase — if a colony is re-created with the
+        # same name the triggers list is the authoritative new schedule.
+        if validated_triggers:
+            triggers_path = colony_dir / "triggers.json"
+            try:
+                triggers_path.write_text(
+                    json.dumps(validated_triggers, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                logger.info(
+                    "create_colony: wrote %d trigger(s) to %s",
+                    len(validated_triggers),
+                    triggers_path,
+                )
+            except OSError:
+                logger.warning(
+                    "create_colony: failed to write triggers.json",
+                    exc_info=True,
+                )
+
         # When the queen forked from INCUBATING phase, the chat is over by
         # design: the colony spec is committed and there's nothing left to
         # discuss in this DM.  Auto-lock the session immediately (same
@@ -1599,28 +1698,6 @@ def register_queen_lifecycle_tools(
         # with the "compact and start a new session" UX.
         phase_state = getattr(session, "phase_state", None)
         if phase_state is not None and phase_state.phase == "incubating":
-            # Drain buffered triggers into the colony's triggers.json so they
-            # auto-start when the colony is first loaded (session_manager
-            # reads triggers.json on colony load and starts each timer /
-            # webhook). Do this BEFORE switch_to_independent clears the
-            # buffer.
-            if phase_state.pending_triggers:
-                triggers_path = colony_dir / "triggers.json"
-                try:
-                    triggers_path.write_text(
-                        json.dumps(phase_state.pending_triggers, indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
-                    )
-                    logger.info(
-                        "create_colony: wrote %d buffered trigger(s) to %s",
-                        len(phase_state.pending_triggers),
-                        triggers_path,
-                    )
-                except OSError:
-                    logger.warning(
-                        "create_colony: failed to write triggers.json from buffer",
-                        exc_info=True,
-                    )
             try:
                 from framework.server.routes_execution import (
                     persist_colony_spawn_lock,
@@ -1866,6 +1943,42 @@ def register_queen_lifecycle_tools(
                         "atomic, this is just guidance. Omit if unsure."
                     ),
                     "minimum": 1,
+                },
+                "triggers": {
+                    "type": "array",
+                    "description": (
+                        "Optional schedule for the colony — written to "
+                        "{colony_dir}/triggers.json and auto-started on "
+                        "first colony load. Use this when the user wants "
+                        "the colony to fire on a cron, every N minutes, "
+                        "or on an incoming webhook; omit for colonies "
+                        "that run once when the user clicks start. Each "
+                        "entry: id (unique string), trigger_type "
+                        "('timer' or 'webhook'), trigger_config (timer: "
+                        "{cron: '0 9 * * *'} or {interval_minutes: N}; "
+                        "webhook: {path: '/hooks/...'}), task (what the "
+                        "worker should do when this trigger fires — "
+                        "required, separate from the colony-wide task "
+                        "because a trigger's task is one-shot per fire). "
+                        "Validated up front — a bad cron, missing task, "
+                        "or malformed webhook path fails the call before "
+                        "anything is written. Scheduling lives on the "
+                        "colony, not on the queen session."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "trigger_type": {
+                                "type": "string",
+                                "enum": ["timer", "webhook"],
+                            },
+                            "trigger_config": {"type": "object"},
+                            "task": {"type": "string"},
+                            "name": {"type": "string"},
+                        },
+                        "required": ["id", "trigger_type", "trigger_config", "task"],
+                    },
                 },
             },
             "required": [
@@ -4330,103 +4443,7 @@ def register_queen_lifecycle_tools(
         trigger_config: dict | None = None,
         task: str | None = None,
     ) -> str:
-        """Activate a trigger so it fires periodically into the queen.
-
-        Phase-branched: in INCUBATING the trigger spec is buffered onto
-        ``phase_state.pending_triggers`` because the colony directory +
-        worker runtime don't exist yet. ``create_colony`` drains the
-        buffer into ``{colony_dir}/triggers.json`` post-fork so the
-        triggers auto-start on first colony load. In WORKING / REVIEWING
-        the live behaviour (start timer/webhook + persist) runs as before.
-        """
-        # ── Incubating branch: buffer instead of activate ────────────
-        phase_state = getattr(session, "phase_state", None)
-        if phase_state is not None and phase_state.phase == "incubating":
-            t_type = trigger_type
-            t_config = trigger_config or {}
-            if not t_type:
-                return json.dumps(
-                    {
-                        "error": (
-                            "trigger_type is required during incubation — "
-                            "no existing trigger to inherit from yet."
-                        )
-                    }
-                )
-            if not task:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"Trigger '{trigger_id}' needs a task — "
-                            "describe what the worker should do when this "
-                            "trigger fires."
-                        )
-                    }
-                )
-            # Mirror the live-path validation so a bad cron / interval is
-            # caught at draft time, not on first colony load.
-            if t_type == "timer":
-                cron_expr = t_config.get("cron")
-                interval = t_config.get("interval_minutes")
-                if cron_expr:
-                    try:
-                        from croniter import croniter
-
-                        if not croniter.is_valid(cron_expr):
-                            return json.dumps({"error": f"Invalid cron expression: {cron_expr}"})
-                    except ImportError:
-                        return json.dumps(
-                            {"error": "croniter package not installed — cannot validate cron expression."}
-                        )
-                elif interval:
-                    if not isinstance(interval, (int, float)) or interval <= 0:
-                        return json.dumps({"error": f"interval_minutes must be > 0, got {interval}"})
-                else:
-                    return json.dumps(
-                        {"error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."}
-                    )
-            elif t_type == "webhook":
-                path = (t_config.get("path") or "").strip()
-                if not path or not path.startswith("/"):
-                    return json.dumps(
-                        {
-                            "error": (
-                                "Webhook trigger requires 'path' starting "
-                                "with '/' in trigger_config (e.g. '/hooks/github')."
-                            )
-                        }
-                    )
-            else:
-                return json.dumps({"error": f"Unsupported trigger type: {t_type}"})
-
-            # Replace any prior buffered entry with the same id so the
-            # queen can iteratively refine without duplicates.
-            phase_state.pending_triggers = [
-                t for t in phase_state.pending_triggers if t.get("id") != trigger_id
-            ]
-            phase_state.pending_triggers.append(
-                {
-                    "id": trigger_id,
-                    "trigger_type": t_type,
-                    "trigger_config": t_config,
-                    "task": task,
-                    "name": trigger_id,
-                }
-            )
-            return json.dumps(
-                {
-                    "status": "buffered",
-                    "trigger_id": trigger_id,
-                    "trigger_type": t_type,
-                    "trigger_config": t_config,
-                    "note": (
-                        "Buffered for incubation. Will be written to "
-                        "triggers.json when create_colony commits the spec, "
-                        "and auto-start on first colony load."
-                    ),
-                }
-            )
-
+        """Activate a trigger so it fires periodically into the queen."""
         if trigger_id in getattr(session, "active_trigger_ids", set()):
             return json.dumps({"error": f"Trigger '{trigger_id}' is already active."})
 
@@ -4635,29 +4652,7 @@ def register_queen_lifecycle_tools(
     # --- remove_trigger --------------------------------------------------------
 
     async def remove_trigger(trigger_id: str) -> str:
-        """Deactivate an active trigger.
-
-        Phase-branched: in INCUBATING, removes the buffered draft instead
-        of touching live runtime state.
-        """
-        # ── Incubating branch: drop from buffer ──────────────────────
-        phase_state = getattr(session, "phase_state", None)
-        if phase_state is not None and phase_state.phase == "incubating":
-            before = len(phase_state.pending_triggers)
-            phase_state.pending_triggers = [
-                t for t in phase_state.pending_triggers if t.get("id") != trigger_id
-            ]
-            if len(phase_state.pending_triggers) == before:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"Trigger '{trigger_id}' was not in the "
-                            "incubation buffer."
-                        )
-                    }
-                )
-            return json.dumps({"status": "removed_from_buffer", "trigger_id": trigger_id})
-
+        """Deactivate an active trigger."""
         if trigger_id not in getattr(session, "active_trigger_ids", set()):
             return json.dumps({"error": f"Trigger '{trigger_id}' is not active."})
 
@@ -4723,26 +4718,7 @@ def register_queen_lifecycle_tools(
     # --- list_triggers ---------------------------------------------------------
 
     async def list_triggers() -> str:
-        """List all available triggers and their status.
-
-        Phase-branched: in INCUBATING, returns the buffered drafts that
-        will be written to triggers.json when create_colony commits.
-        """
-        # ── Incubating branch: return buffered drafts ────────────────
-        phase_state = getattr(session, "phase_state", None)
-        if phase_state is not None and phase_state.phase == "incubating":
-            return json.dumps(
-                {
-                    "triggers": list(phase_state.pending_triggers),
-                    "buffered": True,
-                    "note": (
-                        "These are draft triggers staged for the colony "
-                        "being incubated. They are written to triggers.json "
-                        "when create_colony commits the spec."
-                    ),
-                }
-            )
-
+        """List all available triggers and their status."""
         available = getattr(session, "available_triggers", {})
         triggers = []
         for tdef in available.values():
