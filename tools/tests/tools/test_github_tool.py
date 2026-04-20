@@ -18,6 +18,8 @@ from fastmcp import FastMCP
 
 from aden_tools.tools.github_tool.github_tool import (
     _GitHubClient,
+    _sanitize_branch_param,
+    _sanitize_path_param,
     register_tools,
 )
 
@@ -620,3 +622,80 @@ class TestGitHubBranches:
             result = get_branch(owner="owner", repo="repo", branch="main")
 
             assert result["success"] is True
+
+    @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
+    def test_get_branch_with_slash(self, mock_get, mcp):
+        """Branch names with slashes (e.g. feature/login) must be accepted."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"name": "feature/login", "protected": False}
+        mock_get.return_value = mock_response
+
+        with patch("os.getenv", return_value="ghp_test"):
+            register_tools(mcp, credentials=None)
+            get_branch = mcp._tool_manager._tools["github_get_branch"].fn
+
+            result = get_branch(owner="owner", repo="repo", branch="feature/login")
+
+            assert result["success"] is True
+            # Verify the URL was encoded correctly
+            call_url = mock_get.call_args.args[0]
+            assert "feature%2Flogin" in call_url
+
+    @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
+    def test_get_branch_with_nested_slashes(self, mock_get, mcp):
+        """Deeply nested branch names like release/v2/hotfix must work."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"name": "release/v2/hotfix"}
+        mock_get.return_value = mock_response
+
+        with patch("os.getenv", return_value="ghp_test"):
+            register_tools(mcp, credentials=None)
+            get_branch = mcp._tool_manager._tools["github_get_branch"].fn
+
+            result = get_branch(owner="owner", repo="repo", branch="release/v2/hotfix")
+
+            assert result["success"] is True
+            call_url = mock_get.call_args.args[0]
+            assert "release%2Fv2%2Fhotfix" in call_url
+
+
+# --- Sanitizer unit tests ---
+
+
+class TestSanitizePathParam:
+    def test_simple_name_passes(self):
+        assert _sanitize_path_param("my-repo", "repo") == "my-repo"
+
+    def test_slash_rejected(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            _sanitize_path_param("owner/name", "owner")
+
+    def test_dot_dot_rejected(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            _sanitize_path_param("..secret", "repo")
+
+
+class TestSanitizeBranchParam:
+    def test_simple_branch(self):
+        assert _sanitize_branch_param("main") == "main"
+
+    def test_slash_encoded(self):
+        assert _sanitize_branch_param("feature/login") == "feature%2Flogin"
+
+    def test_multiple_slashes_encoded(self):
+        assert _sanitize_branch_param("release/v2/hotfix") == "release%2Fv2%2Fhotfix"
+
+    def test_traversal_rejected(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            _sanitize_branch_param("../etc/passwd")
+
+    def test_traversal_in_middle_rejected(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            _sanitize_branch_param("feature/../admin")
+
+    def test_special_chars_encoded(self):
+        # Spaces and other special characters should also be encoded
+        result = _sanitize_branch_param("my branch")
+        assert " " not in result

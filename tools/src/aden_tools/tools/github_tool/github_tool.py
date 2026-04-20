@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import httpx
 from fastmcp import FastMCP
@@ -39,6 +40,28 @@ def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
     if "/" in param or ".." in param:
         raise ValueError(f"Invalid {param_name}: cannot contain '/' or '..'")
     return param
+
+
+def _sanitize_branch_param(branch: str) -> str:
+    """
+    Sanitize a branch name for use in GitHub API URL paths.
+
+    Branch names may contain forward slashes (e.g. ``feature/login``),
+    which are valid in Git but must be URL-encoded for the REST API.
+    Path-traversal sequences are still rejected.
+
+    Args:
+        branch: The branch name to sanitize
+
+    Returns:
+        The URL-encoded branch name (slashes encoded as %2F)
+
+    Raises:
+        ValueError: If branch contains path-traversal sequences
+    """
+    if ".." in branch:
+        raise ValueError("Invalid branch: cannot contain '..'")
+    return quote(branch, safe="")
 
 
 def _sanitize_error_message(error: Exception) -> str:
@@ -396,7 +419,7 @@ class _GitHubClient:
         """Get a specific branch."""
         owner = _sanitize_path_param(owner, "owner")
         repo = _sanitize_path_param(repo, "repo")
-        branch = _sanitize_path_param(branch, "branch")
+        branch = _sanitize_branch_param(branch)
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{branch}",
             headers=self._headers,
