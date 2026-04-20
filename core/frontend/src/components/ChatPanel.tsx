@@ -38,6 +38,8 @@ import {
   workerIdFromStreamId,
 } from "@/lib/chat-helpers";
 
+type QueenPhase = "independent" | "incubating" | "working" | "reviewing";
+
 export interface ChatMessage {
   id: string;
   agent: string;
@@ -59,7 +61,7 @@ export interface ChatMessage {
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
   /** Queen phase active when this message was created */
-  phase?: "independent" | "incubating" | "working" | "reviewing";
+  phase?: QueenPhase;
   /** Images attached to a user message */
   images?: ImageContent[];
   /** Backend node_id that produced this message — used for subagent grouping */
@@ -106,7 +108,7 @@ interface ChatPanelProps {
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
-  queenPhase?: "independent" | "incubating" | "working" | "reviewing";
+  queenPhase?: QueenPhase;
   /** When false, queen messages omit the phase badge */
   showQueenPhaseBadge?: boolean;
   /** Context window usage for queen and workers */
@@ -150,6 +152,18 @@ interface ChatPanelProps {
 
 const queenColor = "hsl(45,95%,58%)";
 const workerColor = "hsl(220,60%,55%)";
+
+function queenPhaseLabel(phase?: QueenPhase): string {
+  return phase ?? "independent";
+}
+
+function queenPhaseBadgeClass(phase?: QueenPhase): string {
+  if (phase === "incubating") {
+    // Honey-amber tint distinguishes spec incubation from the normal queen modes.
+    return "bg-amber-500/15 text-amber-500";
+  }
+  return "bg-primary/15 text-primary";
+}
 
 function getColor(_agent: string, role?: "queen" | "worker"): string {
   if (role === "queen") return queenColor;
@@ -357,7 +371,7 @@ function InlineAskUserBubble({
     thread: string,
     images?: ImageContent[],
   ) => void;
-  queenPhase?: "independent" | "incubating" | "working" | "reviewing";
+  queenPhase?: QueenPhase;
   showQueenPhaseBadge?: boolean;
   queenProfileId?: string | null;
 }) {
@@ -455,23 +469,10 @@ function InlineAskUserBubble({
           </span>
           {(!isQueen || showQueenPhaseBadge) && (() => {
             const effectivePhase = msg.phase ?? queenPhase;
-            const isIncubating = isQueen && effectivePhase === "incubating";
             const badgeClass = isQueen
-              ? isIncubating
-                // Honey-amber tint distinguishes incubating from the
-                // primary-tinted independent/working/reviewing badges.
-                ? "bg-amber-500/15 text-amber-500"
-                : "bg-primary/15 text-primary"
+              ? queenPhaseBadgeClass(effectivePhase)
               : "bg-muted text-muted-foreground";
-            const label = isQueen
-              ? effectivePhase === "working"
-                ? "working"
-                : effectivePhase === "reviewing"
-                  ? "reviewing"
-                  : effectivePhase === "incubating"
-                    ? "incubating"
-                    : "independent"
-              : "Worker";
+            const label = isQueen ? queenPhaseLabel(effectivePhase) : "Worker";
             return (
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${badgeClass}`}>
                 {label}
@@ -585,7 +586,7 @@ const MessageBubble = memo(
     onColonyLinkClick,
   }: {
     msg: ChatMessage;
-    queenPhase?: "independent" | "incubating" | "working" | "reviewing";
+    queenPhase?: QueenPhase;
     showQueenPhaseBadge?: boolean;
     queenProfileId?: string | null;
     queenAvatarUrl?: string | null;
@@ -778,17 +779,11 @@ const MessageBubble = memo(
               <span
                 className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
                   isQueen
-                    ? "bg-primary/15 text-primary"
+                    ? queenPhaseBadgeClass(msg.phase ?? queenPhase)
                     : "bg-muted text-muted-foreground"
                 }`}
               >
-                {isQueen
-                  ? (msg.phase ?? queenPhase) === "working"
-                    ? "working"
-                    : (msg.phase ?? queenPhase) === "reviewing"
-                      ? "reviewing"
-                      : "independent"
-                  : "Worker"}
+                {isQueen ? queenPhaseLabel(msg.phase ?? queenPhase) : "Worker"}
               </span>
             )}
             {msg.createdAt && (

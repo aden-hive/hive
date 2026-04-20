@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { sseEventToChatMessage, formatAgentDisplayName } from "./chat-helpers";
+import {
+  extractLastPhase,
+  sseEventToChatMessage,
+  formatAgentDisplayName,
+} from "./chat-helpers";
 import type { AgentEvent } from "@/api/types";
 
 // ---------------------------------------------------------------------------
@@ -441,5 +445,37 @@ describe("formatAgentDisplayName", () => {
 
   it("handles a single word", () => {
     expect(formatAgentDisplayName("agent")).toBe("Agent");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractLastPhase
+// ---------------------------------------------------------------------------
+
+describe("extractLastPhase", () => {
+  it("keeps incubating as a valid queen phase", () => {
+    expect(
+      extractLastPhase([
+        makeEvent({
+          type: "queen_phase_changed",
+          data: { phase: "independent" },
+        }),
+        makeEvent({
+          type: "queen_phase_changed",
+          data: { phase: "incubating" },
+        }),
+      ]),
+    ).toBe("incubating");
+  });
+
+  it("reads phase metadata from node loop iterations", () => {
+    expect(
+      extractLastPhase([
+        makeEvent({
+          type: "node_loop_iteration",
+          data: { phase: "working" },
+        }),
+      ]),
+    ).toBe("working");
   });
 });

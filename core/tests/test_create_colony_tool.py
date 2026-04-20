@@ -512,3 +512,128 @@ async def test_fork_failure_keeps_materialized_skill(patched_home, monkeypatch) 
     installed = _colony_skill_path(patched_home, "will_fail", "durable-skill") / "SKILL.md"
     assert installed.exists()
     assert "hint" in payload
+
+
+# ---------------------------------------------------------------------------
+# triggers — inline schedule persisted to triggers.json
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_triggers_written_to_triggers_json(patched_home: Path, patched_fork: list[dict]) -> None:
+    """A valid ``triggers`` arg is written to {colony_dir}/triggers.json."""
+    executor, _ = _make_executor()
+
+    triggers = [
+        {
+            "id": "daily-report",
+            "trigger_type": "timer",
+            "trigger_config": {"cron": "0 9 * * *"},
+            "task": "Generate the daily report",
+        },
+        {
+            "id": "github-webhook",
+            "trigger_type": "webhook",
+            "trigger_config": {"path": "/hooks/github"},
+            "task": "Process the github event",
+            "name": "GitHub webhook",
+        },
+    ]
+
+    payload = await _call(
+        executor,
+        colony_name="scheduled",
+        task="t",
+        skill_name="scheduled-skill",
+        skill_description="d",
+        skill_body=_DEFAULT_BODY,
+        triggers=triggers,
+    )
+    assert payload.get("status") == "created", payload
+
+    triggers_path = patched_home / ".hive" / "colonies" / "scheduled" / "triggers.json"
+    assert triggers_path.exists()
+    written = json.loads(triggers_path.read_text(encoding="utf-8"))
+    assert len(written) == 2
+    assert written[0]["id"] == "daily-report"
+    assert written[0]["trigger_type"] == "timer"
+    assert written[0]["trigger_config"] == {"cron": "0 9 * * *"}
+    assert written[0]["task"] == "Generate the daily report"
+    # Unspecified name defaults to id; specified name is preserved.
+    assert written[0]["name"] == "daily-report"
+    assert written[1]["name"] == "GitHub webhook"
+
+
+@pytest.mark.asyncio
+async def test_triggers_omitted_does_not_write_triggers_json(
+    patched_home: Path, patched_fork: list[dict]
+) -> None:
+    """No triggers arg → no triggers.json (colony runs on-demand)."""
+    executor, _ = _make_executor()
+
+    payload = await _call(
+        executor,
+        colony_name="no_schedule",
+        task="t",
+        skill_name="plain-skill",
+        skill_description="d",
+        skill_body=_DEFAULT_BODY,
+    )
+    assert payload.get("status") == "created", payload
+    triggers_path = patched_home / ".hive" / "colonies" / "no_schedule" / "triggers.json"
+    assert not triggers_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_triggers_invalid_cron_fails_before_fork(
+    patched_home: Path, patched_fork: list[dict]
+) -> None:
+    """A bad cron fails fast: no skill written, no fork call."""
+    executor, _ = _make_executor()
+
+    payload = await _call(
+        executor,
+        colony_name="bad_cron",
+        task="t",
+        skill_name="skill",
+        skill_description="d",
+        skill_body=_DEFAULT_BODY,
+        triggers=[
+            {
+                "id": "broken",
+                "trigger_type": "timer",
+                "trigger_config": {"cron": "not a cron"},
+                "task": "x",
+            }
+        ],
+    )
+    assert "error" in payload
+    assert "cron" in payload["error"]
+    # Fork was not called, skill not materialized.
+    assert len(patched_fork) == 0
+    assert not (patched_home / ".hive" / "colonies" / "bad_cron" / ".hive" / "skills" / "skill").exists()
+
+
+@pytest.mark.asyncio
+async def test_triggers_missing_task_fails(patched_home: Path, patched_fork: list[dict]) -> None:
+    """A trigger without a ``task`` is rejected before any write happens."""
+    executor, _ = _make_executor()
+
+    payload = await _call(
+        executor,
+        colony_name="no_task",
+        task="t",
+        skill_name="skill",
+        skill_description="d",
+        skill_body=_DEFAULT_BODY,
+        triggers=[
+            {
+                "id": "notask",
+                "trigger_type": "timer",
+                "trigger_config": {"interval_minutes": 5},
+            }
+        ],
+    )
+    assert "error" in payload
+    assert "task" in payload["error"]
+    assert len(patched_fork) == 0

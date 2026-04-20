@@ -80,6 +80,7 @@ export interface DiscoverEntry {
   name: string;
   description: string;
   category: string;
+  created_at?: string | null;
   session_count: number;
   run_count: number;
   node_count: number;
@@ -87,6 +88,7 @@ export interface DiscoverEntry {
   tags: string[];
   last_active: string | null;
   is_loaded: boolean;
+  icon?: string | null;
   workers: WorkerEntry[];
 }
 

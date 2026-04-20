@@ -463,8 +463,13 @@ export function replayEventsToMessages(
   return [block, ...native];
 }
 
-type QueenPhase = "planning" | "building" | "staging" | "running" | "independent";
-const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running", "independent"]);
+type QueenPhase = "independent" | "incubating" | "working" | "reviewing";
+const VALID_PHASES = new Set<string>([
+  "independent",
+  "incubating",
+  "working",
+  "reviewing",
+]);
 
 /**
  * Scan an array of persisted events and return the last queen phase seen,

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Loader2, Users, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import ChatPanel, {
   type ChatMessage,
   type ImageContent,
@@ -923,11 +923,7 @@ export default function QueenDM() {
           isBusy={isTyping}
           disabled={loading || !queenReady}
           queenPhase={queenPhase}
-          // The DM is normally in `independent` phase, so the per-message
-          // badge would just be noise. Surface it once the phase moves
-          // (e.g. INCUBATING after start_incubating_colony approves) so
-          // the user immediately sees the queen is in a different mode.
-          showQueenPhaseBadge={queenPhase !== "independent"}
+          showQueenPhaseBadge
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}
           pendingQuestions={awaitingInput ? pendingQuestions : null}

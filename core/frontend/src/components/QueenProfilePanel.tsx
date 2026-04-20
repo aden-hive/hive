@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { X, MessageSquare, Crown, ChevronRight, Briefcase, Award, Pencil, Check, Loader2, Camera, Plus } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { queensApi, type QueenProfile } from "@/api/queens";
@@ -29,7 +29,6 @@ function SectionHeader({ children, onEdit }: { children: React.ReactNode; onEdit
 
 export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenProfilePanelProps) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { queenProfiles, refresh } = useColony();
   const summary = queenProfiles.find((q) => q.id === queenId);
   const [profile, setProfile] = useState<QueenProfile | null>(null);
@@ -48,8 +47,6 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
   const [editSummary, setEditSummary] = useState("");
   const [editSkills, setEditSkills] = useState("");
   const [editAchievement, setEditAchievement] = useState("");
-
-  const alreadyInQueenPm = location.pathname === `/queen/${queenId}`;
 
   useEffect(() => {
     setLoading(true);
