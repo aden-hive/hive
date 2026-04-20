@@ -132,6 +132,18 @@ This sets up:
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
+### First-Run Troubleshooting
+
+A few setup blockers are easy to hit on first run. Checking these before debugging agent behavior can save time:
+
+- **Verify your LLM provider credits/quota first.** Hive can start planning and executing quickly, so free-tier or low-credit accounts may fail before a full run completes.
+- **Connect required tools before testing search-heavy workflows.** Some agents depend on integrations such as web search or external services. If the required tool is not connected, results may be incomplete or the workflow may fail.
+- **Expect some sample agents to require credentials.** Template agents such as inbox, research, or external-data workflows may not be runnable until their required credentials are configured.
+- **Google account setup may vary by account type.** Some Google-managed or workspace accounts may hit OAuth/admin restrictions depending on account policy.
+- **If a run appears stalled, check provider limits before deeper debugging.** Provider rate limits, exhausted quota, or missing credentials can look like product issues on first run.
+
+> **Tip:** If a workflow depends on external tools or provider credits, confirm those are configured before evaluating agent behavior in the UI.
+
 ### Build Your First Agent
 
 Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
