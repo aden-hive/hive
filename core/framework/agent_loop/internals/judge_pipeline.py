@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from framework.agent_loop.conversation import NodeConversation
+from framework.agent_loop.internals.failure_memory import is_silent_failure, record_failure
 from framework.agent_loop.internals.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
 from framework.orchestrator.node import NodeContext
-import asyncio
-from framework.agent_loop.internals.failure_memory import is_silent_failure, record_failure
 
 logger = logging.getLogger(__name__)
 

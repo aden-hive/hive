@@ -190,7 +190,16 @@ class RuleProposal:
 # ---------------------------------------------------------------------------
 
 def is_silent_failure(output: dict[str, Any]) -> tuple[bool, str]:
-    """Detect whether an ACCEPT-ed output is semantically empty / useless."""
+    """Detect whether an ACCEPT-ed output is semantically empty or useless.
+
+    Silent failure detection exists because the judge's structural checks
+    (e.g. required keys are present) can pass even when all field values
+    are empty strings, None, or placeholder patterns like "N/A".  Without
+    this check, the agent loop would accept outputs that look complete but
+    carry no real information, effectively silently failing the task.
+
+    Returns (True, reason) when a silent failure is detected, (False, "") otherwise.
+    """
     if not output:
         return True, "output dict is empty — agent produced no values"
 
@@ -340,6 +349,8 @@ def _save_records_sync(memory_dir: Path, records: list[FailureRecord]) -> None:
 def _append_record_sync(memory_dir: Path, record: FailureRecord) -> None:
     """Append-only write with advisory file lock for cross-process safety.
 
+    # NOTE: JSONL used for simplicity; can be replaced with indexed storage if needed.
+
     On Windows, msvcrt.locking is exclusive and blocks concurrent readers;
     NTFS append-mode writes are atomic for our record sizes so the OS-level
     advisory lock is skipped on win32 to prevent PermissionError under
@@ -436,6 +447,7 @@ async def record_failure(
 
     record = await asyncio.to_thread(_upsert)
 
+    logger.info("failure_memory: recorded failure type=%s", ftype)  # checklist log
     logger.info(                                            # fix #8
         "failure_memory: recorded agent=%s node=%s type=%s pattern=%r count=%d",
         agent_id, node_name, ftype, pattern_key[:50], record.occurrence_count,

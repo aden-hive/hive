@@ -55,6 +55,12 @@ from framework.agent_loop.internals.event_publishing import (
     publish_tool_started,
     run_hooks,
 )
+from framework.agent_loop.internals.failure_memory import (
+    build_failure_memory_prompt,
+    is_silent_failure,  # noqa: F401 — re-exported for callers
+    record_failure,  # noqa: F401 — re-exported for callers
+    retrieve_relevant_failures,
+)
 from framework.agent_loop.internals.judge_pipeline import (
     SubagentJudge as SharedSubagentJudge,
     handle_accept_verdict,
@@ -4306,12 +4312,13 @@ class AgentLoop(AgentProtocol):
     # -------------------------------------------------------------------
 
     async def _inject_failure_memory_at_session_start(self, ctx, system_prompt: str) -> str:
-        """Retrieve past failures and prepend them to the Layer-2 narrative."""
+        """Retrieve past failures and prepend them to the Layer-2 narrative.
+
+        Called once per fresh session before the conversation is created.
+        Skips gracefully on any I/O error so a missing or corrupt failure
+        store never prevents agent execution.
+        """
         try:
-            from framework.agent_loop.internals.failure_memory import (
-                build_failure_memory_prompt,
-                retrieve_relevant_failures,
-            )
             failures = await retrieve_relevant_failures(
                 agent_id=ctx.agent_id,
                 node_name=ctx.agent_spec.name,
