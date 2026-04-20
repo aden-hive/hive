@@ -156,6 +156,9 @@ export function sseEventToChatMessage(
         type: "user",
         thread,
         createdAt,
+        // Carrying execution_id here lets the optimistic-message reconciler
+        // distinguish server-echoed user bubbles from still-unflushed ones.
+        executionId: event.execution_id || undefined,
         streamId: event.stream_id || undefined,
       };
     }
