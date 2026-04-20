@@ -866,6 +866,8 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "tool_count": entry.tool_count,
                 "tags": entry.tags,
                 "last_active": entry.last_active,
+                "created_at": entry.created_at,
+                "icon": entry.icon,
                 "is_loaded": str(entry.path.resolve()) in loaded_paths,
                 "workers": [w.to_dict() for w in entry.workers],
             }
@@ -946,6 +948,40 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
     return web.json_response({"path": str(folder)})
 
 
+async def handle_update_colony_metadata(request: web.Request) -> web.Response:
+    """PATCH /api/agents/metadata — update colony metadata (e.g. icon).
+
+    Body: {"agent_path": "...", "icon": "rocket"}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    agent_path = body.get("agent_path")
+    if not agent_path:
+        return web.json_response({"error": "agent_path is required"}, status=400)
+
+    try:
+        resolved = validate_agent_path(agent_path)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+    metadata_path = resolved / "metadata.json"
+    metadata: dict = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    if "icon" in body:
+        metadata["icon"] = body["icon"]
+
+    metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return web.json_response({"ok": True})
+
+
 # ------------------------------------------------------------------
 # Route registration
 # ------------------------------------------------------------------
@@ -956,6 +992,7 @@ def register_routes(app: web.Application) -> None:
     # Discovery & agent management
     app.router.add_get("/api/discover", handle_discover)
     app.router.add_delete("/api/agents", handle_delete_agent)
+    app.router.add_patch("/api/agents/metadata", handle_update_colony_metadata)
 
     # Session lifecycle
     app.router.add_post("/api/sessions", handle_create_session)

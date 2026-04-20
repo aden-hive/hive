@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Loader2, Users } from "lucide-react";
+import { Loader2, Users, Plus } from "lucide-react";
 import ChatPanel, {
   type ChatMessage,
   type ImageContent,
@@ -45,6 +45,7 @@ export default function QueenDM() {
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState({ input: 0, output: 0 });
   const [, setActiveToolCalls] = useState<
     Record<string, { name: string; done: boolean }>
   >({});
@@ -84,6 +85,7 @@ export default function QueenDM() {
     setAwaitingInput(false);
     setActiveToolCalls({});
     setQueenPhase("independent");
+    setTokenUsage({ input: 0, output: 0 });
     setInitialDraft(null);
     turnCounterRef.current = 0;
     toolUseToPillRef.current = {};
@@ -378,15 +380,6 @@ export default function QueenDM() {
     if (!queenId) return;
     setActions(
       <>
-        <button
-          onClick={() => setCloneDialogOpen(true)}
-          disabled={!sessionId}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0 disabled:opacity-50"
-          title="Clone queen to a colony"
-        >
-          <Users className="w-3.5 h-3.5" />
-          Clone Colony
-        </button>
         <QueenSessionSwitcher
           sessions={historySessions}
           currentSessionId={sessionId}
@@ -439,6 +432,11 @@ export default function QueenDM() {
         case "llm_turn_complete":
           turnCounterRef.current++;
           setActiveToolCalls({});
+          if (event.data) {
+            const inp = (event.data.input_tokens as number) || 0;
+            const out = (event.data.output_tokens as number) || 0;
+            setTokenUsage((prev) => ({ input: prev.input + inp, output: prev.output + out }));
+          }
           break;
 
         case "client_output_delta":
@@ -856,6 +854,17 @@ export default function QueenDM() {
           initialDraft={initialDraft}
           queenProfileId={queenId ?? null}
           queenId={queenId}
+          tokenUsage={tokenUsage}
+          headerAction={
+            <button
+              onClick={() => setCloneDialogOpen(true)}
+              disabled={!sessionId}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
+            >
+              <Plus className="w-3 h-3" />
+              Create a Colony
+            </button>
+          }
         />
       </div>
 
@@ -867,11 +876,11 @@ export default function QueenDM() {
           />
           <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <h2 className="text-sm font-semibold text-foreground">
-              Fork to Colony
+              Create a Colony
             </h2>
             <p className="text-[11px] text-muted-foreground">
-              Forks the queen's full session into a new colony. Multiple
-              sessions can run against it in parallel.
+              Create a new colony from this queen's session. The colony inherits
+              the queen's tools, context, and conversation history.
             </p>
             <div className="space-y-3">
               <div>
@@ -922,7 +931,7 @@ export default function QueenDM() {
                 disabled={spawning || !cloneColonyName.trim()}
                 className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {spawning ? "Forking..." : "Fork"}
+                {spawning ? "Creating..." : "Create"}
               </button>
             </div>
           </div>

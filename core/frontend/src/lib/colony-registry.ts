@@ -114,6 +114,27 @@ export function getColonyColor(slug: string): string {
   return COLONY_COLORS[slug] || "hsl(45,95%,58%)";
 }
 
+/** Fixed display order for queen profiles */
+export const QUEEN_DISPLAY_ORDER: string[] = [
+  "queen_technology",
+  "queen_operations",
+  "queen_growth",
+  "queen_finance_fundraising",
+  "queen_talent",
+  "queen_product_strategy",
+  "queen_brand_design",
+  "queen_legal",
+];
+
+/** Sort queen profiles by fixed display order */
+export function sortQueenProfiles<T extends { id: string }>(profiles: T[]): T[] {
+  return [...profiles].sort((a, b) => {
+    const ia = QUEEN_DISPLAY_ORDER.indexOf(a.id);
+    const ib = QUEEN_DISPLAY_ORDER.indexOf(b.id);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+}
+
 /** Pre-defined templates for the home page */
 export const TEMPLATES: Template[] = [
   {

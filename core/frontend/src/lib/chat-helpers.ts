@@ -263,9 +263,11 @@ export function replayEvent(
   event: AgentEvent,
   thread: string,
   agentDisplayName: string | undefined,
+  queenDisplayName?: string,
 ): ChatMessage[] {
   const streamId = event.stream_id;
   const isQueen = streamId === "queen";
+  const effectiveName = isQueen ? (queenDisplayName || agentDisplayName) : agentDisplayName;
   const role: "queen" | "worker" = isQueen ? "queen" : "worker";
   const turnKey = streamId;
   const currentTurn = state.turnCounters[turnKey] ?? 0;
@@ -313,7 +315,7 @@ export function replayEvent(
       const allDone = tools.length > 0 && tools.every((t) => t.done);
       out.push({
         id: pillId,
-        agent: agentDisplayName || event.node_id || "Agent",
+        agent: effectiveName || event.node_id || "Agent",
         agentColor: "",
         content: JSON.stringify({ tools, allDone }),
         timestamp: "",
@@ -340,11 +342,9 @@ export function replayEvent(
         .filter((t) => t.streamId === streamId)
         .map((t) => ({ name: t.name, done: t.done }));
       const allDone = tools.length > 0 && tools.every((t) => t.done);
-      // Re-emit the SAME pill id with updated content. Caller upserts
-      // by id, so this replaces the row from tool_call_started.
       out.push({
         id: tracked.msgId,
-        agent: agentDisplayName || event.node_id || "Agent",
+        agent: effectiveName || event.node_id || "Agent",
         agentColor: "",
         content: JSON.stringify({ tools, allDone }),
         timestamp: "",
@@ -364,7 +364,7 @@ export function replayEvent(
   const msg = sseEventToChatMessage(
     event,
     thread,
-    agentDisplayName,
+    effectiveName,
     state.turnCounters[turnKey] ?? 0,
   );
   if (msg) {
@@ -384,12 +384,13 @@ export function replayEventsToMessages(
   events: AgentEvent[],
   thread: string,
   agentDisplayName: string | undefined,
+  queenDisplayName?: string,
 ): ChatMessage[] {
   const state = newReplayState();
   // Upsert by id — later emissions for the same pill replace earlier ones.
   const byId = new Map<string, ChatMessage>();
   for (const evt of events) {
-    for (const m of replayEvent(state, evt, thread, agentDisplayName)) {
+    for (const m of replayEvent(state, evt, thread, agentDisplayName, queenDisplayName)) {
       byId.set(m.id, m);
     }
   }
