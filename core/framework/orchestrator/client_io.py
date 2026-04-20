@@ -88,28 +88,31 @@ class ActiveNodeClientIO(NodeClientIO):
         self._input_event = asyncio.Event()
         self._input_result = None
 
-        if self._event_bus is not None:
-            # `prompt` is consumed by the caller separately (callers emit
-            # it as a text delta when needed). The event only carries the
-            # structured questions payload for widget rendering.
-            await self._event_bus.emit_client_input_requested(
-                stream_id=self.node_id,
-                node_id=self.node_id,
-                execution_id=self._execution_id or None,
-            )
-
         try:
+            if self._event_bus is not None:
+                # `prompt` is consumed by the caller separately (callers emit
+                # it as a text delta when needed). The event only carries the
+                # structured questions payload for widget rendering.
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=self.node_id,
+                    node_id=self.node_id,
+                    execution_id=self._execution_id or None,
+                )
+
             if timeout is not None:
                 await asyncio.wait_for(self._input_event.wait(), timeout=timeout)
             else:
                 await self._input_event.wait()
         finally:
+            # Capture result before resetting state so a concurrent
+            # request_input cannot wipe _input_result between the
+            # reset and the read.
+            result = self._input_result
             self._input_event = None
+            self._input_result = None
 
-        if self._input_result is None:
+        if result is None:
             raise RuntimeError("input event was set but no input was provided")
-        result = self._input_result
-        self._input_result = None
         return result
 
     async def provide_input(self, content: str) -> None:
