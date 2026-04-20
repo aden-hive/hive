@@ -567,7 +567,7 @@ def build_llm_compaction_prompt(
     user_messages_section = (
         "6. **User Messages** — Reproduce EVERY user message verbatim and "
         "in full, in chronological order, each on its own line prefixed "
-        "with the message index (e.g. \"[U1] ...\"). Do NOT paraphrase, "
+        'with the message index (e.g. "[U1] ..."). Do NOT paraphrase, '
         "summarise, merge, or omit any user message. Preserve markdown, "
         "code fences, whitespace, and punctuation exactly as the user "
         "wrote them.\n"

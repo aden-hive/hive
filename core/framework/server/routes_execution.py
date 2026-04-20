@@ -1081,8 +1081,7 @@ async def _compact_inherited_conversation(
     of the summary.
     """
     import json as _json
-    from datetime import UTC as _UTC
-    from datetime import datetime as _datetime
+    from datetime import UTC as _UTC, datetime as _datetime
 
     try:
         result = await _compact_queen_conversation_in_place(
@@ -1140,8 +1139,7 @@ async def _compact_inherited_conversation(
         logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
 
     logger.info(
-        "compact_inherited: compacted %d parent message(s) -> 1 summary "
-        "(%d chars) for colony forked from %s",
+        "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
         messages_compacted,
         summary_chars,
         source_session_id,
@@ -1501,8 +1499,7 @@ async def fork_session_into_colony(
                 )
             except TimeoutError:
                 compaction_error = (
-                    f"compaction timed out after {_COMPACTION_TIMEOUT_SECONDS:.0f}s "
-                    "(falling back to raw transcript)"
+                    f"compaction timed out after {_COMPACTION_TIMEOUT_SECONDS:.0f}s (falling back to raw transcript)"
                 )
                 logger.warning(
                     "fork_session_into_colony: %s for %s",
@@ -1512,8 +1509,7 @@ async def fork_session_into_colony(
             except Exception as exc:
                 compaction_error = f"compaction failed: {exc}"
                 logger.warning(
-                    "fork_session_into_colony: %s for %s "
-                    "(falling back to raw transcript)",
+                    "fork_session_into_colony: %s for %s (falling back to raw transcript)",
                     compaction_error,
                     _dest_queen_dir,
                     exc_info=True,
@@ -1619,9 +1615,7 @@ async def fork_session_into_colony(
         # compact). Frontend uses this to decide whether to display a
         # "preparing colony…" state while session-load blocks on the
         # compaction marker.
-        "compaction_status": (
-            "in_progress" if source_queen_dir.exists() else "skipped"
-        ),
+        "compaction_status": ("in_progress" if source_queen_dir.exists() else "skipped"),
     }
 
 

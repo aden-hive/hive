@@ -141,8 +141,7 @@ async def await_completion(
             return last
         if loop.time() >= deadline:
             logger.warning(
-                "compaction_status: timed out after %.0fs waiting for %s "
-                "(proceeding with raw transcript)",
+                "compaction_status: timed out after %.0fs waiting for %s (proceeding with raw transcript)",
                 timeout,
                 queen_dir,
             )

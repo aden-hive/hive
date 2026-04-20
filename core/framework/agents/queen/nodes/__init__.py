@@ -474,12 +474,7 @@ queen_node = NodeSpec(
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
     tools=sorted(
-        set(
-            _QUEEN_INDEPENDENT_TOOLS
-            + _QUEEN_INCUBATING_TOOLS
-            + _QUEEN_WORKING_TOOLS
-            + _QUEEN_REVIEWING_TOOLS
-        )
+        set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_INCUBATING_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS)
     ),
     system_prompt=(
         _queen_character_core
@@ -492,12 +487,7 @@ queen_node = NodeSpec(
 )
 
 ALL_QUEEN_TOOLS = sorted(
-    set(
-        _QUEEN_INDEPENDENT_TOOLS
-        + _QUEEN_INCUBATING_TOOLS
-        + _QUEEN_WORKING_TOOLS
-        + _QUEEN_REVIEWING_TOOLS
-    )
+    set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_INCUBATING_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS)
 )
 
 __all__ = [

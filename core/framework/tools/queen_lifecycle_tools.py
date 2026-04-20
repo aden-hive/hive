@@ -86,8 +86,6 @@ _INCUBATING_APPROVAL_GUIDANCE = (
 )
 
 
-
-
 def _render_credentials_block(provider: Any) -> str:
     """Call a credentials_prompt_provider safely and return its output.
 
@@ -570,9 +568,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                     if cron_expr:
                         try:
                             _peek = croniter(cron_expr, datetime.now(tz=UTC)).get_next(datetime)
-                            _next_delay = max(
-                                0.0, (_peek - datetime.now(tz=UTC)).total_seconds()
-                            )
+                            _next_delay = max(0.0, (_peek - datetime.now(tz=UTC)).total_seconds())
                         except Exception:
                             _next_delay = 60.0
                     else:
@@ -1557,8 +1553,7 @@ def register_queen_lifecycle_tools(
                         return None, f"triggers[{idx}] ('{tid}') interval_minutes must be > 0, got {interval}"
                 else:
                     return None, (
-                        f"triggers[{idx}] ('{tid}') timer trigger needs 'cron' or "
-                        "'interval_minutes' in trigger_config."
+                        f"triggers[{idx}] ('{tid}') timer trigger needs 'cron' or 'interval_minutes' in trigger_config."
                     )
             else:  # webhook
                 path = (t_config.get("path") or "").strip() if isinstance(t_config.get("path"), str) else ""
@@ -1573,7 +1568,9 @@ def register_queen_lifecycle_tools(
                     "trigger_type": t_type,
                     "trigger_config": t_config,
                     "task": task_str.strip(),
-                    "name": entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name").strip() else tid,
+                    "name": (
+                        entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name").strip() else tid
+                    ),
                 }
             )
         return normalized, None
@@ -1698,7 +1695,9 @@ def register_queen_lifecycle_tools(
                 colony_name=cn,
                 task=(task or "").strip(),
                 tasks=tasks if isinstance(tasks, list) else None,
-                concurrency_hint=concurrency_hint if isinstance(concurrency_hint, int) and concurrency_hint > 0 else None,
+                concurrency_hint=(
+                    concurrency_hint if isinstance(concurrency_hint, int) and concurrency_hint > 0 else None
+                ),
             )
         except Exception as e:
             logger.exception("create_colony: fork failed after installing skill")
@@ -1739,9 +1738,7 @@ def register_queen_lifecycle_tools(
                             # the background; opening the colony will
                             # block on that until it finishes. "skipped"
                             # means no compaction was needed.
-                            "compaction_status": fork_result.get(
-                                "compaction_status", "skipped"
-                            ),
+                            "compaction_status": fork_result.get("compaction_status", "skipped"),
                         },
                     )
                 )
@@ -1820,9 +1817,7 @@ def register_queen_lifecycle_tools(
                 "tasks_seeded": len(fork_result.get("task_ids") or []),
                 # Transcript compaction runs in the background; opening
                 # the colony blocks on this marker until it finishes.
-                "compaction_status": fork_result.get(
-                    "compaction_status", "skipped"
-                ),
+                "compaction_status": fork_result.get("compaction_status", "skipped"),
             }
         )
 
@@ -2105,12 +2100,7 @@ def register_queen_lifecycle_tools(
         cn = (colony_name or "").strip()
         if not _COLONY_NAME_RE.match(cn):
             return json.dumps(
-                {
-                    "error": (
-                        "colony_name must be lowercase alphanumeric with "
-                        "underscores (e.g. 'morning_hn_digest')."
-                    )
-                }
+                {"error": ("colony_name must be lowercase alphanumeric with underscores (e.g. 'morning_hn_digest').")}
             )
 
         purpose = (intended_purpose or "").strip()
@@ -2197,9 +2187,7 @@ def register_queen_lifecycle_tools(
                     "status": "not_ready",
                     "colony_name": cn,
                     "reasons": verdict.get("reasons", []),
-                    "missing_prerequisites": verdict.get(
-                        "missing_prerequisites", []
-                    ),
+                    "missing_prerequisites": verdict.get("missing_prerequisites", []),
                 }
             )
 

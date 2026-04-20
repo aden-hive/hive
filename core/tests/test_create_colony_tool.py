@@ -565,9 +565,7 @@ async def test_triggers_written_to_triggers_json(patched_home: Path, patched_for
 
 
 @pytest.mark.asyncio
-async def test_triggers_omitted_does_not_write_triggers_json(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_triggers_omitted_does_not_write_triggers_json(patched_home: Path, patched_fork: list[dict]) -> None:
     """No triggers arg → no triggers.json (colony runs on-demand)."""
     executor, _ = _make_executor()
 
@@ -585,9 +583,7 @@ async def test_triggers_omitted_does_not_write_triggers_json(
 
 
 @pytest.mark.asyncio
-async def test_triggers_invalid_cron_fails_before_fork(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_triggers_invalid_cron_fails_before_fork(patched_home: Path, patched_fork: list[dict]) -> None:
     """A bad cron fails fast: no skill written, no fork call."""
     executor, _ = _make_executor()
 

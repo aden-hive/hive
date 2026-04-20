@@ -240,23 +240,22 @@ async def _ensure_viewport_size(tab_id: int, _caller: str = "unknown") -> tuple[
 
     try:
         from ..telemetry import write_log
-        write_log({
-            "type": "viewport_sample",
-            "tab_id": tab_id,
-            "caller": _caller,
-            "live_w": cw,
-            "live_h": ch,
-            "cached_w": cached_before[0] if cached_before else None,
-            "cached_h": cached_before[1] if cached_before else None,
-            "deltaH_vs_cache": (
-                (ch - cached_before[1])
-                if (cached_before and ch > 0)
-                else None
-            ),
-            "returned_w": result_cw,
-            "returned_h": result_ch,
-            "evaluate_error": evaluate_error,
-        })
+
+        write_log(
+            {
+                "type": "viewport_sample",
+                "tab_id": tab_id,
+                "caller": _caller,
+                "live_w": cw,
+                "live_h": ch,
+                "cached_w": cached_before[0] if cached_before else None,
+                "cached_h": cached_before[1] if cached_before else None,
+                "deltaH_vs_cache": ((ch - cached_before[1]) if (cached_before and ch > 0) else None),
+                "returned_w": result_cw,
+                "returned_h": result_ch,
+                "evaluate_error": evaluate_error,
+            }
+        )
     except Exception:
         pass
 
@@ -362,31 +361,32 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             # physical_scale is derived from pngWidth.
             try:
                 from ..telemetry import write_log
+
                 expected_w = css_width * dpr
                 expected_h = css_height_raw * dpr
-                write_log({
-                    "type": "screenshot_geometry",
-                    "tab_id": target_tab,
-                    "url": screenshot_result.get("url", ""),
-                    "pngWidth": png_w,
-                    "pngHeight": png_h,
-                    "cssWidth": css_width,
-                    "cssHeight": css_height_raw,
-                    "dpr": dpr,
-                    "expectedPngWidth": expected_w,
-                    "expectedPngHeight": expected_h,
-                    "deltaPngWidthPx": png_w - expected_w,
-                    "deltaPngHeightPx": png_h - expected_h,
-                    # If the PNG is taller than cssHeight×dpr (e.g. a
-                    # devtools-attached banner adds rows above the page
-                    # in the capture), clicks land BELOW intended at
-                    # the top of the page and converge to 0 error at
-                    # the bottom. Reverse signs if PNG is shorter.
-                    # Worst-case error in CSS px at fy=0:
-                    "yErrorAtTopCssPx": (
-                        (png_h - expected_h) / dpr if dpr else 0
-                    ),
-                })
+                write_log(
+                    {
+                        "type": "screenshot_geometry",
+                        "tab_id": target_tab,
+                        "url": screenshot_result.get("url", ""),
+                        "pngWidth": png_w,
+                        "pngHeight": png_h,
+                        "cssWidth": css_width,
+                        "cssHeight": css_height_raw,
+                        "dpr": dpr,
+                        "expectedPngWidth": expected_w,
+                        "expectedPngHeight": expected_h,
+                        "deltaPngWidthPx": png_w - expected_w,
+                        "deltaPngHeightPx": png_h - expected_h,
+                        # If the PNG is taller than cssHeight×dpr (e.g. a
+                        # devtools-attached banner adds rows above the page
+                        # in the capture), clicks land BELOW intended at
+                        # the top of the page and converge to 0 error at
+                        # the bottom. Reverse signs if PNG is shorter.
+                        # Worst-case error in CSS px at fy=0:
+                        "yErrorAtTopCssPx": ((png_h - expected_h) / dpr if dpr else 0),
+                    }
+                )
             except Exception:
                 pass
 

@@ -112,10 +112,7 @@ def format_conversation_excerpt(messages: list[Message]) -> str:
             # Surface tool-call intent for empty assistant turns so the
             # evaluator sees what the queen has been doing.
             if not content and msg.tool_calls:
-                names = [
-                    tc.get("function", {}).get("name", "?")
-                    for tc in msg.tool_calls
-                ]
+                names = [tc.get("function", {}).get("name", "?") for tc in msg.tool_calls]
                 content = f"(called: {', '.join(names)})"
             if len(content) > _MAX_ASSISTANT_CONTENT_CHARS:
                 content = content[:_MAX_ASSISTANT_CONTENT_CHARS] + "..."
@@ -224,9 +221,7 @@ async def evaluate(
         return {
             "ready": False,
             "reasons": ["evaluation_failed"],
-            "missing_prerequisites": [
-                "evaluator LLM call failed; retry once the queen can reach the model again"
-            ],
+            "missing_prerequisites": ["evaluator LLM call failed; retry once the queen can reach the model again"],
         }
 
     raw = (getattr(response, "content", "") or "").strip()
@@ -239,9 +234,7 @@ async def evaluate(
         return {
             "ready": False,
             "reasons": ["evaluation_failed"],
-            "missing_prerequisites": [
-                "evaluator returned malformed JSON; retry"
-            ],
+            "missing_prerequisites": ["evaluator returned malformed JSON; retry"],
         }
 
     return _normalize_verdict(parsed)

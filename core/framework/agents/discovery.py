@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 
 
@@ -227,9 +228,10 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             # Fallback: use directory creation time if metadata lacks created_at
             if not colony_created_at:
                 try:
-                    from datetime import datetime, timezone
+                    from datetime import datetime
+
                     stat = path.stat()
-                    colony_created_at = datetime.fromtimestamp(stat.st_birthtime, tz=timezone.utc).isoformat()
+                    colony_created_at = datetime.fromtimestamp(stat.st_birthtime, tz=UTC).isoformat()
                 except Exception:
                     pass
 
