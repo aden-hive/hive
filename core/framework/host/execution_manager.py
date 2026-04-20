@@ -50,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 CancelExecutionResult = Literal["cancelled", "cancelling", "not_found"]
 
+# How long cancel_execution waits for a task to exit before returning "cancelling".
+# Override with HIVE_CANCEL_TIMEOUT_SECONDS for environments with slow LLM teardown.
+_CANCEL_TIMEOUT_SECONDS: float = float(os.environ.get("HIVE_CANCEL_TIMEOUT_SECONDS", "5.0"))
+
 
 class GraphScopedEventBus(EventBus):
     """Proxy that stamps ``graph_id`` on every published event.
@@ -436,11 +440,12 @@ class ExecutionManager:
         if tasks_to_wait:
             # Wait briefly — don't block indefinitely if tasks are stuck
             # in long-running operations (LLM calls, tool executions).
-            _, pending = await asyncio.wait(tasks_to_wait, timeout=5.0)
+            _, pending = await asyncio.wait(tasks_to_wait, timeout=_CANCEL_TIMEOUT_SECONDS)
             if pending:
                 logger.warning(
-                    "%d execution task(s) did not finish within 5s after cancellation",
+                    "%d execution task(s) did not finish within %.1fs after cancellation",
                     len(pending),
+                    _CANCEL_TIMEOUT_SECONDS,
                 )
 
         logger.info(f"ExecutionStream '{self.stream_id}' stopped")
@@ -1240,15 +1245,17 @@ class ExecutionManager:
         # Wait briefly for the task to finish. Don't block indefinitely —
         # the task may be stuck in a long LLM API call that doesn't
         # respond to cancellation quickly.
-        done, _ = await asyncio.wait({task}, timeout=5.0)
+        done, _ = await asyncio.wait({task}, timeout=_CANCEL_TIMEOUT_SECONDS)
         if not done:
             # Keep bookkeeping in place until the task's own finally block runs.
             # We intentionally do not add deferred cleanup keyed by execution_id
             # here because resumed executions reuse the same id; a delayed pop
             # could otherwise delete bookkeeping that belongs to the new run.
             logger.warning(
-                "Execution %s did not finish within cancel timeout; leaving bookkeeping in place until task exit",
+                "Execution %s did not finish within %.1fs cancel timeout; "
+                "task will be detached. Set HIVE_CANCEL_TIMEOUT_SECONDS to adjust.",
                 execution_id,
+                _CANCEL_TIMEOUT_SECONDS,
             )
             return "cancelling"
         return "cancelled"
