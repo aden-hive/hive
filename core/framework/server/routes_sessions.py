@@ -10,6 +10,7 @@ Session-primary routes:
 - GET    /api/sessions/{session_id}/stats             — runtime statistics
 - GET    /api/sessions/{session_id}/entry-points      — list entry points
 - PATCH  /api/sessions/{session_id}/triggers/{id}    — update trigger task
+- POST   /api/sessions/{session_id}/triggers/{id}/run — fire trigger once (manual)
 - GET    /api/sessions/{session_id}/colonies          — list colony IDs
 - GET    /api/sessions/{session_id}/events/history   — persisted eventbus log (for replay)
 
@@ -247,7 +248,14 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             }
             mono = getattr(session, "trigger_next_fire", {}).get(t.id)
             if mono is not None:
-                entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+                remaining = max(0.0, mono - time.monotonic())
+                entry["next_fire_in"] = remaining
+                entry["next_fire_at"] = int((time.time() + remaining) * 1000)
+            stats = getattr(session, "trigger_fire_stats", {}).get(t.id)
+            if stats:
+                entry["fire_count"] = stats.get("fire_count", 0)
+                if stats.get("last_fired_at") is not None:
+                    entry["last_fired_at"] = stats["last_fired_at"]
             data["entry_points"].append(entry)
         data["colonies"] = session.colony_runtime.list_graphs()
 
@@ -397,7 +405,14 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
         }
         mono = getattr(session, "trigger_next_fire", {}).get(t.id)
         if mono is not None:
-            entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+            remaining = max(0.0, mono - time.monotonic())
+            entry["next_fire_in"] = remaining
+            entry["next_fire_at"] = int((time.time() + remaining) * 1000)
+        stats = getattr(session, "trigger_fire_stats", {}).get(t.id)
+        if stats:
+            entry["fire_count"] = stats.get("fire_count", 0)
+            if stats.get("last_fired_at") is not None:
+                entry["last_fired_at"] = stats["last_fired_at"]
         entry_points.append(entry)
     return web.json_response({"entry_points": entry_points})
 
@@ -548,6 +563,60 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     )
 
 
+async def handle_run_trigger(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/triggers/{trigger_id}/run — fire the trigger once.
+
+    Manual invocation for testing. Works whether the trigger is active or
+    inactive; does not change active state and does not reset the scheduled
+    next-fire time of an active timer.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    trigger_id = request.match_info["trigger_id"]
+    tdef = getattr(session, "available_triggers", {}).get(trigger_id)
+    if tdef is None:
+        return web.json_response(
+            {"error": f"Trigger '{trigger_id}' not found"},
+            status=404,
+        )
+
+    if getattr(session, "colony_runtime", None) is None:
+        return web.json_response({"error": "Colony not loaded"}, status=409)
+
+    executor = getattr(session, "queen_executor", None)
+    queen_node = getattr(executor, "node_registry", {}).get("queen") if executor else None
+    if queen_node is None:
+        return web.json_response({"error": "Queen not ready"}, status=409)
+
+    from framework.agent_loop.agent_loop import TriggerEvent
+
+    try:
+        await queen_node.inject_trigger(
+            TriggerEvent(
+                trigger_type=tdef.trigger_type,
+                source_id=trigger_id,
+                payload={
+                    "task": tdef.task or "",
+                    "trigger_config": tdef.trigger_config,
+                    "forced": True,
+                },
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response(
+            {"error": f"Failed to fire trigger: {exc}"},
+            status=500,
+        )
+
+    from framework.tools.queen_lifecycle_tools import _emit_trigger_fired
+
+    await _emit_trigger_fired(session, trigger_id, tdef.trigger_type)
+
+    return web.json_response({"status": "fired", "trigger_id": trigger_id})
+
+
 async def handle_activate_trigger(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/triggers/{trigger_id}/activate — start a trigger."""
     session, err = resolve_session(request)
@@ -599,6 +668,17 @@ async def handle_activate_trigger(request: web.Request) -> web.Response:
 
         runner = getattr(session, "runner", None)
         colony_entry = runner.graph.entry_node if runner else None
+        config_out = dict(tdef.trigger_config)
+        mono = getattr(session, "trigger_next_fire", {}).get(trigger_id)
+        if mono is not None:
+            remaining = max(0.0, mono - time.monotonic())
+            config_out["next_fire_in"] = remaining
+            config_out["next_fire_at"] = int((time.time() + remaining) * 1000)
+        stats = getattr(session, "trigger_fire_stats", {}).get(trigger_id)
+        if stats:
+            config_out["fire_count"] = stats.get("fire_count", 0)
+            if stats.get("last_fired_at") is not None:
+                config_out["last_fired_at"] = stats["last_fired_at"]
         await bus.publish(
             AgentEvent(
                 type=EventType.TRIGGER_ACTIVATED,
@@ -606,7 +686,7 @@ async def handle_activate_trigger(request: web.Request) -> web.Response:
                 data={
                     "trigger_id": trigger_id,
                     "trigger_type": tdef.trigger_type,
-                    "trigger_config": tdef.trigger_config,
+                    "trigger_config": config_out,
                     "name": tdef.description or trigger_id,
                     **({"entry_node": colony_entry} if colony_entry else {}),
                 },
@@ -1021,6 +1101,10 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post(
         "/api/sessions/{session_id}/triggers/{trigger_id}/deactivate",
         handle_deactivate_trigger,
+    )
+    app.router.add_post(
+        "/api/sessions/{session_id}/triggers/{trigger_id}/run",
+        handle_run_trigger,
     )
     app.router.add_get("/api/sessions/{session_id}/colonies", handle_session_colonies)
 

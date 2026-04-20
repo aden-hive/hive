@@ -84,6 +84,11 @@ export const sessionsApi = {
       `/sessions/${sessionId}/triggers/${triggerId}/deactivate`,
     ),
 
+  runTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/run`,
+    ),
+
   colonies: (sessionId: string) =>
     api.get<{ colonies: string[] }>(`/sessions/${sessionId}/colonies`),
 

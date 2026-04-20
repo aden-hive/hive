@@ -62,6 +62,12 @@ export interface EntryPoint {
   task?: string;
   /** Seconds until the next timer fire (only present for timer entry points). */
   next_fire_in?: number;
+  /** Absolute wall-clock time of the next timer fire (epoch ms). */
+  next_fire_at?: number;
+  /** Number of times this trigger has fired during the session's lifetime. */
+  fire_count?: number;
+  /** Wall-clock time of the most recent fire (epoch ms). */
+  last_fired_at?: number;
 }
 
 export interface WorkerEntry {

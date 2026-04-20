@@ -93,6 +93,9 @@ class Session:
     worker_configured: bool = False
     # Monotonic timestamps for next trigger fire (mirrors AgentRuntime._timer_next_fire)
     trigger_next_fire: dict[str, float] = field(default_factory=dict)
+    # Per-trigger fire stats (session lifetime): {trigger_id: {"fire_count": int, "last_fired_at": epoch_ms}}.
+    # Reset on process restart — good enough as a "since this session started" counter.
+    trigger_fire_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -1607,8 +1610,28 @@ class SessionManager:
         # Resolve entry node for trigger target
         runner = getattr(session, "runner", None)
         colony_entry = runner.graph.entry_node if runner else None
+        fire_times = getattr(session, "trigger_next_fire", {})
+        fire_stats = getattr(session, "trigger_fire_stats", {})
+        now_mono = time.monotonic()
+        now_wall = time.time()
 
         for t in triggers.values():
+            # Merge ephemeral next-fire data + historical fire stats into
+            # trigger_config so the UI can render a live-ticking countdown
+            # and a "fired Nx · last 2m ago" badge. `next_fire_at` is epoch
+            # milliseconds (wall clock) — the frontend anchors its ticker
+            # on this. `next_fire_in` is kept for legacy consumers.
+            config_out = dict(t.trigger_config)
+            mono = fire_times.get(t.id)
+            if mono is not None:
+                remaining = max(0.0, mono - now_mono)
+                config_out["next_fire_in"] = remaining
+                config_out["next_fire_at"] = int((now_wall + remaining) * 1000)
+            stats = fire_stats.get(t.id)
+            if stats:
+                config_out["fire_count"] = stats.get("fire_count", 0)
+                if stats.get("last_fired_at") is not None:
+                    config_out["last_fired_at"] = stats["last_fired_at"]
             await session.event_bus.publish(
                 AgentEvent(
                     type=event_type,
@@ -1616,7 +1639,7 @@ class SessionManager:
                     data={
                         "trigger_id": t.id,
                         "trigger_type": t.trigger_type,
-                        "trigger_config": t.trigger_config,
+                        "trigger_config": config_out,
                         "name": t.description or t.id,
                         **({"entry_node": colony_entry} if colony_entry else {}),
                     },

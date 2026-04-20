@@ -468,12 +468,75 @@ async def _persist_active_triggers(session: Any, session_id: str) -> None:
         logger.warning("Failed to persist active triggers for session %s", session_id, exc_info=True)
 
 
+async def _emit_trigger_fired(session: Any, trigger_id: str, trigger_type: str) -> None:
+    """Publish EventType.TRIGGER_FIRED and update per-session fire stats.
+
+    Called by both the timer loop and the webhook handler right after
+    ``queen_node.inject_trigger(...)``. The event carries refreshed
+    ``next_fire_at``/``next_fire_in`` so the UI can re-anchor its
+    countdown without polling, plus ``fire_count``/``last_fired_at`` for
+    the "fired Nx · last 2m ago" badge.
+    """
+    now_wall = time.time()
+    stats_map = getattr(session, "trigger_fire_stats", None)
+    fire_count: int | None = None
+    last_fired_at: int = int(now_wall * 1000)
+    if stats_map is not None:
+        s = stats_map.setdefault(trigger_id, {"fire_count": 0, "last_fired_at": None})
+        s["fire_count"] = int(s.get("fire_count", 0)) + 1
+        s["last_fired_at"] = last_fired_at
+        fire_count = s["fire_count"]
+
+    bus = getattr(session, "event_bus", None)
+    if bus is None:
+        return
+
+    from framework.host.event_bus import AgentEvent, EventType
+
+    data: dict[str, Any] = {
+        "trigger_id": trigger_id,
+        "trigger_type": trigger_type,
+        "last_fired_at": last_fired_at,
+    }
+    if fire_count is not None:
+        data["fire_count"] = fire_count
+
+    mono = getattr(session, "trigger_next_fire", {}).get(trigger_id)
+    if mono is not None:
+        remaining = max(0.0, mono - time.monotonic())
+        data["next_fire_in"] = remaining
+        data["next_fire_at"] = int((now_wall + remaining) * 1000)
+
+    try:
+        await bus.publish(AgentEvent(type=EventType.TRIGGER_FIRED, stream_id="queen", data=data))
+    except Exception:
+        logger.warning("Failed to publish TRIGGER_FIRED for '%s'", trigger_id, exc_info=True)
+
+
 async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None:
     """Start an asyncio background task that fires the trigger on a timer."""
     from framework.agent_loop.agent_loop import TriggerEvent
 
     cron_expr = tdef.trigger_config.get("cron")
     interval_minutes = tdef.trigger_config.get("interval_minutes")
+
+    # Seed the first-fire time up front so introspection (and the UI
+    # countdown) have a value immediately on activation instead of only
+    # after the first tick. Cron uses croniter's next match; interval
+    # uses interval_minutes. Both use monotonic, matching route readers.
+    fire_times = getattr(session, "trigger_next_fire", None)
+    if fire_times is not None:
+        if cron_expr:
+            try:
+                from croniter import croniter as _croniter_seed
+
+                _first = _croniter_seed(cron_expr, datetime.now(tz=UTC)).get_next(datetime)
+                _first_delay = max(0.0, (_first - datetime.now(tz=UTC)).total_seconds())
+            except Exception:
+                _first_delay = 60.0
+        else:
+            _first_delay = float(interval_minutes) * 60 if interval_minutes else 60.0
+        fire_times[trigger_id] = time.monotonic() + _first_delay
 
     async def _timer_loop() -> None:
         if cron_expr:
@@ -491,10 +554,21 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                 else:
                     await asyncio.sleep(float(interval_minutes) * 60)
 
-                # Record next fire time for introspection (monotonic, matches routes)
+                # Record the *subsequent* next-fire time for introspection.
+                # For cron we peek one step further; for interval we add
+                # another interval. Matches routes' monotonic clock.
                 fire_times = getattr(session, "trigger_next_fire", None)
                 if fire_times is not None:
-                    _next_delay = float(interval_minutes) * 60 if interval_minutes else 60
+                    if cron_expr:
+                        try:
+                            _peek = croniter(cron_expr, datetime.now(tz=UTC)).get_next(datetime)
+                            _next_delay = max(
+                                0.0, (_peek - datetime.now(tz=UTC)).total_seconds()
+                            )
+                        except Exception:
+                            _next_delay = 60.0
+                    else:
+                        _next_delay = float(interval_minutes) * 60 if interval_minutes else 60.0
                     fire_times[trigger_id] = time.monotonic() + _next_delay
 
                 # Gate on a graph being loaded
@@ -518,6 +592,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                     },
                 )
                 await queen_node.inject_trigger(event)
+                await _emit_trigger_fired(session, trigger_id, "timer")
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -567,6 +642,7 @@ async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> No
             },
         )
         await queen_node.inject_trigger(trigger_event)
+        await _emit_trigger_fired(session, trigger_id, "webhook")
 
     sub_id = bus.subscribe(
         event_types=[EventType.WEBHOOK_RECEIVED],

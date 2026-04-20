@@ -818,11 +818,64 @@ function countdownLabel(nextFireIn: number | undefined): string | null {
     : `next in ${m}m ${String(s).padStart(2, "0")}s`;
 }
 
+/** Tick a live countdown against the server-provided absolute `next_fire_at`
+ *  (epoch ms). Falls back to converting `next_fire_in` (seconds delta) if
+ *  the absolute form is absent. Rolls forward by interval_minutes when
+ *  zero is crossed so the UI keeps counting between server pushes. */
+function useLiveCountdown(
+  nextFireAt: number | undefined,
+  nextFireIn: number | undefined,
+  isActive: boolean,
+  intervalMinutes: number | undefined,
+): { remainingSec: number | null; firesAtMs: number | null } {
+  const [firesAtMs, setFiresAtMs] = useState<number | null>(null);
+  const [remainingSec, setRemainingSec] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (typeof nextFireAt === "number" && nextFireAt > 0) {
+      setFiresAtMs(nextFireAt);
+    } else if (typeof nextFireIn === "number" && nextFireIn >= 0) {
+      setFiresAtMs(Date.now() + nextFireIn * 1000);
+    } else {
+      setFiresAtMs(null);
+    }
+  }, [nextFireAt, nextFireIn]);
+
+  useEffect(() => {
+    if (!isActive || firesAtMs == null) {
+      setRemainingSec(null);
+      return;
+    }
+    const tick = () => {
+      const diff = (firesAtMs - Date.now()) / 1000;
+      if (diff > 0) {
+        setRemainingSec(diff);
+      } else if (intervalMinutes) {
+        setFiresAtMs((prev) => (prev != null ? prev + intervalMinutes * 60 * 1000 : prev));
+      } else {
+        setRemainingSec(0);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [firesAtMs, isActive, intervalMinutes]);
+
+  return { remainingSec, firesAtMs };
+}
+
 function TriggerCard({ trigger, onClick }: { trigger: GraphNode; onClick: () => void }) {
   const isActive = triggerIsActive(trigger);
   const schedule = scheduleLabel(trigger.triggerConfig);
   const nextFireIn = trigger.triggerConfig?.next_fire_in as number | undefined;
-  const countdown = isActive ? countdownLabel(nextFireIn) : null;
+  const nextFireAt = trigger.triggerConfig?.next_fire_at as number | undefined;
+  const interval = trigger.triggerConfig?.interval_minutes as number | undefined;
+  const fireCount = trigger.triggerConfig?.fire_count as number | undefined;
+  const lastFiredAt = trigger.triggerConfig?.last_fired_at as number | undefined;
+  const { remainingSec } = useLiveCountdown(nextFireAt, nextFireIn, isActive, interval);
+  const now = useNow(1000);
+  const countdown = isActive && remainingSec != null ? countdownLabel(remainingSec) : null;
+  const agoLabel = lastFiredAt ? formatAgo(lastFiredAt, now) : null;
 
   return (
     <button
@@ -854,6 +907,13 @@ function TriggerCard({ trigger, onClick }: { trigger: GraphNode; onClick: () => 
       {countdown && (
         <p className="text-[10px] text-muted-foreground mt-1.5 italic pl-8">{countdown}</p>
       )}
+      {(fireCount != null && fireCount > 0) || agoLabel ? (
+        <p className="text-[10px] text-muted-foreground mt-0.5 pl-8">
+          {fireCount != null && fireCount > 0 ? `fired ${fireCount}×` : null}
+          {fireCount != null && fireCount > 0 && agoLabel ? " · " : null}
+          {agoLabel ? `last ${agoLabel}` : null}
+        </p>
+      ) : null}
     </button>
   );
 }
@@ -867,6 +927,31 @@ function formatCountdown(seconds: number): string {
   return `${s}s`;
 }
 
+/** Human-readable "X ago" for a wall-clock epoch ms. */
+function formatAgo(epochMs: number, nowMs: number): string {
+  const diff = Math.max(0, Math.floor((nowMs - epochMs) / 1000));
+  if (diff < 5) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+/** Reactive Date.now() that re-renders on an interval. 1s default keeps
+ *  countdowns smooth; consumers that only need "ago" can pass a coarser
+ *  interval. */
+function useNow(intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
 function TriggerDetail({
   sessionId,
   trigger,
@@ -877,13 +962,22 @@ function TriggerDetail({
   onBack: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [runBusy, setRunBusy] = useState(false);
+  const [runNotice, setRunNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isActive = triggerIsActive(trigger);
   const config = (trigger.triggerConfig || {}) as Record<string, unknown>;
   const cron = config.cron as string | undefined;
   const interval = config.interval_minutes as number | undefined;
   const nextFireIn = config.next_fire_in as number | undefined;
+  const nextFireAt = config.next_fire_at as number | undefined;
+  const fireCount = config.fire_count as number | undefined;
+  const lastFiredAt = config.last_fired_at as number | undefined;
   const triggerId = trigger.id.replace(/^__trigger_/, "");
+
+  const { remainingSec, firesAtMs } = useLiveCountdown(nextFireAt, nextFireIn, isActive, interval);
+  const now = useNow(1000);
+  const lastFiredAgo = lastFiredAt ? formatAgo(lastFiredAt, now) : null;
 
   const handleToggle = async () => {
     if (!sessionId || busy) return;
@@ -904,6 +998,23 @@ function TriggerDetail({
     }
   };
 
+  const handleForceRun = async () => {
+    if (!sessionId || runBusy) return;
+    setRunBusy(true);
+    setError(null);
+    setRunNotice(null);
+    try {
+      await sessionsApi.runTrigger(sessionId, triggerId);
+      setRunNotice("Trigger fired");
+      // Clear the notice after a few seconds so it doesn't linger.
+      setTimeout(() => setRunNotice(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
   const schedule = cron
     ? cronToLabel(cron)
     : interval != null
@@ -914,7 +1025,12 @@ function TriggerDetail({
 
   // Hide UI-synthesised fields so the user sees only real operator config.
   const displayEntries = Object.entries(config).filter(
-    ([k]) => k !== "next_fire_in" && k !== "entry_node",
+    ([k]) =>
+      k !== "next_fire_in" &&
+      k !== "next_fire_at" &&
+      k !== "fire_count" &&
+      k !== "last_fired_at" &&
+      k !== "entry_node",
   );
 
   return (
@@ -967,11 +1083,32 @@ function TriggerDetail({
         </Section>
       )}
 
-      {isActive && nextFireIn != null && nextFireIn > 0 && (
+      {isActive && remainingSec != null && remainingSec > 0 && (
         <Section label="Next fire">
-          <p className="text-xs text-foreground italic">in {formatCountdown(nextFireIn)}</p>
+          <p className="text-xs text-foreground italic">in {formatCountdown(remainingSec)}</p>
+          {firesAtMs != null && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              at {new Date(firesAtMs).toLocaleTimeString()}
+            </p>
+          )}
         </Section>
       )}
+
+      {(fireCount != null && fireCount > 0) || lastFiredAgo ? (
+        <Section label="Last fire">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-xs text-foreground">{lastFiredAgo ?? "—"}</span>
+            {fireCount != null && fireCount > 0 && (
+              <span className="text-[10px] text-muted-foreground">fired {fireCount}×</span>
+            )}
+          </div>
+          {lastFiredAt && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              at {new Date(lastFiredAt).toLocaleTimeString()}
+            </p>
+          )}
+        </Section>
+      ) : null}
 
       {displayEntries.length > 0 && (
         <Section label="Config">
@@ -995,6 +1132,23 @@ function TriggerDetail({
       {error && (
         <p className="text-[10.5px] text-destructive leading-snug mb-2">{error}</p>
       )}
+      {runNotice && (
+        <p className="text-[10.5px] text-emerald-400 leading-snug mb-2">{runNotice}</p>
+      )}
+      <button
+        type="button"
+        onClick={handleForceRun}
+        disabled={runBusy || !sessionId}
+        title="Fire this trigger once, bypassing the schedule"
+        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 mb-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/30"
+      >
+        {runBusy ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <Zap className="w-3.5 h-3.5" />
+        )}
+        {runBusy ? "Firing…" : "Force Run"}
+      </button>
       <button
         type="button"
         onClick={handleToggle}

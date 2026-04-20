@@ -1151,10 +1151,14 @@ export default function ColonyChat() {
             setGraphNodes((prev) =>
               prev.map((n) => {
                 if (n.id !== `__trigger_${triggerId}`) return n;
-                const { next_fire_in: _, ...restConfig } = (n.triggerConfig || {}) as Record<
-                  string,
-                  unknown
-                > & { next_fire_in?: unknown };
+                const {
+                  next_fire_in: _nfi,
+                  next_fire_at: _nfa,
+                  ...restConfig
+                } = (n.triggerConfig || {}) as Record<string, unknown> & {
+                  next_fire_in?: unknown;
+                  next_fire_at?: unknown;
+                };
                 return { ...n, status: "pending" as NodeStatus, triggerConfig: restConfig };
               }),
             );
@@ -1166,6 +1170,24 @@ export default function ColonyChat() {
           const triggerId = event.data?.trigger_id as string;
           if (triggerId) {
             const nodeId = `__trigger_${triggerId}`;
+            // Merge refreshed fire stats + next-fire anchor into the node's
+            // triggerConfig so the countdown re-anchors and the card shows
+            // an up-to-date "fired Nx · last 2m ago" badge.
+            const fireCount = event.data?.fire_count as number | undefined;
+            const lastFiredAt = event.data?.last_fired_at as number | undefined;
+            const nextFireAt = event.data?.next_fire_at as number | undefined;
+            const nextFireIn = event.data?.next_fire_in as number | undefined;
+            setGraphNodes((prev) =>
+              prev.map((n) => {
+                if (n.id !== nodeId) return n;
+                const config = { ...(n.triggerConfig || {}) };
+                if (fireCount != null) config.fire_count = fireCount;
+                if (lastFiredAt != null) config.last_fired_at = lastFiredAt;
+                if (nextFireAt != null) config.next_fire_at = nextFireAt;
+                if (nextFireIn != null) config.next_fire_in = nextFireIn;
+                return { ...n, triggerConfig: config };
+              }),
+            );
             updateGraphNodeStatus(nodeId, "complete");
             setTimeout(() => updateGraphNodeStatus(nodeId, "running"), 1500);
           }
