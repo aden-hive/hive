@@ -20,7 +20,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
+from .models import CredentialDecryptionError, CredentialError, CredentialKey, CredentialObject, CredentialType
 
 logger = logging.getLogger(__name__)
 
@@ -609,15 +609,31 @@ class CompositeStorage(CredentialStorage):
     def load(self, credential_id: str) -> CredentialObject | None:
         """Load from primary, then fallbacks."""
         # Try primary first
-        credential = self._primary.load(credential_id)
-        if credential is not None:
-            return credential
+        primary_error: CredentialError | None = None
+        try:
+            credential = self._primary.load(credential_id)
+            if credential is not None:
+                return credential
+        except CredentialError as exc:
+            logger.warning(
+                "Primary storage failed for '%s': %s. Trying fallbacks.",
+                credential_id,
+                exc,
+            )
+            primary_error = exc
 
         # Try fallbacks
         for fallback in self._fallbacks:
-            credential = fallback.load(credential_id)
-            if credential is not None:
-                return credential
+            try:
+                credential = fallback.load(credential_id)
+                if credential is not None:
+                    return credential
+            except CredentialError:
+                continue
+
+        # No backend succeeded — re-raise the primary error if one occurred
+        if primary_error is not None:
+            raise primary_error
 
         return None
 

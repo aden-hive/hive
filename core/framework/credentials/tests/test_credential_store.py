@@ -19,6 +19,8 @@ from unittest.mock import patch
 import pytest
 from core.framework.credentials import (
     CompositeStorage,
+    CredentialDecryptionError,
+    CredentialError,
     CredentialKey,
     CredentialKeyNotFoundError,
     CredentialNotFoundError,
@@ -358,6 +360,88 @@ class TestCompositeStorage:
 
         assert primary.exists("test")
         assert not fallback.exists("test")
+
+    def test_fallback_on_primary_credential_error(self):
+        """When primary raises CredentialError, fallback should be tried."""
+        primary = InMemoryStorage()
+        fallback = InMemoryStorage()
+        fallback.save(
+            CredentialObject(
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fallback_val"))},
+            )
+        )
+
+        # Make primary raise CredentialDecryptionError
+        def failing_load(cred_id):
+            raise CredentialDecryptionError("corrupted file")
+
+        primary.load = failing_load
+
+        storage = CompositeStorage(primary, [fallback])
+        cred = storage.load("test")
+
+        assert cred is not None
+        assert cred.get_key("k") == "fallback_val"
+
+    def test_primary_error_reraise_when_no_fallback_succeeds(self):
+        """When primary raises and no fallback has the credential, re-raise the original error."""
+        primary = InMemoryStorage()
+        fallback = InMemoryStorage()
+
+        def failing_load(cred_id):
+            raise CredentialDecryptionError("corrupted file")
+
+        primary.load = failing_load
+
+        storage = CompositeStorage(primary, [fallback])
+
+        with pytest.raises(CredentialDecryptionError, match="corrupted file"):
+            storage.load("test")
+
+    def test_fallback_error_skipped_gracefully(self):
+        """When both primary and a fallback raise, skip to the next fallback."""
+        primary = InMemoryStorage()
+        bad_fallback = InMemoryStorage()
+        good_fallback = InMemoryStorage()
+        good_fallback.save(
+            CredentialObject(
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("good"))},
+            )
+        )
+
+        def primary_fail(cred_id):
+            raise CredentialDecryptionError("primary corrupted")
+
+        def fallback_fail(cred_id):
+            raise CredentialError("fallback broken")
+
+        primary.load = primary_fail
+        bad_fallback.load = fallback_fail
+
+        storage = CompositeStorage(primary, [bad_fallback, good_fallback])
+        cred = storage.load("test")
+
+        assert cred is not None
+        assert cred.get_key("k") == "good"
+
+    def test_primary_returns_none_still_tries_fallback(self):
+        """Existing behavior: primary returns None → fallback is checked."""
+        primary = InMemoryStorage()
+        fallback = InMemoryStorage()
+        fallback.save(
+            CredentialObject(
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fb"))},
+            )
+        )
+
+        storage = CompositeStorage(primary, [fallback])
+        cred = storage.load("test")
+
+        assert cred is not None
+        assert cred.get_key("k") == "fb"
 
 
 class TestStaticProvider:
