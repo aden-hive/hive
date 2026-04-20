@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "ionic-notif": {
+            "command": "python",
+            "args": [
+                "PATH_TO_YOUR_BACKEND/mcp_server.py"
+            ],
+            "env": {}
+        }
+    }
+}
