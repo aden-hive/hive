@@ -61,6 +61,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Open-the-floor message returned by ``start_incubating_colony`` on
+# approval.  The same kinds of prompts (concurrency, schedule, result
+# tracking, failure handling, credentials) live ongoingly inside
+# ``_queen_tools_incubating`` so the queen sees them every turn — this
+# constant is the single-shot version that lands as the tool result.
+# Phrasing intentionally invites the queen's judgement; do NOT turn this
+# into a hard checklist.
+_INCUBATING_APPROVAL_GUIDANCE = (
+    "Approved to incubate colony '{colony_name}' for: {intended_purpose}\n\n"
+    "Your phase has flipped to INCUBATING. Before you call create_colony, "
+    "the worker will need operational details that are easy to lose in a "
+    "planning conversation. Take a moment to figure out what's still "
+    "ambiguous for THIS colony — for example: how many tasks should run "
+    "in parallel, what schedule fits (cron, interval, manual-only), what "
+    "should the worker write into progress.db so the user can review "
+    "results later, how to handle partial failures, what credentials or "
+    "MCP servers the worker needs that you haven't discussed. You don't "
+    "need to cover every example — only the items that actually matter "
+    "for this colony, and only the ones the user hasn't already implied. "
+    "Use ask_user / ask_user_multiple to fill the real gaps. "
+    "If, while sorting these out, you decide the spec isn't ready, call "
+    "cancel_incubation and we go back to INDEPENDENT."
+)
+
+
+
+
 def _render_credentials_block(provider: Any) -> str:
     """Call a credentials_prompt_provider safely and return its output.
 
@@ -94,8 +121,10 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Three phases: independent, working, reviewing.
+    Four phases: independent, incubating, working, reviewing.
     INDEPENDENT: queen acts as a standalone agent with MCP tools, no colony workers.
+    INCUBATING: queen has been approved by the incubating_evaluator to fork
+        a colony — focused tool surface for drafting the spec.
     WORKING: colony workers are running autonomously.
     REVIEWING: workers have completed, queen reviews results.
 
@@ -103,8 +132,9 @@ class QueenPhaseState:
     that trigger phase transitions.
     """
 
-    phase: str = "independent"  # "independent", "working", or "reviewing"
+    phase: str = "independent"  # "independent", "incubating", "working", or "reviewing"
     independent_tools: list = field(default_factory=list)  # list[Tool]
+    incubating_tools: list = field(default_factory=list)  # list[Tool]
     working_tools: list = field(default_factory=list)  # list[Tool]
     reviewing_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
@@ -115,8 +145,26 @@ class QueenPhaseState:
 
     # Phase-specific prompts (set by queen_orchestrator after construction)
     prompt_independent: str = ""
+    prompt_incubating: str = ""
     prompt_working: str = ""
     prompt_reviewing: str = ""
+
+    # Last-set incubation context (colony_name + intended_purpose), populated
+    # by start_incubating_colony when the evaluator approves. Read by
+    # get_current_prompt() to interpolate the colony name into the
+    # incubating role prompt so the queen sees the same name across turns
+    # without having to remember it from the tool result.
+    incubating_colony_name: str | None = None
+    incubating_intended_purpose: str | None = None
+    # Trigger configs the queen drafted during incubation. set_trigger /
+    # remove_trigger / list_triggers buffer here when phase=="incubating"
+    # because the colony directory + worker runtime don't exist yet —
+    # there's nothing live to attach a timer/webhook to. ``create_colony``
+    # drains this list into ``{colony_dir}/triggers.json`` after the fork
+    # so the triggers auto-start the next time the colony is loaded.
+    # Cleared on switch_to_independent so failed/cancelled incubations
+    # don't leak into a future incubation attempt.
+    pending_triggers: list = field(default_factory=list)  # list[dict]
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
@@ -172,6 +220,8 @@ class QueenPhaseState:
             return list(self.working_tools)
         if self.phase == "reviewing":
             return list(self.reviewing_tools)
+        if self.phase == "incubating":
+            return list(self.incubating_tools)
         # Default / "independent" — DM mode with full MCP tools.
         return list(self.independent_tools)
 
@@ -181,6 +231,15 @@ class QueenPhaseState:
             base = self.prompt_working
         elif self.phase == "reviewing":
             base = self.prompt_reviewing
+        elif self.phase == "incubating":
+            # Interpolate the active incubation context so the queen sees the
+            # same colony_name on every turn, not just the first tool result.
+            base = self.prompt_incubating
+            if self.incubating_colony_name:
+                base = base.replace(
+                    "{colony_name}",
+                    self.incubating_colony_name,
+                )
         else:
             base = self.prompt_independent
 
@@ -250,6 +309,14 @@ class QueenPhaseState:
         if self.phase == "independent":
             return
         self.phase = "independent"
+        # Clear stale incubation context so a future incubation starts fresh.
+        # This includes the trigger buffer — a cancelled or successful
+        # incubation should not leak its drafted triggers into the next
+        # attempt (successful create_colony already drained them; cancel
+        # never committed them).
+        self.incubating_colony_name = None
+        self.incubating_intended_purpose = None
+        self.pending_triggers = []
         tool_names = [t.name for t in self.independent_tools]
         logger.info("Queen phase → independent (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
@@ -258,6 +325,48 @@ class QueenPhaseState:
                 "[PHASE CHANGE] Switched to INDEPENDENT mode. "
                 "You are the agent — execute the task directly. "
                 "Available tools: " + ", ".join(tool_names) + "."
+            )
+
+    async def switch_to_incubating(
+        self,
+        *,
+        colony_name: str,
+        intended_purpose: str,
+        source: str = "tool",
+    ) -> None:
+        """Switch to incubating phase — queen drafts the colony spec.
+
+        Caller must already have validated colony_name. Stores the active
+        incubation context on self so get_current_prompt() can interpolate
+        it on every turn (the queen otherwise loses the colony_name after
+        the first tool result rolls past in the conversation history).
+
+        Args:
+            colony_name: Validated colony slug (lowercase alphanumeric + _).
+            intended_purpose: One-paragraph brief from the queen.
+            source: "tool", "frontend", or "auto".
+        """
+        if self.phase == "incubating":
+            # Allow re-statement of context even when already incubating —
+            # the queen may have refined her intended_purpose mid-flight.
+            self.incubating_colony_name = colony_name
+            self.incubating_intended_purpose = intended_purpose
+            return
+        self.phase = "incubating"
+        self.incubating_colony_name = colony_name
+        self.incubating_intended_purpose = intended_purpose
+        tool_names = [t.name for t in self.incubating_tools]
+        logger.info(
+            "Queen phase → incubating (source=%s, colony=%s, tools: %s)",
+            source,
+            colony_name,
+            tool_names,
+        )
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to INCUBATING phase for colony "
+                f"'{colony_name}'. Available tools: " + ", ".join(tool_names) + "."
             )
 
 
@@ -1334,6 +1443,7 @@ def register_queen_lifecycle_tools(
         skill_body: str,
         skill_files: list[dict] | None = None,
         tasks: list[dict] | None = None,
+        concurrency_hint: int | None = None,
     ) -> str:
         """Create a colony and materialize its skill folder in one atomic call.
 
@@ -1427,6 +1537,7 @@ def register_queen_lifecycle_tools(
                 colony_name=cn,
                 task=(task or "").strip(),
                 tasks=tasks if isinstance(tasks, list) else None,
+                concurrency_hint=concurrency_hint if isinstance(concurrency_hint, int) and concurrency_hint > 0 else None,
             )
         except Exception as e:
             logger.exception("create_colony: fork failed after installing skill")
@@ -1468,6 +1579,61 @@ def register_queen_lifecycle_tools(
             except Exception:
                 logger.warning(
                     "create_colony: failed to publish COLONY_CREATED event",
+                    exc_info=True,
+                )
+
+        # When the queen forked from INCUBATING phase, the chat is over by
+        # design: the colony spec is committed and there's nothing left to
+        # discuss in this DM.  Auto-lock the session immediately (same
+        # mechanism the user-click path uses) and switch the queen back to
+        # INDEPENDENT so her closing message renders normally.  The
+        # colony_spawned check on /chat will reject the user's NEXT message
+        # with the "compact and start a new session" UX.
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is not None and phase_state.phase == "incubating":
+            # Drain buffered triggers into the colony's triggers.json so they
+            # auto-start when the colony is first loaded (session_manager
+            # reads triggers.json on colony load and starts each timer /
+            # webhook). Do this BEFORE switch_to_independent clears the
+            # buffer.
+            if phase_state.pending_triggers:
+                triggers_path = colony_dir / "triggers.json"
+                try:
+                    triggers_path.write_text(
+                        json.dumps(phase_state.pending_triggers, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    logger.info(
+                        "create_colony: wrote %d buffered trigger(s) to %s",
+                        len(phase_state.pending_triggers),
+                        triggers_path,
+                    )
+                except OSError:
+                    logger.warning(
+                        "create_colony: failed to write triggers.json from buffer",
+                        exc_info=True,
+                    )
+            try:
+                from framework.server.routes_execution import (
+                    persist_colony_spawn_lock,
+                )
+
+                persist_colony_spawn_lock(session, fork_result.get("colony_name", cn))
+            except OSError:
+                logger.warning(
+                    "create_colony: failed to persist colony-spawned lock",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.warning(
+                    "create_colony: persist_colony_spawn_lock raised",
+                    exc_info=True,
+                )
+            try:
+                await phase_state.switch_to_independent(source="tool")
+            except Exception:
+                logger.warning(
+                    "create_colony: failed to switch phase back to independent",
                     exc_info=True,
                 )
 
@@ -1674,6 +1840,20 @@ def register_queen_lifecycle_tools(
                         "required": ["goal"],
                     },
                 },
+                "concurrency_hint": {
+                    "type": "integer",
+                    "description": (
+                        "Optional advisory cap: how many worker processes "
+                        "should typically run in parallel for this colony "
+                        "(e.g. 1 for a single-fire 'send digest' job, 5 "
+                        "for a fan-out that processes records). Baked "
+                        "into worker.json as ``concurrency_hint`` for the "
+                        "future colony queen to consult when planning "
+                        "fan-outs. Not enforced — the queue itself is "
+                        "atomic, this is just guidance. Omit if unsure."
+                    ),
+                    "minimum": 1,
+                },
             },
             "required": [
                 "colony_name",
@@ -1688,6 +1868,258 @@ def register_queen_lifecycle_tools(
         "create_colony",
         _create_colony_tool,
         lambda inputs: create_colony(**inputs),
+    )
+    tools_registered += 1
+
+    # --- start_incubating_colony -------------------------------------------------
+
+    async def start_incubating_colony(
+        *,
+        colony_name: str,
+        intended_purpose: str,
+    ) -> str:
+        """Gate the queen behind a one-shot readiness evaluator.
+
+        Reads the queen's recent conversation off disk and asks
+        :func:`incubating_evaluator.evaluate` whether the spec is
+        settled enough to fork.  On approval, flips the queen's phase
+        to ``incubating`` so a focused tool surface (``create_colony``,
+        ``cancel_incubation``, read-only file tools) takes over.  On
+        rejection, returns the verdict for the queen to self-correct
+        on her next turn — the rejection is queen-only by design (no
+        SSE event, no user-facing message).
+        """
+        if session is None:
+            return json.dumps({"error": "No session bound to this tool registry."})
+
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps(
+                {
+                    "error": (
+                        "colony_name must be lowercase alphanumeric with "
+                        "underscores (e.g. 'morning_hn_digest')."
+                    )
+                }
+            )
+
+        purpose = (intended_purpose or "").strip()
+        if not purpose:
+            return json.dumps(
+                {
+                    "error": (
+                        "intended_purpose is required — describe in one "
+                        "paragraph what the colony will do, on what "
+                        "cadence, and why it must outlive this chat."
+                    )
+                }
+            )
+
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is None:
+            return json.dumps({"error": "phase_state is not initialised on this session."})
+
+        # Block re-entry from working/reviewing — those phases mean a colony
+        # is already running, the queen should NOT be drafting another spec
+        # on top.  Independent → incubating is the only legal entry path.
+        if phase_state.phase not in ("independent", "incubating"):
+            return json.dumps(
+                {
+                    "error": (
+                        f"start_incubating_colony is not available in phase "
+                        f"'{phase_state.phase}' — finish or stop the current "
+                        "colony's workers first."
+                    )
+                }
+            )
+
+        # Read the queen's conversation parts straight from disk.  Same
+        # pattern as handle_compact_and_fork — avoids needing access to
+        # the live NodeConversation, which is local to the agent loop.
+        from framework.agent_loop.conversation import Message
+        from framework.agents.queen import incubating_evaluator
+        from framework.storage.conversation_store import FileConversationStore
+
+        queen_dir = getattr(session, "queen_dir", None)
+        messages: list = []
+        if queen_dir is not None and (queen_dir / "conversations").exists():
+            try:
+                store = FileConversationStore(queen_dir / "conversations")
+                raw_parts = await store.read_parts()
+                for part in raw_parts:
+                    try:
+                        messages.append(Message.from_storage_dict(part))
+                    except (KeyError, TypeError):
+                        # Skip malformed parts; the evaluator can still work
+                        # off whatever messages it gets.
+                        continue
+            except Exception:
+                logger.warning(
+                    "start_incubating_colony: failed to read queen conversation",
+                    exc_info=True,
+                )
+
+        llm = getattr(session, "llm", None)
+        if llm is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "session has no LLM — cannot run readiness "
+                        "evaluator. Retry once the session has fully "
+                        "initialised."
+                    )
+                }
+            )
+
+        verdict = await incubating_evaluator.evaluate(
+            llm=llm,
+            messages=messages,
+            colony_name=cn,
+            intended_purpose=purpose,
+        )
+
+        if not verdict.get("ready"):
+            # Queen-only silent rejection — no SSE, no user message.
+            # The queen reads the reasons in her tool result and decides
+            # what to do next (ask the user, refine scope, drop the idea).
+            return json.dumps(
+                {
+                    "status": "not_ready",
+                    "colony_name": cn,
+                    "reasons": verdict.get("reasons", []),
+                    "missing_prerequisites": verdict.get(
+                        "missing_prerequisites", []
+                    ),
+                }
+            )
+
+        # Approved — flip phase.  switch_to_incubating publishes
+        # QUEEN_PHASE_CHANGED so the frontend badge updates and stores
+        # the colony_name + purpose for the role prompt to interpolate.
+        await phase_state.switch_to_incubating(
+            colony_name=cn,
+            intended_purpose=purpose,
+            source="tool",
+        )
+
+        return json.dumps(
+            {
+                "status": "incubating",
+                "colony_name": cn,
+                "intended_purpose": purpose,
+                "guidance": _INCUBATING_APPROVAL_GUIDANCE.format(
+                    colony_name=cn,
+                    intended_purpose=purpose,
+                ),
+            }
+        )
+
+    _start_incubating_colony_tool = Tool(
+        name="start_incubating_colony",
+        description=(
+            "Ask to fork this session into a persistent colony for "
+            "HEADLESS / RECURRING / BACKGROUND work that needs to "
+            "outlive this chat. This tool does NOT fork on its own — "
+            "it spawns a one-shot evaluator that reads the recent "
+            "conversation and decides whether the spec is settled "
+            "enough to proceed.\n\n"
+            "On APPROVAL, your phase flips to INCUBATING and a focused "
+            "tool surface unlocks (create_colony, cancel_incubation, "
+            "read-only file tools). The full coding toolkit goes away "
+            "on purpose so you can concentrate on writing a tight task "
+            "+ SKILL.md.\n\n"
+            "On REJECTION, you stay in INDEPENDENT and the verdict's "
+            "``missing_prerequisites`` lists what's still ambiguous in "
+            "queen-actionable form. Resolve those with the user (ask "
+            "in plain prose or via ask_user) and call this tool again "
+            "when the spec is settled. The rejection is queen-only — "
+            "the user does NOT see it, so frame your follow-up "
+            "naturally without referencing 'the evaluator'.\n\n"
+            "DO NOT call this for one-shot work that the user wants "
+            "results for right now in this chat — do that work yourself "
+            "with your independent toolkit instead."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {
+                    "type": "string",
+                    "description": (
+                        "Lowercase alphanumeric+underscore name for the "
+                        "proposed colony (e.g. 'morning_hn_digest', "
+                        "'inbox_monitor')."
+                    ),
+                },
+                "intended_purpose": {
+                    "type": "string",
+                    "description": (
+                        "One-paragraph brief: what the colony will do, "
+                        "on what cadence, why it must outlive this "
+                        "chat. Do NOT write the SKILL.md here — that "
+                        "happens in INCUBATING phase after approval."
+                    ),
+                },
+            },
+            "required": ["colony_name", "intended_purpose"],
+        },
+    )
+    registry.register(
+        "start_incubating_colony",
+        _start_incubating_colony_tool,
+        lambda inputs: start_incubating_colony(**inputs),
+    )
+    tools_registered += 1
+
+    # --- cancel_incubation -------------------------------------------------------
+
+    async def cancel_incubation() -> str:
+        """Bail out of incubating mode and return to independent.
+
+        Use when the spec turns out to not be ready after all (user
+        changed their mind, the work is one-shot, more than a couple of
+        details still need to be worked out). Harmless no-op if not
+        currently in incubating.
+        """
+        if session is None:
+            return json.dumps({"error": "No session bound to this tool registry."})
+
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is None:
+            return json.dumps({"error": "phase_state is not initialised on this session."})
+
+        if phase_state.phase != "incubating":
+            return json.dumps(
+                {
+                    "status": "noop",
+                    "reason": f"phase is '{phase_state.phase}', not 'incubating'",
+                }
+            )
+
+        previous_colony = phase_state.incubating_colony_name
+        await phase_state.switch_to_independent(source="tool")
+        return json.dumps(
+            {
+                "status": "cancelled",
+                "previous_colony_name": previous_colony,
+            }
+        )
+
+    _cancel_incubation_tool = Tool(
+        name="cancel_incubation",
+        description=(
+            "Bail out of INCUBATING phase back to INDEPENDENT. Use "
+            "when the spec turns out to not be ready after all — the "
+            "user changed their mind, the work is actually one-shot, "
+            "or more than a couple of operational details still need "
+            "to be sorted out. No fork happens; the full coding "
+            "toolkit comes back. Harmless no-op outside INCUBATING."
+        ),
+        parameters={"type": "object", "properties": {}, "required": []},
+    )
+    registry.register(
+        "cancel_incubation",
+        _cancel_incubation_tool,
+        lambda inputs: cancel_incubation(**inputs),
     )
     tools_registered += 1
 
@@ -3885,7 +4317,103 @@ def register_queen_lifecycle_tools(
         trigger_config: dict | None = None,
         task: str | None = None,
     ) -> str:
-        """Activate a trigger so it fires periodically into the queen."""
+        """Activate a trigger so it fires periodically into the queen.
+
+        Phase-branched: in INCUBATING the trigger spec is buffered onto
+        ``phase_state.pending_triggers`` because the colony directory +
+        worker runtime don't exist yet. ``create_colony`` drains the
+        buffer into ``{colony_dir}/triggers.json`` post-fork so the
+        triggers auto-start on first colony load. In WORKING / REVIEWING
+        the live behaviour (start timer/webhook + persist) runs as before.
+        """
+        # ── Incubating branch: buffer instead of activate ────────────
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is not None and phase_state.phase == "incubating":
+            t_type = trigger_type
+            t_config = trigger_config or {}
+            if not t_type:
+                return json.dumps(
+                    {
+                        "error": (
+                            "trigger_type is required during incubation — "
+                            "no existing trigger to inherit from yet."
+                        )
+                    }
+                )
+            if not task:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Trigger '{trigger_id}' needs a task — "
+                            "describe what the worker should do when this "
+                            "trigger fires."
+                        )
+                    }
+                )
+            # Mirror the live-path validation so a bad cron / interval is
+            # caught at draft time, not on first colony load.
+            if t_type == "timer":
+                cron_expr = t_config.get("cron")
+                interval = t_config.get("interval_minutes")
+                if cron_expr:
+                    try:
+                        from croniter import croniter
+
+                        if not croniter.is_valid(cron_expr):
+                            return json.dumps({"error": f"Invalid cron expression: {cron_expr}"})
+                    except ImportError:
+                        return json.dumps(
+                            {"error": "croniter package not installed — cannot validate cron expression."}
+                        )
+                elif interval:
+                    if not isinstance(interval, (int, float)) or interval <= 0:
+                        return json.dumps({"error": f"interval_minutes must be > 0, got {interval}"})
+                else:
+                    return json.dumps(
+                        {"error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."}
+                    )
+            elif t_type == "webhook":
+                path = (t_config.get("path") or "").strip()
+                if not path or not path.startswith("/"):
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Webhook trigger requires 'path' starting "
+                                "with '/' in trigger_config (e.g. '/hooks/github')."
+                            )
+                        }
+                    )
+            else:
+                return json.dumps({"error": f"Unsupported trigger type: {t_type}"})
+
+            # Replace any prior buffered entry with the same id so the
+            # queen can iteratively refine without duplicates.
+            phase_state.pending_triggers = [
+                t for t in phase_state.pending_triggers if t.get("id") != trigger_id
+            ]
+            phase_state.pending_triggers.append(
+                {
+                    "id": trigger_id,
+                    "trigger_type": t_type,
+                    "trigger_config": t_config,
+                    "task": task,
+                    "name": trigger_id,
+                }
+            )
+            return json.dumps(
+                {
+                    "status": "buffered",
+                    "trigger_id": trigger_id,
+                    "trigger_type": t_type,
+                    "trigger_config": t_config,
+                    "note": (
+                        "Buffered for incubation. Will be written to "
+                        "triggers.json when create_colony commits the spec, "
+                        "and auto-start on first colony load."
+                    ),
+                }
+            )
+
         if trigger_id in getattr(session, "active_trigger_ids", set()):
             return json.dumps({"error": f"Trigger '{trigger_id}' is already active."})
 
@@ -4094,7 +4622,29 @@ def register_queen_lifecycle_tools(
     # --- remove_trigger --------------------------------------------------------
 
     async def remove_trigger(trigger_id: str) -> str:
-        """Deactivate an active trigger."""
+        """Deactivate an active trigger.
+
+        Phase-branched: in INCUBATING, removes the buffered draft instead
+        of touching live runtime state.
+        """
+        # ── Incubating branch: drop from buffer ──────────────────────
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is not None and phase_state.phase == "incubating":
+            before = len(phase_state.pending_triggers)
+            phase_state.pending_triggers = [
+                t for t in phase_state.pending_triggers if t.get("id") != trigger_id
+            ]
+            if len(phase_state.pending_triggers) == before:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Trigger '{trigger_id}' was not in the "
+                            "incubation buffer."
+                        )
+                    }
+                )
+            return json.dumps({"status": "removed_from_buffer", "trigger_id": trigger_id})
+
         if trigger_id not in getattr(session, "active_trigger_ids", set()):
             return json.dumps({"error": f"Trigger '{trigger_id}' is not active."})
 
@@ -4160,7 +4710,26 @@ def register_queen_lifecycle_tools(
     # --- list_triggers ---------------------------------------------------------
 
     async def list_triggers() -> str:
-        """List all available triggers and their status."""
+        """List all available triggers and their status.
+
+        Phase-branched: in INCUBATING, returns the buffered drafts that
+        will be written to triggers.json when create_colony commits.
+        """
+        # ── Incubating branch: return buffered drafts ────────────────
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is not None and phase_state.phase == "incubating":
+            return json.dumps(
+                {
+                    "triggers": list(phase_state.pending_triggers),
+                    "buffered": True,
+                    "note": (
+                        "These are draft triggers staged for the colony "
+                        "being incubated. They are written to triggers.json "
+                        "when create_colony commits the spec."
+                    ),
+                }
+            )
+
         available = getattr(session, "available_triggers", {})
         triggers = []
         for tdef in available.values():

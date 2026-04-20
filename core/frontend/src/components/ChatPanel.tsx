@@ -58,7 +58,7 @@ export interface ChatMessage {
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
   /** Queen phase active when this message was created */
-  phase?: "independent" | "working" | "reviewing";
+  phase?: "independent" | "incubating" | "working" | "reviewing";
   /** Images attached to a user message */
   images?: ImageContent[];
   /** Backend node_id that produced this message — used for subagent grouping */
@@ -105,7 +105,7 @@ interface ChatPanelProps {
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
-  queenPhase?: "independent" | "working" | "reviewing";
+  queenPhase?: "independent" | "incubating" | "working" | "reviewing";
   /** When false, queen messages omit the phase badge */
   showQueenPhaseBadge?: boolean;
   /** Context window usage for queen and workers */
@@ -347,7 +347,7 @@ function InlineAskUserBubble({
     thread: string,
     images?: ImageContent[],
   ) => void;
-  queenPhase?: "independent" | "working" | "reviewing";
+  queenPhase?: "independent" | "incubating" | "working" | "reviewing";
   showQueenPhaseBadge?: boolean;
   queenProfileId?: string | null;
 }) {
@@ -443,23 +443,31 @@ function InlineAskUserBubble({
           >
             {msg.agent}
           </span>
-          {(!isQueen || showQueenPhaseBadge) && (
-            <span
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-                isQueen
-                  ? "bg-primary/15 text-primary"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {isQueen
-                ? (msg.phase ?? queenPhase) === "working"
-                  ? "working"
-                  : (msg.phase ?? queenPhase) === "reviewing"
-                    ? "reviewing"
+          {(!isQueen || showQueenPhaseBadge) && (() => {
+            const effectivePhase = msg.phase ?? queenPhase;
+            const isIncubating = isQueen && effectivePhase === "incubating";
+            const badgeClass = isQueen
+              ? isIncubating
+                // Honey-amber tint distinguishes incubating from the
+                // primary-tinted independent/working/reviewing badges.
+                ? "bg-amber-500/15 text-amber-500"
+                : "bg-primary/15 text-primary"
+              : "bg-muted text-muted-foreground";
+            const label = isQueen
+              ? effectivePhase === "working"
+                ? "working"
+                : effectivePhase === "reviewing"
+                  ? "reviewing"
+                  : effectivePhase === "incubating"
+                    ? "incubating"
                     : "independent"
-                : "Worker"}
-            </span>
-          )}
+              : "Worker";
+            return (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${badgeClass}`}>
+                {label}
+              </span>
+            );
+          })()}
         </div>
         {payload.kind === "single" ? (
           <QuestionWidget
@@ -501,7 +509,7 @@ const MessageBubble = memo(
     onColonyLinkClick,
   }: {
     msg: ChatMessage;
-    queenPhase?: "independent" | "working" | "reviewing";
+    queenPhase?: "independent" | "incubating" | "working" | "reviewing";
     showQueenPhaseBadge?: boolean;
     queenProfileId?: string | null;
     queenAvatarUrl?: string | null;

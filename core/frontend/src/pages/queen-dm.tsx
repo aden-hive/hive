@@ -78,7 +78,7 @@ export default function QueenDM() {
   >({});
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const [queenPhase, setQueenPhase] = useState<
-    "independent" | "working" | "reviewing"
+    "independent" | "incubating" | "working" | "reviewing"
   >("independent");
 
   const resetViewState = useCallback(() => {
@@ -317,10 +317,14 @@ export default function QueenDM() {
     };
   }, [queenId, sessionId]);
 
-  // Hydrate the colony-spawned lock from the session detail whenever the
-  // session ID changes. The /sessions/{id} response carries colony_spawned
-  // (live) and the cold-info path returns the same field after a server
-  // restart, so the same fetch covers both states.
+  // Hydrate the colony-spawned lock + queen phase from the session detail
+  // whenever the session ID changes. /sessions/{id} carries both flags
+  // (and the cold-info path returns colony_spawned after a server restart),
+  // so this single fetch covers live, page-reload, and post-restart states.
+  // Without seeding queen_phase here the badge starts at the useState
+  // default ("independent") and only updates when a fresh
+  // QUEEN_PHASE_CHANGED SSE event fires — a reload mid-incubation would
+  // briefly mis-render.
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
@@ -328,17 +332,25 @@ export default function QueenDM() {
       .get(sessionId)
       .then((data) => {
         if (cancelled) return;
-        const locked = Boolean(
-          (data as { colony_spawned?: boolean }).colony_spawned,
-        );
-        const name =
-          (data as { spawned_colony_name?: string | null })
-            .spawned_colony_name ?? null;
-        setColonySpawned(locked);
-        setSpawnedColonyName(name);
+        const detail = data as {
+          colony_spawned?: boolean;
+          spawned_colony_name?: string | null;
+          queen_phase?: "independent" | "incubating" | "working" | "reviewing";
+        };
+        setColonySpawned(Boolean(detail.colony_spawned));
+        setSpawnedColonyName(detail.spawned_colony_name ?? null);
+        if (
+          detail.queen_phase === "independent" ||
+          detail.queen_phase === "incubating" ||
+          detail.queen_phase === "working" ||
+          detail.queen_phase === "reviewing"
+        ) {
+          setQueenPhase(detail.queen_phase);
+        }
       })
       .catch(() => {
-        // Non-fatal — lock simply won't activate until the user navigates back.
+        // Non-fatal — lock + phase simply won't activate until a fresh
+        // SSE event arrives.
       });
     return () => {
       cancelled = true;
@@ -620,6 +632,7 @@ export default function QueenDM() {
           const rawPhase = event.data?.phase as string;
           if (
             rawPhase === "independent" ||
+            rawPhase === "incubating" ||
             rawPhase === "working" ||
             rawPhase === "reviewing"
           ) {
@@ -912,7 +925,11 @@ export default function QueenDM() {
           isBusy={isTyping}
           disabled={loading || !queenReady}
           queenPhase={queenPhase}
-          showQueenPhaseBadge={false}
+          // The DM is normally in `independent` phase, so the per-message
+          // badge would just be noise. Surface it once the phase moves
+          // (e.g. INCUBATING after start_incubating_colony approves) so
+          // the user immediately sees the queen is in a different mode.
+          showQueenPhaseBadge={queenPhase !== "independent"}
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}
           pendingQuestions={awaitingInput ? pendingQuestions : null}

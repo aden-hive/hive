@@ -47,7 +47,7 @@ function truncate(s: string, max: number): string {
 
 type SessionRestoreResult = {
   messages: ChatMessage[];
-  restoredPhase: "independent" | "working" | "reviewing" | null;
+  restoredPhase: "independent" | "incubating" | "working" | "reviewing" | null;
   truncated: boolean;
   droppedCount: number;
 };
@@ -139,7 +139,7 @@ interface AgentState {
   displayName: string | null;
   awaitingInput: boolean;
   workerInputMessageId: string | null;
-  queenPhase: "independent" | "working" | "reviewing";
+  queenPhase: "independent" | "incubating" | "working" | "reviewing";
   agentPath: string | null;
   currentRunId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -456,7 +456,7 @@ export default function ColonyChat() {
         }
       }
 
-      let restoredPhase: "independent" | "working" | "reviewing" | null = null;
+      let restoredPhase: "independent" | "incubating" | "working" | "reviewing" | null = null;
 
       if (!liveSession) {
         if (coldRestoreId) {

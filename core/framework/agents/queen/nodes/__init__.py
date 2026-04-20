@@ -47,9 +47,30 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "undo_changes",
     # NOTE (2026-04-16): ``run_parallel_workers`` is not in the DM phase.
     # Pure DM is for conversation with the user; fan out parallel work via
-    # ``create_colony`` (forks into a persistent colony with its own page
-    # and phase machine).
+    # ``start_incubating_colony`` (which gates the colony fork behind a
+    # readiness eval before exposing create_colony in INCUBATING phase).
+    "start_incubating_colony",
+]
+
+# Incubating phase: queen has been approved by the incubating_evaluator to
+# fork into a colony. Tool surface is intentionally small — the queen's job
+# in this phase is to nail the operational spec (concurrency, schedule,
+# result tracking, credentials) and write a tight task + SKILL.md, not to
+# keep doing work. Read-only file tools are kept so she can confirm details
+# (e.g. inspect an existing skill) before committing.
+_QUEEN_INCUBATING_TOOLS = [
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Trigger management: phase-branched in queen_lifecycle_tools.py to
+    # buffer drafts onto phase_state.pending_triggers, then drained into
+    # the colony's triggers.json by create_colony post-fork.
+    "set_trigger",
+    "remove_trigger",
+    "list_triggers",
     "create_colony",
+    "cancel_incubation",
 ]
 
 # Working phase: colony workers are running. Queen monitors, replies
@@ -129,15 +150,70 @@ If the user opens with a greeting or chat, reply in plain prose in \
 character first — check recall memory for name and past topics and weave \
 them in. If you need a structured choice or approval gate, always use \
 ask_user or ask_user_multiple; otherwise ask in plain prose. \
+\
+When the user clearly wants persistent / recurring / headless work that \
+needs to outlive THIS chat (e.g. "every morning", "monitor X and alert \
+me", "set up a job that…"), call ``start_incubating_colony`` with a \
+proposed colony_name and a one-paragraph intended_purpose. A side \
+evaluator reads the conversation and decides if the spec is settled. If \
+it returns ``not_ready`` you keep talking with the user — sort out \
+whatever the evaluator said is missing, then retry. If it returns \
+``incubating`` your phase flips and a new prompt takes over. Do not \
+try to write SKILL.md, fork directories, or otherwise build the colony \
+yourself in this phase.\
+"""
+
+_queen_role_incubating = """\
+You are in INCUBATING mode. The incubating evaluator has approved you to \
+fork colony ``{colony_name}`` and you are now drafting the spec. Your \
+ONLY job in this phase: produce a self-contained ``task`` description \
+and ``SKILL.md`` body that lets a fresh worker, who has zero memory of \
+this chat, do the work unattended. Do not start doing the work yourself \
+— the coding toolkit is gone on purpose so you can focus.
+
+Before you call ``create_colony``, sort out the operational details that \
+conversation tends to skip. The "Approved → operational checklist" block \
+in your tools doc lists the kinds of things to think about (concurrency, \
+schedule, result-tracking, failure handling, credentials). Treat that \
+list as prompts for YOUR judgement — only ask the user about the items \
+that actually matter for THIS colony and that the conversation hasn't \
+already settled. Use ``ask_user`` / ``ask_user_multiple`` for the gaps; \
+plain prose for everything else.
+
+If you realise mid-incubation that the spec isn't ready (user changed \
+their mind, you're missing more than a couple of details, the work \
+turned out to be one-shot after all), call ``cancel_incubation`` — \
+no harm, you go back to INDEPENDENT and can retry later.
 """
 
 _queen_role_working = """\
-You are in WORKING mode. Your colony has workers executing right now. \
-Your job: monitor progress, answer worker escalations through \
-reply_to_worker, and fan out more tasks with run_parallel_workers if \
-the user asks. Keep the user informed when they ask; do NOT poll the \
-workers just to have something to say. If the user greets you \
-mid-run, reply in prose and wait for their next message.
+You are in WORKING mode. The colony's spec was settled during \
+INCUBATING; workers are executing that spec now. Your role here is \
+operational presence, not direction — think on-call engineer for a \
+running deployment, not architect of a new one.
+
+What you DO in this phase:
+- Be available for worker escalations (reply_to_worker on items in \
+  list_worker_questions).
+- Surface progress when the user asks for it (get_worker_status), or \
+  when something concrete is worth flagging (a notable failure, a \
+  worker stuck on a question that needs them).
+- Intervene when a worker is clearly off course (inject_message) or \
+  needs to stop (stop_worker).
+- Make SPEC-COMPATIBLE adjustments when the user asks — fan out MORE \
+  of the same work (run_parallel_workers), or tweak the schedule \
+  (set_trigger / remove_trigger / list_triggers). These are tweaks to \
+  the spec the user already approved, not redesigns.
+
+What you DO NOT do in this phase:
+- Redesign the colony. If the user asks for something fundamentally \
+  new (different scope, different skill, different problem), say so \
+  plainly: "this colony is for X — for that we'd need a fresh chat \
+  with me, where I can incubate a new colony." A new colony is born \
+  in INDEPENDENT via start_incubating_colony, and you cannot reach \
+  that from inside a colony.
+- Drive the conversation. Do not poll workers just to have something \
+  to say. If the user greets you mid-run, reply in prose and wait.
 """
 
 _queen_role_reviewing = """\
@@ -167,42 +243,140 @@ search_files, run_command, undo_changes
   browser_tabs, browser_close, browser_evaluate, etc.).
 - MUST Follow the browser-automation skill protocol before using browser tools.
 
-## Persistent colony
+## Hand off to a colony
+- start_incubating_colony(colony_name, intended_purpose) — Use this when \
+  the user wants persistent / recurring / headless work that needs to \
+  outlive THIS chat. It does NOT fork on its own; it spawns a one-shot \
+  evaluator that reads this conversation and decides whether the spec \
+  is settled enough to proceed. On approval your phase flips to \
+  INCUBATING and a new tool surface (including create_colony itself) \
+  unlocks. On rejection you stay here and keep the conversation going \
+  to fill the gaps the evaluator named.
+- ``intended_purpose`` is a one-paragraph brief: what the colony will \
+  do, on what cadence, why it must outlive this chat. Don't write a \
+  SKILL.md here — that comes in INCUBATING.
+"""
+
+_queen_tools_incubating = """
+# Tools (INCUBATING mode)
+
+You've been approved to fork. The full coding toolkit is gone on \
+purpose — your job in this phase is to nail the spec, not keep doing \
+work. Available:
+
+## Read-only inspection (coder-tools MCP)
+- read_file, list_directory, search_files, run_command — for confirming \
+details before you commit (e.g. peek at an existing skill in \
+~/.hive/skills/, sanity-check an API URL).
+
+## Schedule the colony (drafted now, written on commit)
+- set_trigger(trigger_id, trigger_type, trigger_config, task) — Stage a \
+  schedule for the colony. Validated immediately (cron syntax / interval \
+  shape) but NOT activated yet — buffered onto the incubation context \
+  and written to ``triggers.json`` by create_colony so it auto-starts on \
+  first colony load. Repeated calls with the same trigger_id replace \
+  the prior draft.
+- list_triggers() — Inspect the buffered drafts.
+- remove_trigger(trigger_id) — Drop a draft from the buffer.
+- ``trigger_type`` is "timer" (with ``trigger_config={"cron": "..."}`` \
+  or ``{"interval_minutes": N}``) or "webhook" (with \
+  ``trigger_config={"path": "/hooks/..."}``).
+- ``task`` describes what the worker should do when the trigger fires; \
+  this is REQUIRED — a trigger with no task can't fire usefully. It's \
+  separate from create_colony's ``task`` argument because the trigger \
+  task is one-shot per fire, while create_colony's ``task`` is the \
+  worker's overall purpose.
+
+## Approved → operational checklist (use your judgement, ask only what's missing)
+The conversation that got you here probably did NOT cover all of:
+- Concurrency: how many tasks should run in parallel? Single-fire?
+- Schedule: cron expression, interval (every N minutes), webhook, \
+  manual-only?
+- Result tracking: what should the worker write into ``progress.db`` so \
+  the user can review later? Per-task status, summary, raw payload?
+- Failure handling: retry, alert, mark-failed-and-continue?
+- Credentials and MCP servers: what does the worker need that you \
+  haven't discussed (API keys, OAuth, browser profile)?
+- Skills the worker needs beyond the one you'll write inline.
+
+These are PROMPTS for your judgement, not a required checklist. Cover \
+the items that actually matter for THIS colony, and only the ones the \
+user hasn't already implied. Use ``ask_user`` / ``ask_user_multiple`` \
+for gaps that need a real answer; skip the rest.
+
+## Commit
 - create_colony(colony_name, task, skill_name, skill_description, \
-  skill_body, skill_files?, tasks?) — Fork this session into a \
-  persistent colony for headless / recurring / background work. The colony \
-  has its own chat surface and runs `run_parallel_workers` from there.
-- **Atomic call — pass the skill INLINE.** Do NOT write SKILL.md with \
-  `write_file` beforehand. Provide `skill_name`, `skill_description`, \
-  and `skill_body` as arguments and the tool will materialize \
-  `~/.hive/skills/{skill_name}/` for you, then fork. Use optional \
-  `skill_files` (array of `{path, content}`) for supporting scripts \
-  or references. Reusing an existing `skill_name` simply replaces that \
-  skill with your latest content.
-- The `task` must be FULL and self-contained because the future worker \
-  run cannot rely on this live chat turn for missing context.
-- The `skill_body` must be FULL and self-contained too — capture the \
-  operational protocol (endpoints, auth, gotchas, pre-baked queries) so \
-  the worker doesn't have to rediscover what you already know.
-- Nothing runs immediately after the call. The user launches the \
-  worker later from the new colony page.
+  skill_body, skill_files?, tasks?, concurrency_hint?) — Fork this \
+  session into the colony. **Atomic call — pass the skill INLINE.** Do \
+  NOT write SKILL.md with write_file beforehand; this tool materialises \
+  the folder for you and then forks. Reusing an existing skill_name \
+  within the colony replaces that skill with your latest content.
+- The ``task`` must be FULL and self-contained — the worker has zero \
+  memory of THIS chat at run time.
+- The ``skill_body`` must be FULL and self-contained — capture the \
+  operational protocol (endpoints, auth, gotchas, pre-baked queries) \
+  so the worker doesn't have to rediscover what you already know.
+- ``concurrency_hint`` (optional integer ≥ 1) — advisory cap on how \
+  many worker processes typically run in parallel for this colony \
+  (e.g. 1 for "send digest", 5 for a fan-out). Baked into worker.json \
+  for the future colony queen to consult; not enforced.
+- Any triggers you staged with ``set_trigger`` during this incubation \
+  are written to ``triggers.json`` as part of the commit and \
+  auto-start on first colony load.
+- After this returns, the chat is over: the session locks immediately \
+  and the user gets a "compact and start a new session with you" \
+  button. So make your call to create_colony the last thing you do — \
+  one closing message to the user is fine, but expect the next user \
+  input to land in a fresh forked session, not this one.
+
+## Bail
+- cancel_incubation() — Call when the spec isn't ready after all (user \
+  changed their mind, you discovered the work is actually one-shot, \
+  more than a couple of details still need to be worked out). Returns \
+  you to INDEPENDENT with the full toolkit; no fork happens.
 """
 
 _queen_tools_working = """
 # Tools (WORKING mode)
 
-Workers are running in your colony. You have:
-- Read-only: read_file, list_directory, search_files, run_command
-- get_worker_status(focus?) — Poll latest progress / issues
-- inject_message(content) — Send guidance to a running worker
-- list_worker_questions() / reply_to_worker(request_id, reply) — Answer escalations
-- stop_worker() — Stop a worker early
-- run_parallel_workers(tasks, timeout?) — Fan out MORE parallel tasks on \
-top of what's already running (each task string must be fully self-contained)
-- set_trigger / remove_trigger / list_triggers — Timer management
+The colony's spec was committed during INCUBATING. Your tools here are \
+operational, not editorial.
 
-When every worker has reported (success or failure), the phase auto-moves \
-to REVIEWING. You do not need to call a transition tool yourself.
+## Stay informed (only when asked, or when something matters)
+- get_worker_status(focus?) — Pull progress / issues for the user.
+- list_worker_questions() — Check the escalation inbox.
+
+## Respond
+- reply_to_worker(request_id, reply) — Answer a worker escalation.
+- inject_message(content) — Course-correct a running worker (e.g. it's \
+  heading the wrong way and the user wants it redirected).
+
+## Intervene
+- stop_worker() — Kill switch for a runaway or no-longer-needed worker.
+
+## Spec-compatible adjustments
+- run_parallel_workers(tasks, timeout?) — Fan out MORE of the same \
+  work. Use when the user wants additional units of an already-defined \
+  job, NOT for new scope. Each task string must be fully self-contained.
+- set_trigger / remove_trigger / list_triggers — Tweak the schedule \
+  the user already approved during incubation. Adding a follow-up \
+  trigger for the same colony is fine; redesigning the colony's \
+  purpose is not.
+
+## Read-only inspection
+- read_file, list_directory, search_files, run_command
+
+When every worker has reported (success or failure), the phase \
+auto-moves to REVIEWING. You do not need to call a transition tool \
+yourself.
+
+## What does NOT belong here
+A request like "actually let's also do X" with X being a new scope, \
+new skill, or different problem is a NEW COLONY, not an extension of \
+this one. Tell the user plainly: "this colony is for the work we \
+already started — for that we'd need a fresh chat with me, where I \
+can incubate a new colony." You cannot create a new colony from \
+inside a colony.
 """
 
 _queen_tools_reviewing = """
@@ -291,9 +465,9 @@ queen_node = NodeSpec(
     id="queen",
     name="Queen",
     description=(
-        "User's primary interactive interface. Operates in DM (independent) "
-        "or colony mode (working / reviewing) depending on whether workers "
-        "have been spawned."
+        "User's primary interactive interface. Operates in DM (independent), "
+        "colony-spec drafting (incubating), or colony mode (working / "
+        "reviewing) depending on whether workers have been spawned."
     ),
     node_type="event_loop",
     max_node_visits=0,
@@ -301,7 +475,14 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
-    tools=sorted(set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS)),
+    tools=sorted(
+        set(
+            _QUEEN_INDEPENDENT_TOOLS
+            + _QUEEN_INCUBATING_TOOLS
+            + _QUEEN_WORKING_TOOLS
+            + _QUEEN_REVIEWING_TOOLS
+        )
+    ),
     system_prompt=(
         _queen_character_core
         + _queen_role_independent
@@ -312,20 +493,30 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = sorted(set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_WORKING_TOOLS + _QUEEN_REVIEWING_TOOLS))
+ALL_QUEEN_TOOLS = sorted(
+    set(
+        _QUEEN_INDEPENDENT_TOOLS
+        + _QUEEN_INCUBATING_TOOLS
+        + _QUEEN_WORKING_TOOLS
+        + _QUEEN_REVIEWING_TOOLS
+    )
+)
 
 __all__ = [
     "queen_node",
     "ALL_QUEEN_TOOLS",
     "_QUEEN_INDEPENDENT_TOOLS",
+    "_QUEEN_INCUBATING_TOOLS",
     "_QUEEN_WORKING_TOOLS",
     "_QUEEN_REVIEWING_TOOLS",
     # Character + phase-specific prompt segments (used by queen_orchestrator for dynamic prompts)
     "_queen_character_core",
     "_queen_role_independent",
+    "_queen_role_incubating",
     "_queen_role_working",
     "_queen_role_reviewing",
     "_queen_tools_independent",
+    "_queen_tools_incubating",
     "_queen_tools_working",
     "_queen_tools_reviewing",
     "_queen_behavior_always",

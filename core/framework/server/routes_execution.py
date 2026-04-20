@@ -682,35 +682,32 @@ async def handle_cancel_queen(request: web.Request) -> web.Response:
     return web.json_response({"cancelled": True})
 
 
-async def handle_mark_colony_spawned(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/mark-colony-spawned -- lock the queen DM.
+def persist_colony_spawn_lock(session: Any, colony_name: str) -> None:
+    """Persist the colony-spawned lock on a queen session.
 
-    Called by the frontend the first time the user clicks the
-    COLONY_CREATED system message. Persists ``colony_spawned: true`` and
-    ``spawned_colony_name`` into the queen session's ``meta.json`` so the
-    lock survives server restart, and caches the same on the live Session
-    object so subsequent /chat calls in this process can be rejected
-    immediately without disk I/O.
+    Writes ``colony_spawned: true`` + ``spawned_colony_name`` + a timestamp
+    into the queen session's ``meta.json`` and mirrors the same fields onto
+    the live ``Session`` object so subsequent ``/chat`` calls in this
+    process are rejected immediately without disk I/O.
 
-    Body: ``{"colony_name": "..."}``
+    Shared by the HTTP route ``handle_mark_colony_spawned`` (frontend
+    click on the colony-link card) and the in-process ``create_colony``
+    tool path (when the queen forks while in ``incubating`` phase).
+
+    Raises ``OSError`` if the meta.json write fails. Callers should catch
+    and respond/log appropriately.
     """
     from datetime import datetime as _dt
 
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    body = await request.json() if request.can_read_body else {}
-    colony_name = (body.get("colony_name") or "").strip()
-    if not colony_name:
-        return web.json_response({"error": "colony_name is required"}, status=400)
-
     queen_dir = getattr(session, "queen_dir", None)
     if queen_dir is None:
-        return web.json_response(
-            {"error": "queen session directory is not set on this session"},
-            status=503,
-        )
+        # Tool-side callers may invoke before the queen dir is available.
+        # Still mirror onto the session so the in-process /chat guard
+        # works; the meta.json write is just deferred until the next
+        # session start writes the file (rare path).
+        session.colony_spawned = True
+        session.spawned_colony_name = colony_name
+        return
 
     meta_path = queen_dir / "meta.json"
     meta: dict = {}
@@ -724,15 +721,38 @@ async def handle_mark_colony_spawned(request: web.Request) -> web.Response:
     meta["spawned_colony_name"] = colony_name
     meta["spawned_colony_at"] = _dt.now(UTC).isoformat()
 
-    try:
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
-    except OSError as exc:
-        logger.exception("mark_colony_spawned: failed to persist meta.json")
-        return web.json_response({"error": f"failed to persist: {exc}"}, status=500)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
     session.colony_spawned = True
     session.spawned_colony_name = colony_name
+
+
+async def handle_mark_colony_spawned(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/mark-colony-spawned -- lock the queen DM.
+
+    Called by the frontend the first time the user clicks the
+    COLONY_CREATED system message. Thin wrapper around
+    :func:`persist_colony_spawn_lock` — the heavy lifting (meta.json
+    merge + Session cache) lives in the helper so the in-process
+    ``create_colony`` path can reuse it without re-issuing an HTTP call.
+
+    Body: ``{"colony_name": "..."}``
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    body = await request.json() if request.can_read_body else {}
+    colony_name = (body.get("colony_name") or "").strip()
+    if not colony_name:
+        return web.json_response({"error": "colony_name is required"}, status=400)
+
+    try:
+        persist_colony_spawn_lock(session, colony_name)
+    except OSError as exc:
+        logger.exception("mark_colony_spawned: failed to persist meta.json")
+        return web.json_response({"error": f"failed to persist: {exc}"}, status=500)
 
     return web.json_response(
         {
@@ -991,6 +1011,7 @@ async def fork_session_into_colony(
     colony_name: str,
     task: str,
     tasks: list[dict] | None = None,
+    concurrency_hint: int | None = None,
 ) -> dict:
     """Fork a queen session into a colony directory.
 
@@ -1228,6 +1249,13 @@ async def fork_session_into_colony(
         "spawned_from": session.id,
         "spawned_at": datetime.now(UTC).isoformat(),
     }
+    # Concurrency advisory baked in at incubation time. Not enforced — the
+    # progress.db queue is atomic regardless — but the colony queen reads
+    # this when planning fan-outs (run_parallel_workers, trigger-fired
+    # batches) so behavior matches what the user agreed to during
+    # incubation.
+    if isinstance(concurrency_hint, int) and concurrency_hint > 0:
+        worker_meta["concurrency_hint"] = concurrency_hint
     worker_config_path.write_text(json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ── 3. Duplicate queen session into colony ───────────────────
