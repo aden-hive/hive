@@ -211,6 +211,34 @@ export function sseEventToChatMessage(
       };
     }
 
+    case "trigger_fired": {
+      // Surface each scheduler/webhook fire as a banner in the chat, so the
+      // user can see exactly when the queen was invoked by a trigger vs. by
+      // a typed message. The banner sits at the start of the turn the queen
+      // is about to run in response.
+      const triggerId = event.data?.trigger_id as string | undefined;
+      if (!triggerId) return null;
+      const payload = {
+        trigger_id: triggerId,
+        trigger_type: event.data?.trigger_type as string | undefined,
+        name: event.data?.name as string | undefined,
+        task: event.data?.task as string | undefined,
+        fire_count: event.data?.fire_count as number | undefined,
+        last_fired_at: event.data?.last_fired_at as number | undefined,
+      };
+      return {
+        id: `trigger-${triggerId}-${payload.last_fired_at ?? event.timestamp}`,
+        agent: "Trigger",
+        agentColor: "",
+        content: JSON.stringify(payload),
+        timestamp: "",
+        type: "trigger",
+        thread,
+        createdAt,
+        streamId: event.stream_id || undefined,
+      };
+    }
+
     default:
       return null;
   }

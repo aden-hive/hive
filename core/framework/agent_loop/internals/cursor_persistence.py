@@ -234,7 +234,9 @@ async def drain_trigger_queue(
 
     combined = "\n\n".join(parts)
     logger.info("[drain] %d trigger(s): %s", len(triggers), combined[:200])
-    await conversation.add_user_message(combined)
+    # Tag the message so the UI can render a banner instead of the raw
+    # `[TRIGGER: ...]` text. The LLM still sees `combined` verbatim.
+    await conversation.add_user_message(combined, is_trigger=True)
     return len(triggers)
 
 

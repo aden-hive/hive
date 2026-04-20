@@ -9,6 +9,7 @@ import {
   Loader2,
   Paperclip,
   X,
+  Zap,
 } from "lucide-react";
 import WorkerRunBubble from "@/components/WorkerRunBubble";
 import type { WorkerRunGroup } from "@/components/WorkerRunBubble";
@@ -54,7 +55,8 @@ export interface ChatMessage {
     | "worker_input_request"
     | "run_divider"
     | "colony_link"
-    | "inherited_block";
+    | "inherited_block"
+    | "trigger";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -631,6 +633,53 @@ const MessageBubble = memo(
           <span className="text-[11px] text-muted-foreground bg-muted/60 px-3 py-1.5 rounded-full">
             {msg.content}
           </span>
+        </div>
+      );
+    }
+
+    if (msg.type === "trigger") {
+      // Rendered when a scheduler/webhook trigger fires. Content is a JSON
+      // payload: { trigger_id, trigger_type, name, task, last_fired_at,
+      // fire_count }. Shown as a distinctive banner marking the start of
+      // the turn the queen is about to run in response.
+      let parsed: {
+        trigger_id?: string;
+        trigger_type?: string;
+        name?: string;
+        task?: string;
+        fire_count?: number;
+        last_fired_at?: number;
+      } = {};
+      try {
+        parsed = JSON.parse(msg.content);
+      } catch {
+        // Fall through to plain text
+      }
+      const label = parsed.name || parsed.trigger_id || "trigger";
+      const kind = parsed.trigger_type || "timer";
+      const task = (parsed.task || "").trim();
+      const fireCount = parsed.fire_count;
+      return (
+        <div className="flex justify-center py-2">
+          <div className="max-w-[85%] w-full rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/15 text-amber-400">
+                <Zap className="w-3 h-3" />
+              </span>
+              <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
+                {kind === "webhook" ? "Webhook" : "Scheduler"} fired
+              </span>
+              <span className="text-[11px] text-foreground font-mono truncate">{label}</span>
+              {fireCount != null && fireCount > 0 && (
+                <span className="ml-auto text-[10px] text-muted-foreground">#{fireCount}</span>
+              )}
+            </div>
+            {task && (
+              <p className="text-[12px] text-muted-foreground leading-snug whitespace-pre-wrap">
+                {task}
+              </p>
+            )}
+          </div>
         </div>
       );
     }

@@ -61,6 +61,11 @@ class Message:
     # compacted-summary message it writes when a colony is born from a
     # queen DM. Presence of the field IS the "inherited" signal.
     inherited_from: str | None = None
+    # True when this user message was synthesized from one or more
+    # fired triggers (timer/webhook), not typed by a human. The LLM still
+    # sees the message as a regular user turn; the UI uses this flag to
+    # render it as a trigger banner instead of a speech bubble.
+    is_trigger: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -128,6 +133,8 @@ class Message:
             d["truncated"] = self.truncated
         if self.inherited_from is not None:
             d["inherited_from"] = self.inherited_from
+        if self.is_trigger:
+            d["is_trigger"] = self.is_trigger
         return d
 
     @classmethod
@@ -148,6 +155,7 @@ class Message:
             is_system_nudge=data.get("is_system_nudge", False),
             truncated=data.get("truncated", False),
             inherited_from=data.get("inherited_from"),
+            is_trigger=data.get("is_trigger", False),
         )
 
 
@@ -493,6 +501,7 @@ class NodeConversation:
         is_client_input: bool = False,
         image_content: list[dict[str, Any]] | None = None,
         is_system_nudge: bool = False,
+        is_trigger: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -504,6 +513,7 @@ class NodeConversation:
             is_client_input=is_client_input,
             image_content=image_content,
             is_system_nudge=is_system_nudge,
+            is_trigger=is_trigger,
         )
         self._messages.append(msg)
         self._next_seq += 1

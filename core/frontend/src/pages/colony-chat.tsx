@@ -1190,6 +1190,29 @@ export default function ColonyChat() {
             );
             updateGraphNodeStatus(nodeId, "complete");
             setTimeout(() => updateGraphNodeStatus(nodeId, "running"), 1500);
+
+            // Render a banner in the chat marking the start of the turn the
+            // queen is about to run in response. Matches the replay path in
+            // chat-helpers.ts (case "trigger_fired") so live + restore look
+            // identical.
+            const bannerPayload = {
+              trigger_id: triggerId,
+              trigger_type: event.data?.trigger_type as string | undefined,
+              name: event.data?.name as string | undefined,
+              task: event.data?.task as string | undefined,
+              fire_count: fireCount,
+              last_fired_at: lastFiredAt,
+            };
+            upsertMessage({
+              id: `trigger-${triggerId}-${lastFiredAt ?? event.timestamp}`,
+              agent: "Trigger",
+              agentColor: "",
+              content: JSON.stringify(bannerPayload),
+              timestamp: "",
+              type: "trigger",
+              thread: agentPath,
+              createdAt: lastFiredAt ?? Date.now(),
+            });
           }
           break;
         }

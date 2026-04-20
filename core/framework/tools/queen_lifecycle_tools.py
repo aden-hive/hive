@@ -493,9 +493,17 @@ async def _emit_trigger_fired(session: Any, trigger_id: str, trigger_type: str) 
 
     from framework.host.event_bus import AgentEvent, EventType
 
+    # Pull the task/description off the trigger definition so the chat
+    # banner can render something human-readable without a second fetch.
+    tdef = getattr(session, "available_triggers", {}).get(trigger_id)
+    task_str = getattr(tdef, "task", "") or "" if tdef else ""
+    name_str = getattr(tdef, "description", "") or trigger_id if tdef else trigger_id
+
     data: dict[str, Any] = {
         "trigger_id": trigger_id,
         "trigger_type": trigger_type,
+        "name": name_str,
+        "task": task_str,
         "last_fired_at": last_fired_at,
     }
     if fire_count is not None:

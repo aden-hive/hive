@@ -209,6 +209,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         EventType.TRIGGER_AVAILABLE.value,
         EventType.TRIGGER_ACTIVATED.value,
         EventType.TRIGGER_DEACTIVATED.value,
+        EventType.TRIGGER_FIRED.value,
         EventType.TRIGGER_REMOVED.value,
         EventType.TRIGGER_UPDATED.value,
     }
