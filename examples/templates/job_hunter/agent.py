@@ -69,14 +69,14 @@ goal = Goal(
     description="Jobs are filtered based on user-provided skills and preferences",
     metric="filter_accuracy",
     target=">=0.8",
-    weight=0.15,
+    weight=0.05,
 ),
 SuccessCriterion(
     id="job-ranking",
     description="Jobs are ranked based on relevance and user skill alignment",
     metric="ranking_accuracy",
     target=">=0.8",
-    weight=0.1,
+    weight=0.05,
 ),
     ],
     constraints=[
