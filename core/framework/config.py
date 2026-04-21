@@ -258,7 +258,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
             except ImportError:
                 pass
             return {
-                "extra_headers": headers, 
+                "extra_headers": headers,
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
@@ -266,14 +266,16 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
         return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
-
 def get_worker_max_tokens() -> int:
     """Return max_tokens for the worker LLM, falling back to default."""
     worker_llm = get_hive_config().get("worker_llm", {})
     if worker_llm:
         value = worker_llm.get("max_tokens")
-        if isinstance(value, int) and value > 0:
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
+        elif value is not None:
+            logger.warning(f"Invalid worker_llm.max_tokens: {value}. Falling back to global default.")
+
     return get_max_tokens()
 
 
@@ -282,16 +284,22 @@ def get_worker_max_context_tokens() -> int:
     worker_llm = get_hive_config().get("worker_llm", {})
     if worker_llm:
         value = worker_llm.get("max_context_tokens")
-        if isinstance(value, int) and value > 0:
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
+        elif value is not None:
+            logger.warning(f"Invalid worker_llm.max_context_tokens: {value}. Falling back to global default.")
+
     return get_max_context_tokens()
 
 
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
     value = get_hive_config().get("llm", {}).get("max_tokens")
-    if isinstance(value, int) and value > 0:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
+    elif value is not None:
+        logger.warning(f"Invalid llm.max_tokens: {value}. Using DEFAULT_MAX_TOKENS ({DEFAULT_MAX_TOKENS}).")
+
     return DEFAULT_MAX_TOKENS
 
 
@@ -302,8 +310,15 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 def get_max_context_tokens() -> int:
     """Return the configured max_context_tokens, falling back to DEFAULT_MAX_CONTEXT_TOKENS."""
     value = get_hive_config().get("llm", {}).get("max_context_tokens")
-    if isinstance(value, int) and value > 0:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
+    elif value is not None:
+        # Wrapped to satisfy the 120-character limit (E501)
+        logger.warning(
+            f"Invalid llm.max_context_tokens: {value}. "
+            f"Using DEFAULT_MAX_CONTEXT_TOKENS ({DEFAULT_MAX_CONTEXT_TOKENS})."
+        )
+
     return DEFAULT_MAX_CONTEXT_TOKENS
 
 
