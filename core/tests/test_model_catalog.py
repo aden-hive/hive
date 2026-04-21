@@ -67,14 +67,11 @@ def test_cerebras_catalog_tracks_public_models_endpoint():
     assert cerebras_default == "gpt-oss-120b"
     assert [model["id"] for model in cerebras_models] == [
         "gpt-oss-120b",
-        "llama3.1-8b",
         "zai-glm-4.7",
         "qwen-3-235b-a22b-instruct-2507",
     ]
-    assert cerebras_models[0]["max_tokens"] == 40960
-    assert cerebras_models[0]["max_context_tokens"] == 131072
-    assert cerebras_models[1]["max_tokens"] == 8192
-    assert cerebras_models[1]["max_context_tokens"] == 32768
+    assert all(model["max_tokens"] == 40960 for model in cerebras_models)
+    assert all(model["max_context_tokens"] == 131072 for model in cerebras_models)
 
 
 def test_minimax_catalog_tracks_current_non_legacy_text_models():
@@ -86,8 +83,8 @@ def test_minimax_catalog_tracks_current_non_legacy_text_models():
         "MiniMax-M2.7",
         "MiniMax-M2.5",
     ]
-    assert all(model["max_context_tokens"] == 204800 for model in minimax_models)
-    assert all(model["max_tokens"] == 32768 for model in minimax_models)
+    assert all(model["max_context_tokens"] == 180000 for model in minimax_models)
+    assert all(model["max_tokens"] == 40960 for model in minimax_models)
 
 
 def test_mistral_catalog_tracks_current_curated_models():
@@ -149,26 +146,25 @@ def test_openrouter_catalog_tracks_current_frontier_set():
         "anthropic/claude-sonnet-4.6",
         "anthropic/claude-opus-4.6",
         "google/gemini-3.1-pro-preview-customtools",
-        "deepseek/deepseek-v3.2",
         "qwen/qwen3.6-plus",
         "z-ai/glm-5v-turbo",
-        "x-ai/grok-4.20",
+        "z-ai/glm-5.1",
+        "minimax/minimax-m2.7",
         "xiaomi/mimo-v2-pro",
-        "stepfun/step-3.5-flash",
     ]
     assert openrouter_models[0]["max_tokens"] == 128000
-    assert openrouter_models[0]["max_context_tokens"] == 922000
-    assert openrouter_models[1]["max_context_tokens"] == 936000
+    assert openrouter_models[0]["max_context_tokens"] == 872000
+    assert openrouter_models[1]["max_context_tokens"] == 872000
     assert openrouter_models[2]["max_context_tokens"] == 872000
-    assert openrouter_models[3]["max_context_tokens"] == 1048576
-    assert openrouter_models[4]["max_context_tokens"] == 163840
+    assert openrouter_models[3]["max_context_tokens"] == 872000
+    assert openrouter_models[4]["max_context_tokens"] == 240000
 
 
 def test_find_model_any_provider_returns_provider_and_model():
     provider_id, model = model_catalog.find_model_any_provider("google/gemini-3.1-pro-preview-customtools")
 
     assert provider_id == "openrouter"
-    assert model["max_context_tokens"] == 1048576
+    assert model["max_context_tokens"] == 872000
 
 
 def test_get_preset_returns_subscription_specific_limits():
@@ -187,8 +183,8 @@ def test_minimax_preset_uses_current_default_model():
 
     assert preset is not None
     assert preset["model"] == "MiniMax-M2.7"
-    assert preset["max_tokens"] == 32768
-    assert preset["max_context_tokens"] == 204800
+    assert preset["max_tokens"] == 40960
+    assert preset["max_context_tokens"] == 180800
 
 
 def test_load_model_catalog_rejects_duplicate_model_ids(tmp_path, monkeypatch):

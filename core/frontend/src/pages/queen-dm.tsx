@@ -10,6 +10,7 @@ import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi } from "@/api/queens";
 import { useMultiSSE } from "@/hooks/use-sse";
+import { usePendingQueue } from "@/hooks/use-pending-queue";
 import type { AgentEvent, HistorySession } from "@/api/types";
 import {
   newReplayState,
@@ -74,6 +75,10 @@ export default function QueenDM() {
   const [compactingAndForking, setCompactingAndForking] = useState(false);
 
   const replayStateRef = useRef(newReplayState());
+  // Flipped true by the auto-flush path; consumed by the next empty-prompt
+  // client_input_requested so we don't flicker the typing bubble off while
+  // the queen is about to resume on the flushed input.
+  const queenAboutToResumeRef = useRef(false);
   const [queenPhase, setQueenPhase] = useState<
     "independent" | "incubating" | "working" | "reviewing"
   >("independent");
@@ -499,11 +504,11 @@ export default function QueenDM() {
         case "execution_started":
           setIsTyping(true);
           setQueenReady(true);
-          // Clear queued flag on all user messages now that the queen is processing
-          setMessages((prev) => {
-            if (!prev.some((m) => m.queued)) return prev;
-            return prev.map((m) => (m.queued ? { ...m, queued: undefined } : m));
-          });
+          // Do NOT clear `queued` on user messages here. The pending queue
+          // hook owns that flag — it's cleared on steer / cancel / flush.
+          // If the user has queued messages that haven't been flushed yet,
+          // the queen starting a new turn (e.g. from a steer or from the
+          // flush itself) shouldn't hide the still-queued ones.
           break;
 
         case "execution_completed":
@@ -517,6 +522,13 @@ export default function QueenDM() {
             const out = (event.data.output_tokens as number) || 0;
             setTokenUsage((prev) => ({ input: prev.input + inp, output: prev.output + out }));
           }
+          // Flush one queued message per LLM turn boundary. This is the
+          // real "turn ended" signal in a queen DM — execution_completed
+          // only fires at session shutdown because the event loop parks in
+          // _await_user_input between turns. Mid-tool-call boundaries
+          // count too: sending now lets the queen pick up the message on
+          // her next drain, same as clicking Steer.
+          flushNextPendingRef.current();
           break;
 
         case "client_output_delta":
@@ -535,6 +547,14 @@ export default function QueenDM() {
                 options?: string[];
               }[])
             : null;
+          // An empty-prompt client_input_requested means the queen parked
+          // in auto-wait. If we just auto-flushed a queued message, our
+          // inject will unblock her in a moment — skip flipping isTyping
+          // off so the thinking bubble doesn't flicker.
+          if (queenAboutToResumeRef.current && !questions) {
+            queenAboutToResumeRef.current = false;
+            break;
+          }
           setAwaitingInput(true);
           setIsTyping(false);
           setIsStreaming(false);
@@ -622,17 +642,60 @@ export default function QueenDM() {
 
   useMultiSSE({ sessions: sseSessions, onEvent: handleSSEEvent });
 
-  // Send handler
+  // Core backend send — used both for immediate sends and for Steer /
+  // auto-flush paths out of the pending queue.
+  const sendToBackend = useCallback(
+    (text: string, images?: ImageContent[]) => {
+      if (!sessionId) return;
+      executionApi.chat(sessionId, text, images).catch(() => {
+        setIsTyping(false);
+        setIsStreaming(false);
+      });
+    },
+    [sessionId],
+  );
+
+  const {
+    enqueue: enqueuePending,
+    steer: handleSteer,
+    cancelQueued: handleCancelQueued,
+    flushNext: flushNextPending,
+    flushNextRef: flushNextPendingRef,
+    clear: clearPendingQueue,
+  } = usePendingQueue({
+    sendToBackend,
+    setMessages,
+    onFlushStart: useCallback(() => {
+      setIsTyping(true);
+      queenAboutToResumeRef.current = true;
+    }, []),
+  });
+
+  // Reset the queue whenever we navigate to a different queen. The hook
+  // outlives the route change (same component instance), so without this,
+  // a message queued for Queen A would auto-flush into Queen B's session
+  // on B's next execution_completed.
+  useEffect(() => {
+    clearPendingQueue();
+  }, [queenId, clearPendingQueue]);
+
+  // Send handler. Queues when the queen is mid-turn (unless the user is
+  // answering an ask_user prompt, which must send immediately to unblock
+  // the loop). Queued messages are held locally until Steer, Cancel, or
+  // the next `execution_completed` auto-flush.
   const handleSend = useCallback(
     (text: string, _thread: string, images?: ImageContent[]) => {
-      if (awaitingInput) {
+      const answeringQuestion = awaitingInput;
+      if (answeringQuestion) {
         setAwaitingInput(false);
         setPendingQuestions(null);
       }
 
-      const isQueenBusy = isTyping;
+      const shouldQueue = !answeringQuestion && isTyping;
+
+      const msgId = makeId();
       const userMsg: ChatMessage = {
-        id: makeId(),
+        id: msgId,
         agent: "You",
         agentColor: "",
         content: text,
@@ -641,19 +704,19 @@ export default function QueenDM() {
         thread: "queen-dm",
         createdAt: Date.now(),
         images,
-        queued: isQueenBusy || undefined,
+        queued: shouldQueue,
       };
       setMessages((prev) => [...prev, userMsg]);
-      setIsTyping(true);
 
-      if (sessionId) {
-        executionApi.chat(sessionId, text, images).catch(() => {
-          setIsTyping(false);
-          setIsStreaming(false);
-        });
+      if (shouldQueue) {
+        enqueuePending(msgId, { text, images });
+        return;
       }
+
+      setIsTyping(true);
+      sendToBackend(text, images);
     },
-    [sessionId, awaitingInput, isTyping],
+    [awaitingInput, isTyping, sendToBackend, enqueuePending],
   );
 
   const handleColonySpawn = useCallback(() => {
@@ -735,15 +798,14 @@ export default function QueenDM() {
       setIsTyping(false);
       setIsStreaming(false);
       replayStateRef.current = newReplayState();
-      // Clear queued flags since the queen is now idle
-      setMessages((prev) => {
-        if (!prev.some((m) => m.queued)) return prev;
-        return prev.map((m) => (m.queued ? { ...m, queued: undefined } : m));
-      });
+      // After cancelling the current turn, immediately send the oldest
+      // queued message (if any). The remaining queued messages stay put
+      // so the user can review them or Steer/Cancel individually.
+      flushNextPending();
     } catch {
       // ignore
     }
-  }, [sessionId]);
+  }, [sessionId, flushNextPending]);
 
   return (
     <div className="flex flex-col h-full">
@@ -766,6 +828,8 @@ export default function QueenDM() {
           messages={messages}
           onSend={handleSend}
           onCancel={handleCancelQueen}
+          onSteer={handleSteer}
+          onCancelQueued={handleCancelQueued}
           activeThread="queen-dm"
           isWaiting={isTyping && !isStreaming}
           isBusy={isTyping}

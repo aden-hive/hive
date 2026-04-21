@@ -88,6 +88,7 @@ class TestHealthCheckerRegistry:
             "notion_token",
             "pinecone",
             "pipedrive",
+            "prometheus",
             "resend",
             "serpapi",
             "slack",

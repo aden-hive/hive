@@ -1959,6 +1959,10 @@ class LiteLLMProvider(LLMProvider):
         if self._codex_backend:
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
+            # Pass store directly to OpenAI in case litellm drops it as unknown
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"]["store"] = False
 
         request_summary = _summarize_request_for_log(kwargs)
         logger.debug(

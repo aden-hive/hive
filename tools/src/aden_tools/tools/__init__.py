@@ -105,6 +105,7 @@ from .plaid_tool import register_tools as register_plaid
 from .port_scanner import register_tools as register_port_scanner
 from .postgres_tool import register_tools as register_postgres
 from .powerbi_tool import register_tools as register_powerbi
+from .prometheus_tool import register_tools as register_prometheus
 from .pushover_tool import register_tools as register_pushover
 from .quickbooks_tool import register_tools as register_quickbooks
 from .razorpay_tool import register_tools as register_razorpay
@@ -310,6 +311,7 @@ def _register_unverified(
     register_pipedrive(mcp, credentials=credentials)
     register_plaid(mcp, credentials=credentials)
     register_powerbi(mcp, credentials=credentials)
+    register_prometheus(mcp, credentials=credentials)
     register_pushover(mcp, credentials=credentials)
     register_quickbooks(mcp, credentials=credentials)
     register_reddit(mcp, credentials=credentials)
