@@ -64,19 +64,24 @@ def _missing_prometheus_credential_response() -> dict:
     }
 
 
-def _get_auth() -> tuple[dict[str, str], httpx.BasicAuth | None]:
+def _get_auth(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[dict[str, str], httpx.BasicAuth | None]:
     headers: dict[str, str] = {}
     auth = None
 
+    creds = credentials.get("prometheus") if credentials else {}
+
     # Bearer token
-    token = os.getenv("PROMETHEUS_TOKEN")
+    token = (creds or {}).get("prometheus_token") or os.getenv("PROMETHEUS_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
         return headers, None
 
     # Basic auth
-    username = os.getenv("PROMETHEUS_USERNAME")
-    password = os.getenv("PROMETHEUS_PASSWORD")
+    username = (creds or {}).get("prometheus_username") or os.getenv("PROMETHEUS_USERNAME")
+    password = (creds or {}).get("prometheus_password") or os.getenv("PROMETHEUS_PASSWORD")
+
     if username and password:
         auth = httpx.BasicAuth(username, password)
 

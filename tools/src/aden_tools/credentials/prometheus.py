@@ -38,4 +38,64 @@ Notes:
         credential_id="prometheus",
         credential_key="base_url",
     ),
+    "prometheus_token": CredentialSpec(
+        env_var="PROMETHEUS_TOKEN",
+        tools=[
+            "prometheus_query",
+            "prometheus_query_range",
+        ],
+        required=False,
+        startup_required=False,
+        help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
+        description="Optional Bearer token for Prometheus authentication",
+        aden_supported=False,
+        direct_api_key_supported=False,
+        api_key_instructions="""Optional: set a bearer token for authenticated Prometheus instances:
+
+export PROMETHEUS_TOKEN=your-token
+""",
+        health_check_endpoint="",
+        credential_id="prometheus",
+        credential_key="token",
+    ),
+    "prometheus_username": CredentialSpec(
+        env_var="PROMETHEUS_USERNAME",
+        tools=[
+            "prometheus_query",
+            "prometheus_query_range",
+        ],
+        required=False,
+        startup_required=False,
+        help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
+        description="Optional username for basic auth",
+        aden_supported=False,
+        direct_api_key_supported=False,
+        api_key_instructions="""Optional: set username for basic authentication:
+
+export PROMETHEUS_USERNAME=admin
+""",
+        health_check_endpoint="",
+        credential_id="prometheus",
+        credential_key="username",
+    ),
+    "prometheus_password": CredentialSpec(
+        env_var="PROMETHEUS_PASSWORD",
+        tools=[
+            "prometheus_query",
+            "prometheus_query_range",
+        ],
+        required=False,
+        startup_required=False,
+        help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
+        description="Optional password for basic auth",
+        aden_supported=False,
+        direct_api_key_supported=False,
+        api_key_instructions="""Optional: set password for basic authentication:
+
+export PROMETHEUS_PASSWORD=secret
+""",
+        health_check_endpoint="",
+        credential_id="prometheus",
+        credential_key="password",
+    ),
 }
