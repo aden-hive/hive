@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Minus, Plus } from "lucide-react";
 import ChatPanel, {
   type ChatMessage,
   type ImageContent,
@@ -59,6 +59,8 @@ export default function QueenDM() {
   const [cloneDataSources, setCloneDataSources] = useState("");
   const [cloneSchedule, setCloneSchedule] = useState("");
   const [cloneConcurrency, setCloneConcurrency] = useState("");
+  const [showCloneOutputs, setShowCloneOutputs] = useState(false);
+  const [showCloneDataSources, setShowCloneDataSources] = useState(false);
   const [showCloneSchedule, setShowCloneSchedule] = useState(false);
   const [showCloneConcurrency, setShowCloneConcurrency] = useState(false);
   // Colony-spawned lock state. Once a colony has been spawned from this DM
@@ -663,10 +665,10 @@ export default function QueenDM() {
       `Colony name: ${colony}`,
       `Purpose: ${task || "Use the current conversation to propose the colony's purpose."}`,
     ];
-    if (cloneOutputs.trim()) {
+    if (showCloneOutputs && cloneOutputs.trim()) {
       briefLines.push(`Expected outputs: ${cloneOutputs.trim()}`);
     }
-    if (cloneDataSources.trim()) {
+    if (showCloneDataSources && cloneDataSources.trim()) {
       briefLines.push(`Inputs, data sources, tools, or credentials: ${cloneDataSources.trim()}`);
     }
     if (showCloneSchedule && cloneSchedule.trim()) {
@@ -692,6 +694,8 @@ export default function QueenDM() {
     setCloneDataSources("");
     setCloneSchedule("");
     setCloneConcurrency("");
+    setShowCloneOutputs(false);
+    setShowCloneDataSources(false);
     setShowCloneSchedule(false);
     setShowCloneConcurrency(false);
   }, [
@@ -702,7 +706,9 @@ export default function QueenDM() {
     cloneSchedule,
     cloneTask,
     handleSend,
+    showCloneDataSources,
     showCloneConcurrency,
+    showCloneOutputs,
     showCloneSchedule,
   ]);
 
@@ -804,15 +810,17 @@ export default function QueenDM() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setCloneDialogOpen(false)}
           />
-          <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
-            <h2 className="text-sm font-semibold text-foreground">
-              Set Up a Colony
-            </h2>
-            <p className="text-[11px] text-muted-foreground">
-              Share the brief. The queen will fill gaps, write the worker skill,
-              and create the colony when the setup is ready.
-            </p>
-            <div className="space-y-3">
+          <div className="relative flex w-full max-w-lg h-[min(560px,88vh)] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
+            <div className="px-6 pt-5 pb-3 space-y-1">
+              <h2 className="text-sm font-semibold text-foreground">
+                Set Up a Colony
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                Share the brief. The queen will fill gaps, write the worker skill,
+                and create the colony when the setup is ready.
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                   Colony name
@@ -842,49 +850,103 @@ export default function QueenDM() {
                   className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Expected output{" "}
-                  <span className="text-muted-foreground/40">(optional)</span>
-                </label>
-                <textarea
-                  value={cloneOutputs}
-                  onChange={(e) => setCloneOutputs(e.target.value)}
-                  placeholder="A digest, saved rows, alerts, files, or a final summary."
-                  rows={2}
-                  className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Inputs, tools, or credentials{" "}
-                  <span className="text-muted-foreground/40">(optional)</span>
-                </label>
-                <textarea
-                  value={cloneDataSources}
-                  onChange={(e) => setCloneDataSources(e.target.value)}
-                  placeholder="APIs, websites, files, accounts, OAuth tools, or credentials it will need."
-                  rows={2}
-                  className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
 
               <div className="space-y-2 pt-1">
+                {!showCloneOutputs ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCloneOutputs(true)}
+                    className="flex w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    Expected output
+                  </button>
+                ) : (
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCloneOutputs(false)}
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                      aria-label="Hide expected output"
+                    >
+                      <span className="text-[11px] font-medium">
+                        Expected output
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                        <Minus className="h-3.5 w-3.5" />
+                        Hide
+                      </span>
+                    </button>
+                    <textarea
+                      value={cloneOutputs}
+                      onChange={(e) => setCloneOutputs(e.target.value)}
+                      placeholder="A digest, saved rows, alerts, files, or a final summary."
+                      rows={2}
+                      className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
+
+                {!showCloneDataSources ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCloneDataSources(true)}
+                    className="flex w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    Inputs, tools, or credentials
+                  </button>
+                ) : (
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCloneDataSources(false)}
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                      aria-label="Hide inputs, tools, or credentials"
+                    >
+                      <span className="text-[11px] font-medium">
+                        Inputs, tools, or credentials
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                        <Minus className="h-3.5 w-3.5" />
+                        Hide
+                      </span>
+                    </button>
+                    <textarea
+                      value={cloneDataSources}
+                      onChange={(e) => setCloneDataSources(e.target.value)}
+                      placeholder="APIs, websites, files, accounts, OAuth tools, or credentials it will need."
+                      rows={2}
+                      className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
+
                 {!showCloneSchedule ? (
                   <button
                     type="button"
                     onClick={() => setShowCloneSchedule(true)}
-                    className="inline-flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                    className="flex w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
                     Schedule / triggers
                   </button>
                 ) : (
-                  <div>
-                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                      Schedule / triggers{" "}
-                      <span className="text-muted-foreground/40">(optional)</span>
-                    </label>
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCloneSchedule(false)}
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                      aria-label="Hide schedule or triggers"
+                    >
+                      <span className="text-[11px] font-medium">
+                        Schedule / triggers
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                        <Minus className="h-3.5 w-3.5" />
+                        Hide
+                      </span>
+                    </button>
                     <textarea
                       value={cloneSchedule}
                       onChange={(e) => setCloneSchedule(e.target.value)}
@@ -899,17 +961,27 @@ export default function QueenDM() {
                   <button
                     type="button"
                     onClick={() => setShowCloneConcurrency(true)}
-                    className="inline-flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                    className="flex w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
                     Concurrency
                   </button>
                 ) : (
-                  <div>
-                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                      Concurrency{" "}
-                      <span className="text-muted-foreground/40">(optional)</span>
-                    </label>
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCloneConcurrency(false)}
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                      aria-label="Hide concurrency"
+                    >
+                      <span className="text-[11px] font-medium">
+                        Concurrency
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                        <Minus className="h-3.5 w-3.5" />
+                        Hide
+                      </span>
+                    </button>
                     <input
                       type="text"
                       value={cloneConcurrency}
@@ -921,7 +993,7 @@ export default function QueenDM() {
                 )}
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="mt-auto flex justify-end gap-2 border-t border-border/50 px-6 py-4">
               <button
                 onClick={() => {
                   setCloneDialogOpen(false);
@@ -931,6 +1003,8 @@ export default function QueenDM() {
                   setCloneDataSources("");
                   setCloneSchedule("");
                   setCloneConcurrency("");
+                  setShowCloneOutputs(false);
+                  setShowCloneDataSources(false);
                   setShowCloneSchedule(false);
                   setShowCloneConcurrency(false);
                 }}
