@@ -771,8 +771,7 @@ class TestCrashRecovery:
                     "function": {
                         "name": "ask_user",
                         "arguments": (
-                            '{"questions":[{"id":"city","prompt":"What city?",'
-                            '"options":["Seattle","Chicago"]}]}'
+                            '{"questions":[{"id":"city","prompt":"What city?","options":["Seattle","Chicago"]}]}'
                         ),
                     },
                 }

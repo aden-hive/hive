@@ -101,16 +101,23 @@ Use this tool when you need to ask the user questions during execution. Reach fo
 - You want post-task feedback, or to offer saving a skill or updating memory
 
 Usage notes:
-- Users will always be able to select "Other" to provide custom text input, so do not include catch-all options like "Other" or "Something else" yourself.
-- Each option is a plain string. Do NOT wrap options in `{"label": "..."}` or `{"value": "..."}` objects — pass the raw choice text directly, e.g. `"Email"`, not `{"label": "Email"}`.
-- If you recommend a specific option, make that the first option in the list and append " (Recommended)" to the end of its text.
+- Users will always be able to select "Other" to provide custom text input, \
+so do not include catch-all options like "Other" or "Something else" yourself.
+- Each option is a plain string. Do NOT wrap options in `{"label": "..."}` or \
+`{"value": "..."}` objects — pass the raw choice text directly, e.g. `"Email"`, \
+not `{"label": "Email"}`.
+- If you recommend a specific option, make that the first option in the list \
+and append " (Recommended)" to the end of its text.
 - Call this tool whenever you need the user's response.
 - The prompt field must be plain text only.
 - Do not include XML, pseudo-tags, or inline option lists inside prompt.
-- Omit options only when the question truly requires a free-form response the user must type out, such as describing an idea or pasting an error message.
-- Do not repeat the questions in your normal text response. The widget renders them, so keep any surrounding text to a brief intro only.
+- Omit options only when the question truly requires a free-form response the \
+user must type out, such as describing an idea or pasting an error message.
+- Do not repeat the questions in your normal text response. The widget renders \
+them, so keep any surrounding text to a brief intro only.
 Example — single question with options:
-{"questions": [{"id": "next", "prompt": "What would you like to do?", "options": ["Build a new agent (Recommended)", "Modify existing agent", "Run tests"]}]}
+{"questions": [{"id": "next", "prompt": "What would you like to do?", \
+"options": ["Build a new agent (Recommended)", "Modify existing agent", "Run tests"]}]}
 
 Example — batch:
 {"questions": [

@@ -128,27 +128,21 @@ def test_array_of_label_objects_unwraps_to_strings() -> None:
 
 
 def test_array_of_value_objects_unwraps() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": [{"value": "A"}, {"text": "B"}, {"name": "C"}]}
     coerce_tool_input(tool, args)
     assert args == {"xs": ["A", "B", "C"]}
 
 
 def test_single_key_object_falls_back_to_sole_value() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": [{"weirdkey": "A"}]}
     coerce_tool_input(tool, args)
     assert args == {"xs": ["A"]}
 
 
 def test_unrecognized_object_is_preserved() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": [{"a": "x", "b": "y"}]}  # ambiguous — no known key, multi-value
     coerce_tool_input(tool, args)
     assert args == {"xs": [{"a": "x", "b": "y"}]}  # untouched
@@ -158,27 +152,21 @@ def test_unrecognized_object_is_preserved() -> None:
 
 
 def test_json_string_array_is_parsed() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": '["A","B","C"]'}
     coerce_tool_input(tool, args)
     assert args == {"xs": ["A", "B", "C"]}
 
 
 def test_scalar_wraps_into_singleton_array() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": "solo"}
     coerce_tool_input(tool, args)
     assert args == {"xs": ["solo"]}
 
 
 def test_invalid_json_string_wraps_as_singleton() -> None:
-    tool = _tool(
-        {"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}}
-    )
+    tool = _tool({"type": "object", "properties": {"xs": {"type": "array", "items": {"type": "string"}}}})
     args = {"xs": "not json [[]"}
     coerce_tool_input(tool, args)
     assert args == {"xs": ["not json [[]"]}
