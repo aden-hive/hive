@@ -87,7 +87,7 @@ class TestIsSilentFailure:
         ok, r = is_silent_failure({"a": None, "b": "N/A", "c": ""})
         assert ok and ("None" in r or "short" in r or "placeholder" in r)
 
-    def test_all_short_real_values_not_flagged(self):
+    def test_substantive_value_prevents_silent_failure(self):
         """Short but genuine values like IDs should NOT be flagged when they have real content."""
         # 'ok' and 'yes' are >= 3 chars and not placeholders, so substantive_seen is True
         ok, _ = is_silent_failure({"a": "ok", "b": "yes", "c": "42"})

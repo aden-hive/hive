@@ -210,7 +210,15 @@ def is_silent_failure(output: dict[str, Any]) -> tuple[bool, str]:
         if value is None:
             flagged.append(f"key '{key}' is None")
             continue
-        val_str = str(value).strip()
+        # Fix 5: handle non-string types (numbers, lists, dicts) — never flag as silent
+        if not isinstance(value, str):
+            if isinstance(value, (list, tuple, set, dict)):
+                if len(value) == 0:
+                    flagged.append(f"key '{key}' is empty collection")
+                    continue
+            substantive_seen = True
+            continue
+        val_str = value.strip()
         if len(val_str) < _SILENT_FAILURE_MIN_LEN:
             flagged.append(f"key '{key}' suspiciously short ({len(val_str)} chars)")
             continue
@@ -449,8 +457,8 @@ async def record_failure(
 
     logger.info("failure_memory: recorded failure type=%s", ftype)  # checklist log
     logger.info(                                            # fix #8
-        "failure_memory: recorded agent=%s node=%s type=%s pattern=%r count=%d",
-        agent_id, node_name, ftype, pattern_key[:50], record.occurrence_count,
+        "failure_memory: recorded agent=%s node=%s type=%s record_id=%s count=%d",
+        agent_id, node_name, ftype, rec_id, record.occurrence_count,
     )
 
     if (
@@ -599,8 +607,8 @@ async def _maybe_propose_rule(record: FailureRecord, memory_dir: Path) -> None:
             _save_records_sync(memory_dir, records)
 
         logger.info(
-            "failure_memory: rule proposal created type=%s pattern=%r count=%d",
-            record.failure_type, record.pattern_key[:60], record.occurrence_count,
+            "failure_memory: rule proposal created type=%s record_id=%s count=%d",
+            record.failure_type, record.record_id, record.occurrence_count,
         )
 
     await asyncio.to_thread(_propose)

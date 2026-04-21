@@ -577,13 +577,6 @@ class AgentLoop(AgentProtocol):
                     logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
 
             system_prompt = await self._inject_failure_memory_at_session_start(ctx, system_prompt)
-            # Cache the injected failure-memory suffix so dynamic prompt refreshes can
-            # re-append it without another I/O call.  (CodeRabbit fix: CR-579)
-            self._cached_failure_memory_block: str = (
-                system_prompt[len(system_prompt.split("\n\n## Failure memory")[0]):]
-                if "\n\n## Failure memory" in system_prompt
-                else ""
-            )
 
             conversation = NodeConversation(
                 system_prompt=system_prompt,
@@ -594,6 +587,9 @@ class AgentLoop(AgentProtocol):
                 compaction_buffer_tokens=self._config.compaction_buffer_tokens,
                 compaction_warning_buffer_tokens=(self._config.compaction_warning_buffer_tokens),
             )
+            if hasattr(ctx, "failure_memory_cache"):
+                conversation.failure_memory_cache = ctx.failure_memory_cache
+                
             accumulator = OutputAccumulator(
                 store=self._conversation_store,
                 spillover_dir=self._config.spillover_dir,
@@ -821,10 +817,8 @@ class AgentLoop(AgentProtocol):
                 else:
                     _new_prompt = build_system_prompt_for_context(ctx)
                 if _new_prompt != conversation.system_prompt:
-                    # Re-append cached failure-memory block so refreshes don't lose it.
-                    _fm_block = getattr(self, "_cached_failure_memory_block", "")
-                    if _fm_block and "## Failure memory" not in _new_prompt:
-                        _new_prompt = f"{_new_prompt}{_fm_block}"
+                    if hasattr(conversation, "failure_memory_cache"):
+                        _new_prompt += "\n\n" + conversation.failure_memory_cache
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated", node_id)
 
@@ -1942,8 +1936,8 @@ class AgentLoop(AgentProtocol):
             if verdict.action == "ACCEPT":
                 verdict_action, verdict_feedback = await handle_accept_verdict(verdict, accumulator, ctx, iteration)
                 if verdict_action == "RETRY":
-                    retry_already_recorded = True  # handle_accept_verdict already recorded
-                    verdict = type(verdict)(action="RETRY", feedback=verdict_feedback)
+                    retry_already_recorded = True
+                    verdict = JudgeVerdict(action="RETRY", feedback=verdict_feedback)
 
             fb_preview = (verdict.feedback or "")[:200]
             logger.info(
@@ -4342,6 +4336,7 @@ class AgentLoop(AgentProtocol):
                 return system_prompt
 
             failure_block = build_failure_memory_prompt(failures)
+            ctx.failure_memory_cache = failure_block
             logger.info(
                 "[%s] failure_memory: injecting %d relevant past failures into prompt",
                 ctx.agent_id,
