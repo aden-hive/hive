@@ -261,7 +261,10 @@ export interface ReplayState {
     string,
     { name: string; done: boolean; streamId: string }
   >;
-  toolUseToPill: Record<string, { msgId: string; name: string }>;
+  toolUseToPill: Record<
+    string,
+    { msgId: string; name: string; streamId: string }
+  >;
   queenIterText: Record<string, Record<number, string>>;
 }
 
@@ -272,6 +275,20 @@ export function newReplayState(): ReplayState {
     toolUseToPill: {},
     queenIterText: {},
   };
+}
+
+function clearToolStateForStream(state: ReplayState, streamId: string): void {
+  const activeToolCalls: typeof state.activeToolCalls = {};
+  for (const [toolUseId, tool] of Object.entries(state.activeToolCalls)) {
+    if (tool.streamId !== streamId) activeToolCalls[toolUseId] = tool;
+  }
+  state.activeToolCalls = activeToolCalls;
+
+  const toolUseToPill: typeof state.toolUseToPill = {};
+  for (const [toolUseId, pill] of Object.entries(state.toolUseToPill)) {
+    if (pill.streamId !== streamId) toolUseToPill[toolUseId] = pill;
+  }
+  state.toolUseToPill = toolUseToPill;
 }
 
 /**
@@ -317,15 +334,14 @@ export function replayEvent(
   switch (event.type) {
     case "execution_started":
       state.turnCounters[turnKey] = currentTurn + 1;
-      // New execution for a worker resets its active tools so stale
-      // tool pills from a previous run cannot bleed into the next run.
-      if (!isQueen) {
-        const keepActive: typeof state.activeToolCalls = {};
-        for (const [k, v] of Object.entries(state.activeToolCalls)) {
-          if (v.streamId !== streamId) keepActive[k] = v;
-        }
-        state.activeToolCalls = keepActive;
-      }
+      // New executions reset their active tools so stale completed pills
+      // from a previous run cannot bleed into the next run.
+      clearToolStateForStream(state, streamId);
+      break;
+    case "node_loop_started":
+      // Queen-triggered scheduler runs emit node_loop_started rather than
+      // execution_started, so use it as an execution boundary too.
+      clearToolStateForStream(state, streamId);
       break;
     case "llm_turn_complete":
       state.turnCounters[turnKey] = currentTurn + 1;
@@ -341,7 +357,11 @@ export function replayEvent(
       };
       const pillId = `tool-pill-${streamId}-${event.execution_id || "exec"}-${currentTurn}`;
       if (toolUseId) {
-        state.toolUseToPill[toolUseId] = { msgId: pillId, name: toolName };
+        state.toolUseToPill[toolUseId] = {
+          msgId: pillId,
+          name: toolName,
+          streamId,
+        };
       }
       const tools = Object.values(state.activeToolCalls)
         .filter((t) => t.streamId === streamId)

@@ -515,6 +515,85 @@ describe("replayEventsToMessages", () => {
       "stream-session-1-0-t1-research",
     ]);
   });
+
+  it("does not carry completed queen tools into a scheduler run", () => {
+    const events = [
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-setup",
+        data: { tool_name: "create_colony", tool_use_id: "tool-create" },
+      }),
+      makeEvent({
+        type: "tool_call_completed",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-setup",
+        data: { tool_name: "create_colony", tool_use_id: "tool-create" },
+      }),
+      makeEvent({
+        type: "llm_turn_complete",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-setup",
+      }),
+      makeEvent({
+        type: "node_loop_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-scheduler",
+      }),
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-scheduler",
+        data: {
+          tool_name: "list_worker_questions",
+          tool_use_id: "tool-questions",
+        },
+      }),
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-scheduler",
+        data: { tool_name: "get_worker_status", tool_use_id: "tool-status" },
+      }),
+      makeEvent({
+        type: "tool_call_completed",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-scheduler",
+        data: {
+          tool_name: "list_worker_questions",
+          tool_use_id: "tool-questions",
+        },
+      }),
+      makeEvent({
+        type: "tool_call_completed",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "session-scheduler",
+        data: { tool_name: "get_worker_status", tool_use_id: "tool-status" },
+      }),
+    ];
+
+    const restored = replayEventsToMessages(events, "queen-dm", "Alexandra");
+    const schedulerToolRow = restored.find(
+      (m) => m.id === "tool-pill-queen-session-scheduler-1",
+    );
+
+    expect(schedulerToolRow).toBeDefined();
+    expect(JSON.parse(schedulerToolRow!.content)).toEqual({
+      tools: [
+        { name: "list_worker_questions", done: true },
+        { name: "get_worker_status", done: true },
+      ],
+      allDone: true,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

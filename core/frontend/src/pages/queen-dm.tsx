@@ -51,7 +51,6 @@ export default function QueenDM() {
     null,
   );
   const [creatingNewSession, setCreatingNewSession] = useState(false);
-  const [spawning, setSpawning] = useState(false);
   const [initialDraft, setInitialDraft] = useState<string | null>(null);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneColonyName, setCloneColonyName] = useState("");
@@ -422,49 +421,6 @@ export default function QueenDM() {
     }
   }, [sessionId, compactingAndForking, queenId, setSearchParams]);
 
-  const handleColonySpawn = useCallback(async () => {
-    if (!sessionId || spawning) return;
-    const colony = cloneColonyName.trim();
-    if (!colony) return;
-    setSpawning(true);
-    try {
-      const result = await executionApi.colonySpawn(
-        sessionId,
-        colony,
-        cloneTask.trim() || undefined,
-      );
-      const msg: ChatMessage = {
-        id: makeId(),
-        agent: "System",
-        agentColor: "",
-        content: `Forked to colony "${result.colony_name}"${result.is_new ? " (new)" : ""} — session ${result.queen_session_id}`,
-        timestamp: "",
-        type: "system",
-        thread: "queen-dm",
-        createdAt: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-      setCloneDialogOpen(false);
-      setCloneColonyName("");
-      setCloneTask("");
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const msg: ChatMessage = {
-        id: makeId(),
-        agent: "System",
-        agentColor: "",
-        content: `Clone failed: ${errMsg}`,
-        timestamp: "",
-        type: "system",
-        thread: "queen-dm",
-        createdAt: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-    } finally {
-      setSpawning(false);
-    }
-  }, [sessionId, spawning, cloneColonyName, cloneTask]);
-
   const handleSelectHistoricalSession = useCallback(
     (nextSessionId: string) => {
       if (!nextSessionId || nextSessionId === sessionId) return;
@@ -692,6 +648,19 @@ export default function QueenDM() {
     [sessionId, awaitingInput, isTyping],
   );
 
+  const handleColonySpawn = useCallback(() => {
+    const colony = cloneColonyName.trim();
+    if (!colony) return;
+    const task = cloneTask.trim();
+    const message = task
+      ? `Create a colony named \`${colony}\` for the following task:\n\n${task}`
+      : `Create a colony named \`${colony}\` from this session.`;
+    handleSend(message, "queen-dm");
+    setCloneDialogOpen(false);
+    setCloneColonyName("");
+    setCloneTask("");
+  }, [cloneColonyName, cloneTask, handleSend]);
+
   const handleQuestionAnswer = useCallback(
     (answers: Record<string, string>) => {
       setAwaitingInput(false);
@@ -788,7 +757,7 @@ export default function QueenDM() {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => !spawning && setCloneDialogOpen(false)}
+            onClick={() => setCloneDialogOpen(false)}
           />
           <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <h2 className="text-sm font-semibold text-foreground">
@@ -837,17 +806,16 @@ export default function QueenDM() {
                   setCloneColonyName("");
                   setCloneTask("");
                 }}
-                disabled={spawning}
                 className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleColonySpawn}
-                disabled={spawning || !cloneColonyName.trim()}
+                disabled={!cloneColonyName.trim()}
                 className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {spawning ? "Creating..." : "Create"}
+                Create
               </button>
             </div>
           </div>
