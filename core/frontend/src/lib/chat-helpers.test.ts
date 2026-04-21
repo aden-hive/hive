@@ -594,6 +594,51 @@ describe("replayEventsToMessages", () => {
       allDone: true,
     });
   });
+
+  it("uses execution id when resolving tool completions", () => {
+    const events = [
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "exec-a",
+        data: { tool_name: "first_run_tool", tool_use_id: "shared-id" },
+      }),
+      makeEvent({
+        type: "tool_call_started",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "exec-b",
+        data: { tool_name: "second_run_tool", tool_use_id: "shared-id" },
+      }),
+      makeEvent({
+        type: "tool_call_completed",
+        stream_id: "queen",
+        node_id: "queen",
+        execution_id: "exec-a",
+        data: { tool_name: "first_run_tool", tool_use_id: "shared-id" },
+      }),
+    ];
+
+    const restored = replayEventsToMessages(events, "queen-dm", "Alexandra");
+    const firstRunRow = restored.find(
+      (m) => m.id === "tool-pill-queen-exec-a-0",
+    );
+    const secondRunRow = restored.find(
+      (m) => m.id === "tool-pill-queen-exec-b-0",
+    );
+
+    expect(firstRunRow).toBeDefined();
+    expect(secondRunRow).toBeDefined();
+    expect(JSON.parse(firstRunRow!.content)).toEqual({
+      tools: [{ name: "first_run_tool", done: true }],
+      allDone: true,
+    });
+    expect(JSON.parse(secondRunRow!.content)).toEqual({
+      tools: [{ name: "second_run_tool", done: false }],
+      allDone: false,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
