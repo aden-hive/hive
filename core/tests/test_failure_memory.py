@@ -83,11 +83,31 @@ class TestIsSilentFailure:
         assert ok
 
     def test_all_short_values(self):
-        ok, r = is_silent_failure({"a": "ok", "b": "yes", "c": "1"})
-        assert ok and "short" in r
+        """All values short AND all are None/placeholder → silent failure."""
+        ok, r = is_silent_failure({"a": None, "b": "N/A", "c": ""})
+        assert ok and ("None" in r or "short" in r or "placeholder" in r)
+
+    def test_all_short_real_values_not_flagged(self):
+        """Short but genuine values like IDs should NOT be flagged when they have real content."""
+        # 'ok' and 'yes' are >= 3 chars and not placeholders, so substantive_seen is True
+        ok, _ = is_silent_failure({"a": "ok", "b": "yes", "c": "42"})
+        assert not ok   # real values — not a silent failure
 
     def test_single_char(self):
         ok, _ = is_silent_failure({"result": "x"})
+        assert ok
+
+    def test_xml_placeholder_mixed(self):
+        """Placeholder in one field, real content in another → not a silent failure."""
+        ok, _ = is_silent_failure({
+            "result": "<o>",
+            "details": "See attached report for full breakdown of the quarterly results.",
+        })
+        assert not ok  # details is substantive
+
+    def test_all_placeholders(self):
+        """Every field is a placeholder → silent failure."""
+        ok, _ = is_silent_failure({"result": "<o>", "summary": "N/A"})
         assert ok
 
     def test_good_output_not_flagged(self):

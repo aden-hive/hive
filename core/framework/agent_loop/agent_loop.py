@@ -577,6 +577,13 @@ class AgentLoop(AgentProtocol):
                     logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
 
             system_prompt = await self._inject_failure_memory_at_session_start(ctx, system_prompt)
+            # Cache the injected failure-memory suffix so dynamic prompt refreshes can
+            # re-append it without another I/O call.  (CodeRabbit fix: CR-579)
+            self._cached_failure_memory_block: str = (
+                system_prompt[len(system_prompt.split("\n\n## Failure memory")[0]):]
+                if "\n\n## Failure memory" in system_prompt
+                else ""
+            )
 
             conversation = NodeConversation(
                 system_prompt=system_prompt,
@@ -814,6 +821,10 @@ class AgentLoop(AgentProtocol):
                 else:
                     _new_prompt = build_system_prompt_for_context(ctx)
                 if _new_prompt != conversation.system_prompt:
+                    # Re-append cached failure-memory block so refreshes don't lose it.
+                    _fm_block = getattr(self, "_cached_failure_memory_block", "")
+                    if _fm_block and "## Failure memory" not in _new_prompt:
+                        _new_prompt = f"{_new_prompt}{_fm_block}"
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated", node_id)
 
@@ -1927,9 +1938,11 @@ class AgentLoop(AgentProtocol):
                 real_tool_results,
                 iteration,
             )
+            retry_already_recorded = False
             if verdict.action == "ACCEPT":
                 verdict_action, verdict_feedback = await handle_accept_verdict(verdict, accumulator, ctx, iteration)
                 if verdict_action == "RETRY":
+                    retry_already_recorded = True  # handle_accept_verdict already recorded
                     verdict = type(verdict)(action="RETRY", feedback=verdict_feedback)
 
             fb_preview = (verdict.feedback or "")[:200]
@@ -2080,7 +2093,8 @@ class AgentLoop(AgentProtocol):
                 )
 
             elif verdict.action == "RETRY":
-                await handle_retry_verdict(verdict, accumulator, ctx, iteration)
+                if not retry_already_recorded:
+                    await handle_retry_verdict(verdict, accumulator, ctx, iteration)
                 _retry_count += 1
                 if ctx.runtime_logger:
                     iter_latency_ms = int((time.time() - iter_start) * 1000)

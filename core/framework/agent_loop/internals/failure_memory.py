@@ -204,6 +204,7 @@ def is_silent_failure(output: dict[str, Any]) -> tuple[bool, str]:
         return True, "output dict is empty — agent produced no values"
 
     flagged: list[str] = []
+    substantive_seen = False
 
     for key, value in output.items():
         if value is None:
@@ -213,11 +214,18 @@ def is_silent_failure(output: dict[str, Any]) -> tuple[bool, str]:
         if len(val_str) < _SILENT_FAILURE_MIN_LEN:
             flagged.append(f"key '{key}' suspiciously short ({len(val_str)} chars)")
             continue
+        matched_placeholder = False
         for pat in _SILENT_FAILURE_PATTERNS:
             if pat.search(val_str):
                 flagged.append(f"key '{key}' matches placeholder: {val_str!r:.60}")
+                matched_placeholder = True
                 break
+        if not matched_placeholder:
+            # At least one field has real, substantive content — not a silent failure.
+            substantive_seen = True
 
+    if substantive_seen:
+        return False, ""
     return (True, "; ".join(flagged)) if flagged else (False, "")
 
 
@@ -528,13 +536,16 @@ def build_failure_memory_prompt(
     ]
     n = 0
     for ftype, recs in groups.items():
-        lines.append(f"\n**{ftype.replace('_', ' ').title()}**")
+        safe_type = _sanitize_for_prompt(str(ftype).replace("_", " ").title(), max_len=40)
+        lines.append(f"\n**{safe_type}**")
         for rec in recs:
             n += 1
-            safe_output = _sanitize_for_prompt(rec.output_sample, max_len=60)
+            safe_pattern  = _sanitize_for_prompt(rec.pattern_key, max_len=70)
+            safe_feedback = _sanitize_for_prompt(rec.judge_feedback, max_len=100)
+            safe_output   = _sanitize_for_prompt(rec.output_sample, max_len=60)
             entry = (
-                f"  {n}. (seen {rec.occurrence_count}x) {rec.pattern_key[:70]}\n"
-                f"     Feedback: {rec.judge_feedback[:100]}\n"
+                f"  {n}. (seen {rec.occurrence_count}x) {safe_pattern}\n"
+                f"     Feedback: {safe_feedback}\n"
                 f"     Output: {safe_output}\n"
             )
             if len(entry) > per_record_budget:
