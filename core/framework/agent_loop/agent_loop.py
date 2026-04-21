@@ -71,6 +71,7 @@ from framework.agent_loop.internals.synthetic_tools import (
     build_report_to_parent_tool,
     handle_report_to_parent,
 )
+from framework.agent_loop.internals.tool_input_coercer import coerce_tool_input
 from framework.agent_loop.internals.tool_result_handler import (
     build_json_preview,
     execute_tool,
@@ -2835,7 +2836,17 @@ class AgentLoop(AgentProtocol):
             # nudge on its next turn without losing the real execution output.
             replay_prefixes_by_id: dict[str, str] = {}
 
+            # Schema-driven coercion of tool arguments. Heals the small
+            # handful of drift patterns that non-frontier models emit
+            # (numbers-as-strings, array-of-{label} wrappers, arrays
+            # sent as JSON strings, singleton scalars). Runs once per
+            # tool call before dispatch; see tool_input_coercer module.
+            _tool_by_name = {t.name: t for t in tools}
+
             for tc in tool_calls:
+                _tool_schema = _tool_by_name.get(tc.tool_name)
+                if _tool_schema is not None:
+                    coerce_tool_input(_tool_schema, tc.tool_input)
                 tool_call_count += 1
                 if hard_limit > 0 and tool_call_count > hard_limit:
                     limit_hit = True
@@ -2893,11 +2904,15 @@ class AgentLoop(AgentProtocol):
                         user_input_requested = False
                         continue
 
-                    # Normalize + self-heal each question entry. Some
-                    # model families cram options inside the prompt as a
-                    # pseudo-XML blob like "What now?</question>\n
-                    # _OPTIONS: [\"A\", \"B\"]". sanitize_ask_user_inputs
-                    # strips the tag and recovers the inline options.
+                    # Normalize + self-heal each question entry. The
+                    # generic tool_input_coercer has already handled
+                    # schema-shape drift (array-of-string options, JSON
+                    # strings, etc.), so here we only deal with
+                    # prompt-style drift: some model families cram
+                    # options inside the prompt as a pseudo-XML blob
+                    # like "What now?</question>\n_OPTIONS: [\"A\", \"B\"]".
+                    # sanitize_ask_user_inputs strips the tag and
+                    # recovers the inline options as a fallback.
                     questions: list[dict] = []
                     for i, q in enumerate(raw_questions):
                         if not isinstance(q, dict):
@@ -2906,21 +2921,12 @@ class AgentLoop(AgentProtocol):
                         raw_prompt = q.get("prompt", q.get("question", ""))
                         raw_opts = q.get("options", None)
                         cleaned_prompt, recovered_opts = sanitize_ask_user_inputs(raw_prompt, raw_opts)
-                        if recovered_opts is not None and raw_opts is None:
-                            raw_opts = recovered_opts
 
                         opts: list[str] | None = None
-                        if isinstance(raw_opts, list):
+                        if isinstance(raw_opts, list) and raw_opts:
                             opts = [str(o) for o in raw_opts if o]
-                        elif isinstance(raw_opts, str) and raw_opts.strip():
-                            # Defensive: smaller models sometimes send a
-                            # JSON-encoded string instead of an array.
-                            try:
-                                parsed = json.loads(raw_opts)
-                                if isinstance(parsed, list):
-                                    opts = [str(o) for o in parsed if o]
-                            except (json.JSONDecodeError, TypeError):
-                                pass
+                        elif recovered_opts is not None:
+                            opts = recovered_opts
                         if opts is not None and len(opts) < 2:
                             opts = None  # fall back to free-text
 

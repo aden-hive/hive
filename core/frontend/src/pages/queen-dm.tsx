@@ -55,6 +55,12 @@ export default function QueenDM() {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneColonyName, setCloneColonyName] = useState("");
   const [cloneTask, setCloneTask] = useState("");
+  const [cloneOutputs, setCloneOutputs] = useState("");
+  const [cloneDataSources, setCloneDataSources] = useState("");
+  const [cloneSchedule, setCloneSchedule] = useState("");
+  const [cloneConcurrency, setCloneConcurrency] = useState("");
+  const [showCloneSchedule, setShowCloneSchedule] = useState(false);
+  const [showCloneConcurrency, setShowCloneConcurrency] = useState(false);
   // Colony-spawned lock state. Once a colony has been spawned from this DM
   // and the user clicked into it, /chat is rejected server-side and the
   // composer is replaced with a "compact + new session" button. Hydrated
@@ -652,14 +658,53 @@ export default function QueenDM() {
     const colony = cloneColonyName.trim();
     if (!colony) return;
     const task = cloneTask.trim();
-    const message = task
-      ? `Create a colony named \`${colony}\` for the following task:\n\n${task}`
-      : `Create a colony named \`${colony}\` from this session.`;
+
+    const briefLines = [
+      `Colony name: ${colony}`,
+      `Purpose: ${task || "Use the current conversation to propose the colony's purpose."}`,
+    ];
+    if (cloneOutputs.trim()) {
+      briefLines.push(`Expected outputs: ${cloneOutputs.trim()}`);
+    }
+    if (cloneDataSources.trim()) {
+      briefLines.push(`Inputs, data sources, tools, or credentials: ${cloneDataSources.trim()}`);
+    }
+    if (showCloneSchedule && cloneSchedule.trim()) {
+      briefLines.push(`Schedule/triggers: ${cloneSchedule.trim()}`);
+    }
+    if (showCloneConcurrency && cloneConcurrency.trim()) {
+      briefLines.push(`Concurrency: ${cloneConcurrency.trim()}`);
+    }
+
+    const message = [
+      "I want to set up a persistent colony.",
+      "",
+      briefLines.join("\n"),
+      "",
+      "Please use start_incubating_colony if this is appropriate. Ask me for any missing details before calling create_colony, then generate the self-contained task, skill name, skill description, skill body, and any optional triggers or concurrency hint needed by the colony.",
+    ].join("\n");
+
     handleSend(message, "queen-dm");
     setCloneDialogOpen(false);
     setCloneColonyName("");
     setCloneTask("");
-  }, [cloneColonyName, cloneTask, handleSend]);
+    setCloneOutputs("");
+    setCloneDataSources("");
+    setCloneSchedule("");
+    setCloneConcurrency("");
+    setShowCloneSchedule(false);
+    setShowCloneConcurrency(false);
+  }, [
+    cloneColonyName,
+    cloneConcurrency,
+    cloneDataSources,
+    cloneOutputs,
+    cloneSchedule,
+    cloneTask,
+    handleSend,
+    showCloneConcurrency,
+    showCloneSchedule,
+  ]);
 
   const handleQuestionAnswer = useCallback(
     (answers: Record<string, string>) => {
@@ -747,7 +792,7 @@ export default function QueenDM() {
               className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
             >
               <Plus className="w-3 h-3" />
-              Create a Colony
+              Start Colony Setup
             </button>
           }
         />
@@ -759,13 +804,13 @@ export default function QueenDM() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setCloneDialogOpen(false)}
           />
-          <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
             <h2 className="text-sm font-semibold text-foreground">
-              Create a Colony
+              Set Up a Colony
             </h2>
             <p className="text-[11px] text-muted-foreground">
-              Create a new colony from this queen's session. The colony inherits
-              the queen's tools, context, and conversation history.
+              Share the brief. The queen will fill gaps, write the worker skill,
+              and create the colony when the setup is ready.
             </p>
             <div className="space-y-3">
               <div>
@@ -787,16 +832,93 @@ export default function QueenDM() {
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Task{" "}
-                  <span className="text-muted-foreground/40">(optional)</span>
+                  What should it do?
                 </label>
-                <input
-                  type="text"
+                <textarea
                   value={cloneTask}
                   onChange={(e) => setCloneTask(e.target.value)}
-                  placeholder="Continue the work from the queen's session"
-                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Monitor launches, process a backlog, prepare a report, or continue this session's work."
+                  rows={3}
+                  className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Expected output{" "}
+                  <span className="text-muted-foreground/40">(optional)</span>
+                </label>
+                <textarea
+                  value={cloneOutputs}
+                  onChange={(e) => setCloneOutputs(e.target.value)}
+                  placeholder="A digest, saved rows, alerts, files, or a final summary."
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Inputs, tools, or credentials{" "}
+                  <span className="text-muted-foreground/40">(optional)</span>
+                </label>
+                <textarea
+                  value={cloneDataSources}
+                  onChange={(e) => setCloneDataSources(e.target.value)}
+                  placeholder="APIs, websites, files, accounts, OAuth tools, or credentials it will need."
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {!showCloneSchedule ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCloneSchedule(true)}
+                    className="inline-flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Schedule / triggers
+                  </button>
+                ) : (
+                  <div>
+                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                      Schedule / triggers{" "}
+                      <span className="text-muted-foreground/40">(optional)</span>
+                    </label>
+                    <textarea
+                      value={cloneSchedule}
+                      onChange={(e) => setCloneSchedule(e.target.value)}
+                      placeholder="Manual only, every weekday at 9 AM, every 30 minutes, or webhook path."
+                      rows={2}
+                      className="w-full resize-none rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
+
+                {!showCloneConcurrency ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCloneConcurrency(true)}
+                    className="inline-flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Concurrency
+                  </button>
+                ) : (
+                  <div>
+                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                      Concurrency{" "}
+                      <span className="text-muted-foreground/40">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={cloneConcurrency}
+                      onChange={(e) => setCloneConcurrency(e.target.value)}
+                      placeholder="1 for a single worker, 5 for a parallel backlog, or any limit to respect."
+                      className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -805,6 +927,12 @@ export default function QueenDM() {
                   setCloneDialogOpen(false);
                   setCloneColonyName("");
                   setCloneTask("");
+                  setCloneOutputs("");
+                  setCloneDataSources("");
+                  setCloneSchedule("");
+                  setCloneConcurrency("");
+                  setShowCloneSchedule(false);
+                  setShowCloneConcurrency(false);
                 }}
                 className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               >
@@ -815,7 +943,7 @@ export default function QueenDM() {
                 disabled={!cloneColonyName.trim()}
                 className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                Create
+                Start setup
               </button>
             </div>
           </div>
