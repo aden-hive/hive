@@ -258,7 +258,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
             except ImportError:
                 pass
             return {
-                "extra_headers": headers,
+                "extra_headers": headers, 
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
