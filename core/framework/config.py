@@ -266,6 +266,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
         return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
+
 def get_worker_max_tokens() -> int:
     """Return max_tokens for the worker LLM, falling back to default."""
     worker_llm = get_hive_config().get("worker_llm", {})
@@ -315,8 +316,7 @@ def get_max_context_tokens() -> int:
     elif value is not None:
         # Wrapped to satisfy the 120-character limit (E501)
         logger.warning(
-            f"Invalid llm.max_context_tokens: {value}. "
-            f"Using DEFAULT_MAX_CONTEXT_TOKENS ({DEFAULT_MAX_CONTEXT_TOKENS})."
+            f"Invalid llm.max_context_tokens: {value}. Using DEFAULT_MAX_CONTEXT_TOKENS ({DEFAULT_MAX_CONTEXT_TOKENS})."
         )
 
     return DEFAULT_MAX_CONTEXT_TOKENS
