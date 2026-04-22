@@ -283,6 +283,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
 
     # Wait for background fork finalization (compaction + worker storage copy)
     from framework.server import routes_execution
+
     if routes_execution._BACKGROUND_FORK_TASKS:
         await asyncio.gather(*routes_execution._BACKGROUND_FORK_TASKS)
 

@@ -1144,10 +1144,7 @@ def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int |
     # World lore
     if lore:
         sections.append(
-            f"<world_lore>\n"
-            f"- Habitat: {lore.get('habitat', '')}\n"
-            f"- Lexicon: {lore.get('lexicon', '')}\n"
-            f"</world_lore>"
+            f"<world_lore>\n- Habitat: {lore.get('habitat', '')}\n- Lexicon: {lore.get('lexicon', '')}\n</world_lore>"
         )
 
     # Skills (functional, for tool selection context)
@@ -1161,12 +1158,8 @@ def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int |
     if examples:
         example_parts: list[str] = []
         for ex in examples:
-            example_parts.append(
-                f"User: {ex['user']}\n\nAssistant:\n{ex['internal']}\n{ex['response']}"
-            )
-        sections.append(
-            "<roleplay_examples>\n" + "\n\n---\n\n".join(example_parts) + "\n</roleplay_examples>"
-        )
+            example_parts.append(f"User: {ex['user']}\n\nAssistant:\n{ex['internal']}\n{ex['response']}")
+        sections.append("<roleplay_examples>\n" + "\n\n---\n\n".join(example_parts) + "\n</roleplay_examples>")
 
     return "\n\n".join(sections)
 
@@ -1271,10 +1264,7 @@ async def select_queen_with_reason(user_message: str, llm: LLMProvider) -> Queen
             reason,
             raw,
         )
-        fallback_reason = (
-            reason
-            or f"Selection failed because the classifier returned unknown queen_id {queen_id!r}."
-        )
+        fallback_reason = reason or f"Selection failed because the classifier returned unknown queen_id {queen_id!r}."
         return QueenSelection(queen_id=_DEFAULT_QUEEN_ID, reason=fallback_reason)
 
     if not reason:
