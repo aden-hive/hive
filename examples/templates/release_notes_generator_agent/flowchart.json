@@ -1,0 +1,173 @@
+{
+  "original_draft": {
+    "agent_name": "release_notes_generator_agent",
+    "goal": "Generate structured release notes from GitHub repository commits.",
+    "description": "",
+    "success_criteria": [],
+    "constraints": [],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Release Notes Intake",
+        "description": "Collect version and confirm generation of release notes",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "version",
+          "repo",
+          "since"
+        ],
+        "output_keys": [
+          "version",
+          "repo",
+          "since"
+        ],
+        "success_criteria": "Version has been confirmed for release notes generation.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "collect_changes",
+        "name": "Collect Changes",
+        "description": "Fetch recent commits from GitHub",
+        "node_type": "event_loop",
+        "tools": [
+          "github_list_commits"
+        ],
+        "input_keys": [
+          "repo",
+          "since"
+        ],
+        "output_keys": [
+          "changes"
+        ],
+        "success_criteria": "Changes have been collected.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "classify_changes",
+        "name": "Classify Changes",
+        "description": "Classify changes into categories",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "changes"
+        ],
+        "output_keys": [
+          "classified_changes"
+        ],
+        "success_criteria": "Changes have been classified.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "generate_notes",
+        "name": "Generate Release Notes",
+        "description": "Generate formatted release notes",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "classified_changes",
+          "version"
+        ],
+        "output_keys": [
+          "release_notes"
+        ],
+        "success_criteria": "Release notes have been generated.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "collect_changes",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "collect_changes",
+        "target": "classify_changes",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "classify_changes",
+        "target": "generate_notes",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "generate_notes"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "collect_changes": [
+      "collect_changes"
+    ],
+    "classify_changes": [
+      "classify_changes"
+    ],
+    "generate_notes": [
+      "generate_notes"
+    ]
+  }
+}
