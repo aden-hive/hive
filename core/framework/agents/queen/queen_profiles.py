@@ -1060,7 +1060,7 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
-def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
+def format_queen_identity_prompt(profile: dict[str, Any], *, max_examples: int | None = None) -> str:
     """Convert a queen profile into a high-dimensional character prompt.
 
     Uses the 5-pillar character construction system: core identity,
@@ -1068,6 +1068,11 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
     behavior rules, and world lore.  The hidden background and
     psychological profile are never shown to the user but shape
     every response.
+
+    ``max_examples`` caps the roleplay_examples block — profiles ship
+    four worked examples (~2.4 KB) but one is enough at runtime to show
+    the internal-then-external pattern. Full rendering stays available
+    for profile authoring / eval playback by leaving ``max_examples=None``.
     """
     name = profile.get("name", "the Queen")
     title = profile.get("title", "Senior Advisor")
@@ -1151,6 +1156,8 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
 
     # Few-shot examples showing the full internal process
     examples = profile.get("examples", [])
+    if examples and max_examples is not None:
+        examples = examples[:max_examples]
     if examples:
         example_parts: list[str] = []
         for ex in examples:

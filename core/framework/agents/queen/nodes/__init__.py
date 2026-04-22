@@ -885,9 +885,9 @@ You are operating as a standalone agent — no worker layout. You do the work di
 search_files, run_command, undo_changes
 
 ## Browser Automation (gcu-tools MCP)
-All browser tools are prefixed with `browser_` (browser_start, browser_navigate, \
-browser_click, browser_fill, browser_snapshot, <!-- vision-only -->browser_screenshot, <!-- /vision-only -->browser_scroll, \  # noqa: E501
-browser_tabs, browser_close, browser_evaluate, etc.).
+All browser tools are prefixed with `browser_` (browser_start, browser_navigate,
+browser_click, browser_fill, browser_snapshot, <!-- vision-only -->browser_screenshot,
+<!-- /vision-only -->browser_scroll, browser_tabs, browser_close, browser_evaluate, etc.).
 Follow the browser-automation skill protocol — activate it before using browser tools.
 
 ## Parallel fan-out (one-off batch work)
