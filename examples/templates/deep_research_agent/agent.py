@@ -106,23 +106,23 @@ edges = [
         priority=1,
     ),
     # review -> research (feedback loop)
-    EdgeSpec(
-        id="review-to-research-feedback",
-        source="review",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == True",
-        priority=1,
-    ),
-    # review -> report (user satisfied)
-    EdgeSpec(
-        id="review-to-report",
-        source="review",
-        target="report",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == False",
-        priority=2,
-    ),
+EdgeSpec(
+    id="review-to-research-feedback",
+    source="review",
+    target="research",
+    condition=EdgeCondition.CONDITIONAL,
+    condition_expr="str(needs_more_research).lower() == 'true'",  # fix
+    priority=1,
+),
+# review -> report (user satisfied)
+EdgeSpec(
+    id="review-to-report",
+    source="review",
+    target="report",
+    condition=EdgeCondition.CONDITIONAL,
+    condition_expr="str(needs_more_research).lower() != 'true'",  # fix
+    priority=2,
+),
     # report -> research (user wants deeper research on current topic)
     EdgeSpec(
         id="report-to-research",
