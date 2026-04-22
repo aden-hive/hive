@@ -1570,6 +1570,10 @@ ALL_QUEEN_TOOLS = sorted(
     )
 )
 
+# Backwards compatibility aliases for older code/tests
+_QUEEN_WORKING_TOOLS = _QUEEN_RUNNING_TOOLS
+_QUEEN_REVIEWING_TOOLS = _QUEEN_EDITING_TOOLS
+
 __all__ = [
     "queen_node",
     "ALL_QUEEN_TOOLS",
@@ -1577,7 +1581,9 @@ __all__ = [
     "_QUEEN_BUILDING_TOOLS",
     "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
+    "_QUEEN_WORKING_TOOLS",  # Backwards compatibility alias
     "_QUEEN_EDITING_TOOLS",
+    "_QUEEN_REVIEWING_TOOLS",  # Backwards compatibility alias
     "_QUEEN_INDEPENDENT_TOOLS",
     # Character + phase-specific prompt segments (used by session_manager for dynamic prompts)
     "_queen_character_core",
