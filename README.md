@@ -94,6 +94,7 @@ Use Hive when the bottleneck is no longer the model but the harness around it:
 ## Quick Start
 
 ### Prerequisites
+> 💡 For beginners: Make sure you have Python 3.11 or higher installed and added to your PATH before running the setup script.
 
 - Python 3.11+ for agent development
 - An LLM provider that powers the agents
@@ -102,6 +103,7 @@ Use Hive when the bottleneck is no longer the model but the harness around it:
 > **Windows Users:** Native Windows is supported via `quickstart.ps1` and `hive.ps1`. Run these in PowerShell 5.1+. WSL is also an option but not required.
 
 ### Installation
+The following steps will help you set up Hive locally for the first time.
 
 > **Note**
 > Hive uses a `uv` workspace layout and is not installed with `pip install`.
@@ -298,3 +300,4 @@ Contributions are welcome! Fork the repository, create your feature branch, impl
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>
+Minor documentation improvement
