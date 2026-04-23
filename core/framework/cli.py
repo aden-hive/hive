@@ -79,6 +79,11 @@ def main() -> None:
 
     register_mcp_commands(subparsers)
 
+    # Register credential management commands (creds list, show, add, delete, test, refresh)
+    from framework.credentials.cli import register_commands as register_cred_commands
+
+    register_cred_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
