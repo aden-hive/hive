@@ -228,7 +228,9 @@ else:  # linux
 - **Node.js 18+** (optional, for frontend development)
 
 > **Windows Users:**
-> Native Windows is supported. Use `.\quickstart.ps1` for setup and `.\hive.ps1` to run (PowerShell 5.1+). Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts. WSL is also an option but not required.
+> Native Windows is supported. Use `.\quickstart.ps1` for setup and `.\hive.ps1` to run (PowerShell 5.1+). Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts.
+>
+> **Using WSL2?** See the dedicated [Windows WSL2 Setup Guide](docs/windows-wsl2-setup.md) for WSL2-specific instructions, including line-ending fixes, port forwarding, and Node.js setup inside WSL2.
 
 > **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 
