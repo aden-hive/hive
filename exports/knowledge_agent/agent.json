@@ -1,0 +1,78 @@
+{
+  "goal": {
+    "goal_id": "knowledge_gathering",
+    "name": "Knowledge Agent",
+    "description": "Autonomous research agent that searches the web and compiles summaries.",
+    "success_criteria": "Relevant information is found, scraped, and summarized into a coherent answer."
+  },
+  "nodes": [
+    {
+      "node_id": "search_plan",
+      "name": "Plan Search",
+      "node_type": "llm_generate",
+      "system_prompt": "You are a research planner. Given a user topic, generate 3 specific search queries to find high-quality information.",
+      "input_keys": ["topic"],
+      "output_keys": ["queries"]
+    },
+    {
+      "node_id": "execute_search",
+      "name": "Execute Search",
+      "node_type": "tool_call",
+      "tool": "web_search",
+      "input_mapping": {
+        "query": "queries"
+      },
+      "output_key": "search_results"
+    },
+    {
+      "node_id": "scrape_content",
+      "name": "Scrape Pages",
+      "node_type": "tool_call",
+      "tool": "web_scrape",
+      "input_mapping": {
+        "url": "search_results.url"
+      },
+      "output_key": "page_content"
+    },
+    {
+      "node_id": "synthesize",
+      "name": "Synthesize Answer",
+      "node_type": "llm_generate",
+      "system_prompt": "You are a knowledge synthesizer. Read the scraped content and write a comprehensive summary answering the original topic.",
+      "input_keys": ["topic", "page_content"],
+      "output_keys": ["summary", "sources"]
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "start_to_plan",
+      "source": "START",
+      "target": "search_plan",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "plan_to_search",
+      "source": "search_plan",
+      "target": "execute_search",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "search_to_scrape",
+      "source": "execute_search",
+      "target": "scrape_content",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "scrape_to_synth",
+      "source": "scrape_content",
+      "target": "synthesize",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "synth_to_end",
+      "source": "synthesize",
+      "target": "END",
+      "condition": "on_success"
+    }
+  ]
+}
