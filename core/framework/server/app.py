@@ -6,9 +6,14 @@ from pathlib import Path
 
 from aiohttp import web
 
+from framework.credentials.store import CredentialStore
 from framework.server.session_manager import Session, SessionManager
 
 logger = logging.getLogger(__name__)
+
+CREDENTIAL_STORE_KEY = web.AppKey("credential_store", CredentialStore)
+SESSION_MANAGER_KEY = web.AppKey("manager", SessionManager)
+QUEEN_TOOL_REGISTRY_KEY = web.AppKey("queen_tool_registry", object)
 
 
 # Anchor to the repository root so allowed roots are independent of CWD.
@@ -83,7 +88,7 @@ def resolve_session(request: web.Request):
 
     Returns (session, None) on success or (None, error_response) on failure.
     """
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[SESSION_MANAGER_KEY]
     sid = request.match_info["session_id"]
     session = manager.get_session(sid)
     if not session:
@@ -162,13 +167,13 @@ async def error_middleware(request: web.Request, handler):
 
 async def _on_shutdown(app: web.Application) -> None:
     """Gracefully unload all agents on server shutdown."""
-    manager: SessionManager = app["manager"]
+    manager: SessionManager = app[SESSION_MANAGER_KEY]
     await manager.shutdown_all()
 
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /api/health — simple health check."""
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[SESSION_MANAGER_KEY]
     sessions = manager.list_sessions()
     return web.json_response(
         {
@@ -271,8 +276,6 @@ def create_app(model: str | None = None) -> web.Application:
     app = web.Application(middlewares=[cors_middleware, error_middleware])
 
     # Initialize credential store (before SessionManager so it can be shared)
-    from framework.credentials.store import CredentialStore
-
     try:
         from framework.credentials.validation import ensure_credential_key_env
 
@@ -305,12 +308,12 @@ def create_app(model: str | None = None) -> web.Application:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
         credential_store = CredentialStore.for_testing({})
 
-    app["credential_store"] = credential_store
+    app[CREDENTIAL_STORE_KEY] = credential_store
 
     # Let queen sessions build their registry lazily on first use instead of
     # paying the MCP discovery cost during `hive open`.
-    app["queen_tool_registry"] = None
-    app["manager"] = SessionManager(
+    app[QUEEN_TOOL_REGISTRY_KEY] = None
+    app[SESSION_MANAGER_KEY] = SessionManager(
         model=model,
         credential_store=credential_store,
         queen_tool_registry=None,

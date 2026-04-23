@@ -95,7 +95,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     _build_frontend()
 
     from framework.observability import configure_logging
-    from framework.server.app import create_app
+    from framework.server.app import SESSION_MANAGER_KEY, create_app
 
     if getattr(args, "debug", False):
         configure_logging(level="DEBUG")
@@ -120,7 +120,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     app = create_app(model=model)
 
     async def run_server() -> None:
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         shutdown_event = asyncio.Event()
         signal_count = {"n": 0}
 

@@ -22,7 +22,7 @@ from framework.server import (
     routes_queens,
     session_manager as session_manager_module,
 )
-from framework.server.app import create_app
+from framework.server.app import CREDENTIAL_STORE_KEY, SESSION_MANAGER_KEY, create_app
 from framework.server.session_manager import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -331,7 +331,7 @@ def custom_id_session(tmp_agent_dir):
 def _make_app_with_session(session):
     """Create an aiohttp app with a pre-loaded session."""
     app = create_app()
-    mgr = app["manager"]
+    mgr = app[SESSION_MANAGER_KEY]
     mgr._sessions[session.id] = session
     return app
 
@@ -386,7 +386,7 @@ class TestSessionCRUD:
     @pytest.mark.asyncio
     async def test_create_session_with_worker_forwards_session_id(self):
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         manager.create_session_with_worker_colony = AsyncMock(return_value=_make_session(agent_id="my-custom-session"))
 
         async with TestClient(TestServer(app)) as client:
@@ -583,7 +583,7 @@ class TestMessageBootstrap:
     @pytest.mark.asyncio
     async def test_classify_returns_queen_id_without_touching_sessions(self, monkeypatch):
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         # Pre-existing live session must NOT be stopped by classify.
         existing = _make_session(agent_id="live_session")
         existing.queen_name = "queen_growth"
@@ -623,7 +623,7 @@ class TestQueenSessionSelection:
     @pytest.mark.asyncio
     async def test_select_queen_session_returns_live_session_without_duplication(self):
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         target = _make_session(agent_id="queen_live")
         target.queen_name = "queen_technology"
         other = _make_session(agent_id="other_live")
@@ -662,7 +662,7 @@ class TestQueenSessionSelection:
         )
 
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         manager.stop_session = AsyncMock()
         restored = _make_session(agent_id="queen_history", with_queen=False)
         restored.queen_name = "queen_technology"
@@ -702,7 +702,7 @@ class TestQueenSessionSelection:
         )
 
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         manager.stop_session = AsyncMock()
         restored = _make_session(agent_id="worker_history", with_queen=False)
         restored.queen_name = "queen_technology"
@@ -734,7 +734,7 @@ class TestQueenSessionSelection:
     @pytest.mark.asyncio
     async def test_new_queen_session_creates_fresh_thread(self):
         app = create_app()
-        manager = app["manager"]
+        manager = app[SESSION_MANAGER_KEY]
         existing = _make_session(agent_id="old_live")
         existing.queen_name = "queen_growth"
         manager._sessions[existing.id] = existing
@@ -1504,7 +1504,7 @@ class TestCredentials:
         from framework.credentials.store import CredentialStore
 
         app = create_app()
-        app["credential_store"] = CredentialStore.for_testing(initial_creds or {})
+        app[CREDENTIAL_STORE_KEY] = CredentialStore.for_testing(initial_creds or {})
         return app
 
     @pytest.mark.asyncio
@@ -1535,7 +1535,7 @@ class TestCredentials:
                 )
 
         app = create_app()
-        app["credential_store"] = BrokenStore()
+        app[CREDENTIAL_STORE_KEY] = BrokenStore()
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/credentials")
@@ -1555,7 +1555,7 @@ class TestCredentials:
                 raise CredentialDecryptionError("bad encrypted file")
 
         app = create_app()
-        app["credential_store"] = BrokenStore()
+        app[CREDENTIAL_STORE_KEY] = BrokenStore()
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/credentials/bad_cred")
@@ -1654,7 +1654,7 @@ class TestCredentials:
             )
             assert resp.status == 201
 
-            store = app["credential_store"]
+            store = app[CREDENTIAL_STORE_KEY]
             assert store.get_key("test_cred", "api_key") == "new-value"
 
 
@@ -1675,8 +1675,8 @@ class TestConfigRoutes:
     @pytest.mark.asyncio
     async def test_get_llm_config_exposes_subscription_defaults_from_presets(self):
         app = create_app()
-        app["credential_store"] = MagicMock()
-        app["credential_store"].get.return_value = None
+        app[CREDENTIAL_STORE_KEY] = MagicMock()
+        app[CREDENTIAL_STORE_KEY].get.return_value = None
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/config/llm")

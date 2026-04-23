@@ -21,7 +21,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from framework.agent_loop.internals.types import LoopConfig
-from framework.server.app import create_app
+from framework.server.app import SESSION_MANAGER_KEY, create_app
 from framework.server.session_manager import Session, _queen_session_dir
 
 # Modules that import HIVE_HOME / QUEENS_DIR / COLONIES_DIR / MEMORIES_DIR /
@@ -262,7 +262,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
 
     # Build the in-process aiohttp app and inject our fake session
     app = create_app()
-    manager = app["manager"]
+    manager = app[SESSION_MANAGER_KEY]
     session = _make_session_with_queen_state(
         session_id=source_session_id,
         queen_name=queen_name,

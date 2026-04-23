@@ -304,7 +304,7 @@ When `verify: true`, runs health checks (lightweight HTTP calls) against each av
 ## Key Patterns
 
 - **Session-primary** — sessions are the lookup key for all routes, workers are optional children
-- **Per-request manager access** — routes get `SessionManager` via `request.app["manager"]`
+- **Per-request manager access** — routes get `SessionManager` via the typed `SESSION_MANAGER_KEY` app key
 - **Path validation** — user-provided path segments validated with `safe_path_segment()` to prevent directory traversal
 - **Event-driven streaming** — per-client buffer queues (max 1000 events) with 15s keepalive pings
 - **Shared EventBus** — session owns the bus, queen and worker both publish to it, SSE always connects to `session.event_bus`
