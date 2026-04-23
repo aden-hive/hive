@@ -67,6 +67,7 @@ from .azure_sql import AZURE_SQL_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
 from .brevo import BREVO_CREDENTIALS
+from .ipinfo import IPINFO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
 from .calendly import CALENDLY_CREDENTIALS
@@ -161,6 +162,7 @@ CREDENTIAL_SPECS = {
     **AZURE_SQL_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
     **BREVO_CREDENTIALS,
+    **IPINFO_CREDENTIALS,
     **CALCOM_CREDENTIALS,
     **CALENDLY_CREDENTIALS,
     **CLOUDFLARE_CREDENTIALS,
