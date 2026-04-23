@@ -1420,6 +1420,14 @@ switch ($num) {
         # Antigravity Subscription
         if (-not $AntigravityCredDetected) {
             Write-Host ""
+            Write-Warn "Using Antigravity can technically cause your account suspension. Please use at your own risk."
+            Write-Host ""
+
+            if (-not (Prompt-YesNo "Proceed with Antigravity authentication?" "n")) {
+                $SelectedProviderId = ""
+                break
+            }
+            Write-Host ""
             Write-Color -Text "  Setting up Antigravity authentication..." -Color Cyan
             Write-Host ""
             Write-Warn "A browser window will open for Google OAuth."
@@ -1445,8 +1453,6 @@ switch ($num) {
         if ($AntigravityCredDetected) {
             $SubscriptionMode        = "antigravity"
             Apply-Preset "antigravity"
-            Write-Host ""
-            Write-Warn "Using Antigravity can technically cause your account suspension. Please use at your own risk."
             Write-Host ""
             Write-Ok "Using Antigravity subscription"
             Write-Color -Text "  Model: gemini-3-flash | Direct OAuth (no proxy required)" -Color DarkGray
