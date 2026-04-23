@@ -1,0 +1,46 @@
+{
+  "goal": {
+    "goal_id": "strategic_swot_analysis",
+    "name": "Strategic SWOT Analyzer",
+    "description": "Recursive competitor discovery and formal SWOT synthesis with delta tracking.",
+    "success_criteria": [
+      "Identifies top 3 competitors even if not provided",
+      "Generates a complete SWOT matrix",
+      "Detects pricing or feature deltas from previous runs"
+    ]
+  },
+  "nodes": [
+    {
+      "node_id": "identify",
+      "name": "Identify Competitors",
+      "node_type": "event_loop",
+      "system_prompt": "Find top 3 competitors for {target_company} if not provided. Use web_search.",
+      "input_keys": ["target_company"],
+      "output_keys": ["competitors"],
+      "tools": ["web_search"]
+    },
+    {
+      "node_id": "synthesize",
+      "name": "SWOT Synthesis",
+      "node_type": "event_loop",
+      "system_prompt": "Perform a SWOT analysis for {competitors}. Compare against {previous_run_summary} if available.",
+      "input_keys": ["competitors", "previous_run_summary"],
+      "output_keys": ["swot_report"],
+      "tools": ["web_scrape"]
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e1",
+      "source": "START",
+      "target": "identify",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "identify_to_synthesize",
+      "source": "identify",
+      "target": "synthesize",
+      "condition": "on_success"
+    }
+  ]
+}
