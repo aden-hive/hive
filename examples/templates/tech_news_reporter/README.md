@@ -5,6 +5,61 @@
 **Created**: 2026-02-06
 
 ## Overview
+## Who is this template for?
+## Example Usage
+## Expected Output
+## Who is this template for?
+
+This template is intended for developers who want to:
+- Learn how to build a multi-node Hive agent
+- See how web tools (search + scrape) are integrated into an agent workflow
+- Generate structured reports from real-time data
+
+It is especially useful for:
+- Backend engineers exploring AI agent architectures
+- Developers building automated research workflows
+- Product engineers experimenting with goal-driven AI systems
+
+
+## Example Usage
+
+From the Hive root directory:
+
+```bash
+hive run examples/templates/tech_news_reporter --input '{"topic": "AI startups"}'
+
+The agent will:
+
+1. Ask for topic clarification (optional)
+2. Research recent news articles
+3. Generate a structured HTML report
+4. Provide a downloadable link
+
+## Expected Output
+
+A structured HTML report including:
+
+- Article titles
+- Summaries
+- Sources
+- Organized sections by topic
+
+Save and exit.
+
+---
+
+# 🚀 Now Commit This Properly
+
+From the Hive root:
+
+```bash
+git checkout -b improve-template-readme
+git add examples/templates/tech_news_reporter/README.md
+git commit -m "docs: improve tech_news_reporter README with usage and audience clarification"
+git push origin improve-template-readme
+
+
+
 
 Research the latest technology and AI news from the web, summarize key stories, and produce a well-organized report for the user to read.
 
