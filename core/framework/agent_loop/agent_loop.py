@@ -821,8 +821,7 @@ class AgentLoop(AgentProtocol):
                             _new_suffix = ctx.dynamic_prompt_suffix_provider() or ""
                         except Exception:
                             logger.debug(
-                                "[%s] dynamic_prompt_suffix_provider raised — "
-                                "falling back to legacy stamp",
+                                "[%s] dynamic_prompt_suffix_provider raised — falling back to legacy stamp",
                                 node_id,
                                 exc_info=True,
                             )
@@ -839,9 +838,7 @@ class AgentLoop(AgentProtocol):
                     _new_prompt = build_system_prompt_for_context(ctx)
                     _new_suffix = None
                 if _new_suffix is not None:
-                    _combined_for_compare = (
-                        f"{_new_prompt}\n\n{_new_suffix}" if _new_suffix else _new_prompt
-                    )
+                    _combined_for_compare = f"{_new_prompt}\n\n{_new_suffix}" if _new_suffix else _new_prompt
                     if (
                         _combined_for_compare != conversation.system_prompt
                         or _new_suffix != conversation.system_prompt_dynamic_suffix
@@ -2491,9 +2488,7 @@ class AgentLoop(AgentProtocol):
                 async for event in ctx.llm.stream(
                     messages=_msgs,
                     system=conversation.system_prompt_static,
-                    system_dynamic_suffix=(
-                        conversation.system_prompt_dynamic_suffix or None
-                    ),
+                    system_dynamic_suffix=(conversation.system_prompt_dynamic_suffix or None),
                     tools=tools if tools else None,
                     max_tokens=ctx.max_tokens,
                 ):

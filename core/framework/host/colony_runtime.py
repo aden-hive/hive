@@ -435,9 +435,7 @@ class ColonyRuntime:
         if queen_id:
             queen_home = QUEENS_DIR / queen_id
             queen_overrides_path = queen_home / "skills_overrides.json"
-            extras.append(
-                ExtraScope(directory=queen_home / "skills", label="queen_ui", priority=2)
-            )
+            extras.append(ExtraScope(directory=queen_home / "skills", label="queen_ui", priority=2))
 
         colony_overrides_path: Path | None = None
         if colony_name:
@@ -533,8 +531,7 @@ class ColonyRuntime:
         return [
             t
             for t in tools
-            if getattr(t, "name", None) not in self._mcp_tool_names_all
-            or getattr(t, "name", None) in allowed
+            if getattr(t, "name", None) not in self._mcp_tool_names_all or getattr(t, "name", None) in allowed
         ]
 
     # ── Lifecycle ───────────────────────────────────────────────
@@ -906,17 +903,11 @@ class ColonyRuntime:
             # pre-activated catalog stays static because its contents are
             # built for *this* worker's task (a tombstone toggle from the
             # UI should not yank it mid-run).
-            _db_path_pre_activated = bool(
-                isinstance(input_data, dict) and input_data.get("db_path")
-            )
+            _db_path_pre_activated = bool(isinstance(input_data, dict) and input_data.get("db_path"))
             # Default-bind the manager into the closure so each loop iteration
             # captures the same manager instance — pyflakes B023 would flag a
             # free-variable capture here.
-            _provider = (
-                None
-                if _db_path_pre_activated
-                else (lambda mgr=self._skills_manager: mgr.skills_catalog_prompt)
-            )
+            _provider = None if _db_path_pre_activated else (lambda mgr=self._skills_manager: mgr.skills_catalog_prompt)
 
             agent_context = AgentContext(
                 runtime=self._make_runtime_adapter(worker_id),

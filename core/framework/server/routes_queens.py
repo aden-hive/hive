@@ -253,9 +253,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     # the most recently loaded one so we don't resurrect a stale older
     # session ahead of a freshly created one.
     live_matches = [
-        s
-        for s in manager.list_sessions()
-        if s.queen_name == queen_id and s.colony_id is None and s.worker_path is None
+        s for s in manager.list_sessions() if s.queen_name == queen_id and s.colony_id is None and s.worker_path is None
     ]
     if live_matches:
         latest = max(live_matches, key=lambda s: s.loaded_at)

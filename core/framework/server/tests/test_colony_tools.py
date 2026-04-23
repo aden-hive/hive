@@ -164,9 +164,7 @@ async def test_patch_persists_and_validates(colony_dir):
     metadata_path = colonies_dir / name / "metadata.json"
 
     async with TestClient(TestServer(app)) as client:
-        resp = await client.patch(
-            f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["read_file"]}
-        )
+        resp = await client.patch(f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["read_file"]})
         assert resp.status == 200
         body = await resp.json()
         assert body["enabled_mcp_tools"] == ["read_file"]
@@ -186,9 +184,7 @@ async def test_patch_persists_and_validates(colony_dir):
         assert tools["write_file"]["enabled"] is False
 
         # Unknown → 400
-        resp = await client.patch(
-            f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["ghost"]}
-        )
+        resp = await client.patch(f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["ghost"]})
         assert resp.status == 400
         assert "ghost" in (await resp.json()).get("unknown", [])
 
@@ -214,9 +210,7 @@ async def test_patch_refreshes_live_runtime(colony_dir):
 
     app = await _app(manager)
     async with TestClient(TestServer(app)) as client:
-        resp = await client.patch(
-            f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["read_file"]}
-        )
+        resp = await client.patch(f"/api/colony/{name}/tools", json={"enabled_mcp_tools": ["read_file"]})
         assert resp.status == 200
         body = await resp.json()
         assert body["refreshed_runtimes"] == 1
@@ -230,9 +224,7 @@ async def test_404_for_unknown_colony(colony_dir):
     async with TestClient(TestServer(app)) as client:
         resp = await client.get("/api/colony/unknown/tools")
         assert resp.status == 404
-        resp = await client.patch(
-            "/api/colony/unknown/tools", json={"enabled_mcp_tools": None}
-        )
+        resp = await client.patch("/api/colony/unknown/tools", json={"enabled_mcp_tools": None})
         assert resp.status == 404
 
 

@@ -124,9 +124,7 @@ class LLMProvider(ABC):
         """
         combined_system = system
         if system_dynamic_suffix:
-            combined_system = (
-                f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-            )
+            combined_system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,

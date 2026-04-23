@@ -227,9 +227,7 @@ def _build_admin_manager(
     if colony_name:
         colony_home = COLONIES_DIR / colony_name
         colony_overrides_path = colony_home / "skills_overrides.json"
-        extras.append(
-            ExtraScope(directory=colony_home / ".hive" / "skills", label="colony_ui", priority=3)
-        )
+        extras.append(ExtraScope(directory=colony_home / ".hive" / "skills", label="colony_ui", priority=3))
     cfg = SkillsManagerConfig(
         queen_id=queen_id,
         queen_overrides_path=queen_overrides_path,
@@ -370,8 +368,7 @@ async def handle_list_queen_skills(request: web.Request) -> web.Response:
     mgr = scope.manager
     assert mgr is not None
     skills = [
-        _serialize_skill(s, queen_store=scope.store, colony_store=None)
-        for s in mgr.enumerate_skills_with_source()
+        _serialize_skill(s, queen_store=scope.store, colony_store=None) for s in mgr.enumerate_skills_with_source()
     ]
     skills.sort(key=lambda r: r["name"])
     return web.json_response(
@@ -408,10 +405,7 @@ async def handle_list_colony_skills(request: web.Request) -> web.Response:
         )
 
     all_skills = mgr.enumerate_skills_with_source()
-    rows = [
-        _serialize_skill(s, queen_store=queen_store, colony_store=scope.store)
-        for s in all_skills
-    ]
+    rows = [_serialize_skill(s, queen_store=queen_store, colony_store=scope.store) for s in all_skills]
     rows.sort(key=lambda r: r["name"])
     inherited = [s.name for s in all_skills if s.source_scope == "queen_ui"]
     return web.json_response(
@@ -435,9 +429,7 @@ async def handle_list_all_skills(request: web.Request) -> web.Response:
     # Enumerate queens and colonies by walking the standard dirs.
     _ensure_queens_known()
     queen_ids = (
-        sorted(p.name for p in QUEENS_DIR.glob("*") if (p / "profile.yaml").exists())
-        if QUEENS_DIR.is_dir()
-        else []
+        sorted(p.name for p in QUEENS_DIR.glob("*") if (p / "profile.yaml").exists()) if QUEENS_DIR.is_dir() else []
     )
     colony_names: list[str] = []
     if COLONIES_DIR.is_dir():
@@ -464,16 +456,12 @@ async def handle_list_all_skills(request: web.Request) -> web.Response:
 
     # Raw discovery (no override filtering) — we apply per-scope stores
     # below when computing ``visible_to``.
-    discovery = SkillDiscovery(
-        DiscoveryConfig(project_root=None, skip_framework_scope=False, extra_scopes=extras)
-    )
+    discovery = SkillDiscovery(DiscoveryConfig(project_root=None, skip_framework_scope=False, extra_scopes=extras))
     discovered = discovery.discover()
 
     # Load all stores once.
     queen_stores: dict[str, SkillOverrideStore] = {
-        qid: SkillOverrideStore.load(
-            QUEENS_DIR / qid / "skills_overrides.json", scope_label=f"queen:{qid}"
-        )
+        qid: SkillOverrideStore.load(QUEENS_DIR / qid / "skills_overrides.json", scope_label=f"queen:{qid}")
         for qid in queen_ids
     }
     colony_stores: dict[str, SkillOverrideStore] = {}
@@ -490,6 +478,7 @@ async def handle_list_all_skills(request: web.Request) -> web.Response:
             colony_queens[cn] = None
 
     rows: list[dict[str, Any]] = []
+
     # Owner mapping for queen_ui / colony_ui scopes: the dir path encodes
     # which queen/colony the skill belongs to.
     def _owner_for(skill: ParsedSkill) -> dict[str, str] | None:
@@ -643,9 +632,7 @@ async def _handle_create(scope: SkillScope, payload: dict[str, Any], user_id: st
     if err or draft is None:
         return web.json_response({"error": err}, status=400)
     replace_existing = bool(payload.get("replace_existing", False))
-    installed, wrote_err, replaced = write_skill(
-        draft, target_root=scope.write_dir, replace_existing=replace_existing
-    )
+    installed, wrote_err, replaced = write_skill(draft, target_root=scope.write_dir, replace_existing=replace_existing)
     if wrote_err is not None or installed is None:
         status = 409 if "already exists" in (wrote_err or "") else 500
         return web.json_response({"error": wrote_err}, status=status)
@@ -704,8 +691,6 @@ async def _handle_patch(scope: SkillScope, skill_name: str, payload: dict[str, A
     return web.json_response({"name": name, "enabled": existing.enabled, "ok": True})
 
 
-
-
 async def _handle_put_body(scope: SkillScope, skill_name: str, payload: dict[str, Any]) -> web.Response:
     name, err = validate_skill_name(skill_name)
     if err or name is None:
@@ -713,9 +698,7 @@ async def _handle_put_body(scope: SkillScope, skill_name: str, payload: dict[str
     entry = scope.store.get(name)
     provenance = entry.provenance if entry else Provenance.FRAMEWORK
     if provenance not in _EDITABLE_PROVENANCE:
-        return web.json_response(
-            {"error": f"skill '{name}' is not editable (provenance={provenance})"}, status=403
-        )
+        return web.json_response({"error": f"skill '{name}' is not editable (provenance={provenance})"}, status=403)
     description = payload.get("description")
     body = payload.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -752,9 +735,7 @@ async def _handle_delete(scope: SkillScope, skill_name: str) -> web.Response:
     entry = scope.store.get(name)
     provenance = entry.provenance if entry else None
     if provenance is not None and provenance not in _EDITABLE_PROVENANCE:
-        return web.json_response(
-            {"error": f"skill '{name}' is not deletable (provenance={provenance})"}, status=403
-        )
+        return web.json_response({"error": f"skill '{name}' is not deletable (provenance={provenance})"}, status=403)
     removed, rerr = authoring_remove_skill(scope.write_dir, name)
     if rerr:
         return web.json_response({"error": rerr}, status=500)
@@ -921,9 +902,7 @@ async def handle_upload_skill(request: web.Request) -> web.Response:
                     break
                 buf.write(chunk)
                 if buf.tell() > _MAX_UPLOAD_BYTES:
-                    return web.json_response(
-                        {"error": f"upload exceeds {_MAX_UPLOAD_BYTES} bytes"}, status=413
-                    )
+                    return web.json_response({"error": f"upload exceeds {_MAX_UPLOAD_BYTES} bytes"}, status=413)
             upload_bytes = buf.getvalue()
             upload_filename = part.filename or ""
         else:
@@ -968,9 +947,7 @@ async def handle_upload_skill(request: web.Request) -> web.Response:
     # Extract into a draft
     draft: Any
     if upload_bytes.startswith(_ZIP_MAGIC) or (upload_filename or "").endswith(".zip"):
-        draft_name, draft_desc, draft_body, draft_files, err = _extract_from_zip(
-            upload_bytes, name_hint=name_override
-        )
+        draft_name, draft_desc, draft_body, draft_files, err = _extract_from_zip(upload_bytes, name_hint=name_override)
         if err:
             return web.json_response({"error": err}, status=400)
     else:
@@ -989,9 +966,7 @@ async def handle_upload_skill(request: web.Request) -> web.Response:
     if derr or draft is None:
         return web.json_response({"error": derr}, status=400)
 
-    installed, werr, replaced = write_skill(
-        draft, target_root=write_dir, replace_existing=replace_existing
-    )
+    installed, werr, replaced = write_skill(draft, target_root=write_dir, replace_existing=replace_existing)
     if werr or installed is None:
         status = 409 if "already exists" in (werr or "") else 500
         return web.json_response({"error": werr}, status=status)
@@ -1092,7 +1067,7 @@ def _extract_from_zip(
             continue
         if not entry_name.startswith(root_prefix):
             continue
-        rel = entry_name[len(root_prefix):]
+        rel = entry_name[len(root_prefix) :]
         if not rel or rel == "SKILL.md":
             continue
         content_bytes = z.read(entry_name)

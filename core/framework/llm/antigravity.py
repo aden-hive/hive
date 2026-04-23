@@ -662,9 +662,7 @@ class AntigravityProvider(LLMProvider):
         # cache_control hook. Concatenate the dynamic suffix so its shape
         # matches the legacy single-string call site.
         if system_dynamic_suffix:
-            system = (
-                f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-            )
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()

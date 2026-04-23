@@ -281,11 +281,16 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
         assert resp.status == 200, await resp.text()
         body = await resp.json()
 
-    # Wait for background fork finalization (compaction + worker storage copy)
-    from framework.server import routes_execution
+        # fork_session_into_colony schedules the compaction + worker-storage
+        # copy onto _BACKGROUND_FORK_TASKS and returns. In prod the colony-
+        # open path blocks on compaction_status.await_completion; the test
+        # skips that step, so drain the bg tasks here before asserting on
+        # the artifacts they produce (otherwise the worker-storage check is
+        # a race that flakes under CI load).
+        from framework.server.routes_execution import _BACKGROUND_FORK_TASKS
 
-    if routes_execution._BACKGROUND_FORK_TASKS:
-        await asyncio.gather(*routes_execution._BACKGROUND_FORK_TASKS)
+        if _BACKGROUND_FORK_TASKS:
+            await asyncio.gather(*list(_BACKGROUND_FORK_TASKS), return_exceptions=True)
 
     colony_session_id = body["queen_session_id"]
     assert body["colony_name"] == "honeycomb"

@@ -512,9 +512,7 @@ class NodeConversation:
         else:
             self._system_prompt_static = new_prompt
             self._system_prompt_dynamic_suffix = dynamic_suffix
-            self._system_prompt = (
-                f"{new_prompt}\n\n{dynamic_suffix}" if dynamic_suffix else new_prompt
-            )
+            self._system_prompt = f"{new_prompt}\n\n{dynamic_suffix}" if dynamic_suffix else new_prompt
         self._meta_persisted = False  # re-persist with new prompt
 
     def set_current_phase(self, phase_id: str) -> None:

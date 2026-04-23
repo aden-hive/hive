@@ -159,9 +159,7 @@ class MockLLMProvider(LLMProvider):
     ) -> LLMResponse:
         """Async mock completion (no I/O, returns immediately)."""
         if system_dynamic_suffix:
-            system = (
-                f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-            )
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         return self.complete(
             messages=messages,
             system=system,
@@ -187,9 +185,7 @@ class MockLLMProvider(LLMProvider):
         streaming pipeline without any API calls.
         """
         if system_dynamic_suffix:
-            system = (
-                f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-            )
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         content = self._generate_mock_response(system=system, json_mode=False)
         words = content.split(" ")
         accumulated = ""

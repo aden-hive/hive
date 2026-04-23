@@ -256,9 +256,7 @@ class QueenPhaseState:
                 len(allowed),
             )
         self._filtered_independent_tools = [
-            t
-            for t in self.independent_tools
-            if t.name not in self.mcp_tool_names_all or t.name in allowed
+            t for t in self.independent_tools if t.name not in self.mcp_tool_names_all or t.name in allowed
         ]
         logger.info(
             "rebuild_independent_filter: allowlist=%d, mcp_names=%d, independent=%d -> filtered=%d",
@@ -1711,9 +1709,7 @@ def register_queen_lifecycle_tools(
 
             queen_overrides_path = QUEENS_DIR / queen_id / "skills_overrides.json"
             if queen_overrides_path.exists():
-                queen_store = SkillOverrideStore.load(
-                    queen_overrides_path, scope_label=f"queen:{queen_id}"
-                )
+                queen_store = SkillOverrideStore.load(queen_overrides_path, scope_label=f"queen:{queen_id}")
                 # Shallow clone: queen's explicit toggles + master switch
                 # become the colony's starting state. Tombstones propagate
                 # so a queen-deleted UI skill doesn't resurrect here.

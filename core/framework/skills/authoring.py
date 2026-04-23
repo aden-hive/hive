@@ -128,8 +128,7 @@ def build_draft(
     body = skill_body if isinstance(skill_body, str) else ""
     if not body.strip():
         return None, (
-            "skill_body is required — the operational procedure the "
-            "colony worker needs to run this job unattended"
+            "skill_body is required — the operational procedure the colony worker needs to run this job unattended"
         )
     files, err = validate_files(skill_files)
     if err or files is None:

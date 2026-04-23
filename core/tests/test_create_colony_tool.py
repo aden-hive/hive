@@ -164,9 +164,7 @@ async def test_happy_path_emits_colony_created_event(patched_home: Path, patched
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
-async def test_colony_inherits_queen_override_state(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
+async def test_colony_inherits_queen_override_state(patched_home: Path, patched_fork: list[dict]) -> None:
     """Seed the colony's skills_overrides.json from the queen's at fork
     time. A queen who enabled a preset (e.g. hive.x-automation) before
     calling create_colony must produce a colony that also has it
@@ -204,9 +202,7 @@ async def test_colony_inherits_queen_override_state(
     )
     assert payload.get("status") == "created", f"Tool error: {payload}"
 
-    colony_overrides = (
-        patched_home / ".hive" / "colonies" / "inheritance_check" / "skills_overrides.json"
-    )
+    colony_overrides = patched_home / ".hive" / "colonies" / "inheritance_check" / "skills_overrides.json"
     cstore = SkillOverrideStore.load(colony_overrides)
 
     # Inherited entries from the queen:
@@ -268,9 +264,7 @@ async def test_happy_path_materializes_skill_under_colony_dir(patched_home: Path
     # display it as queen-authored + editable.
     from framework.skills.overrides import Provenance, SkillOverrideStore
 
-    overrides_path = (
-        patched_home / ".hive" / "colonies" / "honeycomb_research" / "skills_overrides.json"
-    )
+    overrides_path = patched_home / ".hive" / "colonies" / "honeycomb_research" / "skills_overrides.json"
     assert overrides_path.exists(), "create_colony should write a skills_overrides.json ledger"
     store = SkillOverrideStore.load(overrides_path)
     entry = store.get("honeycomb-api-protocol")

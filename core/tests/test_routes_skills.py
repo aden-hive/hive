@@ -63,9 +63,7 @@ def _seed_queen(tmp_path: Path):
     """Write a queen profile so _queen_scope recognises the id."""
     queen_home = Path.home() / ".hive" / "agents" / "queens" / "ops"
     queen_home.mkdir(parents=True, exist_ok=True)
-    (queen_home / "profile.yaml").write_text(
-        "name: Ops\ntitle: Ops queen\n", encoding="utf-8"
-    )
+    (queen_home / "profile.yaml").write_text("name: Ops\ntitle: Ops queen\n", encoding="utf-8")
     return queen_home
 
 
@@ -76,9 +74,7 @@ def _seed_colony(tmp_path: Path):
     return colony_home
 
 
-async def test_get_queen_skills_returns_empty_for_fresh_queen(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_get_queen_skills_returns_empty_for_fresh_queen(client: TestClient, _seed_queen) -> None:
     resp = await client.get("/api/queen/ops/skills")
     assert resp.status == 200
     data = await resp.json()
@@ -88,9 +84,7 @@ async def test_get_queen_skills_returns_empty_for_fresh_queen(
     assert isinstance(data["skills"], list)
 
 
-async def test_create_queen_skill_writes_file_and_override(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_create_queen_skill_writes_file_and_override(client: TestClient, _seed_queen) -> None:
     payload = {
         "name": "ops-runbook",
         "description": "Runbook for ops",
@@ -112,9 +106,7 @@ async def test_create_queen_skill_writes_file_and_override(
     assert entry.enabled is True
 
 
-async def test_patch_queen_skill_toggles_enabled(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_patch_queen_skill_toggles_enabled(client: TestClient, _seed_queen) -> None:
     await client.post(
         "/api/queen/ops/skills",
         json={"name": "ops-a", "description": "a", "body": "body"},
@@ -128,9 +120,7 @@ async def test_patch_queen_skill_toggles_enabled(
     assert store.get("ops-a").enabled is False
 
 
-async def test_delete_queen_skill_removes_files(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_delete_queen_skill_removes_files(client: TestClient, _seed_queen) -> None:
     await client.post(
         "/api/queen/ops/skills",
         json={"name": "tmp-skill", "description": "d", "body": "body"},
@@ -145,9 +135,7 @@ async def test_delete_queen_skill_removes_files(
     assert "tmp-skill" in store.deleted_ui_skills
 
 
-async def test_delete_framework_skill_is_refused(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_delete_framework_skill_is_refused(client: TestClient, _seed_queen) -> None:
     # Pre-seed an override entry with framework provenance — simulates the
     # user toggling a framework default so the override exists on disk.
     store = SkillOverrideStore.load(_seed_queen / "skills_overrides.json")
@@ -177,9 +165,7 @@ async def test_upload_markdown_places_in_user_library(client: TestClient) -> Non
     assert (Path.home() / ".hive" / "skills" / "from-upload" / "SKILL.md").exists()
 
 
-async def test_upload_zip_bundle_places_in_queen_scope(
-    client: TestClient, _seed_queen
-) -> None:
+async def test_upload_zip_bundle_places_in_queen_scope(client: TestClient, _seed_queen) -> None:
     # Build a zip in memory with SKILL.md + a supporting file.
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
@@ -203,9 +189,7 @@ async def test_upload_zip_bundle_places_in_queen_scope(
     assert (skill_dir / "scripts" / "helper.py").exists()
 
 
-async def test_patch_does_not_mislabel_legacy_colony_skill_as_framework(
-    client: TestClient, _seed_colony
-) -> None:
+async def test_patch_does_not_mislabel_legacy_colony_skill_as_framework(client: TestClient, _seed_colony) -> None:
     """Regression: toggling a legacy colony skill (no ledger entry yet)
     must not stamp provenance=FRAMEWORK on the new entry. Before the fix,
     the first PATCH wrote FRAMEWORK and the next GET displayed 'Framework'
@@ -230,9 +214,7 @@ async def test_patch_does_not_mislabel_legacy_colony_skill_as_framework(
     assert rows["legacy-queen-skill"]["enabled"] is False
 
 
-async def test_colony_skill_is_editable_even_without_override_entry(
-    client: TestClient, _seed_colony
-) -> None:
+async def test_colony_skill_is_editable_even_without_override_entry(client: TestClient, _seed_colony) -> None:
     """Regression: a SKILL.md dropped into a colony's .hive/skills dir
     (e.g. from a pre-override-store colony) must still be marked editable
     when listed via /api/colonies/{name}/skills. The admin manager used
@@ -261,9 +243,7 @@ async def test_colony_skill_is_editable_even_without_override_entry(
     assert rows["legacy-skill"]["provenance"] == "queen_created"
 
 
-async def test_list_scopes_enumerates_queens_and_colonies(
-    client: TestClient, _seed_queen, _seed_colony
-) -> None:
+async def test_list_scopes_enumerates_queens_and_colonies(client: TestClient, _seed_queen, _seed_colony) -> None:
     resp = await client.get("/api/skills/scopes")
     assert resp.status == 200
     data = await resp.json()

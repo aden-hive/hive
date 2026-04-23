@@ -155,9 +155,7 @@ async def test_get_tools_default_allows_everything_for_unknown_queen(queen_dir, 
     # the fallback-to-allow-all path.
     custom_id = "queen_custom_unknown"
     (queens_dir / custom_id).mkdir()
-    (queens_dir / custom_id / "profile.yaml").write_text(
-        yaml.safe_dump({"name": "Custom", "title": "Custom Role"})
-    )
+    (queens_dir / custom_id / "profile.yaml").write_text(yaml.safe_dump({"name": "Custom", "title": "Custom Role"}))
 
     manager = _FakeManager()
     manager._mcp_tool_catalog = {
@@ -283,9 +281,7 @@ async def test_patch_persists_and_validates(queen_dir, monkeypatch):
         assert servers["write_file"]["enabled"] is False
 
         # Null resets
-        resp = await client.patch(
-            f"/api/queen/{queen_id}/tools", json={"enabled_mcp_tools": None}
-        )
+        resp = await client.patch(f"/api/queen/{queen_id}/tools", json={"enabled_mcp_tools": None})
         assert resp.status == 200
         body = await resp.json()
         assert body["enabled_mcp_tools"] is None

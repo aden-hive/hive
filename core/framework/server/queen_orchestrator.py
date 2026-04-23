@@ -303,9 +303,7 @@ def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]
         if extra:
             try:
                 extra_configs = reg.resolve_for_agent(include=extra)
-                registry_configs = list(registry_configs) + [
-                    reg._server_config_to_dict(c) for c in extra_configs
-                ]
+                registry_configs = list(registry_configs) + [reg._server_config_to_dict(c) for c in extra_configs]
             except Exception:
                 logger.debug("build_queen_tool_registry_bare: resolve_for_agent(extra) failed", exc_info=True)
 
@@ -549,9 +547,7 @@ async def create_queen(
     # ``QueenPhaseState`` only gates MCP tools (lifecycle and synthetic
     # tools always pass through). Then apply the queen profile's stored
     # allowlist (if any) and memoize the filtered independent tool list.
-    mcp_server_tools_map: dict[str, set[str]] = dict(
-        getattr(queen_registry, "_mcp_server_tools", {})
-    )
+    mcp_server_tools_map: dict[str, set[str]] = dict(getattr(queen_registry, "_mcp_server_tools", {}))
     phase_state.mcp_tool_names_all = set().union(*mcp_server_tools_map.values()) if mcp_server_tools_map else set()
     # The queen's MCP tool allowlist now lives in a dedicated
     # ``tools.json`` sidecar next to ``profile.yaml``. ``load_queen_tools_config``
@@ -565,8 +561,7 @@ async def create_queen(
     # now so ``@server:NAME`` shorthands in the role-default table can
     # expand against the just-loaded MCP servers.
     _boot_catalog: dict[str, list[dict]] = {
-        srv: [{"name": name} for name in sorted(names)]
-        for srv, names in mcp_server_tools_map.items()
+        srv: [{"name": name} for name in sorted(names)] for srv, names in mcp_server_tools_map.items()
     }
     # ``queen_dir`` is ``queens/<queen_id>/sessions/<session_id>``; the
     # allowlist sidecar is keyed by queen_id, not session_id.

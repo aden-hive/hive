@@ -259,9 +259,7 @@ def _build_system_message(
     # Single-string path (legacy or no-cache-control provider).
     combined = system
     if system_dynamic_suffix:
-        combined = (
-            f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-        )
+        combined = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
     sys_msg: dict[str, Any] = {"role": "system", "content": combined}
     if _model_supports_cache_control(model):
         sys_msg["cache_control"] = {"type": "ephemeral"}
@@ -1727,9 +1725,7 @@ class LiteLLMProvider(LLMProvider):
         identical to today's single-string path.
         """
         if system_dynamic_suffix:
-            system = (
-                f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
-            )
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         full_messages = self._build_openrouter_tool_compat_messages(messages, system, tools)
         kwargs: dict[str, Any] = {
             "model": self.model,

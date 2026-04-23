@@ -142,9 +142,7 @@ class TestSkillsManagerOverrides:
             SkillsManagerConfig(
                 queen_id="q",
                 queen_overrides_path=overrides_path,
-                extra_scope_dirs=[
-                    ExtraScope(directory=fake_fw, label="framework", priority=0)
-                ],
+                extra_scope_dirs=[ExtraScope(directory=fake_fw, label="framework", priority=0)],
                 project_root=None,
                 skip_community_discovery=True,
                 interactive=False,
@@ -186,9 +184,7 @@ class TestSkillsManagerOverrides:
                 queen_overrides_path=queen_overrides,
                 colony_name="c",
                 colony_overrides_path=colony_overrides,
-                extra_scope_dirs=[
-                    ExtraScope(directory=queen_skills, label="queen_ui", priority=2)
-                ],
+                extra_scope_dirs=[ExtraScope(directory=queen_skills, label="queen_ui", priority=2)],
                 project_root=None,
                 skip_community_discovery=True,
                 skills_config=SkillsConfig(),
@@ -224,9 +220,7 @@ class TestSkillsManagerOverrides:
         assert "hive.x-automation" in enumerated
         assert "hive.browser-automation" in enumerated
 
-    def test_preset_skill_enabled_via_explicit_override(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_preset_skill_enabled_via_explicit_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
         fake_presets = tmp_path / "fake_presets"
         _write_skill_file(fake_presets, "hive.x-automation")

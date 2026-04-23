@@ -189,9 +189,7 @@ class SkillsManager:
         self._queen_overrides = queen_store
         self._colony_overrides = colony_store
         self._watched_files = [
-            str(p)
-            for p in (self._config.queen_overrides_path, self._config.colony_overrides_path)
-            if p is not None
+            str(p) for p in (self._config.queen_overrides_path, self._config.colony_overrides_path) if p is not None
         ]
 
         # 1c. Apply override filtering. Colony entries take precedence over
