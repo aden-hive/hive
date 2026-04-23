@@ -91,6 +91,17 @@ Use Hive when the bottleneck is no longer the model but the harness around it:
 - **[Report Issues](https://github.com/aden-hive/hive/issues)** - Bug reports and feature requests
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
+
+## Project Structure
+
+The Hive repository is organized into the following main directories:
+
+- **`core/`** – Core runtime for the Hive multi-agent framework
+- **`tools/`** – MCP tool integrations used by agents
+- **`docs/`** – Framework documentation and guides
+- **`scripts/`** – Development and setup scripts
+- **`examples/`** – Example agents and use cases
+
 ## Quick Start
 
 ### Prerequisites
