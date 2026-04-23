@@ -1,0 +1,305 @@
+{
+    "agent": {
+        "id": "hr_screener",
+        "name": "Automated HR Screener",
+        "version": "1.0.0",
+        "description": "Screen PDF resumes against a job description, score and rank candidates, produce a Top-5 report, and optionally send response emails. Designed for local LLM usage to keep applicant PII private."
+    },
+    "graph": {
+        "id": "hr-screener-graph",
+        "goal_id": "hr-screening",
+        "version": "1.0.0",
+        "entry_node": "intake",
+        "entry_points": {
+            "start": "intake"
+        },
+        "pause_nodes": [],
+        "terminal_nodes": [
+            "notify-candidates"
+        ],
+        "conversation_mode": "continuous",
+        "identity_prompt": "You are a rigorous and highly professional corporate human resources and engineering evaluation agent. You evaluate candidates based strictly on merit without fabrication, adhering to privacy constraints.",
+        "nodes": [
+            {
+                "id": "intake",
+                "name": "Intake",
+                "description": "Pass pre-collected inputs (job description, resume path, email notification preference) into the pipeline.",
+                "node_type": "event_loop",
+                "input_keys": [],
+                "output_keys": [
+                    "job_description",
+                    "resume_files",
+                    "notify_candidates"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are the intake processor. Data has been pre-collected. Call set_output 3 times with the provided job_description, resume_files, and notify_candidates values.",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "scan-resumes",
+                "name": "Scan Resumes",
+                "description": "Enumerate PDF files in the resume folder, read each one using pdf_read, and extract candidate text data.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "job_description",
+                    "resume_files"
+                ],
+                "output_keys": [
+                    "resume_data"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are the resume scanner. Use list_dir to enumerate PDFs, then pdf_read on each to extract text. Output structured JSON with all candidate data via set_output(\"resume_data\", ...).",
+                "tools": [
+                    "pdf_read",
+                    "list_dir"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "rank-candidates",
+                "name": "Rank Candidates",
+                "description": "Score each candidate's resume from 1-100 against the job description requirements, then rank them.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "job_description",
+                    "resume_data"
+                ],
+                "output_keys": [
+                    "rankings"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are the candidate evaluator. Score each resume 1-100 using: Skills Match (40%), Experience (25%), Education (15%), Communication (10%), Bonus (10%). Output ranked JSON via set_output(\"rankings\", ...).",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "generate-report",
+                "name": "Generate Report",
+                "description": "Build a plain text screening report of ranked candidates.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "rankings"
+                ],
+                "output_keys": [
+                    "report_file"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are a report generator. Write a plain text screening report using save_data, then call set_output with key report_file.",
+                "tools": [
+                    "save_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "notify-candidates",
+                "name": "Notify Candidates",
+                "description": "Draft and send personalized response emails to candidates. The user reviews all emails before they are sent.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "rankings",
+                    "notify_candidates"
+                ],
+                "output_keys": [
+                    "emails_sent"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are the candidate notification assistant. If notify_candidates is 'no', skip. Otherwise draft personalized interview invitation (Top 5) and polite rejection (others) emails. Present all to user for approval before sending via send_email.",
+                "tools": [
+                    "send_email"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            }
+        ],
+        "edges": [
+            {
+                "id": "intake-to-scan-resumes",
+                "source": "intake",
+                "target": "scan-resumes",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "scan-resumes-to-rank-candidates",
+                "source": "scan-resumes",
+                "target": "rank-candidates",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "rank-candidates-to-generate-report",
+                "source": "rank-candidates",
+                "target": "generate-report",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "generate-report-to-notify-candidates",
+                "source": "generate-report",
+                "target": "notify-candidates",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            }
+        ],
+        "max_steps": 100,
+        "max_retries_per_node": 3,
+        "description": "Screen PDF resumes against a job description, score and rank candidates, produce a Top-5 report, and optionally send response emails.",
+        "created_at": "2026-02-21T11:21:00.000000"
+    },
+    "goal": {
+        "id": "hr-screening",
+        "name": "Automated HR Screener",
+        "description": "Screen PDF resumes against a job description, score and rank candidates 1-100, produce a Top-5 report, and optionally send personalized response emails — all while keeping applicant data private on the local machine.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "sc-resumes-scanned",
+                "description": "Successfully reads and extracts text from all PDF resumes in the folder",
+                "metric": "Resumes successfully scanned",
+                "target": ">=1",
+                "weight": 0.2,
+                "met": false
+            },
+            {
+                "id": "sc-candidates-scored",
+                "description": "Scores every candidate 1-100 with clear reasoning",
+                "metric": "Percentage of candidates scored",
+                "target": "100%",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "sc-top5-report",
+                "description": "Produces a plain text report of the Top 5 candidates",
+                "metric": "Report generated and delivered",
+                "target": "Yes",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "sc-privacy-compliance",
+                "description": "All processing done locally without transmitting PII externally",
+                "metric": "No external PII transmission",
+                "target": "Yes",
+                "weight": 0.15,
+                "met": false
+            },
+            {
+                "id": "sc-email-delivery",
+                "description": "Sends response emails to candidates if user opted in",
+                "metric": "Emails handled correctly",
+                "target": "Yes",
+                "weight": 0.15,
+                "met": false
+            }
+        ],
+        "constraints": [
+            {
+                "id": "c-no-fabrication",
+                "description": "Never fabricate resume content, scores, or candidate information",
+                "constraint_type": "hard",
+                "category": "quality",
+                "check": ""
+            },
+            {
+                "id": "c-privacy",
+                "description": "Never transmit raw resume content to external services",
+                "constraint_type": "hard",
+                "category": "privacy",
+                "check": ""
+            },
+            {
+                "id": "c-no-unsolicited-email",
+                "description": "Never send emails without explicit user approval",
+                "constraint_type": "hard",
+                "category": "safety",
+                "check": ""
+            },
+            {
+                "id": "c-objective-scoring",
+                "description": "Apply scoring criteria consistently across all candidates",
+                "constraint_type": "hard",
+                "category": "quality",
+                "check": ""
+            }
+        ],
+        "context": {},
+        "required_capabilities": [],
+        "input_schema": {},
+        "output_schema": {},
+        "version": "1.0.0",
+        "parent_version": null,
+        "evolution_reason": null,
+        "created_at": "2026-02-21 11:21:00.000000",
+        "updated_at": "2026-02-21 11:21:00.000000"
+    },
+    "required_tools": [
+        "pdf_read",
+        "list_dir",
+        "save_data",
+        "send_email"
+    ],
+    "metadata": {
+        "created_at": "2026-02-21T11:21:00.000000",
+        "node_count": 5,
+        "edge_count": 4
+    }
+}
