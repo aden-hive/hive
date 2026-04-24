@@ -132,6 +132,9 @@ def get_preferred_model() -> str:
         # OpenRouter quickstart stores raw model IDs; tolerate pasted "openrouter/<id>" too.
         if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
             model = model[len("openrouter/") :]
+        # Avoid double-prefixing for any provider (e.g. "ollama/qwen2.5:7b" + provider="ollama")
+        if model.startswith(f"{provider}/"):
+            return model
         if model:
             return f"{provider}/{model}"
     return "anthropic/claude-sonnet-4-20250514"
