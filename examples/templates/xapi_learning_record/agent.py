@@ -15,14 +15,20 @@ to record learning interactions as xAPI statements in real time.
 import logging
 from pathlib import Path
 
-from framework.graph import Constraint, Goal, SuccessCriterion
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.executor import ExecutionResult
+from framework.orchestrator import (
+    Constraint,
+    EdgeCondition,
+    EdgeSpec,
+    ExecutionResult,
+    Goal,
+    GraphSpec,
+    SuccessCriterion,
+)
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost
+from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
@@ -161,7 +167,7 @@ edges = [
 
 entry_node = "event-capture"
 entry_points = {"default": "event-capture"}
-async_entry_points: list[AsyncEntryPointSpec] = []
+async_entry_points: list = []
 pause_nodes: list[str] = []
 terminal_nodes: list[str] = []
 
@@ -216,7 +222,7 @@ class XAPILearningRecordAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_host: AgentHost | None = None
         self._graph: GraphSpec | None = None
         self._tool_registry: ToolRegistry | None = None
 
@@ -290,7 +296,7 @@ class XAPILearningRecordAgent:
             ),
         ]
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_host = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
@@ -303,16 +309,16 @@ class XAPILearningRecordAgent:
 
     async def start(self, mock_mode: bool = False) -> None:
         """Set up and start the agent runtime."""
-        if self._agent_runtime is None:
+        if self._agent_host is None:
             self._setup(mock_mode=mock_mode)
-        if not self._agent_runtime.is_running:
-            await self._agent_runtime.start()
+        if not self._agent_host.is_running:
+            await self._agent_host.start()
 
     async def stop(self) -> None:
         """Stop the agent runtime and clean up."""
-        if self._agent_runtime and self._agent_runtime.is_running:
-            await self._agent_runtime.stop()
-        self._agent_runtime = None
+        if self._agent_host and self._agent_host.is_running:
+            await self._agent_host.stop()
+        self._agent_host = None
 
     async def trigger_and_wait(
         self,
@@ -322,10 +328,10 @@ class XAPILearningRecordAgent:
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the pipeline and wait for completion."""
-        if self._agent_runtime is None:
+        if self._agent_host is None:
             raise RuntimeError("Agent not started. Call start() first.")
 
-        return await self._agent_runtime.trigger_and_wait(
+        return await self._agent_host.trigger_and_wait(
             entry_point_id=entry_point,
             input_data=input_data,
             timeout=timeout,

@@ -8,7 +8,7 @@ Defines 5 nodes in a linear deterministic pipeline:
 - confirmation:      Return statement_id, timestamp, success/error status
 """
 
-from framework.graph.node import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # ---------------------------------------------------------------------------
 # Node 1: Event Capture (client-facing)

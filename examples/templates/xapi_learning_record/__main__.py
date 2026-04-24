@@ -224,7 +224,7 @@ def tui(mock, verbose, debug):
         await agent.start(mock_mode=mock)
 
         try:
-            app = AdenTUI(agent._agent_runtime)
+            app = AdenTUI(agent._agent_host)
             await app.run_async()
         finally:
             await agent.stop()
