@@ -64,6 +64,20 @@ goal = Goal(
             target=">=0.9",
             weight=0.15,
         ),
+        SuccessCriterion(
+    id="skill-filtering",
+    description="Jobs are filtered based on user-provided skills and preferences",
+    metric="filter_accuracy",
+    target=">=0.8",
+    weight=0.05,
+),
+SuccessCriterion(
+    id="job-ranking",
+    description="Jobs are ranked based on relevance and user skill alignment",
+    metric="ranking_accuracy",
+    target=">=0.8",
+    weight=0.05,
+),
     ],
     constraints=[
         Constraint(
@@ -176,10 +190,11 @@ class JobHunterAgent:
             },
             conversation_mode="continuous",
             identity_prompt=(
-                "You are a job hunting assistant. You analyze resumes to identify "
-                "the strongest role fits, search for matching job opportunities, "
-                "and help create personalized application materials."
-            ),
+    "You are an intelligent job hunting assistant. You analyze resumes, "
+    "filter jobs based on user skills and preferences, identify the strongest role fits, "
+    "search for relevant job opportunities, and help create personalized application materials. "
+    "Ensure job results are ranked based on relevance and user skill alignment."
+),
         )
 
     def _setup(self, mock_mode=False) -> None:

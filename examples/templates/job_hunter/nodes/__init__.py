@@ -2,6 +2,7 @@
 
 from framework.orchestrator import NodeSpec
 
+
 # Node 1: Intake (simple)
 # Collect resume and identify strongest role types.
 intake_node = NodeSpec(
@@ -65,12 +66,25 @@ Use web_scrape to directly scrape job listings from job boards. Build search URL
 - LinkedIn Jobs: https://www.linkedin.com/jobs/search/?keywords={role_title}
 - Indeed: https://www.indeed.com/jobs?q={role_title}
 
-Gather 10 quality job listings total across the target roles.
+Gather job listings across the target roles.
+
+After collecting jobs:
+1. Extract user skills from role_analysis
+2. Filter jobs that match user skills and preferences
+3. Remove irrelevant or weak matches
+4. Rank jobs based on:
+   - Skill match (highest priority)
+   - Role relevance
+   - Quality of job description
+
+Select the top 10 most relevant jobs after filtering and ranking.
+
+Ensure results are filtered and ranked before final output.
 
 **For each job, extract:**
 - Job title, Company name, Location, Brief description, URL.
 
-**OUTPUT:** Once you have 10 jobs, call:
+**OUTPUT:** Once you have the top 10 filtered and ranked jobs, call:
 set_output("job_listings", "<JSON array of 10 job objects>")
 """,
     tools=["web_scrape"],
