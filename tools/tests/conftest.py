@@ -11,8 +11,22 @@ import pytest
 from fastmcp import FastMCP
 
 from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter
+from aden_tools.credentials.store_adapter import _reset_default_adapter_cache
 
 logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(autouse=True)
+def _clear_default_adapter_cache():
+    """Drop the memoized default adapter so each test starts clean.
+
+    `CredentialStoreAdapter.default()` is process-memoized to avoid redundant
+    Aden syncs at startup; in tests we need a fresh build per test so env-var
+    and patch state from one test does not leak into the next.
+    """
+    _reset_default_adapter_cache()
+    yield
+    _reset_default_adapter_cache()
 
 
 @pytest.fixture

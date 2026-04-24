@@ -175,9 +175,7 @@ class TestHubSpotClientCreateObject:
 
     def test_create_object_posts_properties(self, client):
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"id": "99", "properties": {"email": "a@b.com"}}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "99", "properties": {"email": "a@b.com"}})
             result = client.create_object("contacts", {"email": "a@b.com", "firstname": "Alice"})
             body = mock_post.call_args.kwargs["json"]
             assert body == {"properties": {"email": "a@b.com", "firstname": "Alice"}}
@@ -209,9 +207,7 @@ class TestHubSpotClientDeleteObject:
 
     def test_delete_non_204_delegates_to_handle_response(self, client):
         with patch("httpx.delete") as mock_delete:
-            mock_delete.return_value = _mock_response(
-                status_code=404, json_data={"message": "Not found"}
-            )
+            mock_delete.return_value = _mock_response(status_code=404, json_data={"message": "Not found"})
             result = client.delete_object("contacts", "42")
             assert "error" in result
 
@@ -333,9 +329,7 @@ class TestHubSpotGetContact:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_get_contact")
         with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(
-                200, {"id": "42", "properties": {"email": "a@b.com"}}
-            )
+            mock_get.return_value = _mock_response(200, {"id": "42", "properties": {"email": "a@b.com"}})
             result = fn(contact_id="42")
             assert result["id"] == "42"
 
@@ -356,9 +350,7 @@ class TestHubSpotCreateContact:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_create_contact")
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"id": "99", "properties": {"email": "new@example.com"}}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "99", "properties": {"email": "new@example.com"}})
             result = fn(properties={"email": "new@example.com"})
             assert result["id"] == "99"
 
@@ -395,9 +387,7 @@ class TestHubSpotGetCompany:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_get_company")
         with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(
-                200, {"id": "c1", "properties": {"name": "Acme"}}
-            )
+            mock_get.return_value = _mock_response(200, {"id": "c1", "properties": {"name": "Acme"}})
             result = fn(company_id="c1")
             assert result["id"] == "c1"
 
@@ -407,9 +397,7 @@ class TestHubSpotCreateCompany:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_create_company")
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"id": "c2", "properties": {"name": "NewCo"}}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "c2", "properties": {"name": "NewCo"}})
             result = fn(properties={"name": "NewCo"})
             assert result["id"] == "c2"
 
@@ -444,9 +432,7 @@ class TestHubSpotGetDeal:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_get_deal")
         with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(
-                200, {"id": "d1", "properties": {"dealname": "Big Deal"}}
-            )
+            mock_get.return_value = _mock_response(200, {"id": "d1", "properties": {"dealname": "Big Deal"}})
             result = fn(deal_id="d1")
             assert result["id"] == "d1"
 
@@ -456,9 +442,7 @@ class TestHubSpotCreateDeal:
         monkeypatch.setenv("HUBSPOT_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "hubspot_create_deal")
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"id": "d2", "properties": {"dealname": "New Deal"}}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "d2", "properties": {"dealname": "New Deal"}})
             result = fn(properties={"dealname": "New Deal", "amount": "10000"})
             assert result["id"] == "d2"
 

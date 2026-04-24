@@ -86,7 +86,7 @@ intake → fetch-emails → classify-and-act → report
 
 ## MCP Tool Sources
 
-### hive-tools (stdio)
+### hive_tools (stdio)
 Hive tools MCP server
 
 **Configuration:**

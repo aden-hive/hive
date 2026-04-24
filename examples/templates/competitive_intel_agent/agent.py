@@ -1,7 +1,7 @@
 """Agent graph construction for Competitive Intelligence Agent."""
 
 from typing import Any, TYPE_CHECKING
-from framework.graph import (
+from framework.orchestrator import (
     EdgeSpec,
     EdgeCondition,
     Goal,
@@ -9,12 +9,12 @@ from framework.graph import (
     Constraint,
     NodeSpec,
 )
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult, GraphExecutor
-from framework.runtime.event_bus import EventBus
-from framework.runtime.core import Runtime
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult, Orchestrator
+from framework.host.event_bus import EventBus
+from framework.tracker.decision_tracker import DecisionTracker as Runtime
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
+from framework.loader.tool_registry import ToolRegistry
 
 from .config import default_config, metadata, RuntimeConfig
 from .nodes import (
@@ -188,7 +188,7 @@ class CompetitiveIntelAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: GraphExecutor | None = None
+        self._executor: Orchestrator | None = None
         self._graph: GraphSpec | None = None
         self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -219,12 +219,12 @@ class CompetitiveIntelAgent:
             },
         )
 
-    def _setup(self) -> GraphExecutor:
+    def _setup(self) -> Orchestrator:
         """
         Set up the executor with all components (runtime, LLM, tools).
 
         Returns:
-            An initialized GraphExecutor instance.
+            An initialized Orchestrator instance.
         """
         from pathlib import Path
 
@@ -250,7 +250,7 @@ class CompetitiveIntelAgent:
         self._graph = self._build_graph()
         runtime = Runtime(storage_path)
 
-        self._executor = GraphExecutor(
+        self._executor = Orchestrator(
             runtime=runtime,
             llm=llm,
             tools=tools,
@@ -303,9 +303,7 @@ class CompetitiveIntelAgent:
             session_state=session_state,
         )
 
-    async def run(
-        self, context: dict[str, Any], session_state: dict[str, Any] | None = None
-    ) -> ExecutionResult:
+    async def run(self, context: dict[str, Any], session_state: dict[str, Any] | None = None) -> ExecutionResult:
         """
         Run the agent (convenience method for single execution).
 
@@ -318,9 +316,7 @@ class CompetitiveIntelAgent:
         """
         await self.start()
         try:
-            result = await self.trigger_and_wait(
-                "start", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("start", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -370,9 +366,7 @@ class CompetitiveIntelAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
 
         return {
             "valid": len(errors) == 0,

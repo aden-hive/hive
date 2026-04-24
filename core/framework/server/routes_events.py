@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
-from framework.runtime.event_bus import AgentEvent, EventType
+from framework.host.event_bus import EventType
 from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
@@ -28,17 +28,15 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_LOOP_COMPLETED,
     EventType.LLM_TURN_COMPLETE,
     EventType.NODE_ACTION_PLAN,
-    EventType.EDGE_TRAVERSED,
     EventType.GOAL_PROGRESS,
-    EventType.QUEEN_INTERVENTION_REQUESTED,
-    EventType.WORKER_ESCALATION_TICKET,
     EventType.NODE_INTERNAL_OUTPUT,
     EventType.NODE_STALLED,
     EventType.NODE_RETRY,
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.CONTEXT_USAGE_UPDATED,
-    EventType.WORKER_LOADED,
+    EventType.WORKER_COLONY_LOADED,
+    EventType.COLONY_CREATED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
@@ -48,11 +46,44 @@ DEFAULT_EVENT_TYPES = [
     EventType.TRIGGER_FIRED,
     EventType.TRIGGER_REMOVED,
     EventType.TRIGGER_UPDATED,
-    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds
 KEEPALIVE_INTERVAL = 15.0
+
+# Session-SSE worker filter: workers run outside the queen's DM
+# chat. Worker activity is observable via the dedicated
+# ``/api/workers/{worker_id}/events`` per-worker SSE route, not via
+# the session chat. This keeps the queen↔user conversation clean of
+# tool-call chatter regardless of whether the worker was spawned by
+# ``run_agent_with_input`` (stream_id="worker") or
+# ``run_parallel_workers`` (stream_id="worker:{uuid}").
+#
+# Lifecycle events the frontend needs for fan-in summaries
+# (SUBAGENT_REPORT, EXECUTION_COMPLETED, EXECUTION_FAILED) are still
+# allowed through so the queen can show "N workers done" surfaces
+# without exposing the per-turn chatter.
+_WORKER_EVENT_ALLOWLIST = {
+    EventType.SUBAGENT_REPORT.value,
+    EventType.EXECUTION_COMPLETED.value,
+    EventType.EXECUTION_FAILED.value,
+}
+
+
+def _is_worker_noise(evt_dict: dict) -> bool:
+    """True if the event belongs to a worker stream and should not
+    surface in the queen DM chat.
+
+    Matches any stream starting with ``worker`` — both the bare
+    ``"worker"`` tag used by single-worker spawns and the
+    ``"worker:{uuid}"`` tag used by parallel fan-outs. The allowlist
+    carves out the three terminal/lifecycle events the UI still
+    needs to render fan-in summaries.
+    """
+    stream_id = evt_dict.get("stream_id") or ""
+    if not stream_id.startswith("worker"):
+        return False
+    return evt_dict.get("type") not in _WORKER_EVENT_ALLOWLIST
 
 
 def _parse_event_types(query_param: str | None) -> list[EventType]:
@@ -88,6 +119,22 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     event_bus = session.event_bus
     event_types = _parse_event_types(request.query.get("types"))
 
+    # Worker-noise filter is phase-aware. In DM mode (queen phase
+    # "independent") the queen's chat should stay clean — workers
+    # are invisible. In colony mode (phase "working"/"reviewing")
+    # the user IS supervising the workers and wants to see the
+    # tool-call/text-delta chatter as it happens. Sample the phase
+    # once at SSE connect; if the queen later transitions the
+    # frontend reconnects.
+    def _should_filter_worker_noise() -> bool:
+        phase_state = getattr(session, "phase_state", None)
+        if phase_state is None:
+            return True  # unknown phase → be conservative, filter noise
+        phase = getattr(phase_state, "phase", "independent")
+        return phase == "independent"
+
+    filter_worker_noise = _should_filter_worker_noise()
+
     # Per-client buffer queue
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
@@ -102,7 +149,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_iteration",
         "node_loop_started",
         "credentials_required",
-        "worker_loaded",
+        "worker_graph_loaded",
         "queen_phase_changed",
     }
 
@@ -114,6 +161,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             return
 
         evt_dict = event.to_dict()
+        if filter_worker_noise and _is_worker_noise(evt_dict):
+            return
         if evt_dict.get("type") in _CRITICAL_EVENTS:
             try:
                 queue.put_nowait(evt_dict)
@@ -139,81 +188,51 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
 
     sse = SSEResponse()
     await sse.prepare(request)
-    logger.info(
-        "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
-    )
+    logger.info("SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types))
 
     # Replay buffered events that were published before this SSE connected.
     # The EventBus keeps a history ring-buffer; we replay the subset that
     # produces visible chat messages so the frontend never misses early
-    # queen output.  Lifecycle events are NOT replayed to avoid duplicate
-    # state transitions (turn counter increments, etc.).
+    # queen output.  Execution/node lifecycle events are NOT replayed to
+    # avoid duplicate state transitions (turn counter increments, etc.).
+    #
+    # Trigger lifecycle events ARE replayed: they're idempotent state
+    # setters (this trigger exists / is active / was deactivated) and
+    # they're published during session load — BEFORE the frontend's
+    # SSE subscription is established. Without replay, a freshly-opened
+    # colony would never see its own triggers.
     _REPLAY_TYPES = {
         EventType.CLIENT_OUTPUT_DELTA.value,
         EventType.EXECUTION_STARTED.value,
         EventType.CLIENT_INPUT_REQUESTED.value,
         EventType.CLIENT_INPUT_RECEIVED.value,
+        EventType.TRIGGER_AVAILABLE.value,
+        EventType.TRIGGER_ACTIVATED.value,
+        EventType.TRIGGER_DEACTIVATED.value,
+        EventType.TRIGGER_FIRED.value,
+        EventType.TRIGGER_REMOVED.value,
+        EventType.TRIGGER_UPDATED.value,
     }
     event_type_values = {et.value for et in event_types}
     replay_types = _REPLAY_TYPES & event_type_values
     replayed = 0
     for past_event in event_bus._event_history:
         if past_event.type.value in replay_types:
+            past_dict = past_event.to_dict()
+            if filter_worker_noise and _is_worker_noise(past_dict):
+                continue
             try:
-                queue.put_nowait(past_event.to_dict())
+                queue.put_nowait(past_dict)
                 replayed += 1
             except asyncio.QueueFull:
                 break
     if replayed:
         logger.info("SSE replayed %d buffered events for session='%s'", replayed, session.id)
 
-    # Inject a live-status snapshot so the frontend knows which nodes are
-    # currently running.  This covers the case where the user navigated away
-    # and back — the localStorage snapshot is stale, and the ring-buffer
-    # replay may not include the original node_loop_started events.
-    worker_runtime = getattr(session, "worker_runtime", None)
-    if worker_runtime and getattr(worker_runtime, "is_running", False):
-        try:
-            for stream_info in worker_runtime.get_active_streams():
-                graph_id = stream_info.get("graph_id")
-                stream_id = stream_info.get("stream_id", "default")
-                for exec_id in stream_info.get("active_execution_ids", []):
-                    # Synthesize execution_started so frontend sets workerRunState
-                    synth_exec = AgentEvent(
-                        type=EventType.EXECUTION_STARTED,
-                        stream_id=stream_id,
-                        execution_id=exec_id,
-                        graph_id=graph_id,
-                        data={"synthetic": True},
-                    ).to_dict()
-                    try:
-                        queue.put_nowait(synth_exec)
-                    except asyncio.QueueFull:
-                        pass
-
-                # Find the currently executing node via the executor
-                for _gid, reg in worker_runtime._graphs.items():
-                    if _gid != graph_id:
-                        continue
-                    for _ep_id, stream in reg.streams.items():
-                        for exec_id, executor in stream._active_executors.items():
-                            current = getattr(executor, "current_node_id", None)
-                            if current:
-                                synth_node = AgentEvent(
-                                    type=EventType.NODE_LOOP_STARTED,
-                                    stream_id=stream_id,
-                                    node_id=current,
-                                    execution_id=exec_id,
-                                    graph_id=graph_id,
-                                    data={"synthetic": True},
-                                ).to_dict()
-                                try:
-                                    queue.put_nowait(synth_node)
-                                except asyncio.QueueFull:
-                                    pass
-            logger.info("SSE injected live-status snapshot for session='%s'", session.id)
-        except Exception:
-            logger.debug("Failed to inject live-status snapshot", exc_info=True)
+    # Live status is surfaced via the EventBus ring-buffer replay above
+    # (executed earlier in this handler).  The old graph-executor snapshot
+    # injection was removed when graph execution was retired -- the
+    # AgentLoop publishes its own lifecycle events to the EventBus.
 
     event_count = 0
     close_reason = "unknown"
@@ -224,9 +243,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                 await sse.send_event(data)
                 event_count += 1
                 if event_count == 1:
-                    logger.info(
-                        "SSE first event: session='%s', type='%s'", session.id, data.get("type")
-                    )
+                    logger.info("SSE first event: session='%s', type='%s'", session.id, data.get("type"))
             except TimeoutError:
                 try:
                     await sse.send_keepalive()

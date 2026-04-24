@@ -148,9 +148,7 @@ def whitespace_equal(a: str, b: str) -> bool:
     return a.replace(" ", "").replace("\t", "") == b.replace(" ", "").replace("\t", "")
 
 
-def strip_insert_echo(
-    anchor_line: str, new_lines: list[str], *, position: str = "first"
-) -> list[str]:
+def strip_insert_echo(anchor_line: str, new_lines: list[str], *, position: str = "first") -> list[str]:
     """Strip echoed anchor line from insert content.
 
     If the model echoes the anchor line in inserted content, remove it to
@@ -175,9 +173,7 @@ def strip_insert_echo(
     return new_lines
 
 
-def strip_boundary_echo(
-    file_lines: list[str], start_1idx: int, end_1idx: int, new_lines: list[str]
-) -> list[str]:
+def strip_boundary_echo(file_lines: list[str], start_1idx: int, end_1idx: int, new_lines: list[str]) -> list[str]:
     """Strip echoed boundary context from replace_lines content.
 
     If the model includes the line before AND after the replaced range as part

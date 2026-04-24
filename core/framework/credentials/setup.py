@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from framework.graph import NodeSpec
+    from framework.orchestrator import NodeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -268,9 +268,7 @@ class CredentialSetupSession:
         self._print(f"{Colors.YELLOW}Initializing credential store...{Colors.NC}")
         try:
             generate_and_save_credential_key()
-            self._print(
-                f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}"
-            )
+            self._print(f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}")
             return True
         except Exception as e:
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
@@ -449,9 +447,7 @@ class CredentialSetupSession:
                     logger.warning("Unexpected error exporting credential to env", exc_info=True)
                 return True
             else:
-                self._print(
-                    f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}"
-                )
+                self._print(f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}")
                 self._print("Please connect this integration on https://hive.adenhq.com first.")
                 return False
         except Exception as e:
@@ -533,7 +529,9 @@ class CredentialSetupSession:
 
 
 def load_agent_nodes(agent_path: str | Path) -> list:
-    """Load NodeSpec list from an agent's agent.py or agent.json.
+    """Load NodeSpec list from an agent directory.
+
+    Checks agent.json (declarative) first, then agent.py (legacy).
 
     Args:
         agent_path: Path to agent directory.
@@ -542,14 +540,26 @@ def load_agent_nodes(agent_path: str | Path) -> list:
         List of NodeSpec objects (empty list if agent can't be loaded).
     """
     agent_path = Path(agent_path)
+    agent_json_file = agent_path / "agent.json"
     agent_py = agent_path / "agent.py"
-    agent_json = agent_path / "agent.json"
 
-    if agent_py.exists():
+    if agent_json_file.exists():
+        return _load_nodes_from_json_declarative(agent_json_file)
+    elif agent_py.exists():
         return _load_nodes_from_python_agent(agent_path)
-    elif agent_json.exists():
-        return _load_nodes_from_json_agent(agent_json)
     return []
+
+
+def _load_nodes_from_json_declarative(agent_json: Path) -> list:
+    """Load nodes from a declarative JSON agent."""
+    try:
+        from framework.loader.agent_loader import load_agent_config
+
+        data = json.loads(agent_json.read_text(encoding="utf-8"))
+        graph, _ = load_agent_config(data)
+        return list(graph.nodes)
+    except Exception:
+        return []
 
 
 def _load_nodes_from_python_agent(agent_path: Path) -> list:
@@ -590,7 +600,7 @@ def _load_nodes_from_json_agent(agent_json: Path) -> list:
         with open(agent_json, encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        from framework.graph import NodeSpec
+        from framework.orchestrator import NodeSpec
 
         nodes_data = data.get("graph", {}).get("nodes", [])
         nodes = []

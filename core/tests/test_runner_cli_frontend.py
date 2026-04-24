@@ -1,8 +1,9 @@
 """Tests for frontend build fallback in the runner CLI."""
 
+import argparse
 import subprocess
 
-from framework.runner import cli as runner_cli
+from framework.loader import cli as runner_cli
 
 
 def _write_frontend_tree(tmp_path, *, with_dist: bool = False):
@@ -57,4 +58,31 @@ def test_build_frontend_cleans_cache_and_uses_windows_npm_cmd(monkeypatch, tmp_p
     assert commands == [
         ["npm.cmd", "install", "--no-fund", "--no-audit"],
         ["npm.cmd", "run", "build"],
+    ]
+
+
+def test_cmd_open_starts_gateway_ping_in_background(monkeypatch):
+    args = argparse.Namespace(open=False)
+    calls: list[tuple[str, object]] = []
+
+    class FakeThread:
+        def __init__(self, *, target, args, daemon, name):
+            calls.append(("init", target, args, daemon, name))
+            self._target = target
+            self._args = args
+
+        def start(self):
+            calls.append(("start", self._target, self._args))
+
+    monkeypatch.setattr(runner_cli.threading, "Thread", FakeThread)
+    monkeypatch.setattr(runner_cli, "_ping_hive_gateway_availability", lambda source: None)
+    monkeypatch.setattr(runner_cli, "cmd_serve", lambda incoming: 123)
+
+    result = runner_cli.cmd_open(args)
+
+    assert result == 123
+    assert args.open is True
+    assert calls == [
+        ("init", runner_cli._ping_hive_gateway_availability, ("hive-open",), True, "hive-open-gateway-ping"),
+        ("start", runner_cli._ping_hive_gateway_availability, ("hive-open",)),
     ]

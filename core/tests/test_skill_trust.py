@@ -181,9 +181,7 @@ class TestProjectTrustDetector:
         store = TrustedRepoStore(tmp_path / "t.json")
         det = ProjectTrustDetector(store)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="http://localhost/org/repo.git\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="http://localhost/org/repo.git\n")
             cls, _ = det.classify(tmp_path)
         assert cls == ProjectTrustClassification.ALWAYS_TRUSTED
 
@@ -193,9 +191,7 @@ class TestProjectTrustDetector:
         store.trust("github.com/trusted/repo")
         det = ProjectTrustDetector(store)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="git@github.com:trusted/repo.git\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="git@github.com:trusted/repo.git\n")
             cls, key = det.classify(tmp_path)
         assert cls == ProjectTrustClassification.TRUSTED_BY_USER
         assert key == "github.com/trusted/repo"
@@ -205,9 +201,7 @@ class TestProjectTrustDetector:
         store = TrustedRepoStore(tmp_path / "t.json")
         det = ProjectTrustDetector(store)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             cls, key = det.classify(tmp_path)
         assert cls == ProjectTrustClassification.UNTRUSTED
         assert key == "github.com/stranger/repo"
@@ -218,9 +212,7 @@ class TestProjectTrustDetector:
         monkeypatch.setenv("HIVE_OWN_REMOTES", "github.com/myorg/*")
         det = ProjectTrustDetector(store)
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="git@github.com:myorg/myrepo.git\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="git@github.com:myorg/myrepo.git\n")
             cls, _ = det.classify(tmp_path)
         assert cls == ProjectTrustClassification.ALWAYS_TRUSTED
 
@@ -289,9 +281,7 @@ class TestTrustGate:
         skill = make_skill("evil-skill", "project")
         gate = TrustGate(store=store, interactive=False)
         with patch("subprocess.run") as m:
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/evil.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/evil.git\n")
             with caplog.at_level(logging.WARNING):
                 result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert not any(s.name == "evil-skill" for s in result)
@@ -314,9 +304,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "session-skill" for s in result)
         # Must NOT persist to trusted store
@@ -338,9 +326,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "perm-skill" for s in result)
         assert store.is_trusted("github.com/stranger/repo")
@@ -361,9 +347,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert not any(s.name == "bad-skill" for s in result)
 
@@ -392,9 +376,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert not any(s.name == "interrupted-skill" for s in result)
 
@@ -420,9 +402,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             gate.filter_and_gate([skill], project_dir=tmp_path)
 
         assert sentinel.exists()
@@ -436,9 +416,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             gate.filter_and_gate([skill2], project_dir=tmp_path)
 
         assert not any("Security notice" in line for line in output_lines)
@@ -461,9 +439,7 @@ class TestTrustGate:
             patch("sys.stdout.isatty", return_value=True),
             patch("subprocess.run") as m,
         ):
-            m.return_value = MagicMock(
-                returncode=0, stdout="https://github.com/stranger/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="https://github.com/stranger/repo.git\n")
             result = gate.filter_and_gate([fw_skill, user_skill, proj_skill], project_dir=tmp_path)
         names = {s.name for s in result}
         assert "fw" in names

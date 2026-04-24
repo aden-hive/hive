@@ -27,9 +27,7 @@ PIPEDRIVE_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://pipedrive.readme.io/docs/core-api-concepts-about-pipedrive-api",
-        description=(
-            "Pipedrive API token for CRM management (also set PIPEDRIVE_DOMAIN for custom domains)"
-        ),
+        description=("Pipedrive API token for CRM management (also set PIPEDRIVE_DOMAIN for custom domains)"),
         direct_api_key_supported=True,
         api_key_instructions="""To get a Pipedrive API token:
 1. Log in to your Pipedrive account

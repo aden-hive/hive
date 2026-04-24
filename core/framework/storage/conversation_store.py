@@ -29,6 +29,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from framework.utils.io import atomic_write
+
 
 class FileConversationStore:
     """File-per-part ConversationStore.
@@ -41,12 +43,18 @@ class FileConversationStore:
     def __init__(self, base_path: str | Path) -> None:
         self._base = Path(base_path)
         self._parts_dir = self._base / "parts"
+        # Partial checkpoints for in-flight assistant turns. Written on every
+        # stream event, deleted atomically when the final part lands. Kept
+        # in a sibling dir so the parts/ glob doesn't pick them up.
+        self._partials_dir = self._base / "partials"
 
     # --- sync helpers --------------------------------------------------------
 
     def _write_json(self, path: Path, data: dict) -> None:
+        # Atomic tmp+rename with fsync — a crash mid-write would otherwise
+        # leave a corrupt cursor.json and silently reset the iteration counter.
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with atomic_write(path) as f:
             json.dump(data, f)
 
     def _read_json(self, path: Path) -> dict | None:
@@ -95,7 +103,45 @@ class FileConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return await self._run(self._read_json, self._base / "cursor.json")
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def write_partial(self, seq: int, data: dict[str, Any]) -> None:
+        """Checkpoint an in-flight assistant turn. Overwrites any prior partial
+        for the same seq. Caller is expected to clear_partial() once the real
+        part is written via write_part().
+        """
+        path = self._partials_dir / f"{seq:010d}.json"
+        await self._run(self._write_json, path, data)
+
+    async def read_partial(self, seq: int) -> dict[str, Any] | None:
+        path = self._partials_dir / f"{seq:010d}.json"
+        return await self._run(self._read_json, path)
+
+    async def read_all_partials(self) -> list[dict[str, Any]]:
+        """Return all partial checkpoints, sorted by seq. Used during restore
+        to surface any in-flight turn that the last process didn't finish.
+        """
+
+        def _read_all() -> list[dict[str, Any]]:
+            if not self._partials_dir.exists():
+                return []
+            files = sorted(self._partials_dir.glob("*.json"))
+            partials: list[dict[str, Any]] = []
+            for f in files:
+                data = self._read_json(f)
+                if data is not None:
+                    partials.append(data)
+            return partials
+
+        return await self._run(_read_all)
+
+    async def clear_partial(self, seq: int) -> None:
+        def _clear() -> None:
+            path = self._partials_dir / f"{seq:010d}.json"
+            if path.exists():
+                path.unlink()
+
+        await self._run(_clear)
+
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
             if not self._parts_dir.exists():
                 return
@@ -109,6 +155,32 @@ class FileConversationStore:
     async def close(self) -> None:
         """No-op — no persistent handles for file-per-part storage."""
         pass
+
+    async def clear(self) -> None:
+        """Clear all parts and cursor, keeping the directory structure.
+
+        Used when starting a fresh execution in the same session directory.
+        """
+
+        def _clear() -> None:
+            # Clear all parts
+            if self._parts_dir.exists():
+                for f in self._parts_dir.glob("*.json"):
+                    f.unlink()
+            # Clear partial checkpoints
+            if self._partials_dir.exists():
+                for f in self._partials_dir.glob("*.json"):
+                    f.unlink()
+            # Clear cursor
+            cursor_path = self._base / "cursor.json"
+            if cursor_path.exists():
+                cursor_path.unlink()
+            # Clear meta
+            meta_path = self._base / "meta.json"
+            if meta_path.exists():
+                meta_path.unlink()
+
+        await self._run(_clear)
 
     async def destroy(self) -> None:
         """Delete the entire base directory and all persisted data."""

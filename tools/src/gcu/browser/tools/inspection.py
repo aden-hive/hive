@@ -1,194 +1,265 @@
 """
-Browser inspection tools - screenshot, console, pdf, snapshots.
+Browser inspection tools - screenshot, snapshot, console.
 
-Tools for extracting content and capturing page state.
+All operations go through the Beeline extension via CDP - no Playwright required.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
 import logging
-from pathlib import Path
-from typing import Any, Literal
+import time
+from typing import Literal
 
 from fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
-from playwright.async_api import Error as PlaywrightError
 
-from ..session import get_session
+from ..bridge import get_bridge
+from ..telemetry import log_tool_call
+from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Screenshot normalization
-# ---------------------------------------------------------------------------
 
-_QUALITY_STEPS = (85, 70, 50)
-_MIN_DIMENSION = 400
-_DIMENSION_STEP = 200
+# Fixed output width for all screenshots (bandwidth default). This
+# number does NOT affect coordinate semantics — click / hover / press
+# and rect tools all work in fractions of the viewport (0..1), which
+# are invariant to whatever resize / tile the vision API applies. The
+# 800 px width is simply small enough to keep JPEG payloads under
+# ~150 KB on typical UI screenshots.
+_SCREENSHOT_WIDTH = 800
+
+# Per-tab viewport-size cache populated on every browser_screenshot
+# and on lazy-init inside the click tools. Stores CSS-pixel viewport
+# dimensions (window.innerWidth / window.innerHeight). Click tools
+# multiply fractional inputs by these to get CSS coords before
+# dispatching CDP events; rect tools divide CSS-pixel DOM rects by
+# these to produce fractions for the agent.
+_viewport_sizes: dict[int, tuple[int, int]] = {}
+
+# Optional debug cache — physical-px scale per tab (orig_png_w /
+# _SCREENSHOT_WIDTH). Logged only; no consumer.
+_screenshot_scales: dict[int, float] = {}
 
 
-def _normalize_screenshot(
-    raw_bytes: bytes,
-    image_type: str,
-    *,
-    max_dimension: int = 2000,
-    max_bytes: int = 5_000_000,
-) -> tuple[bytes, str]:
-    """Normalize a screenshot to fit within size and dimension limits.
+def clear_tab_state(tab_ids) -> None:
+    """Drop cached screenshot scales and viewport sizes for the given tab_ids.
 
-    Progressively resizes and compresses to JPEG until the image fits
-    under *max_bytes* and *max_dimension*.  If Pillow is not installed
-    the original bytes are returned unchanged.
-
-    Args:
-        raw_bytes: Raw PNG or JPEG image bytes from Playwright.
-        image_type: Original format (``"png"`` or ``"jpeg"``).
-        max_dimension: Maximum width or height in pixels.
-        max_bytes: Maximum file size in bytes.
-
-    Returns:
-        ``(normalized_bytes, image_type)`` where *image_type* may change
-        to ``"jpeg"`` if compression was applied.
+    Called when a tab closes or a profile's context is destroyed so stale
+    cache values can't bleed into a later tab that Chrome happens to assign
+    the same id. Accepts a single id or any iterable.
     """
+    if isinstance(tab_ids, int):
+        tab_ids = (tab_ids,)
+    for tid in tab_ids:
+        _screenshot_scales.pop(tid, None)
+        _viewport_sizes.pop(tid, None)
+
+
+def _resize_and_annotate(
+    data: str,
+    css_width: int,
+    dpr: float = 1.0,
+    highlights: list[dict] | None = None,
+) -> tuple[str, float]:
+    """Resize the captured PNG down to ``_SCREENSHOT_WIDTH`` (=800 px)
+    and re-encode as JPEG quality 75.
+
+    The image dimensions do NOT determine click coordinates any more —
+    the tools work in viewport fractions. This helper exists purely
+    for bandwidth + annotation overlay. Returns ``(new_b64,
+    physical_scale)`` where ``physical_scale = orig_png_w / output_w``
+    is kept for debug logging.
+
+    Highlight rects arrive in CSS px; they're converted to image-space
+    for overlay drawing via the local ``css_to_image = css_width /
+    output_w`` factor (computed inline — no external cache).
+    """
+    if not css_width or css_width <= 0:
+        # Bridge always supplies css_width from window.innerWidth; only
+        # reach here on a degraded response. Return the raw PNG.
+        return data, 1.0
+
     try:
-        from PIL import Image
+        from PIL import Image, ImageDraw, ImageFont
     except ImportError:
-        logger.debug("Pillow not installed — skipping screenshot normalization")
-        return raw_bytes, image_type
+        raw = base64.b64decode(data) if data else b""
+        orig_w = 0
+        if len(raw) >= 24 and raw[:8] == b"\x89PNG\r\n\x1a\n":
+            import struct
+
+            orig_w = struct.unpack(">I", raw[16:20])[0]
+        physical_scale = orig_w / _SCREENSHOT_WIDTH if orig_w else 1.0
+        logger.warning(
+            "PIL not available — screenshot resize SKIPPED. "
+            "Returning raw physical-px PNG. physicalScale=%.4f, "
+            "css_width=%d, dpr=%s. Install Pillow for annotation.",
+            physical_scale,
+            css_width,
+            dpr,
+        )
+        return data, round(physical_scale, 4)
 
     try:
-        img = Image.open(io.BytesIO(raw_bytes))
-        width, height = img.size
-        max_dim = max(width, height)
+        raw = base64.b64decode(data)
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        orig_w, orig_h = img.size
 
-        # Already within limits — return as-is
-        if len(raw_bytes) <= max_bytes and max_dim <= max_dimension:
-            return raw_bytes, image_type
+        physical_scale = orig_w / _SCREENSHOT_WIDTH
+        new_w = _SCREENSHOT_WIDTH
+        new_h = round(orig_h * new_w / orig_w)
+        if (new_w, new_h) != img.size:
+            img = img.resize((new_w, new_h), Image.LANCZOS)
 
-        # Build candidate dimensions (descending), skip anything >= original
-        candidates = [
-            d for d in range(max_dimension, _MIN_DIMENSION - 1, -_DIMENSION_STEP) if d < max_dim
-        ]
-        # If the original is already <= max_dimension but over max_bytes,
-        # still try compressing at original size first.
-        if max_dim <= max_dimension:
-            candidates = [max_dim] + candidates
+        # Local CSS → image px factor for overlay draws. Kept local —
+        # not exported, not stored, not leaked to the agent.
+        css_to_image = css_width / _SCREENSHOT_WIDTH
 
-        smallest: tuple[bytes, int] | None = None
+        logger.info(
+            "Screenshot: orig=%dx%d → out=%dx%d (css_width=%d, dpr=%s), physicalScale=%.4f, css_to_image=%.4f",
+            orig_w,
+            orig_h,
+            new_w,
+            new_h,
+            css_width,
+            dpr,
+            physical_scale,
+            css_to_image,
+        )
 
-        for side in candidates:
-            # Re-open from source each iteration (thumbnail is destructive)
-            img = Image.open(io.BytesIO(raw_bytes))
-            img.thumbnail((side, side), Image.LANCZOS)
+        if highlights:
+            overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+            except Exception:
+                font = ImageFont.load_default()
 
-            # JPEG doesn't support alpha
-            if img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGB")
+            for h in highlights:
+                kind = h.get("kind", "rect")
+                label = h.get("label", "")
+                # Highlights arrive in CSS px → convert to image px.
+                ix = h["x"] / css_to_image
+                iy = h["y"] / css_to_image
+                iw = h.get("w", 0) / css_to_image
+                ih = h.get("h", 0) / css_to_image
 
-            for quality in _QUALITY_STEPS:
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=quality, optimize=True)
-                out_bytes = buf.getvalue()
+                if kind == "point":
+                    cx, cy, r = ix, iy, 10
+                    draw.ellipse(
+                        [(cx - r, cy - r), (cx + r, cy + r)],
+                        fill=(239, 68, 68, 100),
+                        outline=(239, 68, 68, 220),
+                        width=2,
+                    )
+                    draw.line([(cx - r - 4, cy), (cx + r + 4, cy)], fill=(239, 68, 68, 220), width=2)
+                    draw.line([(cx, cy - r - 4), (cx, cy + r + 4)], fill=(239, 68, 68, 220), width=2)
+                else:
+                    draw.rectangle(
+                        [(ix, iy), (ix + iw, iy + ih)],
+                        fill=(59, 130, 246, 70),
+                        outline=(59, 130, 246, 220),
+                        width=2,
+                    )
 
-                if smallest is None or len(out_bytes) < smallest[1]:
-                    smallest = (out_bytes, len(out_bytes))
+                display_label = f"({round(ix)},{round(iy)}) {label}".strip()
+                lx, ly = ix, max(2, iy - 16)
+                lx = max(2, min(lx, new_w - 120))
+                bbox = draw.textbbox((lx, ly), display_label, font=font)
+                pad = 3
+                draw.rectangle(
+                    [(bbox[0] - pad, bbox[1] - pad), (bbox[2] + pad, bbox[3] + pad)],
+                    fill=(59, 130, 246, 200),
+                )
+                draw.text((lx, ly), display_label, fill=(255, 255, 255, 255), font=font)
 
-                if len(out_bytes) <= max_bytes:
-                    return out_bytes, "jpeg"
+            img = Image.alpha_composite(img, overlay).convert("RGB")
+        else:
+            img = img.convert("RGB")
 
-        # Nothing fit — return the smallest we produced
-        if smallest is not None:
-            logger.warning(
-                "Screenshot normalization: could not fit under %d bytes (best: %d bytes)",
-                max_bytes,
-                smallest[1],
-            )
-            return smallest[0], "jpeg"
-
-        return raw_bytes, image_type
-
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75, optimize=True)
+        return (
+            base64.b64encode(buf.getvalue()).decode(),
+            round(physical_scale, 4),
+        )
     except Exception:
-        logger.warning("Screenshot normalization failed — returning original", exc_info=True)
-        return raw_bytes, image_type
+        logger.warning(
+            "Screenshot resize/annotate FAILED — returning original image. css_width=%s, dpr=%s.",
+            css_width,
+            dpr,
+            exc_info=True,
+        )
+        return data, 1.0
 
 
-def _format_ax_tree(nodes: list[dict[str, Any]]) -> str:
-    """Format a CDP Accessibility.getFullAXTree result into an indented text tree.
+async def _ensure_viewport_size(tab_id: int, _caller: str = "unknown") -> tuple[int, int]:
+    """Return ``(cssWidth, cssHeight)`` for ``tab_id``, always
+    refreshing from ``window.innerWidth`` / ``window.innerHeight``.
 
-    Each node is rendered as:
-        indent + "- " + role + ' "name"' + [properties]
+    Used by click / hover / press tools to turn fractional inputs
+    (0..1) into CSS px, and by rect tools to turn CSS-px rects into
+    fractions.
 
-    Ignored and invisible nodes are skipped.
+    Every call emits a ``viewport_sample`` telemetry entry so we
+    can build a timeline of Chrome's reported viewport across an
+    agent run — needed to diagnose the sessions where cssH changes
+    silently (no visible layout shift) between screenshot and
+    click. The entry records the live value, the cached value, and
+    the delta so the transition point is trivial to locate in
+    ``~/.hive/browser-logs/browser-YYYY-MM-DD.jsonl``.
+
+    Falls back to the cached value on evaluate failure, then to
+    ``(1, 1)`` if there's no cache — identity-op is a safe no-op.
     """
-    if not nodes:
-        return "(empty tree)"
+    bridge = get_bridge()
+    cw = ch = 0
+    evaluate_error: str | None = None
+    try:
+        result = await bridge.evaluate(tab_id, "({w: window.innerWidth, h: window.innerHeight})")
+        inner = (result or {}).get("result") or {}
+        cw = int(float(inner.get("w") or 0))
+        ch = int(float(inner.get("h") or 0))
+    except Exception as e:
+        evaluate_error = str(e)
+        cw = ch = 0
 
-    # Build nodeId → node lookup
-    by_id = {n["nodeId"]: n for n in nodes}
+    cached_before = _viewport_sizes.get(tab_id)
 
-    # Build nodeId → [child nodeId] mapping
-    children_map: dict[str, list[str]] = {}
-    for n in nodes:
-        for child_id in n.get("childIds", []):
-            children_map.setdefault(n["nodeId"], []).append(child_id)
+    if cw <= 0 or ch <= 0:
+        if cached_before is not None and cached_before[0] > 0 and cached_before[1] > 0:
+            result_cw, result_ch = cached_before
+        else:
+            result_cw, result_ch = 1, 1
+    else:
+        result_cw, result_ch = cw, ch
+        _viewport_sizes[tab_id] = (cw, ch)
 
-    lines: list[str] = []
+    try:
+        from ..telemetry import write_log
 
-    def _walk(node_id: str, depth: int) -> None:
-        node = by_id.get(node_id)
-        if not node:
-            return
+        write_log(
+            {
+                "type": "viewport_sample",
+                "tab_id": tab_id,
+                "caller": _caller,
+                "live_w": cw,
+                "live_h": ch,
+                "cached_w": cached_before[0] if cached_before else None,
+                "cached_h": cached_before[1] if cached_before else None,
+                "deltaH_vs_cache": ((ch - cached_before[1]) if (cached_before and ch > 0) else None),
+                "returned_w": result_cw,
+                "returned_h": result_ch,
+                "evaluate_error": evaluate_error,
+            }
+        )
+    except Exception:
+        pass
 
-        # Skip ignored nodes
-        if node.get("ignored", False):
-            # Still walk children — they may be visible
-            for cid in children_map.get(node_id, []):
-                _walk(cid, depth)
-            return
-
-        role_info = node.get("role", {})
-        role = role_info.get("value", "unknown") if isinstance(role_info, dict) else str(role_info)
-
-        # Skip generic/none roles that add no information
-        if role in ("none", "Ignored"):
-            for cid in children_map.get(node_id, []):
-                _walk(cid, depth)
-            return
-
-        name_info = node.get("name", {})
-        name = name_info.get("value", "") if isinstance(name_info, dict) else str(name_info)
-
-        # Build property annotations
-        props: list[str] = []
-        for prop in node.get("properties", []):
-            pname = prop.get("name", "")
-            pval = prop.get("value", {})
-            val = pval.get("value") if isinstance(pval, dict) else pval
-            if pname in ("focused", "disabled", "checked", "expanded", "selected", "required"):
-                if val is True:
-                    props.append(pname)
-            elif pname == "level" and val:
-                props.append(f"level={val}")
-
-        indent = "  " * depth
-        label = f"- {role}"
-        if name:
-            label += f' "{name}"'
-        if props:
-            label += f" [{', '.join(props)}]"
-
-        lines.append(f"{indent}{label}")
-
-        for cid in children_map.get(node_id, []):
-            _walk(cid, depth + 1)
-
-    # Root is the first node in the list
-    _walk(nodes[0]["nodeId"], 0)
-
-    return "\n".join(lines) if lines else "(empty tree)"
+    return result_cw, result_ch
 
 
 def register_inspection_tools(mcp: FastMCP) -> None:
@@ -196,226 +267,516 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def browser_screenshot(
-        target_id: str | None = None,
-        profile: str = "default",
+        tab_id: int | None = None,
+        profile: str | None = None,
         full_page: bool = False,
         selector: str | None = None,
-        image_type: Literal["png", "jpeg"] = "png",
+        annotate: bool = True,
     ) -> list:
         """
         Take a screenshot of the current page.
 
-        Returns the screenshot as an image the LLM can see, alongside
-        text metadata (URL, size, etc.).
+        Image is 800 px wide (JPEG quality 75, ~50–120 KB). All
+        coordinate tools work in **fractions of the viewport (0..1)**,
+        not pixels — so read a target's proportional position off this
+        image ("~35 % from the left, ~20 % from the top") and pass
+        ``(0.35, 0.20)`` to ``browser_click_coordinate`` /
+        ``browser_hover_coordinate`` / ``browser_press_at``.
+        ``browser_get_rect`` and ``browser_shadow_query`` likewise
+        return coordinates as fractions.
 
         Args:
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            full_page: Capture full scrollable page (default: False)
-            selector: CSS selector to screenshot specific element (optional)
-            image_type: Image format - png or jpeg (default: png)
+            full_page: Capture full scrollable page (default: False).
+                Note: full_page images extend beyond the viewport, so
+                fractions read off them do NOT map cleanly to
+                viewport-space clicks. Use for reading / overview only,
+                not for pointing.
+            selector: CSS selector to screenshot a specific element (optional)
+            annotate: Draw bounding box of last interaction on image (default: True)
 
         Returns:
-            List of content blocks: text metadata + image
+            List of content blocks: text metadata + image.
         """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return [
-                    TextContent(
-                        type="text", text=json.dumps({"ok": False, "error": "No active tab"})
-                    )
-                ]
+        start = time.perf_counter()
+        params = {
+            "tab_id": tab_id,
+            "profile": profile,
+            "full_page": full_page,
+            "selector": selector,
+        }
 
-            if selector:
-                from ..refs import resolve_selector
-
-                selector = resolve_selector(selector, session, target_id)
-                element = await page.query_selector(selector)
-                if not element:
-                    return [
-                        TextContent(
-                            type="text",
-                            text=json.dumps(
-                                {"ok": False, "error": f"Element not found: {selector}"}
-                            ),
-                        )
-                    ]
-                screenshot_bytes = await element.screenshot(type=image_type)
-            else:
-                screenshot_bytes = await page.screenshot(
-                    full_page=full_page,
-                    type=image_type,
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"ok": False, "error": "Extension not connected"}),
                 )
+            ]
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                result={"ok": False, "error": "Extension not connected"},
+            )
+            return result
 
-            normalized_bytes, normalized_type = _normalize_screenshot(screenshot_bytes, image_type)
+        ctx = _get_context(profile)
+        if not ctx:
+            err_msg = json.dumps({"ok": False, "error": "Browser not started"})
+            log_tool_call("browser_screenshot", params, result={"ok": False, "error": "Browser not started"})
+            return [TextContent(type="text", text=err_msg)]
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = [TextContent(type="text", text=json.dumps({"ok": False, "error": "No active tab"}))]
+            log_tool_call("browser_screenshot", params, result={"ok": False, "error": "No active tab"})
+            return result
+
+        try:
+            screenshot_result = await bridge.screenshot(target_tab, full_page=full_page, selector=selector)
+
+            if not screenshot_result.get("ok"):
+                log_tool_call(
+                    "browser_screenshot",
+                    params,
+                    result=screenshot_result,
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return [TextContent(type="text", text=json.dumps(screenshot_result))]
+
+            data = screenshot_result.get("data")
+            css_width = screenshot_result.get("cssWidth", 0)
+            css_height_raw = screenshot_result.get("cssHeight", 0)
+            dpr = screenshot_result.get("devicePixelRatio", 1.0)
+            png_w = screenshot_result.get("pngWidth", 0)
+            png_h = screenshot_result.get("pngHeight", 0)
+
+            # Diagnostic for the y-axis offset hunt: clicks convert
+            # fractions through cssHeight, but the displayed image is
+            # resized using the PNG's aspect ratio. If png_h differs
+            # from cssHeight × dpr the two coordinate systems drift.
+            # X is checked too — should always read delta_x ≈ 0 since
+            # physical_scale is derived from pngWidth.
+            try:
+                from ..telemetry import write_log
+
+                expected_w = css_width * dpr
+                expected_h = css_height_raw * dpr
+                write_log(
+                    {
+                        "type": "screenshot_geometry",
+                        "tab_id": target_tab,
+                        "url": screenshot_result.get("url", ""),
+                        "pngWidth": png_w,
+                        "pngHeight": png_h,
+                        "cssWidth": css_width,
+                        "cssHeight": css_height_raw,
+                        "dpr": dpr,
+                        "expectedPngWidth": expected_w,
+                        "expectedPngHeight": expected_h,
+                        "deltaPngWidthPx": png_w - expected_w,
+                        "deltaPngHeightPx": png_h - expected_h,
+                        # If the PNG is taller than cssHeight×dpr (e.g. a
+                        # devtools-attached banner adds rows above the page
+                        # in the capture), clicks land BELOW intended at
+                        # the top of the page and converge to 0 error at
+                        # the bottom. Reverse signs if PNG is shorter.
+                        # Worst-case error in CSS px at fy=0:
+                        "yErrorAtTopCssPx": ((png_h - expected_h) / dpr if dpr else 0),
+                    }
+                )
+            except Exception:
+                pass
+
+            # Collect highlights: last interaction from bridge + CDP already drew in browser
+            from ..bridge import _interaction_highlights
+
+            highlights: list[dict] | None = None
+            if annotate and target_tab in _interaction_highlights:
+                highlights = [_interaction_highlights[target_tab]]
+
+            # Resize to CSS-viewport dimensions (image px == CSS px)
+            # and re-encode as JPEG. Offloaded to a thread because PIL
+            # Image.open/resize/ImageDraw/composite on a 2-megapixel
+            # PNG blocks for ~150–300 ms of CPU — plenty to freeze the
+            # asyncio event loop. Reentrant: no shared state.
+            data, physical_scale = await asyncio.to_thread(
+                _resize_and_annotate,
+                data,
+                css_width,
+                dpr,
+                highlights,
+            )
+            # Cache live viewport dimensions so click / hover / press /
+            # rect tools can translate fractions ↔ CSS px without
+            # asking the page again.
+            css_height = int(screenshot_result.get("cssHeight", 0)) or 0
+            if target_tab is not None and css_width > 0 and css_height > 0:
+                _viewport_sizes[target_tab] = (int(css_width), css_height)
+                _screenshot_scales[target_tab] = physical_scale
+
             meta = json.dumps(
                 {
                     "ok": True,
-                    "targetId": target_id or session.active_page_id,
-                    "url": page.url,
-                    "imageType": normalized_type,
-                    "size": len(normalized_bytes),
-                    "originalSize": len(screenshot_bytes),
+                    "tabId": target_tab,
+                    "url": screenshot_result.get("url", ""),
+                    "imageType": "jpeg",
+                    "size": len(base64.b64decode(data)) if data else 0,
+                    "imageWidth": _SCREENSHOT_WIDTH,
+                    "cssWidth": css_width,
+                    "cssHeight": css_height,
+                    "fullPage": full_page,
+                    "devicePixelRatio": dpr,
+                    "physicalScale": physical_scale,
+                    "annotated": bool(highlights),
+                    "scaleHint": (
+                        "Coordinates for click / hover / press are "
+                        "fractions 0..1 of the viewport. Read a "
+                        "target's proportional position off this image "
+                        "(e.g. '~35 % from the left, ~20 % from the top' "
+                        "→ (0.35, 0.20)) and pass that to "
+                        "browser_click_coordinate / "
+                        "browser_hover_coordinate / browser_press_at. "
+                        "browser_get_rect / browser_shadow_query / "
+                        "focused_element.rect return fractions too."
+                    ),
                 }
             )
+
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                result={
+                    "ok": True,
+                    "size": len(base64.b64decode(data)) if data else 0,
+                    "url": screenshot_result.get("url", ""),
+                    "cssWidth": css_width,
+                    "cssHeight": css_height,
+                    "physicalScale": physical_scale,
+                    "dpr": dpr,
+                },
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+
             return [
                 TextContent(type="text", text=meta),
-                ImageContent(
-                    type="image",
-                    data=base64.b64encode(normalized_bytes).decode(),
-                    mimeType=f"image/{normalized_type}",
-                ),
+                ImageContent(type="image", data=data, mimeType="image/jpeg"),
             ]
-        except PlaywrightError as e:
-            return [
-                TextContent(
-                    type="text", text=json.dumps({"ok": False, "error": f"Browser error: {e!s}"})
-                )
-            ]
+        except Exception as e:
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return [TextContent(type="text", text=json.dumps({"ok": False, "error": str(e)}))]
+
+    @mcp.tool()
+    async def browser_shadow_query(
+        selector: str,
+        tab_id: int | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """
+        Shadow-piercing querySelector using '>>>' syntax.
+
+        Traverses shadow roots to find elements inside closed/open shadow DOM,
+        overlays, and virtual-rendered components (e.g. LinkedIn's #interop-outlet).
+        Returns the element's bounding rect as **fractions of the
+        viewport (0..1)** — feed ``rect.cx`` / ``rect.cy`` straight
+        into browser_click_coordinate / hover_coordinate / press_at.
+
+        Args:
+            selector: CSS selectors joined by ' >>> ' to pierce shadow roots.
+                      Example: '#interop-outlet >>> #ember37 >>> p'
+            tab_id: Chrome tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+
+        Returns:
+            Dict with ``rect`` block (x, y, w, h, cx, cy) as fractions,
+            plus ``cssWidth`` / ``cssHeight`` for reference.
+        """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        result = await bridge.shadow_query(target_tab, selector)
+        if not result.get("ok"):
+            return result
+
+        rect = result["rect"]
+        cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_shadow_query")
+        cw_f = float(cw) if cw > 0 else 1.0
+        ch_f = float(ch) if ch > 0 else 1.0
+        return {
+            "ok": True,
+            "selector": selector,
+            "tag": rect.get("tag"),
+            "rect": {
+                "x": round(rect["x"] / cw_f, 4),
+                "y": round(rect["y"] / ch_f, 4),
+                "w": round(rect["w"] / cw_f, 4),
+                "h": round(rect["h"] / ch_f, 4),
+                "cx": round(rect["cx"] / cw_f, 4),
+                "cy": round(rect["cy"] / ch_f, 4),
+            },
+            "cssWidth": cw,
+            "cssHeight": ch,
+            "note": (
+                "rect fields are fractions of the viewport (0..1). "
+                "Pass rect.cx / rect.cy to browser_click_coordinate / "
+                "hover_coordinate / press_at."
+            ),
+        }
+
+    @mcp.tool()
+    async def browser_get_rect(
+        selector: str,
+        tab_id: int | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """
+        Get the bounding rect of an element by CSS selector.
+
+        Supports '>>>' shadow-piercing selectors for overlay/shadow DOM
+        content. Returns the rect as **fractions of the viewport
+        (0..1)** — the same coordinate space browser_click_coordinate
+        / hover_coordinate / press_at expect.
+
+        Args:
+            selector: CSS selector, optionally with ' >>> ' to pierce shadow roots.
+                      Example: 'button.submit' or '#shadow-host >>> button'
+            tab_id: Chrome tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+
+        Returns:
+            Dict with ``rect`` block (x, y, w, h, cx, cy) as fractions,
+            plus ``cssWidth`` / ``cssHeight`` for reference.
+        """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        result = await bridge.shadow_query(target_tab, selector)
+        if not result.get("ok"):
+            return result
+
+        rect = result["rect"]
+        cw, ch = await _ensure_viewport_size(target_tab, _caller="browser_get_rect")
+        cw_f = float(cw) if cw > 0 else 1.0
+        ch_f = float(ch) if ch > 0 else 1.0
+        return {
+            "ok": True,
+            "selector": selector,
+            "tag": rect.get("tag"),
+            "rect": {
+                "x": round(rect["x"] / cw_f, 4),
+                "y": round(rect["y"] / ch_f, 4),
+                "w": round(rect["w"] / cw_f, 4),
+                "h": round(rect["h"] / ch_f, 4),
+                "cx": round(rect["cx"] / cw_f, 4),
+                "cy": round(rect["cy"] / ch_f, 4),
+            },
+            "cssWidth": cw,
+            "cssHeight": ch,
+            "note": (
+                "rect fields are fractions of the viewport (0..1). "
+                "Pass rect.cx / rect.cy to browser_click_coordinate / "
+                "hover_coordinate / press_at."
+            ),
+        }
 
     @mcp.tool()
     async def browser_snapshot(
-        target_id: str | None = None,
-        profile: str = "default",
-        mode: Literal["aria", "cdp"] = "aria",
+        tab_id: int | None = None,
+        profile: str | None = None,
+        mode: Literal["default", "simple", "interactive"] = "default",
     ) -> dict:
         """
         Get an accessibility snapshot of the page.
 
-        Two modes:
-          - "aria" (default): Uses Playwright's aria_snapshot() for a compact,
-            indented text tree with role/name annotations. Much smaller than raw
-            HTML and ideal for LLM consumption — typically 1-5 KB vs 100+ KB.
-          - "cdp": Uses Chrome DevTools Protocol (Accessibility.getFullAXTree)
-            for the complete, low-level accessibility tree. More verbose but
-            includes all ARIA properties and states.
+        Uses CDP Accessibility.getFullAXTree to build a compact, readable
+        tree of the page's interactive elements. Ideal for LLM consumption.
 
-        Aria output format example:
+        Output format example:
             - navigation "Main":
-              - link "Home"
-              - link "About"
+              - link "Home" [ref=e1]
+              - link "About" [ref=e2]
             - main:
               - heading "Welcome"
-              - textbox "Search"
+              - textbox "Search" [ref=e3]
 
         Args:
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            mode: Snapshot mode - "aria" (compact) or "cdp" (full tree). Default: "aria"
+            mode: Snapshot filtering mode (default: "default")
+                - "default": full accessibility tree
+                - "simple": interactive + content nodes, skip unnamed structural nodes
+                - "interactive": only interactive nodes (buttons, links, inputs, etc.)
 
         Returns:
-            Dict with the snapshot text tree, URL, and target ID
+            Dict with the snapshot text tree, URL, and tab ID
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile, "mode": mode}
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
+
+        ctx = _get_context(profile)
+        if not ctx:
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
+
         try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
-
-            if mode == "cdp":
-                if not session.context:
-                    return {"ok": False, "error": "No browser context"}
-
-                cdp = await session.context.new_cdp_session(page)
-                try:
-                    result = await cdp.send("Accessibility.getFullAXTree")
-                    ax_nodes = result.get("nodes", [])
-                    snapshot = _format_ax_tree(ax_nodes)
-                finally:
-                    await cdp.detach()
-            else:
-                snapshot = await page.locator(":root").aria_snapshot()
-                # Annotate with [ref=eN] markers for interactive elements
-                from ..refs import annotate_snapshot
-
-                snapshot, ref_map = annotate_snapshot(snapshot)
-                tid = target_id or session.active_page_id
-                if tid:
-                    session.ref_maps[tid] = ref_map
-
-            return {
-                "ok": True,
-                "targetId": target_id or session.active_page_id,
-                "url": page.url,
-                "snapshot": snapshot,
-            }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Browser error: {e!s}"}
+            snapshot_result = await bridge.snapshot(target_tab, mode=mode)
+            log_tool_call(
+                "browser_snapshot",
+                params,
+                result=snapshot_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return snapshot_result
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_snapshot",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_console(
-        target_id: str | None = None,
-        profile: str = "default",
+        tab_id: int | None = None,
+        profile: str | None = None,
         level: str | None = None,
     ) -> dict:
         """
         Get console messages from the browser.
 
+        Note: Console capture requires Runtime.enable and event handling.
+        Currently returns a message indicating this feature needs implementation.
+
         Args:
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             level: Filter by level (log, info, warn, error) (optional)
 
         Returns:
             Dict with console messages
         """
-        session = get_session(profile)
-        tid = target_id or session.active_page_id
-        if not tid:
-            return {"ok": False, "error": "No active tab"}
-
-        messages = session.console_messages.get(tid, [])
-        if level:
-            messages = [m for m in messages if m.get("type") == level]
-
-        return {
+        result = {
             "ok": True,
-            "targetId": tid,
-            "messages": messages,
-            "count": len(messages),
+            "message": "Console capture not yet implemented",
+            "suggestion": "Use browser_evaluate to check specific values or errors",
         }
+        log_tool_call("browser_console", {"tab_id": tab_id, "profile": profile, "level": level}, result=result)
+        return result
 
     @mcp.tool()
-    async def browser_pdf(
-        target_id: str | None = None,
-        profile: str = "default",
-        path: str | None = None,
+    async def browser_html(
+        tab_id: int | None = None,
+        profile: str | None = None,
+        selector: str | None = None,
     ) -> dict:
         """
-        Save the current page as PDF.
+        Get the HTML content of the page or a specific element.
 
         Args:
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            path: File path to save PDF (optional, returns base64 if not provided)
+            selector: CSS selector to get specific element HTML (optional)
 
         Returns:
-            Dict with PDF data or file path
+            Dict with HTML content
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile, "selector": selector}
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_html", params, result=result)
+            return result
+
+        ctx = _get_context(profile)
+        if not ctx:
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_html", params, result=result)
+            return result
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_html", params, result=result)
+            return result
+
         try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+            import json as json_mod
 
-            pdf_bytes = await page.pdf()
-
-            if path:
-                Path(path).write_bytes(pdf_bytes)
-                return {
-                    "ok": True,
-                    "targetId": target_id or session.active_page_id,
-                    "path": path,
-                    "size": len(pdf_bytes),
-                }
+            if selector:
+                sel_json = json_mod.dumps(selector)
+                script = (
+                    f"(function() {{ const el = document.querySelector({sel_json}); "
+                    f"return el ? el.outerHTML : null; }})()"
+                )
             else:
-                return {
+                script = "document.documentElement.outerHTML"
+
+            eval_result = await bridge.evaluate(target_tab, script)
+
+            if eval_result.get("ok"):
+                result = {
                     "ok": True,
-                    "targetId": target_id or session.active_page_id,
-                    "pdfBase64": base64.b64encode(pdf_bytes).decode(),
-                    "size": len(pdf_bytes),
+                    "tabId": target_tab,
+                    "html": eval_result.get("result"),
+                    "selector": selector,
                 }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Browser error: {e!s}"}
+                log_tool_call(
+                    "browser_html",
+                    params,
+                    result={
+                        "ok": True,
+                        "selector": selector,
+                        "html_length": len(eval_result.get("result") or ""),
+                    },
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return result
+            log_tool_call(
+                "browser_html",
+                params,
+                result=eval_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return eval_result
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+            log_tool_call("browser_html", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
+            return result

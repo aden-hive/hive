@@ -364,9 +364,7 @@ class BaseHttpHealthChecker:
         if self.AUTH_TYPE == self.AUTH_BEARER:
             headers["Authorization"] = f"Bearer {credential_value}"
         elif self.AUTH_TYPE == self.AUTH_HEADER:
-            headers[self.AUTH_HEADER_NAME] = self.AUTH_HEADER_TEMPLATE.format(
-                token=credential_value
-            )
+            headers[self.AUTH_HEADER_NAME] = self.AUTH_HEADER_TEMPLATE.format(token=credential_value)
         return headers
 
     def _build_params(self, credential_value: str) -> dict[str, str]:
@@ -1047,6 +1045,47 @@ class LushaHealthChecker:
             )
 
 
+class PrometheusHealthChecker:
+    """Health checker for Prometheus (no authentication)."""
+
+    TIMEOUT = 5.0
+
+    def check(self, base_url: str) -> HealthCheckResult:
+        """
+        Validate Prometheus by hitting /-/ready endpoint.
+        """
+        url = base_url.rstrip("/") + "/-/ready"
+
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(url)
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Prometheus is healthy",
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Prometheus returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Prometheus health check timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Prometheus: {e}",
+                details={"error": str(e)},
+            )
+
+
 # --- New checkers using BaseHttpHealthChecker ---
 
 
@@ -1307,6 +1346,11 @@ class YouTubeHealthChecker(BaseHttpHealthChecker):
     AUTH_QUERY_PARAM_NAME = "key"
 
 
+class CloudflareHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.cloudflare.com/client/v4/user/tokens/verify"
+    SERVICE_NAME = "Cloudflare"
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "apify": ApifyHealthChecker(),
@@ -1317,6 +1361,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "brevo": BrevoHealthChecker(),
     "calcom": CalcomHealthChecker(),
     "calendly_pat": CalendlyHealthChecker(),
+    "cloudflare": CloudflareHealthChecker(),
     "discord": DiscordHealthChecker(),
     "docker_hub": DockerHubHealthChecker(),
     "exa_search": ExaSearchHealthChecker(),
@@ -1338,6 +1383,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "notion_token": NotionHealthChecker(),
     "pinecone": PineconeHealthChecker(),
     "pipedrive": PipedriveHealthChecker(),
+    "prometheus": PrometheusHealthChecker(),
     "resend": ResendHealthChecker(),
     "serpapi": SerpApiHealthChecker(),
     "slack": SlackHealthChecker(),
@@ -1447,15 +1493,12 @@ def validate_integration_wiring(credential_name: str) -> list[str]:
     if not spec.help_url:
         issues.append("CredentialSpec.help_url is empty (users need this to get credentials)")
     if spec.direct_api_key_supported and not spec.api_key_instructions:
-        issues.append(
-            "CredentialSpec.api_key_instructions is empty but direct_api_key_supported=True"
-        )
+        issues.append("CredentialSpec.api_key_instructions is empty but direct_api_key_supported=True")
 
     # 3. Check health check
     if not spec.health_check_endpoint:
         issues.append(
-            "CredentialSpec.health_check_endpoint is empty. "
-            "Add a lightweight API endpoint for credential validation."
+            "CredentialSpec.health_check_endpoint is empty. Add a lightweight API endpoint for credential validation."
         )
     else:
         checker = HEALTH_CHECKERS.get(credential_name)
@@ -1466,16 +1509,13 @@ def validate_integration_wiring(credential_name: str) -> list[str]:
                 f"Add a dedicated checker if auth is not Bearer token."
             )
         else:
-            checker_endpoint = getattr(checker, "ENDPOINT", None) or getattr(
-                checker, "endpoint", None
-            )
+            checker_endpoint = getattr(checker, "ENDPOINT", None) or getattr(checker, "endpoint", None)
             if checker_endpoint and spec.health_check_endpoint:
                 spec_base = spec.health_check_endpoint.split("?")[0]
                 checker_base = str(checker_endpoint).split("?")[0]
                 if spec_base != checker_base:
                     issues.append(
-                        f"Endpoint mismatch: spec='{spec.health_check_endpoint}' "
-                        f"vs checker='{checker_endpoint}'"
+                        f"Endpoint mismatch: spec='{spec.health_check_endpoint}' vs checker='{checker_endpoint}'"
                     )
 
     return issues

@@ -155,8 +155,11 @@ class MockLLMProvider(LLMProvider):
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
+        system_dynamic_suffix: str | None = None,
     ) -> LLMResponse:
         """Async mock completion (no I/O, returns immediately)."""
+        if system_dynamic_suffix:
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         return self.complete(
             messages=messages,
             system=system,
@@ -173,6 +176,7 @@ class MockLLMProvider(LLMProvider):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
+        system_dynamic_suffix: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a mock completion as word-level TextDeltaEvents.
 
@@ -180,6 +184,8 @@ class MockLLMProvider(LLMProvider):
         TextDeltaEvent with an accumulating snapshot, exercising the full
         streaming pipeline without any API calls.
         """
+        if system_dynamic_suffix:
+            system = f"{system}\n\n{system_dynamic_suffix}" if system else system_dynamic_suffix
         content = self._generate_mock_response(system=system, json_mode=False)
         words = content.split(" ")
         accumulated = ""

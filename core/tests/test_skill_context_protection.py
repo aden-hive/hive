@@ -2,7 +2,7 @@
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation
+from framework.agent_loop.conversation import Message, NodeConversation
 
 
 def _make_conversation() -> NodeConversation:
@@ -11,6 +11,7 @@ def _make_conversation() -> NodeConversation:
     conv._next_seq = 0
     conv._current_phase = None
     conv._store = None
+    conv._run_id = None
     return conv
 
 

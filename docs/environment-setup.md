@@ -373,7 +373,7 @@ claude> test workflow
 
 ```bash
 # Interactive dashboard
-hive tui
+hive open
 
 # Or run directly
 hive run exports/your_agent_name --input '{"task": "..."}'
@@ -394,6 +394,7 @@ The script auto-detects available LLM credentials and prompts you to pick a prov
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`
+- `KIMI_API_KEY`
 - `ZAI_API_KEY`
 - A Claude Code, Codex, or Kimi subscription
 
@@ -445,7 +446,7 @@ Quickstart also supports selecting OpenRouter and Hive LLM interactively. See [c
 # Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
-# Agent storage location (default: /tmp)
+# Agent storage location (default: ~/.hive/agents/{agent_name}/)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
 

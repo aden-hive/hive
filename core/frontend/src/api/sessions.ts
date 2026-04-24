@@ -1,31 +1,31 @@
 import { api } from "./client";
 import type {
   AgentEvent,
+  HistorySession,
   LiveSession,
   LiveSessionDetail,
-  SessionSummary,
-  SessionDetail,
-  Checkpoint,
   EntryPoint,
 } from "./types";
 
 export const sessionsApi = {
   // --- Session lifecycle ---
 
-  /** Create a session. If agentPath is provided, loads worker in one step. */
-  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string) =>
+  /** Create a session. If agentPath is provided, loads a colony in one step. */
+  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string, initialPhase?: string, workerName?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
       agent_id: agentId,
       model,
       initial_prompt: initialPrompt,
       queen_resume_from: queenResumeFrom || undefined,
+      initial_phase: initialPhase || undefined,
+      worker_name: workerName || undefined,
     }),
 
   /** List all active sessions. */
   list: () => api.get<{ sessions: LiveSession[] }>("/sessions"),
 
-  /** Get session detail (includes entry_points, graphs when worker is loaded). */
+  /** Get session detail (includes entry_points, colonies when a worker is loaded). */
   get: (sessionId: string) =>
     api.get<LiveSessionDetail>(`/sessions/${sessionId}`),
 
@@ -35,23 +35,23 @@ export const sessionsApi = {
       `/sessions/${sessionId}`,
     ),
 
-  // --- Worker lifecycle ---
+  // --- Colony lifecycle ---
 
-  loadWorker: (
+  loadColony: (
     sessionId: string,
     agentPath: string,
-    workerId?: string,
+    colonyId?: string,
     model?: string,
   ) =>
-    api.post<LiveSession>(`/sessions/${sessionId}/worker`, {
+    api.post<LiveSession>(`/sessions/${sessionId}/colony`, {
       agent_path: agentPath,
-      worker_id: workerId,
+      colony_id: colonyId,
       model,
     }),
 
-  unloadWorker: (sessionId: string) =>
-    api.delete<{ session_id: string; worker_unloaded: boolean }>(
-      `/sessions/${sessionId}/worker`,
+  unloadColony: (sessionId: string) =>
+    api.delete<{ session_id: string; colony_unloaded: boolean }>(
+      `/sessions/${sessionId}/colony`,
     ),
 
   // --- Session info ---
@@ -74,12 +74,43 @@ export const sessionsApi = {
       patch,
     ),
 
-  graphs: (sessionId: string) =>
-    api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
+  activateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/activate`,
+    ),
 
-  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
-  eventsHistory: (sessionId: string) =>
-    api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
+  deactivateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/deactivate`,
+    ),
+
+  runTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/run`,
+    ),
+
+  colonies: (sessionId: string) =>
+    api.get<{ colonies: string[] }>(`/sessions/${sessionId}/colonies`),
+
+  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay).
+   *
+   * Returns the TAIL of the event log. Default limit 2000 (server
+   * clamps to [1, 10000]); older events get dropped and
+   * ``truncated: true`` is set so the UI can show an indicator.
+   */
+  eventsHistory: (sessionId: string, limit?: number) =>
+    api.get<{
+      events: AgentEvent[];
+      session_id: string;
+      total: number;
+      returned: number;
+      truncated: boolean;
+      limit: number;
+    }>(
+      `/sessions/${sessionId}/events/history${
+        limit ? `?limit=${limit}` : ""
+      }`,
+    ),
 
   /** Open the session's data folder in the OS file manager. */
   revealFolder: (sessionId: string) =>
@@ -87,36 +118,9 @@ export const sessionsApi = {
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
-    api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null }> }>("/sessions/history"),
+    api.get<{ sessions: HistorySession[] }>("/sessions/history"),
 
   /** Permanently delete a history session (stops live session + removes disk files). */
   deleteHistory: (sessionId: string) =>
     api.delete<{ deleted: string }>(`/sessions/history/${sessionId}`),
-
-  // --- Worker session browsing (persisted execution runs) ---
-
-  workerSessions: (sessionId: string) =>
-    api.get<{ sessions: SessionSummary[] }>(
-      `/sessions/${sessionId}/worker-sessions`,
-    ),
-
-  workerSession: (sessionId: string, wsId: string) =>
-    api.get<SessionDetail>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}`,
-    ),
-
-  deleteWorkerSession: (sessionId: string, wsId: string) =>
-    api.delete<{ deleted: string }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}`,
-    ),
-
-  checkpoints: (sessionId: string, wsId: string) =>
-    api.get<{ checkpoints: Checkpoint[] }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}/checkpoints`,
-    ),
-
-  restore: (sessionId: string, wsId: string, checkpointId: string) =>
-    api.post<{ execution_id: string }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}/checkpoints/${checkpointId}/restore`,
-    ),
 };

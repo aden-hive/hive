@@ -9,7 +9,8 @@ AST nodes, disallowed function calls).
 
 import pytest
 
-from framework.graph.safe_eval import safe_eval
+import framework.orchestrator.safe_eval as safe_eval_module
+from framework.orchestrator.safe_eval import safe_eval
 
 # ---------------------------------------------------------------------------
 # Literals and constants
@@ -94,8 +95,125 @@ class TestArithmetic:
     def test_power(self):
         assert safe_eval("2 ** 10") == 1024
 
+    def test_power_large_exponent_blocked(self):
+        with pytest.raises(ValueError, match="Power exponent"):
+            safe_eval("2 ** 1001")
+
+    def test_power_large_result_blocked(self):
+        with pytest.raises(ValueError, match="Power operation"):
+            safe_eval("99 ** 1000")
+
+    def test_nested_power_blocked(self):
+        with pytest.raises(ValueError, match="Power exponent"):
+            safe_eval("2 ** 2 ** 20")
+
     def test_complex_expression(self):
         assert safe_eval("(2 + 3) * 4 - 1") == 19
+
+
+class TestExecutionTimeout:
+    def test_default_timeout(self):
+        import signal
+
+        expected = 100 if hasattr(signal, "SIGALRM") else 500
+        assert safe_eval_module.DEFAULT_TIMEOUT_MS == expected
+
+    def test_timeout_must_be_positive(self):
+        with pytest.raises(ValueError, match="timeout_ms"):
+            safe_eval("1 + 1", timeout_ms=0)
+
+    def test_timeout_can_be_disabled(self):
+        assert safe_eval("1 + 1", timeout_ms=None) == 2
+
+    def test_timeout_exceeded_raises(self, monkeypatch):
+        ticks = iter([0.0, 1.0])
+        monkeypatch.setattr(safe_eval_module.time, "perf_counter", lambda: next(ticks))
+
+        with pytest.raises(TimeoutError, match="1ms"):
+            safe_eval("1 + 1", timeout_ms=1)
+
+    def test_existing_process_timer_is_preserved(self, monkeypatch):
+        calls: list[tuple[str, object]] = []
+        main_thread = object()
+
+        monkeypatch.setattr(safe_eval_module.signal, "SIGALRM", object(), raising=False)
+        monkeypatch.setattr(safe_eval_module.signal, "ITIMER_REAL", object(), raising=False)
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "getitimer",
+            lambda which: (5.0, 0.0),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "setitimer",
+            lambda *args: calls.append(("setitimer", args)),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "signal",
+            lambda *args: calls.append(("signal", args)),
+        )
+        monkeypatch.setattr(safe_eval_module.threading, "main_thread", lambda: main_thread)
+        monkeypatch.setattr(
+            safe_eval_module.threading,
+            "current_thread",
+            lambda: main_thread,
+        )
+
+        with safe_eval_module._execution_timeout(100):
+            pass
+
+        assert calls == []
+
+    def test_timeout_restores_alarm_state(self, monkeypatch):
+        calls: list[tuple[str, object]] = []
+        main_thread = object()
+        old_handler = object()
+
+        monkeypatch.setattr(safe_eval_module.signal, "SIGALRM", object(), raising=False)
+        monkeypatch.setattr(safe_eval_module.signal, "ITIMER_REAL", object(), raising=False)
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "getitimer",
+            lambda which: (0.0, 0.0),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "getsignal",
+            lambda which: old_handler,
+        )
+
+        def fake_signal(which, handler):
+            calls.append(("signal", handler))
+
+        def fake_setitimer(which, delay, interval=0.0):
+            calls.append(("setitimer", (delay, interval)))
+            return (0.0, 0.0)
+
+        monkeypatch.setattr(safe_eval_module.signal, "signal", fake_signal)
+        monkeypatch.setattr(
+            safe_eval_module.signal,
+            "setitimer",
+            fake_setitimer,
+            raising=False,
+        )
+        monkeypatch.setattr(safe_eval_module.threading, "main_thread", lambda: main_thread)
+        monkeypatch.setattr(
+            safe_eval_module.threading,
+            "current_thread",
+            lambda: main_thread,
+        )
+
+        with safe_eval_module._execution_timeout(100):
+            pass
+
+        assert calls[0][0] == "signal"
+        assert calls[1] == ("setitimer", (0.1, 0.0))
+        assert calls[2] == ("signal", old_handler)
+        assert calls[3] == ("setitimer", (0.0, 0.0))
 
 
 # ---------------------------------------------------------------------------
@@ -494,12 +612,12 @@ class TestEdgeConditionPatterns:
         )
 
     def test_success_flag_check(self):
-        ctx = {"output": {"success": True}, "memory": {"attempts": 2}}
+        ctx = {"output": {"success": True}, "buffer": {"attempts": 2}}
         assert safe_eval("output.get('success') == True", ctx) is True
 
-    def test_memory_threshold(self):
-        ctx = {"memory": {"score": 0.85}}
-        assert safe_eval("memory.get('score', 0) >= 0.8", ctx) is True
+    def test_buffer_threshold(self):
+        ctx = {"buffer": {"score": 0.85}}
+        assert safe_eval("buffer.get('score', 0) >= 0.8", ctx) is True
 
     def test_string_contains_check(self):
         ctx = {"output": {"status": "completed_with_warnings"}}

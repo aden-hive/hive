@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from framework.skills.config import SkillsConfig
 from framework.skills.parser import ParsedSkill, parse_skill_md
@@ -18,39 +19,72 @@ logger = logging.getLogger(__name__)
 # Default skills directory relative to this module
 _DEFAULT_SKILLS_DIR = Path(__file__).parent / "_default_skills"
 
-# Ordered list of default skills (name → directory)
+# Default config values per skill — used for {{placeholder}} substitution
+_SKILL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "hive.quality-monitor": {"assessment_interval": 5},
+    "hive.error-recovery": {"max_retries_per_tool": 3},
+    "hive.context-preservation": {"warn_at_usage_ratio_pct": 45},
+}
+
+
+def is_batch_scenario(text: str) -> bool:
+    """Deprecated: batch auto-detection is no longer used.
+
+    Kept as a no-op so the agent_loop call site (which wraps it in an
+    ``if ctx.default_skill_batch_nudge:`` guard that's also now always
+    empty) can stay unchanged until a broader cleanup.  The old
+    ``_batch_ledger`` shared-buffer feature was replaced by the
+    per-colony SQLite task queue (``hive.colony-progress-tracker``),
+    which lives in ``progress.db`` and is authoritative for batch
+    state across workers and runs.
+    """
+    return False
+
+
+def _apply_overrides(skill_name: str, body: str, overrides: dict[str, Any]) -> str:
+    """Substitute {{placeholder}} values in a skill body using overrides + defaults."""
+    defaults = _SKILL_DEFAULTS.get(skill_name, {})
+    # Convert float warn_at_usage_ratio → warn_at_usage_ratio_pct for the placeholder
+    if "warn_at_usage_ratio" in overrides:
+        overrides = dict(overrides)
+        overrides.setdefault("warn_at_usage_ratio_pct", int(float(overrides["warn_at_usage_ratio"]) * 100))
+    values = {**defaults, **overrides}
+    for key, val in values.items():
+        body = body.replace(f"{{{{{key}}}}}", str(val))
+    return body
+
+
+# Ordered list of default skills (name → directory).
+#
+# Removed on 2026-04-15 as part of the colony-progress-tracker rollout:
+#   - hive.task-decomposition — steps table in progress.db supersedes
+#     in-memory ``_working_notes → Current Plan`` decomposition.
+#   - hive.batch-ledger       — tasks table in progress.db supersedes
+#     the ``_batch_ledger`` dict-shaped queue with its pending →
+#     in_progress → completed/failed/skipped state machine.
+# Both were duplicating state that belongs in SQLite.
 SKILL_REGISTRY: dict[str, str] = {
     "hive.note-taking": "note-taking",
-    "hive.batch-ledger": "batch-ledger",
     "hive.context-preservation": "context-preservation",
     "hive.quality-monitor": "quality-monitor",
     "hive.error-recovery": "error-recovery",
-    "hive.task-decomposition": "task-decomposition",
+    "hive.colony-progress-tracker": "colony-progress-tracker",
+    "hive.writing-hive-skills": "writing-hive-skills",
 }
 
-# All shared memory keys used by default skills (for permission auto-inclusion)
-SHARED_MEMORY_KEYS: list[str] = [
+# Shared buffer keys referenced by the remaining default skills (used
+# for permission auto-inclusion). The dead keys for batch-ledger,
+# task-decomposition, the handoff buffer, and the error-log buffers
+# were removed when those features migrated to progress.db.
+DATA_BUFFER_KEYS: list[str] = [
     # note-taking
     "_working_notes",
     "_notes_updated_at",
-    # batch-ledger
-    "_batch_ledger",
-    "_batch_total",
-    "_batch_completed",
-    "_batch_failed",
     # context-preservation
-    "_handoff_context",
     "_preserved_data",
     # quality-monitor
     "_quality_log",
     "_quality_degradation_count",
-    # error-recovery
-    "_error_log",
-    "_failed_tools",
-    "_escalation_needed",
-    # task-decomposition
-    "_subtasks",
-    "_iteration_budget_remaining",
 ]
 
 
@@ -123,8 +157,10 @@ class DefaultSkillManager:
             skill = self._skills.get(skill_name)
             if skill is None:
                 continue
-            # Use the full body — each SKILL.md contains exactly one protocol section
-            parts.append(skill.body)
+            # Apply config overrides to {{placeholder}} values before injection
+            overrides = self._config.get_default_overrides(skill_name)
+            body = _apply_overrides(skill_name, skill.body, overrides)
+            parts.append(body)
 
         if len(parts) <= 1:
             return ""
@@ -135,8 +171,7 @@ class DefaultSkillManager:
         approx_tokens = len(combined) // 4
         if approx_tokens > 2000:
             logger.warning(
-                "Default skill protocols exceed 2000 token budget "
-                "(~%d tokens, %d chars). Consider trimming.",
+                "Default skill protocols exceed 2000 token budget (~%d tokens, %d chars). Consider trimming.",
                 approx_tokens,
                 len(combined),
             )
@@ -198,3 +233,27 @@ class DefaultSkillManager:
     def active_skills(self) -> dict[str, ParsedSkill]:
         """All active default skills keyed by name."""
         return dict(self._skills)
+
+    @property
+    def batch_init_nudge(self) -> str | None:
+        """Deprecated: always returns None.
+
+        The ``hive.batch-ledger`` default skill was removed when batch
+        tracking moved into ``progress.db`` (``hive.colony-progress-
+        tracker``). Callers in agent_host, colony_runtime, and
+        orchestrator still read this property; returning None keeps
+        them functional with no system-prompt nudge.
+        """
+        return None
+
+    @property
+    def context_warn_ratio(self) -> float | None:
+        """Token usage ratio at which to inject a context preservation warning (DS-13).
+
+        Returns None if ``hive.context-preservation`` is disabled.
+        Defaults to 0.45 when the skill is active but no override is set.
+        """
+        if "hive.context-preservation" not in self._skills:
+            return None
+        overrides = self._config.get_default_overrides("hive.context-preservation")
+        return float(overrides.get("warn_at_usage_ratio", 0.45))

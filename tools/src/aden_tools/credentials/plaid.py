@@ -21,10 +21,7 @@ PLAID_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://dashboard.plaid.com/developers/keys",
-        description=(
-            "Plaid client ID for banking data access"
-            " (also set PLAID_SECRET and optionally PLAID_ENV)"
-        ),
+        description=("Plaid client ID for banking data access (also set PLAID_SECRET and optionally PLAID_ENV)"),
         direct_api_key_supported=True,
         api_key_instructions="""To get Plaid credentials:
 1. Sign up at https://dashboard.plaid.com/

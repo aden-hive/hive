@@ -42,9 +42,7 @@ class TestDatabricksSqlQuery:
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = mock_resp
             mock_post.return_value.text = "{}"
-            result = tool_fns["databricks_sql_query"](
-                statement="SELECT * FROM users", warehouse_id="w1"
-            )
+            result = tool_fns["databricks_sql_query"](statement="SELECT * FROM users", warehouse_id="w1")
 
         assert result["status"] == "SUCCEEDED"
         assert result["columns"] == ["id", "name"]

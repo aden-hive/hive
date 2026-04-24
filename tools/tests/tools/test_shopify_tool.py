@@ -184,9 +184,7 @@ class TestShopifyGetProduct:
                     }
                 ],
                 "options": [{"name": "Size"}, {"name": "Color"}],
-                "images": [
-                    {"id": 850703190, "src": "https://cdn.shopify.com/test.jpg", "position": 1}
-                ],
+                "images": [{"id": 850703190, "src": "https://cdn.shopify.com/test.jpg", "position": 1}],
             }
         }
         with (

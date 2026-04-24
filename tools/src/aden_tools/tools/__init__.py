@@ -44,6 +44,7 @@ from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
+from .cloudflare_tool import register_tools as register_cloudflare
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
@@ -70,6 +71,7 @@ from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
 )
+from .freshdesk_tool import register_tools as register_freshdesk
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -88,6 +90,7 @@ from .kafka_tool import register_tools as register_kafka
 from .langfuse_tool import register_tools as register_langfuse
 from .linear_tool import register_tools as register_linear
 from .lusha_tool import register_tools as register_lusha
+from .mattermost_tool import register_tools as register_mattermost
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .mongodb_tool import register_tools as register_mongodb
 from .n8n_tool import register_tools as register_n8n
@@ -102,6 +105,7 @@ from .plaid_tool import register_tools as register_plaid
 from .port_scanner import register_tools as register_port_scanner
 from .postgres_tool import register_tools as register_postgres
 from .powerbi_tool import register_tools as register_powerbi
+from .prometheus_tool import register_tools as register_prometheus
 from .pushover_tool import register_tools as register_pushover
 from .quickbooks_tool import register_tools as register_quickbooks
 from .razorpay_tool import register_tools as register_razorpay
@@ -130,7 +134,13 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
-from .web_scrape_tool import register_tools as register_web_scrape
+from .wandb_tool import register_tools as register_wandb
+
+try:
+    from .web_scrape_tool import register_tools as register_web_scrape
+except ImportError:
+    # playwright not installed - web_scrape_tool unavailable
+    register_web_scrape = None  # type: ignore
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
@@ -140,15 +150,23 @@ from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .zoom_tool import register_tools as register_zoom
 
+# Tool names registered by `_register_verified()`. Populated on first call.
+# Consumed by the `__aden_verified_manifest` sentinel tool so downstream
+# registries (e.g. the queen's MCP loader) can gate free/credential-less tools
+# on whether they have been promoted to verified status.
+_VERIFIED_TOOL_NAMES: set[str] = set()
+
 
 def _register_verified(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register verified (stable) tools."""
+    _verified_before = set(mcp._tool_manager._tools.keys())
     # --- No credentials ---
     register_example(mcp)
-    register_web_scrape(mcp)
+    if register_web_scrape:
+        register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
@@ -222,6 +240,22 @@ def _register_verified(
     register_notion(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
+    _VERIFIED_TOOL_NAMES.update(set(mcp._tool_manager._tools.keys()) - _verified_before)
+
+
+def _register_manifest(mcp: FastMCP) -> None:
+    """Expose the verified-tool manifest as a sentinel MCP tool.
+
+    Registered after both verified and unverified passes so the manifest tool
+    itself never appears in `_VERIFIED_TOOL_NAMES`. Downstream registries call
+    this to decide whether a credential-less tool is safe to admit.
+    """
+
+    @mcp.tool(name="__aden_verified_manifest")
+    def aden_verified_manifest() -> list[str]:
+        """Return tool names registered by `_register_verified()`."""
+        return sorted(_VERIFIED_TOOL_NAMES)
+
 
 def _register_unverified(
     mcp: FastMCP,
@@ -251,6 +285,7 @@ def _register_unverified(
     register_stripe(mcp, credentials=credentials)
     register_postgres(mcp, credentials=credentials)
     register_calendly(mcp, credentials=credentials)
+    register_cloudflare(mcp, credentials=credentials)
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
     register_databricks(mcp, credentials=credentials)
@@ -266,6 +301,7 @@ def _register_unverified(
     register_langfuse(mcp, credentials=credentials)
     register_linear(mcp, credentials=credentials)
     register_lusha(mcp, credentials=credentials)
+    register_mattermost(mcp, credentials=credentials)
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
@@ -275,6 +311,7 @@ def _register_unverified(
     register_pipedrive(mcp, credentials=credentials)
     register_plaid(mcp, credentials=credentials)
     register_powerbi(mcp, credentials=credentials)
+    register_prometheus(mcp, credentials=credentials)
     register_pushover(mcp, credentials=credentials)
     register_quickbooks(mcp, credentials=credentials)
     register_reddit(mcp, credentials=credentials)
@@ -295,6 +332,8 @@ def _register_unverified(
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
+    register_wandb(mcp, credentials=credentials)
+    register_freshdesk(mcp, credentials=credentials)
 
 
 def register_all_tools(
@@ -319,6 +358,8 @@ def register_all_tools(
 
     if include_unverified:
         _register_unverified(mcp, credentials=credentials)
+
+    _register_manifest(mcp)
 
     return list(mcp._tool_manager._tools.keys())
 

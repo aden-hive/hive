@@ -299,9 +299,7 @@ class TestGoogleDocsClientExportDocument:
 class TestGoogleDocsClientComments:
     def test_add_comment(self, client):
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"id": "comment-1", "content": "Nice work"}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "comment-1", "content": "Nice work"})
             result = client.add_comment("doc-1", "Nice work")
             assert result["id"] == "comment-1"
 
@@ -314,9 +312,7 @@ class TestGoogleDocsClientComments:
 
     def test_list_comments(self, client):
         with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(
-                200, {"comments": [{"id": "c1"}], "nextPageToken": "tok2"}
-            )
+            mock_get.return_value = _mock_response(200, {"comments": [{"id": "c1"}], "nextPageToken": "tok2"})
             result = client.list_comments("doc-1", page_size=10)
             assert len(result["comments"]) == 1
 
@@ -379,9 +375,7 @@ class TestGoogleDocsCreateDocument:
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_create_document")
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"documentId": "new-doc", "title": "My Doc"}
-            )
+            mock_post.return_value = _mock_response(200, {"documentId": "new-doc", "title": "My Doc"})
             result = fn(title="My Doc")
             assert result["document_id"] == "new-doc"
             assert "document_url" in result

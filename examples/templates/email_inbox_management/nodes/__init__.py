@@ -1,6 +1,6 @@
 """Node definitions for Inbox Management Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (client-facing)
 # Receives user rules and max_emails, confirms understanding with user.
@@ -144,10 +144,7 @@ Do NOT add commentary or explanation. Execute the steps and call set_output when
 classify_and_act_node = NodeSpec(
     id="classify-and-act",
     name="Classify and Act",
-    description=(
-        "Apply the user's rules to each email and execute "
-        "the appropriate Gmail actions."
-    ),
+    description=("Apply the user's rules to each email and execute the appropriate Gmail actions."),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
@@ -159,8 +156,8 @@ You are an inbox management assistant. Apply the user's rules to their emails an
 **YOUR TOOLS:**
 - load_data(filename, limit, offset) — Read emails from a local file.
 - append_data(filename, data) — Append a line to a file. Record actions taken.
-- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify labels in batch. ALWAYS prefer this.
-- gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels.
+- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify labels in batch. ONLY call when BOTH add_labels AND remove_labels are non-empty lists. If only one type is needed, use gmail_modify_message instead.
+- gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels. Use when you have only add_labels OR only remove_labels (not both).
 - gmail_trash_message(message_id) — Move a message to trash.
 - gmail_create_draft(to, subject, body) — Create a draft reply. NEVER sends automatically.
 - gmail_create_label(name) — Create a new Gmail label. Returns the label ID.
@@ -195,18 +192,20 @@ Each turn, process exactly ONE chunk: load → classify → act → record. Then
 **CRITICAL:** Only call load_data ONCE per turn. Do NOT pre-load multiple chunks. You must see the emails before you can act on them.
 
 **GMAIL LABEL REFERENCE:**
-- MARK AS UNREAD — add_labels=["UNREAD"]
-- MARK AS READ — remove_labels=["UNREAD"]
-- MARK IMPORTANT — add_labels=["IMPORTANT"]
-- REMOVE IMPORTANT — remove_labels=["IMPORTANT"]
-- STAR — add_labels=["STARRED"]
-- UNSTAR — remove_labels=["STARRED"]
-- ARCHIVE — remove_labels=["INBOX"]
-- MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"]
+- MARK AS UNREAD — add_labels=["UNREAD"] via gmail_modify_message (single action)
+- MARK AS READ — remove_labels=["UNREAD"] via gmail_modify_message
+- MARK IMPORTANT — add_labels=["IMPORTANT"] via gmail_modify_message
+- REMOVE IMPORTANT — remove_labels=["IMPORTANT"] via gmail_modify_message
+- STAR — add_labels=["STARRED"] via gmail_modify_message
+- UNSTAR — remove_labels=["STARRED"] via gmail_modify_message
+- ARCHIVE — remove_labels=["INBOX"] via gmail_modify_message (single email) OR gmail_batch_modify_messages (multiple emails ALL need archive)
+- MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"] — must use gmail_modify_message for single emails or gmail_batch_modify_messages for multiple
 - TRASH — use gmail_trash_message(message_id) per email
 - DRAFT REPLY — use gmail_create_draft(to=<sender>, subject="Re: <subject>", body=<contextual reply based on email content>). Creates a draft only, never sends.
 - CREATE CUSTOM LABEL — use gmail_create_label(name=<label_name>) to create, then apply via gmail_modify_message with add_labels=[<label_id>]
 - APPLY CUSTOM LABEL — add_labels=[<label_id>] using the ID from gmail_create_label or gmail_list_labels
+
+**KEY RULE:** When you have BOTH add_labels AND remove_labels (like marking as spam), use gmail_modify_message for single emails or gmail_batch_modify_messages for multiple. When you have ONLY add_labels OR ONLY remove_labels (like just archiving), you MUST use gmail_modify_message because gmail_batch_modify_messages will fail.
 
 **QUEEN RULE INJECTION:**
 If a new rule appears in the conversation mid-processing (injected by the queen),

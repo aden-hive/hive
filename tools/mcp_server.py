@@ -64,8 +64,6 @@ if "--stdio" in sys.argv:
     rich.console.Console.__init__ = _patched_console_init
 
 from fastmcp import FastMCP  # noqa: E402
-from starlette.requests import Request  # noqa: E402
-from starlette.responses import PlainTextResponse  # noqa: E402
 
 from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
@@ -90,16 +88,9 @@ if "--stdio" not in sys.argv:
     logger.info(f"Registered {len(tools)} tools: {tools}")
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> PlainTextResponse:
-    """Health check endpoint for container orchestration."""
-    return PlainTextResponse("OK")
-
-
-@mcp.custom_route("/", methods=["GET"])
-async def index(request: Request) -> PlainTextResponse:
-    """Landing page for browser visits."""
-    return PlainTextResponse("Welcome to the Hive MCP Server")
+@mcp.resource("health://status")
+def health_check() -> str:
+    return "OK"
 
 
 def main() -> None:

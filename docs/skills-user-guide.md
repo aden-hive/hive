@@ -245,16 +245,16 @@ hive run my-agent
 
 ## Default skills
 
-Hive ships with six built-in operational skills that provide runtime resilience. These are always loaded (unless disabled) and appear as "Operational Protocols" in the agent's system prompt.
+Hive ships with built-in operational skills that provide runtime resilience. These are always loaded (unless disabled) and appear as "Operational Protocols" in the agent's system prompt.
 
 | Skill | Purpose |
 |-------|---------|
-| `hive.note-taking` | Structured working notes in shared memory |
-| `hive.batch-ledger` | Track per-item status in batch operations |
+| `hive.note-taking` | Structured working notes in the shared buffer |
+| `hive.colony-progress-tracker` | Claim tasks and track progress in the colony's SQLite ledger (`progress.db`) |
 | `hive.context-preservation` | Save context before context window pruning |
 | `hive.quality-monitor` | Self-assess output quality periodically |
 | `hive.error-recovery` | Structured error classification and recovery |
-| `hive.task-decomposition` | Break complex tasks into subtasks |
+| `hive.writing-hive-skills` | Author Hive-compatible SKILL.md files |
 
 ### Disable default skills
 

@@ -38,10 +38,7 @@ class TestAzureSQLListServers:
         data = {
             "value": [
                 {
-                    "id": (
-                        "/subscriptions/sub-123/resourceGroups/rg"
-                        "/providers/Microsoft.Sql/servers/myserver"
-                    ),
+                    "id": ("/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver"),
                     "name": "myserver",
                     "location": "eastus",
                     "properties": {
@@ -75,9 +72,7 @@ class TestAzureSQLGetServer:
 
     def test_successful_get(self, tool_fns):
         data = {
-            "id": (
-                "/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver"
-            ),
+            "id": ("/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver"),
             "name": "myserver",
             "location": "eastus",
             "properties": {
@@ -132,9 +127,7 @@ class TestAzureSQLListDatabases:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["azure_sql_list_databases"](
-                resource_group="rg", server_name="myserver"
-            )
+            result = tool_fns["azure_sql_list_databases"](resource_group="rg", server_name="myserver")
 
         assert result["count"] == 1
         assert result["databases"][0]["name"] == "mydb"
@@ -145,9 +138,7 @@ class TestAzureSQLListDatabases:
 class TestAzureSQLGetDatabase:
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["azure_sql_get_database"](
-                resource_group="", server_name="", database_name=""
-            )
+            result = tool_fns["azure_sql_get_database"](resource_group="", server_name="", database_name="")
         assert "error" in result
 
     def test_successful_get(self, tool_fns):
@@ -205,9 +196,7 @@ class TestAzureSQLListFirewallRules:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["azure_sql_list_firewall_rules"](
-                resource_group="rg", server_name="myserver"
-            )
+            result = tool_fns["azure_sql_list_firewall_rules"](resource_group="rg", server_name="myserver")
 
         assert result["count"] == 1
         assert result["firewall_rules"][0]["name"] == "AllowAll"

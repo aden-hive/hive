@@ -51,9 +51,9 @@ def tui():
 
     from framework.tui.app import AdenTUI
     from framework.llm import LiteLLMProvider
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.agent_host import AgentHost
+    from framework.host.execution_manager import EntryPointSpec
 
     async def run_tui():
         agent = EmailReplyAgent()
@@ -68,7 +68,7 @@ def tui():
             api_key=agent.config.api_key,
             api_base=agent.config.api_base,
         )
-        runtime = create_agent_runtime(
+        runtime = AgentHost(
             graph=agent._build_graph(),
             goal=agent.goal,
             storage_path=storage,
@@ -99,9 +99,7 @@ def tui():
 def info():
     """Show agent info."""
     data = default_agent.info()
-    click.echo(
-        f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}"
-    )
+    click.echo(f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}")
     click.echo(f"Nodes: {', '.join(data['nodes'])}")
     click.echo(f"Client-facing: {', '.join(data['client_facing_nodes'])}")
 

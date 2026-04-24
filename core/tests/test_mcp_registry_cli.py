@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from framework.runner.mcp_registry_cli import (
+from framework.loader.mcp_registry_cli import (
     _parse_key_value_pairs,
     _print_security_notice_if_first_use,
     cmd_mcp_add,
@@ -41,7 +41,7 @@ def registry_home(tmp_path, monkeypatch):
 @pytest.fixture()
 def registry(registry_home):
     """Return an initialized MCPRegistry backed by tmp_path."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     reg = MCPRegistry(base_path=registry_home)
     reg.initialize()
@@ -52,7 +52,7 @@ def registry(registry_home):
 def _patch_get_registry(registry, monkeypatch):
     """Patch _get_registry so all CLI commands use the test registry."""
     monkeypatch.setattr(
-        "framework.runner.mcp_registry_cli._get_registry",
+        "framework.loader.mcp_registry_cli._get_registry",
         lambda base_path=None: registry,
     )
 
@@ -213,7 +213,7 @@ def test_install_duplicate_fails(registry, sample_index):
 
 
 def test_security_notice_shown_only_once(registry_home):
-    from framework.runner.mcp_registry_cli import _mark_security_notice_shown
+    from framework.loader.mcp_registry_cli import _mark_security_notice_shown
 
     err1, err2 = StringIO(), StringIO()
     with patch("sys.stderr", err1):
@@ -240,7 +240,7 @@ def test_credential_prompt_stores_override(registry, sample_index, monkeypatch):
     # Ensure the env var isn't already set
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
 
-    from framework.runner.mcp_registry_cli import _prompt_for_missing_credentials
+    from framework.loader.mcp_registry_cli import _prompt_for_missing_credentials
 
     manifest = sample_index["servers"]["jira"]
     _prompt_for_missing_credentials(registry, "jira", manifest)
@@ -258,7 +258,7 @@ def test_credential_prompt_skips_when_env_set(registry, sample_index, monkeypatc
     calls = []
     monkeypatch.setattr("builtins.input", lambda prompt: calls.append(prompt) or "")
 
-    from framework.runner.mcp_registry_cli import _prompt_for_missing_credentials
+    from framework.loader.mcp_registry_cli import _prompt_for_missing_credentials
 
     manifest = sample_index["servers"]["jira"]
     _prompt_for_missing_credentials(registry, "jira", manifest)
@@ -847,7 +847,7 @@ def test_credential_prompt_cancel_does_not_abort_install(registry, sample_index,
     # Install first, then test prompting separately
     registry.install("jira")
 
-    from framework.runner.mcp_registry_cli import _prompt_for_missing_credentials
+    from framework.loader.mcp_registry_cli import _prompt_for_missing_credentials
 
     manifest = sample_index["servers"]["jira"]
     # Should not raise
@@ -890,12 +890,12 @@ def _raise(exc):
 
 def test_main_dispatches_mcp_list_through_real_argparse(registry_home, monkeypatch):
     """hive mcp list goes through main() -> register_mcp_commands -> cmd_mcp_list."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     reg = MCPRegistry(base_path=registry_home)
     reg.initialize()
     monkeypatch.setattr(
-        "framework.runner.mcp_registry_cli._get_registry",
+        "framework.loader.mcp_registry_cli._get_registry",
         lambda base_path=None: reg,
     )
 
@@ -911,16 +911,14 @@ def test_main_dispatches_mcp_list_through_real_argparse(registry_home, monkeypat
     assert "No servers installed" in out.getvalue()
 
 
-def test_main_dispatches_mcp_install_through_real_argparse(
-    registry_home, sample_index, monkeypatch
-):
+def test_main_dispatches_mcp_install_through_real_argparse(registry_home, sample_index, monkeypatch):
     """hive mcp install jira goes through main() -> real argparse -> cmd_mcp_install."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     reg = MCPRegistry(base_path=registry_home)
     reg.initialize()
     monkeypatch.setattr(
-        "framework.runner.mcp_registry_cli._get_registry",
+        "framework.loader.mcp_registry_cli._get_registry",
         lambda base_path=None: reg,
     )
     monkeypatch.setattr("builtins.input", lambda prompt: "")
@@ -938,12 +936,12 @@ def test_main_dispatches_mcp_install_through_real_argparse(
 
 def test_main_dispatches_mcp_update_named_through_real_argparse(registry_home, monkeypatch):
     """hive mcp update nonexistent goes through main() and returns error code 1."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     reg = MCPRegistry(base_path=registry_home)
     reg.initialize()
     monkeypatch.setattr(
-        "framework.runner.mcp_registry_cli._get_registry",
+        "framework.loader.mcp_registry_cli._get_registry",
         lambda base_path=None: reg,
     )
     monkeypatch.setattr("sys.argv", ["hive", "mcp", "update", "nonexistent"])
@@ -969,13 +967,11 @@ def test_info_json_includes_agent_usage(registry, sample_index, tmp_path, monkey
     # Create a fake agent dir with mcp_registry.json that includes jira
     agent_dir = tmp_path / "fake_agent"
     agent_dir.mkdir()
-    (agent_dir / "mcp_registry.json").write_text(
-        json.dumps({"include": ["jira"]}), encoding="utf-8"
-    )
+    (agent_dir / "mcp_registry.json").write_text(json.dumps({"include": ["jira"]}), encoding="utf-8")
 
     # Patch _find_agents_using_server to use our fake directory
     monkeypatch.setattr(
-        "framework.runner.mcp_registry_cli._find_agents_using_server",
+        "framework.loader.mcp_registry_cli._find_agents_using_server",
         lambda reg, name: [str(agent_dir)],
     )
 
@@ -1064,11 +1060,9 @@ def test_health_all_servers_json(registry, sample_index, monkeypatch):
 # ── _find_agents_using_server with real files ────────────────────
 
 
-def test_find_agents_using_server_resolves_via_load_agent_selection(
-    registry_home, tmp_path, monkeypatch
-):
+def test_find_agents_using_server_resolves_via_load_agent_selection(registry_home, tmp_path, monkeypatch):
     """_find_agents_using_server exercises the real helper with patched candidate dirs."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     reg = MCPRegistry(base_path=registry_home)
     reg.initialize()
@@ -1088,9 +1082,7 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
         }
     }
     (cache_dir / "registry_index.json").write_text(json.dumps(index), encoding="utf-8")
-    (cache_dir / "last_fetched").write_text(
-        json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8"
-    )
+    (cache_dir / "last_fetched").write_text(json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8")
     reg.install("jira")
 
     # Create fake agent directories: one that includes jira, one that doesn't
@@ -1098,17 +1090,13 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
     exports_dir.mkdir()
     agent_yes = exports_dir / "agent_with_jira"
     agent_yes.mkdir()
-    (agent_yes / "mcp_registry.json").write_text(
-        json.dumps({"include": ["jira"]}), encoding="utf-8"
-    )
+    (agent_yes / "mcp_registry.json").write_text(json.dumps({"include": ["jira"]}), encoding="utf-8")
     agent_no = exports_dir / "agent_without_jira"
     agent_no.mkdir()
-    (agent_no / "mcp_registry.json").write_text(
-        json.dumps({"include": ["slack"]}), encoding="utf-8"
-    )
+    (agent_no / "mcp_registry.json").write_text(json.dumps({"include": ["slack"]}), encoding="utf-8")
 
     # Patch the path resolution so the helper scans our tmp_path dirs
-    import framework.runner.mcp_registry_cli as cli_mod
+    import framework.loader.mcp_registry_cli as cli_mod
 
     def _find_with_tmp_paths(registry, name):
         """Run the real helper logic but over tmp_path agent dirs."""
@@ -1123,7 +1111,7 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
             if not registry_json.exists():
                 continue
             try:
-                configs = registry.load_agent_selection(agent_dir)
+                configs, _max_tools = registry.load_agent_selection(agent_dir)
                 resolved_names = {c["name"] for c in configs}
                 if name in resolved_names:
                     matches.append(str(agent_dir))
@@ -1149,8 +1137,8 @@ def test_integration_real_registry_install_list_info_remove(tmp_path, monkeypatc
     """
     # Set credential env var so install doesn't prompt for stdin
     monkeypatch.setenv("JIRA_TOKEN", "from-env")
-    from framework.runner.mcp_registry import MCPRegistry
-    from framework.runner.mcp_registry_cli import (
+    from framework.loader.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry_cli import (
         cmd_mcp_config,
         cmd_mcp_info,
         cmd_mcp_install,
@@ -1185,14 +1173,12 @@ def test_integration_real_registry_install_list_info_remove(tmp_path, monkeypatc
         }
     }
     (cache_dir / "registry_index.json").write_text(json.dumps(index), encoding="utf-8")
-    (cache_dir / "last_fetched").write_text(
-        json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8"
-    )
+    (cache_dir / "last_fetched").write_text(json.dumps({"timestamp": "2099-01-01T00:00:00+00:00"}), encoding="utf-8")
     # Security notice sentinel so install doesn't prompt
     (registry_base / ".security_notice_shown").touch()
 
     # Patch _get_registry to use our real registry (only to set base_path)
-    import framework.runner.mcp_registry_cli as cli_mod
+    import framework.loader.mcp_registry_cli as cli_mod
 
     cli_mod_get_registry = cli_mod._get_registry
     cli_mod._get_registry = lambda base_path=None: registry
@@ -1316,9 +1302,7 @@ def test_security_notice_not_persisted_on_failed_install(registry, registry_home
 
 
 @pytest.mark.usefixtures("_patch_get_registry")
-def test_security_notice_persisted_on_successful_install(
-    registry, registry_home, sample_index, monkeypatch
-):
+def test_security_notice_persisted_on_successful_install(registry, registry_home, sample_index, monkeypatch):
     """Sentinel must be written after a successful install."""
     monkeypatch.setattr("builtins.input", lambda prompt: "")
     sentinel = registry_home / ".security_notice_shown"

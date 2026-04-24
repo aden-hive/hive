@@ -70,9 +70,7 @@ class TestMongodbFindOne:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["mongodb_find_one"](
-                database="mydb", collection="users", filter='{"name": "Alice"}'
-            )
+            result = tool_fns["mongodb_find_one"](database="mydb", collection="users", filter='{"name": "Alice"}')
 
         assert result["name"] == "Alice"
         assert result["age"] == 30
@@ -86,9 +84,7 @@ class TestMongodbFindOne:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["mongodb_find_one"](
-                database="mydb", collection="users", filter='{"name": "Nobody"}'
-            )
+            result = tool_fns["mongodb_find_one"](database="mydb", collection="users", filter='{"name": "Nobody"}')
 
         assert "error" in result
 
@@ -119,9 +115,7 @@ class TestMongodbInsertOne:
 class TestMongodbUpdateOne:
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["mongodb_update_one"](
-                database="db", collection="col", filter="", update=""
-            )
+            result = tool_fns["mongodb_update_one"](database="db", collection="col", filter="", update="")
         assert "error" in result
 
     def test_successful_update(self, tool_fns):
@@ -159,9 +153,7 @@ class TestMongodbDeleteOne:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["mongodb_delete_one"](
-                database="mydb", collection="users", filter='{"name": "Alice"}'
-            )
+            result = tool_fns["mongodb_delete_one"](database="mydb", collection="users", filter='{"name": "Alice"}')
 
         assert result["deletedCount"] == 1
 
@@ -174,9 +166,7 @@ class TestMongodbAggregate:
 
     def test_invalid_pipeline(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["mongodb_aggregate"](
-                database="db", collection="col", pipeline='{"not": "array"}'
-            )
+            result = tool_fns["mongodb_aggregate"](database="db", collection="col", pipeline='{"not": "array"}')
         assert "error" in result
 
     def test_successful_aggregate(self, tool_fns):

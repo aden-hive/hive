@@ -62,9 +62,7 @@ def cli():
     default=20,
     help="Max contacts to process per batch (default: 20)",
 )
-@click.option(
-    "--mock", is_flag=True, help="Run in mock mode without LLM or Gmail calls"
-)
+@click.option("--mock", is_flag=True, help="Run in mock mode without LLM or Gmail calls")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
@@ -105,9 +103,7 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo(
-            "TUI requires the 'textual' package. Install with: pip install textual"
-        )
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
         sys.exit(1)
 
     async def run_with_tui():
@@ -183,12 +179,8 @@ async def _interactive_shell(verbose=False):
                     click.echo("Goodbye!")
                     break
 
-                contacts = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Contacts (JSON)> "
-                )
-                background = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Your background/role> "
-                )
+                contacts = await asyncio.get_event_loop().run_in_executor(None, input, "Contacts (JSON)> ")
+                background = await asyncio.get_event_loop().run_in_executor(None, input, "Your background/role> ")
 
                 if not contacts.strip():
                     continue

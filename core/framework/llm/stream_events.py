@@ -65,13 +65,23 @@ class ReasoningDeltaEvent:
 
 @dataclass(frozen=True)
 class FinishEvent:
-    """The LLM has finished generating."""
+    """The LLM has finished generating.
+
+    ``cached_tokens`` and ``cache_creation_tokens`` are subsets of
+    ``input_tokens`` — providers count both inside ``prompt_tokens`` already.
+    Surface them separately for visibility; never add to a total.
+
+    ``cost_usd`` is the per-turn USD cost when the provider or LiteLLM's
+    pricing table supplies one; 0.0 means unreported (not free).
+    """
 
     type: Literal["finish"] = "finish"
     stop_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cost_usd: float = 0.0
     model: str = ""
 
 

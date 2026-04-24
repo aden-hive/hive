@@ -77,7 +77,7 @@ class TestRunnerLoad:
     """Test AgentRunner can load the agent."""
 
     def test_runner_load_succeeds(self, runner_loaded):
-        """AgentRunner.load() succeeds."""
+        """AgentLoader.load() succeeds."""
         assert runner_loaded is not None
 
     def test_runner_has_goal(self, runner_loaded):

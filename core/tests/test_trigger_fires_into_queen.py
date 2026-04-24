@@ -4,10 +4,10 @@ Verifies that:
 - Timer triggers fire inject_trigger() on the queen node
 - Webhook triggers fire inject_trigger() via EventBus WEBHOOK_RECEIVED
 - Queen node unavailable → trigger skipped silently
-- worker_runtime=None → trigger discarded (gating)
+- colony_runtime=None → trigger discarded (gating)
 - remove_trigger cleans up webhook subscription
 - run_agent_with_input is in _QUEEN_RUNNING_TOOLS
-- System prompts reference run_agent_with_input, not start_worker()
+- System prompts reference run_agent_with_input, not start_graph()
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from framework.runtime.event_bus import EventBus
-from framework.runtime.triggers import TriggerDefinition
+from framework.host.event_bus import EventBus
+from framework.host.triggers import TriggerDefinition
 from framework.server.session_manager import Session
 
 
@@ -34,12 +34,12 @@ def _make_executor(queen_node) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_interval_timer_fires_inject_trigger_on_queen_node() -> None:
     """Timer with interval_minutes fires inject_trigger() on the queen node."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
     from framework.tools.queen_lifecycle_tools import _start_trigger_timer
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()  # non-None → worker is loaded
+    session.colony_runtime = object()  # non-None → colony is loaded
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -82,7 +82,7 @@ async def test_timer_skipped_when_queen_node_unavailable() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.colony_runtime = object()
     session.queen_executor = None  # queen not ready
 
     tdef = TriggerDefinition(
@@ -109,12 +109,12 @@ async def test_timer_skipped_when_queen_node_unavailable() -> None:
 @pytest.mark.asyncio
 async def test_webhook_trigger_fires_inject_trigger() -> None:
     """WEBHOOK_RECEIVED on EventBus → inject_trigger() on the queen node."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
     from framework.tools.queen_lifecycle_tools import _start_trigger_webhook
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.colony_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -131,8 +131,8 @@ async def test_webhook_trigger_fires_inject_trigger() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "test-webhook", tdef)
 
     # Simulate an incoming webhook event on the EventBus
@@ -162,7 +162,7 @@ async def test_webhook_trigger_discarded_when_no_worker() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = None  # no worker
+    session.colony_runtime = None  # no colony
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -178,8 +178,8 @@ async def test_webhook_trigger_discarded_when_no_worker() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "no-worker-webhook", tdef)
 
     await bus.emit_webhook_received(
@@ -201,7 +201,7 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.colony_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -217,8 +217,8 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "removable-webhook", tdef)
 
     # Manually unsubscribe (mirrors what remove_trigger does)
@@ -240,22 +240,16 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
     assert "removable-webhook" not in session.active_webhook_subs
 
 
-def test_run_agent_with_input_in_running_tools() -> None:
-    """run_agent_with_input must be available to the queen in RUNNING phase."""
-    from framework.agents.queen.nodes import _QUEEN_RUNNING_TOOLS
+def test_run_parallel_workers_in_working_tools() -> None:
+    """run_parallel_workers must be available to the queen in WORKING phase."""
+    from framework.agents.queen.nodes import _QUEEN_WORKING_TOOLS
 
-    assert "run_agent_with_input" in _QUEEN_RUNNING_TOOLS
+    assert "run_parallel_workers" in _QUEEN_WORKING_TOOLS
 
 
-def test_system_prompt_uses_correct_tool_name() -> None:
-    """Trigger handling rules must reference run_agent_with_input, not start_worker()."""
-    from framework.agents.queen.nodes import (
-        _queen_behavior_running,
-        _queen_behavior_staging,
-    )
+def test_working_tools_include_monitoring() -> None:
+    """WORKING-phase queen must be able to monitor and reply to escalations."""
+    from framework.agents.queen.nodes import _QUEEN_WORKING_TOOLS
 
-    assert "run_agent_with_input" in _queen_behavior_running
-    assert "start_worker()" not in _queen_behavior_running
-
-    assert "run_agent_with_input" in _queen_behavior_staging
-    assert "start_worker()" not in _queen_behavior_staging
+    for required in ("get_worker_status", "inject_message", "reply_to_worker"):
+        assert required in _QUEEN_WORKING_TOOLS, f"{required} missing from working tools"

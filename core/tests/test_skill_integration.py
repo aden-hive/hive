@@ -1,6 +1,6 @@
 """Integration tests for the skill system — prompt composition and backward compatibility."""
 
-from framework.graph.prompt_composer import compose_system_prompt
+from framework.orchestrator.prompt_composer import compose_system_prompt
 from framework.skills.catalog import SkillCatalog
 from framework.skills.config import SkillsConfig
 from framework.skills.defaults import DefaultSkillManager
@@ -121,8 +121,7 @@ class TestEndToEndPipeline:
         skill_dir = tmp_path / ".agents" / "skills" / "my-tool"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: my-tool\ndescription: Tool for testing.\n---\n\n"
-            "## Usage\nUse this tool when testing.\n",
+            "---\nname: my-tool\ndescription: Tool for testing.\n---\n\n## Usage\nUse this tool when testing.\n",
             encoding="utf-8",
         )
 

@@ -49,9 +49,7 @@ def _make_edge(source, target, condition="on_success", description=""):
     )
 
 
-def _make_goal(
-    name="Test Goal", description="A test goal", success_criteria=None, constraints=None
-):
+def _make_goal(name="Test Goal", description="A test goal", success_criteria=None, constraints=None):
     """Create a minimal goal-like object matching Goal interface."""
     return SimpleNamespace(
         name=name,
@@ -84,12 +82,6 @@ class TestClassifyFlowchartNode:
         edges = [{"source": "n1", "target": "n3"}]
         result = classify_flowchart_node(node, 2, 3, edges, {"n3"})
         assert result == "terminal"
-
-    def test_gcu_node_is_browser(self):
-        node = {"id": "n2", "node_type": "gcu", "tools": []}
-        edges = [{"source": "n1", "target": "n2"}]
-        result = classify_flowchart_node(node, 1, 3, edges, set())
-        assert result == "browser"
 
     def test_subprocess_node(self):
         node = {"id": "n2", "node_type": "event_loop", "tools": [], "sub_agents": ["sub1"]}
@@ -133,9 +125,7 @@ class TestSynthesizeDraftFromRuntime:
             _make_edge("intake", "process"),
             _make_edge("process", "deliver"),
         ]
-        draft, fmap = synthesize_draft_from_runtime(
-            nodes, edges, agent_name="test_agent", goal_name="Test"
-        )
+        draft, fmap = synthesize_draft_from_runtime(nodes, edges, agent_name="test_agent", goal_name="Test")
 
         assert draft["agent_name"] == "test_agent"
         assert draft["goal"] == "Test"

@@ -25,6 +25,6 @@ def agent_module():
 @pytest.fixture(scope="session")
 def runner_loaded():
     """Load the agent through AgentRunner (structural only, no LLM needed)."""
-    from framework.runner.runner import AgentRunner
+    from framework.loader.agent_loader import AgentLoader
 
-    return AgentRunner.load(AGENT_PATH)
+    return AgentLoader.load(AGENT_PATH)

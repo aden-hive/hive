@@ -160,15 +160,9 @@ class CredentialValidationResult:
         if aden_nc:
             if missing or invalid:
                 lines.append("")
-            lines.append(
-                "Aden integrations not connected "
-                "(ADEN_API_KEY is set but OAuth tokens unavailable):\n"
-            )
+            lines.append("Aden integrations not connected (ADEN_API_KEY is set but OAuth tokens unavailable):\n")
             for c in aden_nc:
-                lines.append(
-                    f"  {c.env_var} for {_label(c)}"
-                    f"\n    Connect this integration at hive.adenhq.com first."
-                )
+                lines.append(f"  {c.env_var} for {_label(c)}\n    Connect this integration at hive.adenhq.com first.")
         lines.append("\nIf you've already set up credentials, restart your terminal to load them.")
         return "\n".join(lines)
 
@@ -236,6 +230,45 @@ def _presync_aden_tokens(credential_specs: dict, *, force: bool = False) -> None
             )
 
 
+def compute_unavailable_tools(nodes: list) -> tuple[set[str], list[str]]:
+    """Return (tool_names_to_drop, human_messages).
+
+    Runs credential validation *without* raising, collects every tool
+    bound to a failed credential (missing / invalid / Aden-not-connected
+    and no alternative provider available), and returns the set of tool
+    names that should be silently dropped from the worker's effective
+    tool list.
+
+    Use this at every worker-spawn preflight so missing credentials
+    filter tools out of the graph instead of hard-failing the whole
+    spawn. Only affects non-MCP tools — the MCP admission gate
+    (``_build_mcp_admission_gate``) already handles MCP tools at
+    registration time.
+    """
+    try:
+        result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
+    except Exception as exc:
+        logger.debug("compute_unavailable_tools: validation raised: %s", exc)
+        return set(), []
+
+    drop: set[str] = set()
+    messages: list[str] = []
+    for status in result.failed:
+        if not status.tools:
+            continue
+        drop.update(status.tools)
+        reason = "missing"
+        if status.aden_not_connected:
+            reason = "aden_not_connected"
+        elif status.available and status.valid is False:
+            reason = "invalid"
+        messages.append(
+            f"{status.env_var} ({reason}) → drops {len(status.tools)} tool(s): "
+            f"{', '.join(status.tools[:6])}" + (f" +{len(status.tools) - 6} more" if len(status.tools) > 6 else "")
+        )
+    return drop, messages
+
+
 def validate_agent_credentials(
     nodes: list,
     quiet: bool = False,
@@ -292,9 +325,7 @@ def validate_agent_credentials(
     if os.environ.get("ADEN_API_KEY"):
         _presync_aden_tokens(CREDENTIAL_SPECS, force=force_refresh)
 
-    env_mapping = {
-        (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
-    }
+    env_mapping = {(spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
     env_storage = EnvVarStorage(env_mapping=env_mapping)
     if os.environ.get("HIVE_CREDENTIAL_KEY"):
         storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
@@ -328,12 +359,7 @@ def validate_agent_credentials(
         available = store.is_available(cred_id)
 
         # Aden-not-connected: ADEN_API_KEY set, Aden-only cred, but integration missing
-        is_aden_nc = (
-            not available
-            and has_aden_key
-            and spec.aden_supported
-            and not spec.direct_api_key_supported
-        )
+        is_aden_nc = not available and has_aden_key and spec.aden_supported and not spec.direct_api_key_supported
 
         status = CredentialStatus(
             credential_name=cred_name,
@@ -451,9 +477,7 @@ def validate_agent_credentials(
                         identity_data = result.details.get("identity")
                         if identity_data and isinstance(identity_data, dict):
                             try:
-                                cred_obj = store.get_credential(
-                                    status.credential_id, refresh_if_needed=False
-                                )
+                                cred_obj = store.get_credential(status.credential_id, refresh_if_needed=False)
                                 if cred_obj:
                                     cred_obj.set_identity(**identity_data)
                                     store.save_credential(cred_obj)

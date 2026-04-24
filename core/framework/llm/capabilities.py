@@ -12,6 +12,11 @@ Vision support rules are derived from official vendor documentation:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from framework.llm.provider import Tool
+
 
 def _model_name(model: str) -> str:
     """Return the bare model name after stripping any 'provider/' prefix."""
@@ -104,3 +109,22 @@ def supports_image_tool_results(model: str) -> bool:
     # 5. Default: assume vision capable
     #    Covers: OpenAI, Anthropic, Google, Mistral, Kimi, and other hosted providers
     return True
+
+
+def filter_tools_for_model(tools: list[Tool], model: str) -> tuple[list[Tool], list[str]]:
+    """Drop image-producing tools for text-only models.
+
+    Returns ``(filtered_tools, hidden_names)``. For vision-capable models
+    (or when *model* is empty) the input list is returned unchanged and
+    ``hidden_names`` is empty. For text-only models any tool with
+    ``produces_image=True`` is removed so the LLM never sees it in its
+    schema — avoids wasted calls and stale "screenshot failed" entries
+    in agent memory.
+    """
+    if not model or supports_image_tool_results(model):
+        return list(tools), []
+    hidden = [t.name for t in tools if t.produces_image]
+    if not hidden:
+        return list(tools), []
+    kept = [t for t in tools if not t.produces_image]
+    return kept, hidden

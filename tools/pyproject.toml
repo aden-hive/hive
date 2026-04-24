@@ -27,8 +27,8 @@ dependencies = [
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
     "playwright>=1.40.0",
-    "playwright-stealth>=1.0.5",
-    "litellm==1.81.7",  # pinned: supply chain attack in >=1.82.7 (adenhq/hive#6783)
+    "playwright-stealth>=2.0.0",
+    "litellm==1.83.4",
     "dnspython>=2.4.0",
     "resend>=2.0.0",
     "asana>=3.2.0",
@@ -37,6 +37,7 @@ dependencies = [
     "stripe>=14.3.0",
     "arxiv>=2.1.0",
     "requests>=2.31.0",
+    "websockets>=12.0",
     "psycopg2-binary>=2.9.0",
 ]
 
@@ -91,7 +92,7 @@ packages = ["src/aden_tools"]
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 120
 
 lint.select = [
   "B",   # bugbear errors

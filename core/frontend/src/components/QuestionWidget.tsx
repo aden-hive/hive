@@ -10,9 +10,15 @@ export interface QuestionWidgetProps {
   onSubmit: (answer: string, isOther: boolean) => void;
   /** Called when user dismisses the question without answering */
   onDismiss?: () => void;
+  /**
+   * When true, the widget does not register a global keyboard listener. Set this
+   * when rendering the widget inline alongside other inputs (e.g. a chat textarea)
+   * so Enter / number keys do not get hijacked from the surrounding UI.
+   */
+  inline?: boolean;
 }
 
-export default function QuestionWidget({ question, options, onSubmit, onDismiss }: QuestionWidgetProps) {
+export default function QuestionWidget({ question, options, onSubmit, onDismiss, inline = false }: QuestionWidgetProps) {
   const [selected, setSelected] = useState<number | null>(null);
   const [customText, setCustomText] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -42,8 +48,10 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
     }
   }, [canSubmit, submitted, isOtherSelected, customText, options, selected, onSubmit]);
 
-  // Keyboard: Enter to submit, number keys to select (only when text input is not focused)
+  // Keyboard: Enter to submit, number keys to select (only when text input is not focused).
+  // Skipped in inline mode so the widget doesn't hijack keys from surrounding inputs.
   useEffect(() => {
+    if (inline) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (submitted) return;
       const inTextInput = e.target === inputRef.current;
@@ -66,7 +74,7 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSubmit, submitted, options.length]);
+  }, [handleSubmit, submitted, options.length, inline]);
 
   if (submitted) return null;
 

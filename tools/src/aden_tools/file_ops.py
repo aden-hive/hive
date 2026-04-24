@@ -26,10 +26,12 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastmcp import FastMCP
 
+from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 from aden_tools.hashline import (
     HASHLINE_MAX_FILE_BYTES,
     compute_line_hash,
@@ -105,6 +107,85 @@ BINARY_EXTENSIONS = frozenset(
         ".obj",
     }
 )
+
+# ── Context-aware sandboxing ─────────────────────────────────────────────────
+
+# Context variable for additional allowed paths (beyond base_root)
+_EMPTY_PATHS: list[str] = []
+_allowed_paths_ctx: ContextVar[list[str]] = ContextVar("allowed_paths", default=_EMPTY_PATHS)
+
+
+def set_allowed_paths(paths: list[str]) -> None:
+    """Set additional allowed paths for file operations in this context.
+
+    Use this to grant access to paths beyond the base root (e.g., ~/.hive/
+    for cross-agent file access).
+    """
+    _allowed_paths_ctx.set(list(paths))
+
+
+def get_allowed_paths() -> list[str]:
+    """Get current allowed paths including ~/.hive/."""
+    paths = list(_allowed_paths_ctx.get())
+    hive_dir = os.path.expanduser("~/.hive")
+    if hive_dir not in paths:
+        paths.append(hive_dir)
+    return paths
+
+
+def create_sandboxed_resolver(
+    base_root: str,
+    allowed_paths: list[str] | None = None,
+) -> Callable[[str], str]:
+    """Create a path resolver that enforces sandbox boundaries.
+
+    Args:
+        base_root: The primary allowed directory (e.g., PROJECT_ROOT or data_dir).
+        allowed_paths: Additional allowed paths. If None, uses get_allowed_paths()
+            which includes ~/.hive/ by default.
+
+    Returns:
+        A path resolver function that raises ValueError for paths outside allowed scopes.
+
+    The resolver:
+    - Resolves relative paths against base_root
+    - Allows absolute paths under base_root or any allowed_path
+    - Blocks access outside allowed scopes with a helpful error message
+    """
+    hive_dir = os.path.expanduser("~/.hive")  # noqa: F841
+
+    def resolve(path: str) -> str:
+        # Normalize slashes for cross-platform
+        path = path.replace("/", os.sep)
+
+        # Expand ~ to home directory
+        if path.startswith("~"):
+            path = os.path.expanduser(path)
+
+        # Resolve to absolute path
+        if os.path.isabs(path):
+            resolved = os.path.abspath(path)
+        else:
+            resolved = os.path.abspath(os.path.join(base_root, path))
+
+        # Build allowed paths list
+        extra_paths = allowed_paths if allowed_paths is not None else get_allowed_paths()
+        all_allowed = [base_root] + extra_paths
+
+        # Check against all allowed paths
+        for allowed_path in all_allowed:
+            try:
+                if os.path.commonpath([resolved, allowed_path]) == allowed_path:
+                    return resolved
+            except ValueError:
+                continue
+
+        # Block and remind
+        allowed_str = ", ".join(f"'{p}'" for p in all_allowed)
+        raise ValueError(f"Access denied: '{path}' is not accessible. Allowed paths: {allowed_str}")
+
+    return resolve
+
 
 # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -247,6 +328,7 @@ def register_file_tools(
     mcp: FastMCP,
     *,
     resolve_path: Callable[[str], str] | None = None,
+    resolve_path_write: Callable[[str], str] | None = None,
     before_write: Callable[[], None] | None = None,
     project_root: str | None = None,
 ) -> None:
@@ -254,12 +336,18 @@ def register_file_tools(
 
     Args:
         mcp: FastMCP instance to register tools on.
-        resolve_path: Path resolver. Default: resolve to absolute path.
-            Raise ValueError to reject paths (e.g. outside sandbox).
+        resolve_path: Path resolver for READ operations. Default:
+            resolve to absolute path. Raise ValueError to reject paths
+            (e.g. outside sandbox).
+        resolve_path_write: Path resolver for WRITE/EDIT operations.
+            Defaults to ``resolve_path`` when not provided. Split
+            resolvers let callers keep reads permissive (framework
+            skills, docs) while confining writes to an agent workspace.
         before_write: Hook called before write/edit operations (e.g. git snapshot).
         project_root: If set, search_files relativizes output paths to this root.
     """
     _resolve = resolve_path or _default_resolve_path
+    _resolve_write = resolve_path_write or _resolve
 
     @mcp.tool()
     def read_file(path: str, offset: int = 1, limit: int = 0, hashline: bool = False) -> str:
@@ -297,8 +385,16 @@ def register_file_tools(
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:
-            with open(resolved, encoding="utf-8", errors="replace") as f:
-                content = f.read()
+            # Read raw bytes once; use them both for the line-formatted
+            # return value and to hash into the file-state cache so a
+            # later edit can detect external writes without a second
+            # open. Hash is computed even on partial/offset reads so the
+            # guard still fires when the model only read the start of a
+            # large file before editing deeper into it.
+            with open(resolved, "rb") as fb:
+                raw_bytes = fb.read()
+            content = raw_bytes.decode("utf-8", errors="replace")
+            record_read(None, resolved, content_bytes=raw_bytes)
 
             # Use splitlines() for consistent line splitting with hashline module
             all_lines = content.splitlines()
@@ -351,8 +447,28 @@ def register_file_tools(
             path: Absolute file path to write.
             content: Complete file content to write.
         """
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         resolved_path = Path(resolved)
+
+        # Stale-edit guard: an existing file must have been read recently
+        # and still match the on-disk content. Writing over a file the
+        # model has never seen (or that changed since it last saw it)
+        # risks clobbering the user's work.  Brand-new files are allowed
+        # without a prior read - there's nothing to clobber.
+        if resolved_path.is_file():
+            _fresh = check_fresh(None, resolved)
+            if _fresh.status is Freshness.UNREAD:
+                return (
+                    f"Refusing to overwrite '{path}': call read_file('{path}') "
+                    f"first so the harness can track its state before you "
+                    f"replace it. If you intend to discard the current "
+                    f"contents, read it first to acknowledge what you are "
+                    f"overwriting."
+                )
+            if _fresh.status is Freshness.STALE:
+                return (
+                    f"Refusing to overwrite '{path}': {_fresh.detail}. Re-read the file with read_file before writing."
+                )
 
         try:
             # Create parent dirs first (before git snapshot) so structure exists
@@ -372,9 +488,15 @@ def register_file_tools(
                 f.flush()
                 os.fsync(f.fileno())
 
-            line_count = content_str.count("\n") + (
-                1 if content_str and not content_str.endswith("\n") else 0
-            )
+            # Record the post-write state so a later edit in the same
+            # turn doesn't trip the stale-edit guard against the file
+            # this call just created or overwrote.
+            try:
+                record_read(None, resolved, content_bytes=content_str.encode("utf-8"))
+            except Exception:
+                pass
+
+            line_count = content_str.count("\n") + (1 if content_str and not content_str.endswith("\n") else 0)
             action = "Updated" if existed else "Created"
             return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:
@@ -394,9 +516,23 @@ def register_file_tools(
             new_text: Replacement text.
             replace_all: Replace all occurrences (default: first only).
         """
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
+
+        # Stale-edit guard: refuse unless a recent read is on record and
+        # the file on disk still matches it. Prevents the model from
+        # overwriting changes the user made in their editor between
+        # calling read_file and edit_file.
+        _fresh = check_fresh(None, resolved)
+        if _fresh.status is Freshness.UNREAD:
+            return (
+                f"Refusing to edit '{path}': call read_file('{path}') "
+                f"first so the harness can track its state before you "
+                f"edit it."
+            )
+        if _fresh.status is Freshness.STALE:
+            return f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with read_file before editing."
 
         try:
             with open(resolved, encoding="utf-8") as f:
@@ -433,9 +569,7 @@ def register_file_tools(
                     break
 
             if matched_text is None:
-                close = difflib.get_close_matches(
-                    old_text[:200], content.split("\n"), n=3, cutoff=0.4
-                )
+                close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
                 msg = f"Error: Could not find a unique match for old_text in {path}."
                 if close:
                     suggestions = "\n".join(f"  {line}" for line in close)
@@ -451,6 +585,13 @@ def register_file_tools(
 
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(new_content)
+
+            # Re-record post-write state so a second edit in the same
+            # turn doesn't trip its own stale guard.
+            try:
+                record_read(None, resolved, content_bytes=new_content.encode("utf-8"))
+            except Exception:
+                pass
 
             diff = _compute_diff(content, new_content, path)
             match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
@@ -513,9 +654,7 @@ def register_file_tools(
             return f"Error listing directory: {e}"
 
     @mcp.tool()
-    def search_files(
-        pattern: str, path: str = ".", include: str = "", hashline: bool = False
-    ) -> str:
+    def search_files(pattern: str, path: str = ".", include: str = "", hashline: bool = False) -> str:
         """Search file contents using regex. Uses ripgrep if available.
 
         Results sorted by file with line numbers. Set hashline=True to include
@@ -593,9 +732,7 @@ def register_file_tools(
                 total = output.count("\n") + 1
                 result_str = "\n".join(lines)
                 if total > SEARCH_RESULT_LIMIT:
-                    result_str += (
-                        f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                    )
+                    result_str += f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
                 return result_str
         except FileNotFoundError:
             pass  # ripgrep not installed — fall through to Python
@@ -631,9 +768,7 @@ def register_file_tools(
                                         h = compute_line_hash(stripped)
                                         matches.append(f"{display_path}:{i}:{h}|{stripped}")
                                     else:
-                                        matches.append(
-                                            f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}"
-                                        )
+                                        matches.append(f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}")
                                     if len(matches) >= SEARCH_RESULT_LIMIT:
                                         return "\n".join(matches) + "\n... (truncated)"
                     except (OSError, UnicodeDecodeError):
@@ -687,9 +822,28 @@ def register_file_tools(
             return "Error: Too many edits in one call (max 100). Split into multiple calls."
 
         # 2. Read file
-        resolved = _resolve(path)
+        resolved = _resolve_write(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
+
+        # Stale-edit guard: require a prior read_file that still matches
+        # disk. hashline_edit already rehashes anchors, but anchor hashes
+        # only protect the exact lines touched - content drift around
+        # those lines (e.g. new imports the user added) would still slip
+        # through silently. This guard closes that gap.
+        _fresh = check_fresh(None, resolved)
+        if _fresh.status is Freshness.UNREAD:
+            return (
+                f"Error: Refusing to edit '{path}': call read_file"
+                f"('{path}', hashline=True) first so the harness can "
+                f"track its state before you edit it."
+            )
+        if _fresh.status is Freshness.STALE:
+            return (
+                f"Error: Refusing to edit '{path}': {_fresh.detail}. "
+                f"Re-read the file with read_file(hashline=True) before "
+                f"editing."
+            )
 
         try:
             with open(resolved, "rb") as f:
@@ -757,15 +911,9 @@ def register_file_tools(
                     start_num, _ = parse_anchor(start_anchor)
                     end_num, _ = parse_anchor(end_anchor)
                     if start_num > end_num:
-                        return (
-                            f"Error: Edit #{i + 1} (replace_lines): "
-                            f"start line {start_num} > end line {end_num}"
-                        )
+                        return f"Error: Edit #{i + 1} (replace_lines): start line {start_num} > end line {end_num}"
                     if "content" not in op:
-                        return (
-                            f"Error: Edit #{i + 1} (replace_lines): "
-                            f"missing required field 'content'"
-                        )
+                        return f"Error: Edit #{i + 1} (replace_lines): missing required field 'content'"
                     if not isinstance(op["content"], str):
                         return f"Error: Edit #{i + 1} (replace_lines): content must be a string"
                     new_content = op["content"]
@@ -994,6 +1142,14 @@ def register_file_tools(
         except Exception as e:
             return f"Error: Failed to write file: {e}"
 
+        # Refresh the file-state cache so chained edits in the same turn
+        # see the new hash instead of tripping the stale guard against
+        # the post-write disk state.
+        try:
+            record_read(None, resolved, content_bytes=joined.encode(encoding))
+        except Exception:
+            pass
+
         # 10. Build response
         updated_lines = joined.splitlines()
         total_lines = len(updated_lines)
@@ -1014,7 +1170,6 @@ def register_file_tools(
         parts.append(hashline_content)
         if total_lines > preview_limit:
             parts.append(
-                f"\n(Showing first {preview_limit} of {total_lines} lines. "
-                f"Use read_file with offset to see more.)"
+                f"\n(Showing first {preview_limit} of {total_lines} lines. Use read_file with offset to see more.)"
             )
         return "\n".join(parts)

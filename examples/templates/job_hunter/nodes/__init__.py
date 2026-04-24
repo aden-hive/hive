@@ -1,6 +1,6 @@
 """Node definitions for Job Hunter Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (simple)
 # Collect resume and identify strongest role types.
@@ -9,16 +9,21 @@ intake_node = NodeSpec(
     name="Intake",
     description="Analyze resume and identify 3-5 strongest role types",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
     max_node_visits=1,
-    input_keys=["resume_text"],
+    input_keys=[],
     output_keys=["resume_text", "role_analysis"],
     success_criteria=(
-        "The user's resume has been analyzed and 3-5 target roles identified "
-        "based on their actual experience."
+        "The user's resume has been analyzed and 3-5 target roles identified based on their actual experience."
     ),
     system_prompt="""\
 You are a career analyst. Your task is to analyze the user's resume and identify the best role fits.
+
+**ACCEPTING THE RESUME:**
+The user can provide their resume in two ways:
+1. **Paste text** — The user pastes their resume content directly.
+2. **PDF file path** — The user provides a path to a PDF file (e.g., "/path/to/resume.pdf"). \
+If a file path is provided, call pdf_read(file_path="<path>") to extract the text before analyzing.
 
 **PROCESS:**
 1. Identify key skills (technical and soft skills).
@@ -32,7 +37,7 @@ You MUST call set_output to store:
 
 Do NOT wait for user confirmation. Simply perform the analysis and set the outputs.
 """,
-    tools=[],
+    tools=["pdf_read"],
 )
 
 # Node 2: Job Search (simple)
@@ -82,10 +87,7 @@ job_review_node = NodeSpec(
     max_node_visits=1,
     input_keys=["job_listings", "resume_text"],
     output_keys=["selected_jobs"],
-    success_criteria=(
-        "User has reviewed all job listings and explicitly selected "
-        "which jobs they want to apply to."
-    ),
+    success_criteria=("User has reviewed all job listings and explicitly selected which jobs they want to apply to."),
     system_prompt="""\
 You are helping a job seeker choose which positions to apply to.
 

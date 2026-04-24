@@ -613,9 +613,7 @@ def register_tools(
             type_data = item.get(block_type, {})
             rich_text = type_data.get("rich_text", [])
             if rich_text:
-                block_data["text"] = "".join(
-                    p.get("text", {}).get("content", "") for p in rich_text
-                )
+                block_data["text"] = "".join(p.get("text", {}).get("content", "") for p in rich_text)
 
             blocks.append(block_data)
 
@@ -696,8 +694,7 @@ def register_tools(
         if content:
             if not block_type:
                 return {
-                    "error": "block_type is required when setting content. "
-                    "Use notion_get_block to find the type.",
+                    "error": "block_type is required when setting content. Use notion_get_block to find the type.",
                 }
             try:
                 validated = BlockType(block_type)

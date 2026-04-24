@@ -88,8 +88,7 @@ def _create_bigquery_client(project_id: str | None = None) -> Any:
         from google.cloud import bigquery
     except ImportError:
         raise ImportError(
-            "google-cloud-bigquery is required for BigQuery tools. "
-            "Install it with: pip install google-cloud-bigquery"
+            "google-cloud-bigquery is required for BigQuery tools. Install it with: pip install google-cloud-bigquery"
         ) from None
 
     # Create client - will use ADC if GOOGLE_APPLICATION_CREDENTIALS not set
@@ -209,8 +208,7 @@ def register_tools(
         if max_rows > 10000:
             return {
                 "error": "max_rows cannot exceed 10000",
-                "help": "For larger result sets, consider using pagination or "
-                "exporting to Cloud Storage.",
+                "help": "For larger result sets, consider using pagination or exporting to Cloud Storage.",
             }
 
         try:
@@ -263,8 +261,7 @@ def register_tools(
             if "Permission" in error_msg and "denied" in error_msg.lower():
                 return {
                     "error": f"BigQuery permission denied: {error_msg}",
-                    "help": "Ensure your service account has the 'BigQuery Data Viewer' "
-                    "and 'BigQuery Job User' roles.",
+                    "help": "Ensure your service account has the 'BigQuery Data Viewer' and 'BigQuery Job User' roles.",
                 }
             if "Not found" in error_msg:
                 return {
@@ -380,8 +377,7 @@ def register_tools(
             if "Not found" in error_msg:
                 return {
                     "error": f"Dataset not found: {dataset_id}",
-                    "help": "Check that the dataset exists and you have access to it. "
-                    f"Full error: {error_msg}",
+                    "help": f"Check that the dataset exists and you have access to it. Full error: {error_msg}",
                 }
             if "Permission" in error_msg and "denied" in error_msg.lower():
                 return {

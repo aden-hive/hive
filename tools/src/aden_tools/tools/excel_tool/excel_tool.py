@@ -6,7 +6,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from ..file_system_toolkits.security import get_secure_path
+from ..file_system_toolkits.security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -15,9 +15,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_read(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         sheet: str | None = None,
         limit: int | None = None,
         offset: int = 0,
@@ -26,10 +24,8 @@ def register_tools(mcp: FastMCP) -> None:
         Read an Excel file and return its contents.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             sheet: Sheet name to read (default: active sheet)
             limit: Maximum number of rows to return (None = all rows)
             offset: Number of rows to skip from the beginning (after header)
@@ -44,14 +40,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -66,9 +59,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Get the specified sheet or active sheet
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        return {
-                            "error": f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
-                        }
+                        return {"error": f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"}
                     ws = wb[sheet]
                 else:
                     ws = wb.active
@@ -121,9 +112,7 @@ def register_tools(mcp: FastMCP) -> None:
                     rows_as_dicts.append(row_dict)
 
                 # Format column names
-                formatted_columns = [
-                    str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(columns)
-                ]
+                formatted_columns = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(columns)]
 
                 return {
                     "success": True,
@@ -147,9 +136,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_write(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         columns: list[str],
         rows: list[dict],
         sheet: str = "Sheet1",
@@ -158,10 +145,8 @@ def register_tools(mcp: FastMCP) -> None:
         Write data to a new Excel file.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             columns: List of column names for the header
             rows: List of dictionaries, each representing a row
             sheet: Name for the sheet (default: "Sheet1")
@@ -173,14 +158,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import Workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -230,9 +212,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_append(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         rows: list[dict],
         sheet: str | None = None,
     ) -> dict:
@@ -240,10 +220,8 @@ def register_tools(mcp: FastMCP) -> None:
         Append rows to an existing Excel file.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             rows: List of dictionaries to append, keys should match existing columns
             sheet: Sheet name to append to (default: active sheet)
 
@@ -254,14 +232,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}. Use excel_write to create a new file."}
@@ -279,11 +254,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Get the specified sheet or active sheet
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        return {
-                            "error": (
-                                f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
-                            )
-                        }
+                        return {"error": (f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}")}
                     ws = wb[sheet]
                 else:
                     ws = wb.active
@@ -332,18 +303,14 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_info(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
     ) -> dict:
         """
         Get metadata about an Excel file without reading all data.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
 
         Returns:
             dict with file metadata (sheets, columns per sheet, row counts, file size)
@@ -352,14 +319,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -382,10 +346,7 @@ def register_tools(mcp: FastMCP) -> None:
                     columns = []
                     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
                     if first_row:
-                        columns = [
-                            str(c) if c is not None else f"Column_{i + 1}"
-                            for i, c in enumerate(first_row)
-                        ]
+                        columns = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(first_row)]
 
                     # Count rows (excluding header)
                     row_count = 0
@@ -419,18 +380,14 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_sheet_list(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
     ) -> dict:
         """
         List all sheet names in an Excel file.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
 
         Returns:
             dict with list of sheet names
@@ -439,14 +396,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -473,9 +427,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def excel_sql(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         query: str,
         sheet: str | None = None,
     ) -> dict:
@@ -486,10 +438,8 @@ def register_tools(mcp: FastMCP) -> None:
         with underscores). Use 'data' as alias for the specified/active sheet.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             query: SQL query. Use 'data' for the target sheet, or sheet names
                    (with spaces as underscores) to query/join multiple sheets.
             sheet: Sheet to use as 'data' table (default: first sheet)
@@ -510,25 +460,17 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             import duckdb
         except ImportError:
-            return {
-                "error": (
-                    "DuckDB not installed. Install with: "
-                    "pip install duckdb  or  pip install tools[sql]"
-                )
-            }
+            return {"error": ("DuckDB not installed. Install with: pip install duckdb  or  pip install tools[sql]")}
 
         try:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -585,10 +527,7 @@ def register_tools(mcp: FastMCP) -> None:
                         continue
 
                     # Headers from first row
-                    headers = [
-                        str(c) if c is not None else f"Column_{i + 1}"
-                        for i, c in enumerate(rows[0])
-                    ]
+                    headers = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(rows[0])]
 
                     # Data rows
                     records = []
@@ -604,9 +543,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if records:
                         df = pd.DataFrame(records)
                         con.register(f"temp_{table_name}", df)
-                        con.execute(
-                            f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}'
-                        )
+                        con.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}')
                     else:
                         # Empty table
                         cols_sql = ", ".join(f'"{h}" VARCHAR' for h in headers)
@@ -648,17 +585,14 @@ def register_tools(mcp: FastMCP) -> None:
             error_msg = str(e)
             if "Catalog Error" in error_msg or "Table" in error_msg:
                 return {
-                    "error": f"SQL error: {error_msg}. "
-                    "Use 'data' for target sheet or sheet names with underscores."
+                    "error": f"SQL error: {error_msg}. Use 'data' for target sheet or sheet names with underscores."
                 }
             return {"error": f"Query failed: {error_msg}"}
 
     @mcp.tool()
     def excel_search(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         search_term: str,
         sheet: str | None = None,
         case_sensitive: bool = False,
@@ -668,10 +602,8 @@ def register_tools(mcp: FastMCP) -> None:
         Search for values across Excel sheets.
 
         Args:
-            path: Path to the Excel file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the Excel file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             search_term: Text to search for
             sheet: Specific sheet to search (default: search all sheets)
             case_sensitive: Whether search is case-sensitive (default: False)
@@ -684,14 +616,11 @@ def register_tools(mcp: FastMCP) -> None:
             from openpyxl import load_workbook
         except ImportError:
             return {
-                "error": (
-                    "openpyxl not installed. Install with: "
-                    "pip install openpyxl  or  pip install tools[excel]"
-                )
+                "error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -703,9 +632,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "search_term cannot be empty"}
 
             if match_type not in ("contains", "exact", "starts_with", "ends_with"):
-                return {
-                    "error": "match_type must be 'contains', 'exact', 'starts_with', or 'ends_with'"
-                }
+                return {"error": "match_type must be 'contains', 'exact', 'starts_with', or 'ends_with'"}
 
             # Prepare search term
             term = search_term if case_sensitive else search_term.lower()
@@ -727,15 +654,10 @@ def register_tools(mcp: FastMCP) -> None:
                     headers = []
                     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
                     if first_row:
-                        headers = [
-                            str(c) if c is not None else f"Column_{i + 1}"
-                            for i, c in enumerate(first_row)
-                        ]
+                        headers = [str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(first_row)]
 
                     # Search data rows only (skip header row)
-                    for row_idx, row in enumerate(
-                        ws.iter_rows(min_row=2, values_only=True), start=2
-                    ):
+                    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                         for col_idx, cell_value in enumerate(row):
                             if cell_value is None:
                                 continue
@@ -756,11 +678,7 @@ def register_tools(mcp: FastMCP) -> None:
                                 is_match = compare_val.endswith(term)
 
                             if is_match:
-                                col_name = (
-                                    headers[col_idx]
-                                    if col_idx < len(headers)
-                                    else f"Column_{col_idx + 1}"
-                                )
+                                col_name = headers[col_idx] if col_idx < len(headers) else f"Column_{col_idx + 1}"
                                 matches.append(
                                     {
                                         "sheet": sheet_name,

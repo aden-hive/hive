@@ -1,377 +1,308 @@
 """
-Data Tools - Load, save, and list data files for agent pipelines.
+Data Tools - Read and write files with data_dir sandboxing.
 
-These tools let agents store large intermediate results in files and
-retrieve them with pagination, keeping the LLM conversation context small.
-Used in conjunction with the spillover system: when a tool result is too
-large, the framework writes it to a file and the agent can load it back
-with load_data().
+These tools let agents read and write files within their session's data directory
+and access files in ~/.hive/ for cross-agent file sharing.
+
+Uses context injection for data_dir - the parameter is auto-injected by the
+framework and doesn't need to be provided by the LLM.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from aden_tools.credentials.browser import open_browser
+from aden_tools.file_state_cache import record_read
+
+# ~/.hive/ is always allowed for cross-agent file access
+HIVE_DIR = os.path.expanduser("~/.hive")
+
+
+def _resolve_path(path: str, data_dir: str | None) -> str:
+    """Resolve and validate a path against the allowed directories.
+
+    Args:
+        path: The path to resolve (can be relative or absolute)
+        data_dir: The session's data directory from context
+
+    Returns:
+        The resolved absolute path
+
+    Raises:
+        ValueError: If path is outside allowed directories
+    """
+    if not data_dir:
+        raise ValueError("data_dir is not configured")
+
+    # Normalize path
+    path = path.replace("/", os.sep)
+
+    # Expand ~ to home directory
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+
+    # Resolve to absolute path
+    if os.path.isabs(path):
+        resolved = os.path.abspath(path)
+    else:
+        resolved = os.path.abspath(os.path.join(data_dir, path))
+
+    # Check against allowed paths
+    allowed_paths = [data_dir, HIVE_DIR]
+    for allowed in allowed_paths:
+        try:
+            if os.path.commonpath([resolved, allowed]) == allowed:
+                return resolved
+        except ValueError:
+            continue
+
+    # Block and remind
+    allowed_str = ", ".join(f"'{p}'" for p in allowed_paths)
+    raise ValueError(f"Access denied: '{path}' is not accessible. Allowed paths: {allowed_str}")
 
 
 def register_tools(mcp: FastMCP) -> None:
-    """Register data management tools with the MCP server."""
+    """Register file management tools with the MCP server."""
 
     @mcp.tool()
-    def save_data(filename: str, data: str, data_dir: str) -> dict:
-        """
-        Purpose
-            Save data to a file for later retrieval by this or downstream nodes.
+    def read_file(
+        path: str,
+        offset: int = 1,
+        limit: int = 0,
+        data_dir: str = "",
+        agent_id: str = "",
+    ) -> str:
+        """Read file contents with line numbers.
 
-        When to use
-            Store large results (search results, profiles, analysis) instead
-            of passing them inline through set_output.
-            Returns a brief summary with the filename to reference later.
-
-        Rules & Constraints
-            filename must be a simple name like 'results.json' — no paths or '..'
-            data_dir must be the absolute path to the data directory
-
-        Args:
-            filename: Simple filename like 'github_users.json'. No paths or '..'.
-            data: The string data to write (typically JSON).
-            data_dir: Absolute path to the data directory.
-
-        Returns:
-            Dict with success status and file metadata, or error dict
-        """
-        if not filename or ".." in filename or "/" in filename or "\\" in filename:
-            return {"error": "Invalid filename. Use simple names like 'users.json'"}
-        if not data_dir:
-            return {"error": "data_dir is required"}
-
-        try:
-            dir_path = Path(data_dir)
-            dir_path.mkdir(parents=True, exist_ok=True)
-            path = dir_path / filename
-            path.write_text(data, encoding="utf-8")
-            lines = data.count("\n") + 1
-            return {
-                "success": True,
-                "filename": filename,
-                "size_bytes": len(data.encode("utf-8")),
-                "lines": lines,
-                "preview": data[:200] + ("..." if len(data) > 200 else ""),
-            }
-        except Exception as e:
-            return {"error": f"Failed to save data: {str(e)}"}
-
-    @mcp.tool()
-    def load_data(
-        filename: str,
-        data_dir: str,
-        offset_bytes: int = 0,
-        limit_bytes: int = 10000,
-    ) -> dict:
-        """
-        Purpose
-            Load data from a previously saved file with byte-based pagination.
-            Efficient for files of any size (1 byte to 1 TB).
-            Automatically detects safe UTF-8 boundaries to prevent character splitting.
-
-        When to use
-            Retrieve large tool results that were spilled to disk.
-            Read data saved by save_data or by the spillover system.
-            Page through large files without loading everything into context.
-
-        Rules & Constraints
-            filename must match a file in data_dir
-            Uses byte offsets for O(1) seeking (works with huge files)
-            Automatically trims to valid UTF-8 character boundaries
-            Returns exactly limit_bytes or less (rounded to safe boundary)
+        Files are read from the session's data directory or ~/.hive/.
+        Large files are automatically truncated at 2000 lines or 50KB.
+        Use offset and limit to paginate through large files.
 
         Args:
-            filename: The filename to load (as shown in spillover messages or save_data results).
-            data_dir: Absolute path to the data directory.
-            offset_bytes: Byte offset to start reading from. Default 0.
-            limit_bytes: Max number of bytes to return. Default 10000 (10KB).
-
-        Returns:
-            Dict with content, pagination info, and metadata
-
-        Examples:
-            load_data('emails.jsonl', '/data')                           # first 10KB
-            load_data('emails.jsonl', '/data', offset_bytes=10000)       # next 10KB
-            load_data('large.txt', '/data', limit_bytes=50000)           # first 50KB
+            path: File path to read. Can be relative to data_dir or absolute.
+            offset: Starting line number, 1-indexed (default: 1).
+            limit: Max lines to return, 0 = up to 2000 (default: 0).
+            data_dir: Auto-injected - the session's data directory.
+            agent_id: Auto-injected - the calling agent id, used to scope
+                the file-state cache that powers stale-edit detection.
         """
-        if not filename or ".." in filename or "/" in filename or "\\" in filename:
-            return {"error": "Invalid filename"}
-        if not data_dir:
-            return {"error": "data_dir is required"}
+        try:
+            resolved = _resolve_path(path, data_dir)
+        except ValueError as e:
+            return f"Error: {e}"
+
+        if os.path.isdir(resolved):
+            entries = []
+            for entry in sorted(os.listdir(resolved)):
+                full = os.path.join(resolved, entry)
+                suffix = "/" if os.path.isdir(full) else ""
+                entries.append(f"  {entry}{suffix}")
+            total = len(entries)
+            return f"Directory: {path} ({total} entries)\n" + "\n".join(entries[:200])
+
+        if not os.path.isfile(resolved):
+            return f"Error: File not found: {path}"
+
+        # Check for binary files
+        try:
+            with open(resolved, "rb") as f:
+                chunk = f.read(4096)
+            if b"\x00" in chunk:
+                size = os.path.getsize(resolved)
+                return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
+        except OSError:
+            pass
 
         try:
-            offset_bytes = int(offset_bytes)
-            limit_bytes = int(limit_bytes)
-            path = Path(data_dir) / filename
-            if not path.exists():
-                return {"error": f"File not found: {filename}"}
+            # Read as bytes first so we can hash them for the state cache
+            # without a second open, then decode for the line-formatted
+            # return value the model sees.
+            with open(resolved, "rb") as f:
+                raw_bytes = f.read()
+            content = raw_bytes.decode("utf-8", errors="replace")
+            # Record this read in the per-agent state cache so a later
+            # hashline_edit/write_file call can detect external writes
+            # that happened between now and then. Scoped to agent_id so
+            # two agents sharing the MCP server can't see each other.
+            record_read(agent_id or None, resolved, content_bytes=raw_bytes)
 
-            file_size = path.stat().st_size
+            all_lines = content.splitlines()
+            total_lines = len(all_lines)
+            start_idx = max(0, offset - 1)
+            effective_limit = limit if limit > 0 else 2000
+            end_idx = min(start_idx + effective_limit, total_lines)
 
-            # Handle edge case: offset beyond file size
-            if offset_bytes >= file_size:
-                return {
-                    "success": True,
-                    "filename": filename,
-                    "content": "",
-                    "offset_bytes": offset_bytes,
-                    "bytes_read": 0,
-                    "next_offset_bytes": file_size,
-                    "file_size_bytes": file_size,
-                    "has_more": False,
-                }
+            max_bytes = 50 * 1024
+            output_lines = []
+            byte_count = 0
 
-            with open(path, "rb") as f:
-                # O(1) seek to byte offset
-                f.seek(offset_bytes)
+            for i in range(start_idx, end_idx):
+                line = all_lines[i]
+                if len(line) > 2000:
+                    line = line[:2000] + "..."
+                formatted = f"{i + 1:>6}\t{line}"
+                line_bytes = len(formatted.encode("utf-8")) + 1
+                if byte_count + line_bytes > max_bytes:
+                    break
+                output_lines.append(formatted)
+                byte_count += line_bytes
 
-                # Read exactly limit_bytes
-                raw_bytes = f.read(limit_bytes)
+            result = "\n".join(output_lines)
+            lines_shown = len(output_lines)
+            actual_end = start_idx + lines_shown
 
-                # Trim to valid UTF-8 boundary
-                # Scan backwards max 4 bytes to find valid UTF-8 start
-                chunk = raw_bytes
-                text = None
-                for i in range(min(4, len(raw_bytes)) + 1):
-                    try:
-                        slice_end = len(raw_bytes) - i if i > 0 else len(raw_bytes)
-                        text = raw_bytes[:slice_end].decode("utf-8")
-                        chunk = raw_bytes[:slice_end]
-                        break
-                    except UnicodeDecodeError:
-                        continue
-
-                # If we couldn't decode at all, return error
-                if text is None:
-                    return {"error": "Could not decode file as UTF-8"}
-
-                # UTF-8 boundary is already handled above
-                next_offset = offset_bytes + len(chunk)
-
-                return {
-                    "success": True,
-                    "filename": filename,
-                    "content": text,
-                    "offset_bytes": offset_bytes,
-                    "bytes_read": len(chunk),
-                    "next_offset_bytes": next_offset,
-                    "file_size_bytes": file_size,
-                    "has_more": next_offset < file_size,
-                }
-        except Exception as e:
-            return {"error": f"Failed to load data: {str(e)}"}
-
-    @mcp.tool()
-    def serve_file_to_user(
-        filename: str, data_dir: str, label: str = "", open_in_browser: bool = False
-    ) -> dict:
-        """
-        Purpose
-            Resolve a sandboxed file path to a fully qualified file URI
-            that the user can click to open in their system viewer.
-
-        When to use
-            After saving a file (HTML report, CSV export, etc.) with save_data,
-            call this to give the user a clickable link to open it.
-            The TUI will render the file:// URI as a clickable link.
-            Set open_in_browser=True to also auto-open the file in the
-            user's default browser.
-
-        Rules & Constraints
-            filename must be a simple name — no paths or '..'
-            The file must already exist in data_dir
-            Returns a file:// URI the agent should include in its response
-
-        Args:
-            filename: The filename to serve (must exist in data_dir).
-            data_dir: Absolute path to the data directory.
-            label: Optional display label (defaults to filename).
-            open_in_browser: If True, auto-open the file in the default browser.
-
-        Returns:
-            Dict with file_uri, file_path, label, and optionally browser_opened
-        """
-        if not filename or ".." in filename or "/" in filename or "\\" in filename:
-            return {"error": "Invalid filename. Use simple names like 'report.html'"}
-        if not data_dir:
-            return {"error": "data_dir is required"}
-
-        try:
-            path = Path(data_dir) / filename
-            if not path.exists():
-                return {"error": f"File not found: {filename}"}
-
-            full_path = str(path.resolve())
-            file_uri = f"file://{full_path}"
-            result = {
-                "success": True,
-                "file_uri": file_uri,
-                "file_path": full_path,
-                "label": label or filename,
-            }
-
-            if open_in_browser:
-                opened, msg = open_browser(file_uri)
-                result["browser_opened"] = opened
-                result["browser_message"] = msg
+            if actual_end < total_lines:
+                result += (
+                    f"\n\n(Showing lines {start_idx + 1}-{actual_end}"
+                    f" of {total_lines}."
+                    f" Use offset={actual_end + 1} to continue reading.)"
+                )
 
             return result
         except Exception as e:
-            return {"error": f"Failed to serve file: {str(e)}"}
+            return f"Error reading file: {e}"
 
     @mcp.tool()
-    def list_data_files(data_dir: str) -> dict:
-        """
-        Purpose
-            List all data files in the data directory.
+    def write_file(
+        path: str,
+        content: str,
+        data_dir: str = "",
+    ) -> str:
+        """Create or overwrite a file with the given content.
 
-        When to use
-            Discover what intermediate results or spillover files are available.
-            Check what data was saved by previous nodes in the pipeline.
+        Automatically creates parent directories. Files are written to
+        the session's data directory or ~/.hive/.
 
         Args:
-            data_dir: Absolute path to the data directory.
-
-        Returns:
-            Dict with list of files and their sizes
+            path: File path to write. Can be relative to data_dir or absolute.
+            content: Complete file content to write.
+            data_dir: Auto-injected - the session's data directory.
         """
-        if not data_dir:
-            return {"error": "data_dir is required"}
+        try:
+            resolved = _resolve_path(path, data_dir)
+        except ValueError as e:
+            return f"Error: {e}"
 
         try:
-            dir_path = Path(data_dir)
-            if not dir_path.exists():
-                return {"files": []}
+            resolved_path = Path(resolved)
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
-            files = []
-            for f in sorted(dir_path.iterdir()):
-                if f.is_file():
-                    files.append(
-                        {
-                            "filename": f.name,
-                            "size_bytes": f.stat().st_size,
-                        }
-                    )
-            return {"files": files}
+            existed = resolved_path.is_file()
+            content_str = content if content is not None else ""
+            with open(resolved_path, "w", encoding="utf-8") as f:
+                f.write(content_str)
+                f.flush()
+                os.fsync(f.fileno())
+
+            line_count = content_str.count("\n") + (1 if content_str and not content_str.endswith("\n") else 0)
+            action = "Updated" if existed else "Created"
+            return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:
-            return {"error": f"Failed to list data files: {str(e)}"}
+            return f"Error writing file: {e}"
 
     @mcp.tool()
-    def append_data(filename: str, data: str, data_dir: str) -> dict:
-        """
-        Purpose
-            Append data to the end of an existing file, or create it if it
-            doesn't exist yet.
+    def list_files(
+        path: str = ".",
+        recursive: bool = False,
+        data_dir: str = "",
+    ) -> str:
+        """List directory contents with type indicators.
 
-        When to use
-            Build large files incrementally instead of writing everything in
-            one save_data call.  For example, write an HTML skeleton first,
-            then append each section separately to stay within token limits.
-
-        Rules & Constraints
-            filename must be a simple name like 'report.html' — no paths or '..'
+        Directories have a / suffix. Hidden files and common build directories
+        are skipped.
 
         Args:
-            filename: Simple filename to append to. No paths or '..'.
-            data: The string data to append.
-            data_dir: Absolute path to the data directory.
-
-        Returns:
-            Dict with success status, new total size, and bytes appended
+            path: Directory path (default: data_dir).
+            recursive: List recursively (default: false).
+            data_dir: Auto-injected - the session's data directory.
         """
-        if not filename or ".." in filename or "/" in filename or "\\" in filename:
-            return {"error": "Invalid filename. Use simple names like 'report.html'"}
-        if not data_dir:
-            return {"error": "data_dir is required"}
+        try:
+            resolved = _resolve_path(path, data_dir)
+        except ValueError as e:
+            return f"Error: {e}"
+
+        if not os.path.isdir(resolved):
+            return f"Error: Directory not found: {path}"
 
         try:
-            dir_path = Path(data_dir)
-            dir_path.mkdir(parents=True, exist_ok=True)
-            path = dir_path / filename
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(data)
-            appended_bytes = len(data.encode("utf-8"))
-            total_bytes = path.stat().st_size
-            return {
-                "success": True,
-                "filename": filename,
-                "size_bytes": total_bytes,
-                "appended_bytes": appended_bytes,
-            }
+            skip = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
+            entries: list[str] = []
+
+            if recursive:
+                for root, dirs, files in os.walk(resolved):
+                    dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
+                    rel_root = os.path.relpath(root, resolved)
+                    if rel_root == ".":
+                        rel_root = ""
+                    for f in sorted(files):
+                        if f.startswith("."):
+                            continue
+                        entries.append(os.path.join(rel_root, f) if rel_root else f)
+                        if len(entries) >= 500:
+                            entries.append("... (truncated at 500 entries)")
+                            return "\n".join(entries)
+            else:
+                for entry in sorted(os.listdir(resolved)):
+                    if entry.startswith(".") or entry in skip:
+                        continue
+                    full = os.path.join(resolved, entry)
+                    suffix = "/" if os.path.isdir(full) else ""
+                    entries.append(f"{entry}{suffix}")
+
+            return "\n".join(entries) if entries else "(empty directory)"
         except Exception as e:
-            return {"error": f"Failed to append data: {str(e)}"}
+            return f"Error listing directory: {e}"
 
     @mcp.tool()
-    def edit_data(filename: str, old_text: str, new_text: str, data_dir: str) -> dict:
-        """
-        Purpose
-            Find and replace a specific text segment in an existing file.
-            Works like a surgical diff — only the matched portion changes.
+    def search_files(
+        pattern: str,
+        path: str = ".",
+        data_dir: str = "",
+    ) -> str:
+        """Search file contents using regex.
 
-        When to use
-            Update a section of a previously saved file without rewriting
-            the entire content.  For example, replace a placeholder in an
-            HTML report or fix a specific paragraph.
-
-        Rules & Constraints
-            old_text must appear exactly once in the file.  If it appears
-            zero times or more than once, the edit is rejected with an
-            error message.
+        Results sorted by file with line numbers. Searches within
+        the session's data directory or ~/.hive/.
 
         Args:
-            filename: The file to edit. Must exist in data_dir.
-            old_text: The exact text to find (must match exactly once).
-            new_text: The replacement text.
-            data_dir: Absolute path to the data directory.
-
-        Returns:
-            Dict with success status and updated file size
+            pattern: Regex pattern to search for.
+            path: Directory path to search (default: data_dir).
+            data_dir: Auto-injected - the session's data directory.
         """
-        if not filename or ".." in filename or "/" in filename or "\\" in filename:
-            return {"error": "Invalid filename. Use simple names like 'report.html'"}
-        if not data_dir:
-            return {"error": "data_dir is required"}
+        import re
 
         try:
-            path = Path(data_dir) / filename
-            if not path.exists():
-                return {"error": f"File not found: {filename}"}
+            resolved = _resolve_path(path, data_dir)
+        except ValueError as e:
+            return f"Error: {e}"
 
-            content = path.read_text(encoding="utf-8")
-            count = content.count(old_text)
+        if not os.path.isdir(resolved):
+            return f"Error: Directory not found: {path}"
 
-            if count == 0:
-                return {
-                    "error": (
-                        "old_text not found in the file. "
-                        "Make sure you're matching the exact text, "
-                        "including whitespace and newlines."
-                    )
-                }
-            if count > 1:
-                return {
-                    "error": (
-                        f"old_text found {count} times — it must be unique. "
-                        "Include more surrounding context to match exactly once."
-                    )
-                }
+        try:
+            compiled = re.compile(pattern)
+            matches: list[str] = []
+            skip_dirs = {".git", "__pycache__", "node_modules", ".venv"}
 
-            updated = content.replace(old_text, new_text, 1)
-            path.write_text(updated, encoding="utf-8")
+            for root, dirs, files in os.walk(resolved):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    display_path = os.path.relpath(fpath, resolved)
+                    try:
+                        with open(fpath, encoding="utf-8", errors="ignore") as f:
+                            for i, line in enumerate(f, 1):
+                                stripped = line.rstrip()
+                                if compiled.search(stripped):
+                                    matches.append(f"{display_path}:{i}:{stripped[:2000]}")
+                                    if len(matches) >= 100:
+                                        return "\n".join(matches) + "\n... (truncated)"
+                    except (OSError, UnicodeDecodeError):
+                        continue
 
-            return {
-                "success": True,
-                "filename": filename,
-                "size_bytes": len(updated.encode("utf-8")),
-                "replacements": 1,
-            }
-        except Exception as e:
-            return {"error": f"Failed to edit data: {str(e)}"}
+            return "\n".join(matches) if matches else "No matches found."
+        except re.error as e:
+            return f"Error: Invalid regex: {e}"

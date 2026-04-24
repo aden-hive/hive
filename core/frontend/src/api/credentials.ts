@@ -8,6 +8,35 @@ export interface CredentialInfo {
   updated_at: string | null;
 }
 
+export interface CredentialAccount {
+  provider: string;
+  alias: string;
+  identity: Record<string, string>;
+  source: "aden" | "local" | string;
+  credential_id: string;
+}
+
+export interface CredentialSpec {
+  credential_name: string;
+  credential_id: string;
+  env_var: string;
+  description: string;
+  help_url: string;
+  api_key_instructions: string;
+  tools: string[];
+  aden_supported: boolean;
+  direct_api_key_supported: boolean;
+  credential_key: string;
+  credential_group: string;
+  available: boolean;
+  accounts: CredentialAccount[];
+}
+
+export interface ResyncResponse {
+  synced: boolean;
+  accounts_by_provider: Record<string, CredentialAccount[]>;
+}
+
 export interface AgentCredentialRequirement {
   credential_name: string;
   credential_id: string;
@@ -26,6 +55,9 @@ export interface AgentCredentialRequirement {
 }
 
 export const credentialsApi = {
+  listSpecs: () =>
+    api.get<{ specs: CredentialSpec[]; has_aden_key: boolean }>("/credentials/specs"),
+
   list: () =>
     api.get<{ credentials: CredentialInfo[] }>("/credentials"),
 
@@ -45,5 +77,14 @@ export const credentialsApi = {
     api.post<{ required: AgentCredentialRequirement[]; has_aden_key: boolean }>(
       "/credentials/check-agent",
       { agent_path: agentPath },
+    ),
+
+  resync: () =>
+    api.post<ResyncResponse>("/credentials/resync", {}),
+
+  validateKey: (providerId: string, apiKey: string) =>
+    api.post<{ valid: boolean | null; message: string }>(
+      "/credentials/validate-key",
+      { provider_id: providerId, api_key: apiKey },
     ),
 };

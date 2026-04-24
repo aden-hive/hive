@@ -168,9 +168,7 @@ class AdenCachedStorage(CredentialStorage):
                 if rid != credential_id:
                     result = self._load_by_id(rid)
                     if result is not None:
-                        logger.info(
-                            f"Loaded credential '{credential_id}' via provider index (id='{rid}')"
-                        )
+                        logger.info(f"Loaded credential '{credential_id}' via provider index (id='{rid}')")
                         return result
 
         # Direct lookup (exact credential_id match)
@@ -198,6 +196,19 @@ class AdenCachedStorage(CredentialStorage):
         # not in local storage doesn't exist on the Aden server.
         if local_cred is None:
             return None
+
+        # Skip Aden fetch for credentials not managed by Aden (BYOK credentials).
+        # Only OAuth credentials synced from Aden are in the provider index.
+        # BYOK credentials like anthropic, brave_search are local-only.
+        # Also check the _aden_managed flag on the credential itself.
+        is_aden_managed = (
+            credential_id in self._provider_index
+            or any(credential_id in ids for ids in self._provider_index.values())
+            or (local_cred is not None and local_cred.keys.get("_aden_managed") is not None)
+        )
+        if not is_aden_managed:
+            logger.debug(f"Credential '{credential_id}' is local-only, skipping Aden refresh")
+            return local_cred
 
         # Try to refresh stale local credential from Aden
         try:

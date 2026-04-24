@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browser Remote Control</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --accent: #58a6ff;
+    --accent-dim: #1f6feb;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --radius: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 0;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  #status-badge {
+    font-size: 13px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+  #status-badge.connected { background: rgba(63,185,80,0.15); color: var(--green); }
+  #status-badge.disconnected { background: rgba(248,81,73,0.15); color: var(--red); }
+  #status-badge.checking { background: rgba(210,153,34,0.15); color: var(--orange); }
+
+  .layout {
+    display: flex;
+    height: calc(100vh - 57px);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+
+  .sidebar-group {
+    margin-bottom: 8px;
+  }
+
+  .sidebar-group-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text2);
+    padding: 8px 16px 4px;
+  }
+
+  .sidebar-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 13px;
+    padding: 6px 16px 6px 24px;
+    cursor: pointer;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .sidebar-item:hover {
+    background: var(--surface2);
+    color: var(--text);
+  }
+
+  .sidebar-item.active {
+    background: rgba(88,166,255,0.1);
+    color: var(--accent);
+    border-right: 2px solid var(--accent);
+  }
+
+  /* Main content */
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+  }
+
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 16px;
+  }
+
+  .tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+
+  .tool-card:hover { border-color: var(--accent-dim); }
+  .tool-card.active { border-color: var(--accent); }
+
+  .tool-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .tool-card-header:hover { background: var(--surface2); }
+
+  .tool-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .tool-desc {
+    font-size: 12px;
+    color: var(--text2);
+    margin-left: 8px;
+  }
+
+  .tool-card-body {
+    padding: 16px;
+    display: none;
+  }
+
+  .tool-card.open .tool-card-body { display: block; }
+
+  .chevron {
+    color: var(--text2);
+    transition: transform 0.2s;
+    font-size: 12px;
+  }
+
+  .tool-card.open .chevron { transform: rotate(90deg); }
+
+  /* Form fields */
+  .field {
+    margin-bottom: 12px;
+  }
+
+  .field:last-of-type { margin-bottom: 16px; }
+
+  .field label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text2);
+    margin-bottom: 4px;
+  }
+
+  .field label .required {
+    color: var(--red);
+    font-size: 10px;
+  }
+
+  .field label .type-tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--surface2);
+    color: var(--text2);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .field input, .field select, .field textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .field textarea { min-height: 60px; resize: vertical; }
+
+  .field input[type="checkbox"] {
+    width: auto;
+    margin-right: 4px;
+  }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+  }
+
+  .checkbox-row label {
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+
+  /* Buttons */
+  .btn-run {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-dim);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-run:hover { background: var(--accent); }
+  .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-run.running { background: var(--orange); }
+
+  /* Result area */
+  .result-area {
+    margin-top: 12px;
+    display: none;
+  }
+
+  .result-area.visible { display: block; }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .result-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .result-status.ok { background: rgba(63,185,80,0.15); color: var(--green); }
+  .result-status.error { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  .result-duration {
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .result-json {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    max-height: 300px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .result-screenshot {
+    max-width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+
+  /* History panel */
+  .history-panel {
+    width: 320px;
+    min-width: 320px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px;
+  }
+
+  .history-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text2);
+    padding: 4px 4px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .history-item {
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+  }
+
+  .history-item:hover {
+    background: var(--surface2);
+  }
+
+  .history-item-tool {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .history-item-tool.ok { color: var(--green); }
+  .history-item-tool.error { color: var(--red); }
+
+  .history-item-time {
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .history-item-params {
+    font-size: 11px;
+    color: var(--text2);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+  }
+
+  .history-empty {
+    color: var(--text2);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 0;
+  }
+
+  .clear-history {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 11px;
+    cursor: pointer;
+    float: right;
+    padding: 0;
+  }
+  .clear-history:hover { color: var(--red); }
+
+  /* View mode toggle */
+  .view-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 2px;
+  }
+
+  .view-toggle button {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .view-toggle button.active {
+    background: var(--accent-dim);
+    color: #fff;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <h1>Browser Remote Control</h1>
+    <div class="view-toggle">
+      <button class="active" onclick="setView('grid')">Grid</button>
+      <button onclick="setView('single')">Focus</button>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="context-info" style="font-size:12px;color:var(--text2)"></span>
+    <span id="status-badge" class="checking">checking...</span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar"></nav>
+  <main class="main" id="main-content"></main>
+  <aside class="history-panel" id="history-panel">
+    <div class="history-title">
+      History
+      <button class="clear-history" onclick="clearHistory()">clear</button>
+    </div>
+    <div id="history-list">
+      <div class="history-empty">No calls yet</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let toolSchemas = {};
+let history = [];
+let currentView = 'grid';
+
+// Tool categories for sidebar grouping
+const CATEGORIES = {
+  'Lifecycle': ['browser_setup', 'browser_start', 'browser_stop', 'browser_status'],
+  'Tabs': ['browser_tabs', 'browser_open', 'browser_close', 'browser_close_all', 'browser_close_finished', 'browser_activate_tab'],
+  'Navigation': ['browser_navigate', 'browser_go_back', 'browser_go_forward', 'browser_reload'],
+  'Interactions': ['browser_click', 'browser_click_coordinate', 'browser_type', 'browser_type_focused', 'browser_fill', 'browser_press', 'browser_press_at', 'browser_hover', 'browser_hover_coordinate', 'browser_select', 'browser_scroll', 'browser_drag'],
+  'Inspection': ['browser_screenshot', 'browser_snapshot', 'browser_console', 'browser_html', 'browser_get_text', 'browser_get_attribute', 'browser_get_rect', 'browser_shadow_query', 'browser_evaluate', 'browser_wait'],
+  'Advanced': ['browser_resize', 'browser_upload', 'browser_dialog'],
+};
+
+async function init() {
+  await checkStatus();
+  await loadTools();
+  setInterval(checkStatus, 5000);
+}
+
+async function checkStatus() {
+  const badge = document.getElementById('status-badge');
+  const ctx = document.getElementById('context-info');
+  try {
+    const res = await fetch(`${API_BASE}/status`);
+    const data = await res.json();
+    if (data.connected) {
+      badge.textContent = 'connected';
+      badge.className = 'connected';
+      if (data.tools_count) {
+        ctx.textContent = `${data.tools_count} tools`;
+      } else if (data.contexts) {
+        const contexts = Object.entries(data.contexts);
+        ctx.textContent = contexts.length > 0
+          ? contexts.map(([k,v]) => `${k}: tab ${v.activeTabId}`).join(', ')
+          : 'no active context';
+      } else {
+        ctx.textContent = '';
+      }
+    } else {
+      badge.textContent = 'disconnected';
+      badge.className = 'disconnected';
+      ctx.textContent = '';
+    }
+  } catch {
+    badge.textContent = 'unreachable';
+    badge.className = 'disconnected';
+    ctx.textContent = '';
+  }
+}
+
+async function loadTools() {
+  try {
+    const res = await fetch(`${API_BASE}/tools`);
+    toolSchemas = await res.json();
+    renderSidebar();
+    renderToolCards();
+  } catch (e) {
+    document.getElementById('main-content').innerHTML =
+      `<div style="color:var(--red);padding:40px;">Failed to load tools: ${e.message}</div>`;
+  }
+}
+
+function renderSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  let html = '';
+  const categorized = new Set();
+  for (const [group, tools] of Object.entries(CATEGORIES)) {
+    const available = tools.filter(t => toolSchemas[t]);
+    if (available.length === 0) continue;
+    html += `<div class="sidebar-group"><div class="sidebar-group-label">${group}</div>`;
+    for (const tool of available) {
+      categorized.add(tool);
+      const shortName = tool.replace('browser_', '');
+      html += `<button class="sidebar-item" data-tool="${tool}" onclick="scrollToTool('${tool}')">${shortName}</button>`;
+    }
+    html += '</div>';
+  }
+  // Show any uncategorized tools from the server
+  const other = Object.keys(toolSchemas).filter(t => !categorized.has(t));
+  if (other.length > 0) {
+    html += `<div class="sidebar-group"><div class="sidebar-group-label">Other</div>`;
+    for (const tool of other) {
+      const shortName = tool.replace('browser_', '');
+      html += `<button class="sidebar-item" data-tool="${tool}" onclick="scrollToTool('${tool}')">${shortName}</button>`;
+    }
+    html += '</div>';
+  }
+  sidebar.innerHTML = html;
+}
+
+function renderToolCards() {
+  const main = document.getElementById('main-content');
+  let html = '<div class="tools-grid" id="tools-grid">';
+  for (const [tool, schema] of Object.entries(toolSchemas)) {
+    html += buildToolCard(tool, schema);
+  }
+  html += '</div>';
+  main.innerHTML = html;
+}
+
+function buildToolCard(tool, schema) {
+  const shortName = tool.replace('browser_', '');
+  let fieldsHtml = '';
+  for (const [param, spec] of Object.entries(schema.params)) {
+    fieldsHtml += buildField(tool, param, spec);
+  }
+
+  return `
+    <div class="tool-card" id="card-${tool}" data-tool="${tool}">
+      <div class="tool-card-header" onclick="toggleCard('${tool}')">
+        <div>
+          <span class="tool-name">${shortName}</span>
+          <span class="tool-desc">${schema.description}</span>
+        </div>
+        <span class="chevron">&#9654;</span>
+      </div>
+      <div class="tool-card-body">
+        <form id="form-${tool}" onsubmit="runTool(event, '${tool}')">
+          ${fieldsHtml}
+          <button class="btn-run" type="submit" id="btn-${tool}">Run</button>
+        </form>
+        <div class="result-area" id="result-${tool}"></div>
+      </div>
+    </div>`;
+}
+
+function buildField(tool, param, spec) {
+  const id = `${tool}__${param}`;
+  const required = spec.required ? '<span class="required">*</span>' : '';
+  const typeTag = `<span class="type-tag">${spec.type}</span>`;
+  const defaultVal = spec.default !== undefined ? spec.default : '';
+
+  if (spec.type === 'boolean') {
+    return `
+      <div class="field">
+        <div class="checkbox-row">
+          <input type="checkbox" id="${id}" ${defaultVal ? 'checked' : ''}>
+          <label for="${id}">${param} ${typeTag} ${required}</label>
+        </div>
+      </div>`;
+  }
+
+  if (spec.enum) {
+    const opts = spec.enum.map(v => `<option value="${v}" ${v === defaultVal ? 'selected' : ''}>${v}</option>`).join('');
+    return `
+      <div class="field">
+        <label for="${id}">${param} ${typeTag} ${required}</label>
+        <select id="${id}">${opts}</select>
+      </div>`;
+  }
+
+  if (spec.type === 'array') {
+    return `
+      <div class="field">
+        <label for="${id}">${param} ${typeTag} ${required}
+          <span class="type-tag" style="margin-left:2px">JSON</span>
+        </label>
+        <input type="text" id="${id}" placeholder='["value1", "value2"]'>
+      </div>`;
+  }
+
+  // For expression / text that might be multiline
+  if (param === 'expression' || param === 'text') {
+    return `
+      <div class="field">
+        <label for="${id}">${param} ${typeTag} ${required}</label>
+        <textarea id="${id}" placeholder="${param}">${defaultVal}</textarea>
+      </div>`;
+  }
+
+  const inputType = (spec.type === 'integer' || spec.type === 'number') ? 'number' : 'text';
+  const step = spec.type === 'number' ? ' step="any"' : '';
+
+  return `
+    <div class="field">
+      <label for="${id}">${param} ${typeTag} ${required}</label>
+      <input type="${inputType}" id="${id}"${step} placeholder="${defaultVal !== '' ? defaultVal : param}" value="${defaultVal !== '' && spec.type !== 'string' ? defaultVal : ''}">
+    </div>`;
+}
+
+function toggleCard(tool) {
+  const card = document.getElementById(`card-${tool}`);
+  const wasOpen = card.classList.contains('open');
+  if (currentView === 'single') {
+    document.querySelectorAll('.tool-card.open').forEach(c => c.classList.remove('open'));
+  }
+  card.classList.toggle('open', !wasOpen);
+
+  // Update sidebar active state
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+  if (!wasOpen) {
+    const sideItem = document.querySelector(`.sidebar-item[data-tool="${tool}"]`);
+    if (sideItem) sideItem.classList.add('active');
+  }
+}
+
+function scrollToTool(tool) {
+  const card = document.getElementById(`card-${tool}`);
+  if (!card) return;
+
+  // Open it
+  if (!card.classList.contains('open')) {
+    if (currentView === 'single') {
+      document.querySelectorAll('.tool-card.open').forEach(c => c.classList.remove('open'));
+    }
+    card.classList.add('open');
+  }
+
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+  const sideItem = document.querySelector(`.sidebar-item[data-tool="${tool}"]`);
+  if (sideItem) sideItem.classList.add('active');
+}
+
+function collectParams(tool) {
+  const schema = toolSchemas[tool];
+  const params = {};
+  for (const [param, spec] of Object.entries(schema.params)) {
+    const el = document.getElementById(`${tool}__${param}`);
+    if (!el) continue;
+
+    if (spec.type === 'boolean') {
+      params[param] = el.checked;
+    } else if (spec.type === 'array') {
+      const v = el.value.trim();
+      if (v) {
+        try { params[param] = JSON.parse(v); }
+        catch { params[param] = v.split(',').map(s => s.trim()); }
+      }
+    } else if (spec.type === 'integer') {
+      const v = el.value.trim();
+      if (v) params[param] = parseInt(v, 10);
+    } else if (spec.type === 'number') {
+      const v = el.value.trim();
+      if (v) params[param] = parseFloat(v);
+    } else {
+      const v = (el.value || '').trim();
+      if (v) params[param] = v;
+    }
+  }
+  return params;
+}
+
+async function runTool(event, tool) {
+  event.preventDefault();
+  const btn = document.getElementById(`btn-${tool}`);
+  const resultArea = document.getElementById(`result-${tool}`);
+
+  const params = collectParams(tool);
+  btn.textContent = 'Running...';
+  btn.classList.add('running');
+  btn.disabled = true;
+
+  const startTime = Date.now();
+  let result;
+  try {
+    const res = await fetch(`${API_BASE}/${tool}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    result = await res.json();
+  } catch (e) {
+    result = { ok: false, error: e.message };
+  }
+  const elapsed = Date.now() - startTime;
+
+  btn.textContent = 'Run';
+  btn.classList.remove('running');
+  btn.disabled = false;
+
+  // Render result
+  const isOk = result.ok !== false;
+  const statusClass = isOk ? 'ok' : 'error';
+  const statusText = isOk ? 'OK' : 'ERROR';
+  const duration = result._duration_ms ? `${result._duration_ms}ms` : `${elapsed}ms`;
+
+  let bodyHtml = '';
+
+  // Special handling for screenshot — show the image
+  if (tool === 'browser_screenshot' && result.data) {
+    bodyHtml = `<img class="result-screenshot" src="data:image/png;base64,${result.data}">`;
+    // Don't show the raw base64 in JSON
+    const display = { ...result };
+    display.data = `[${result.data.length} chars base64]`;
+    bodyHtml += `<pre class="result-json">${JSON.stringify(display, null, 2)}</pre>`;
+  } else {
+    bodyHtml = `<pre class="result-json">${JSON.stringify(result, null, 2)}</pre>`;
+  }
+
+  resultArea.innerHTML = `
+    <div class="result-header">
+      <span class="result-status ${statusClass}">${statusText}</span>
+      <span class="result-duration">${duration}</span>
+    </div>
+    ${bodyHtml}`;
+  resultArea.classList.add('visible');
+
+  // Add to history
+  addHistory(tool, params, result, duration);
+}
+
+function addHistory(tool, params, result, duration) {
+  const entry = {
+    tool,
+    params,
+    result,
+    duration,
+    time: new Date().toLocaleTimeString(),
+    ok: result.ok !== false,
+  };
+  history.unshift(entry);
+  if (history.length > 50) history.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  if (history.length === 0) {
+    list.innerHTML = '<div class="history-empty">No calls yet</div>';
+    return;
+  }
+  list.innerHTML = history.map((h, i) => {
+    const shortName = h.tool.replace('browser_', '');
+    const paramsStr = JSON.stringify(h.params);
+    const statusCls = h.ok ? 'ok' : 'error';
+    return `
+      <div class="history-item" onclick="replayHistory(${i})" title="Click to load params">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="history-item-tool ${statusCls}">${shortName}</span>
+          <span class="history-item-time">${h.time} (${h.duration})</span>
+        </div>
+        <div class="history-item-params">${paramsStr}</div>
+      </div>`;
+  }).join('');
+}
+
+function replayHistory(idx) {
+  const h = history[idx];
+  const tool = h.tool;
+
+  // Open the card and scroll to it
+  scrollToTool(tool);
+
+  // Fill the form with saved params
+  const schema = toolSchemas[tool];
+  for (const [param, spec] of Object.entries(schema.params)) {
+    const el = document.getElementById(`${tool}__${param}`);
+    if (!el) continue;
+    const val = h.params[param];
+    if (val === undefined) continue;
+
+    if (spec.type === 'boolean') {
+      el.checked = !!val;
+    } else if (spec.type === 'array') {
+      el.value = JSON.stringify(val);
+    } else {
+      el.value = val;
+    }
+  }
+}
+
+function clearHistory() {
+  history = [];
+  renderHistory();
+}
+
+function setView(mode) {
+  currentView = mode;
+  document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  const grid = document.getElementById('tools-grid');
+  if (mode === 'single') {
+    grid.style.gridTemplateColumns = '1fr';
+  } else {
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(420px, 1fr))';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

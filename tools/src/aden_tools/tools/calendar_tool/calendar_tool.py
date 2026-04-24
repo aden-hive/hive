@@ -368,13 +368,9 @@ def register_tools(
         if all_day:
             # Validate date-only format for all-day events
             if not _DATE_ONLY_RE.match(start_time):
-                return {
-                    "error": "all-day events require date-only format for start_time (YYYY-MM-DD)"
-                }
+                return {"error": "all-day events require date-only format for start_time (YYYY-MM-DD)"}
             if not _DATE_ONLY_RE.match(end_time):
-                return {
-                    "error": "all-day events require date-only format for end_time (YYYY-MM-DD)"
-                }
+                return {"error": "all-day events require date-only format for end_time (YYYY-MM-DD)"}
             event_body: dict = {
                 "summary": summary,
                 "start": {"date": start_time},
@@ -511,9 +507,7 @@ def register_tools(
 
             current_attendees = event_data.get("attendees", [])
             remove_set = {e.lower() for e in remove_attendees}
-            remaining = [
-                a for a in current_attendees if a.get("email", "").lower() not in remove_set
-            ]
+            remaining = [a for a in current_attendees if a.get("email", "").lower() not in remove_set]
             patch_body["attendees"] = remaining
         elif attendees is not None:
             patch_body["attendees"] = [{"email": email} for email in attendees]
@@ -529,11 +523,7 @@ def register_tools(
         if start_time is not None:
             if all_day:
                 if not _DATE_ONLY_RE.match(start_time):
-                    return {
-                        "error": (
-                            "all-day events require date-only format for start_time (YYYY-MM-DD)"
-                        )
-                    }
+                    return {"error": ("all-day events require date-only format for start_time (YYYY-MM-DD)")}
                 patch_body["start"] = {"date": start_time}
             else:
                 patch_body["start"] = {"dateTime": start_time}
@@ -543,11 +533,7 @@ def register_tools(
         if end_time is not None:
             if all_day:
                 if not _DATE_ONLY_RE.match(end_time):
-                    return {
-                        "error": (
-                            "all-day events require date-only format for end_time (YYYY-MM-DD)"
-                        )
-                    }
+                    return {"error": ("all-day events require date-only format for end_time (YYYY-MM-DD)")}
                 patch_body["end"] = {"date": end_time}
             else:
                 patch_body["end"] = {"dateTime": end_time}
@@ -901,9 +887,7 @@ def register_tools(
                 # Compute busy/free/conflicts
                 window_start = _parse_event_dt(time_min)
                 window_end = _parse_event_dt(time_max)
-                busy, free_slots, conflicts = _compute_busy_free_conflicts(
-                    events, window_start, window_end
-                )
+                busy, free_slots, conflicts = _compute_busy_free_conflicts(events, window_start, window_end)
 
                 formatted_calendars[cal_id] = {
                     "events": events,

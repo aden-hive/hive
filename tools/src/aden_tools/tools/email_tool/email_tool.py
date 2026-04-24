@@ -8,11 +8,11 @@ Supports:
 
 from __future__ import annotations
 
+import base64
 import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
-import resend
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
@@ -35,6 +35,10 @@ def register_tools(
         bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
+        try:
+            import resend
+        except ImportError:
+            return {"error": ("resend not installed. Install with: pip install resend  or  pip install tools[email]")}
         resend.api_key = api_key
         try:
             payload: dict = {
@@ -68,7 +72,6 @@ def register_tools(
         bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Gmail API (Bearer token pattern, same as HubSpot)."""
-        import base64
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 
@@ -197,18 +200,13 @@ def register_tools(
                 }
             return {
                 "error": "Resend credentials not configured",
-                "help": "Set RESEND_API_KEY environment variable. "
-                "Get a key at https://resend.com/api-keys",
+                "help": "Set RESEND_API_KEY environment variable. Get a key at https://resend.com/api-keys",
             }
 
         try:
             if provider == "gmail":
-                return _send_via_gmail(
-                    credential, to_list, subject, html, from_email, cc_list, bcc_list
-                )
-            return _send_via_resend(
-                credential, to_list, subject, html, from_email, cc_list, bcc_list
-            )
+                return _send_via_gmail(credential, to_list, subject, html, from_email, cc_list, bcc_list)
+            return _send_via_resend(credential, to_list, subject, html, from_email, cc_list, bcc_list)
         except Exception as e:
             return {"error": f"Email send failed: {e}"}
 
@@ -250,7 +248,6 @@ def register_tools(
 
     def _fetch_original_message(access_token: str, message_id: str) -> dict:
         """Fetch the original message to extract threading info and body."""
-        import base64
 
         response = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
@@ -336,7 +333,6 @@ def register_tools(
             Dict with send result including reply message ID and threadId,
             or error dict with "error" and optional "help" keys.
         """
-        import base64
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 

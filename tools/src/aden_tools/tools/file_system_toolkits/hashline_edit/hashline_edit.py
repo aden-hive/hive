@@ -7,6 +7,7 @@ import tempfile
 
 from mcp.server.fastmcp import FastMCP
 
+from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 from aden_tools.hashline import (
     HASHLINE_MAX_FILE_BYTES,
     format_hashlines,
@@ -18,7 +19,7 @@ from aden_tools.hashline import (
     validate_anchor,
 )
 
-from ..security import get_secure_path
+from ..security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -28,9 +29,7 @@ def register_tools(mcp: FastMCP) -> None:
     def hashline_edit(
         path: str,
         edits: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         auto_cleanup: bool = True,
         encoding: str = "utf-8",
     ) -> dict:
@@ -48,7 +47,7 @@ def register_tools(mcp: FastMCP) -> None:
             Overlapping line ranges within a single call are rejected.
 
         Args:
-            path: The path to the file (relative to session root)
+            path: The path to the file (relative to agent sandbox)
             edits: JSON string containing a list of edit operations.
                 Each op is a dict with:
                 - set_line: anchor, content
@@ -57,9 +56,7 @@ def register_tools(mcp: FastMCP) -> None:
                 - insert_before: anchor, content
                 - replace: old_content, new_content, allow_multiple
                 - append: content
-            workspace_id: The ID of workspace
-            agent_id: The ID of agent
-            session_id: The ID of the current session
+            agent_id: The ID of the agent
             auto_cleanup: If True (default), automatically strip hashline prefixes and
                 echoed context from edit content. Set to False to write content exactly
                 as provided.
@@ -85,11 +82,33 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 2. Read file
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
             if not os.path.isfile(secure_path):
                 return {"error": f"Path is not a file: {path}"}
+
+            # Stale-edit guard: refuse to edit unless we have a recent
+            # read recorded in the file-state cache and the file on disk
+            # still matches it. This catches the case where the user
+            # saved the file in their editor between the model's Read
+            # and Edit, which would otherwise cause the model to write
+            # against a stale mental model.
+            fresh = check_fresh(agent_id, secure_path)
+            if fresh.status is Freshness.UNREAD:
+                return {
+                    "error": (
+                        f"Refusing to edit '{path}': you must call "
+                        f"read_file('{path}') first so the harness can "
+                        f"track its state before you edit it."
+                    )
+                }
+            if fresh.status is Freshness.STALE:
+                return {
+                    "error": (
+                        f"Refusing to edit '{path}': {fresh.detail}. Re-read the file with read_file before editing."
+                    )
+                }
 
             with open(secure_path, "rb") as f:
                 raw_head = f.read(8192)
@@ -123,9 +142,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if err:
                         return {"error": f"Edit #{i + 1} (set_line): {err}"}
                     if "content" not in op:
-                        return {
-                            "error": f"Edit #{i + 1} (set_line): missing required field 'content'"
-                        }
+                        return {"error": f"Edit #{i + 1} (set_line): missing required field 'content'"}
                     if not isinstance(op["content"], str):
                         return {"error": f"Edit #{i + 1} (set_line): content must be a string"}
                     if "\n" in op["content"] or "\r" in op["content"]:
@@ -158,16 +175,9 @@ def register_tools(mcp: FastMCP) -> None:
                     start_num, _ = parse_anchor(start_anchor)
                     end_num, _ = parse_anchor(end_anchor)
                     if start_num > end_num:
-                        return {
-                            "error": f"Edit #{i + 1} (replace_lines): "
-                            f"start line {start_num} > end line {end_num}"
-                        }
+                        return {"error": f"Edit #{i + 1} (replace_lines): start line {start_num} > end line {end_num}"}
                     if "content" not in op:
-                        return {
-                            "error": (
-                                f"Edit #{i + 1} (replace_lines): missing required field 'content'"
-                            )
-                        }
+                        return {"error": (f"Edit #{i + 1} (replace_lines): missing required field 'content'")}
                     if not isinstance(op["content"], str):
                         return {"error": f"Edit #{i + 1} (replace_lines): content must be a string"}
                     new_content = op["content"]
@@ -261,9 +271,7 @@ def register_tools(mcp: FastMCP) -> None:
                         return {"error": f"Edit #{i + 1} (replace): new_content must be a string"}
                     allow_multiple = op.get("allow_multiple", False)
                     if not isinstance(allow_multiple, bool):
-                        return {
-                            "error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"
-                        }
+                        return {"error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"}
                     replaces.append((old_content, new_content, i, allow_multiple))
 
                 case "append":
@@ -322,8 +330,7 @@ def register_tools(mcp: FastMCP) -> None:
                 if not (e_a < s_b or e_b < s_a):
                     return {
                         "error": (
-                            f"Overlapping edits: edit #{idx_a + 1} "
-                            f"and edit #{idx_b + 1} affect overlapping line ranges"
+                            f"Overlapping edits: edit #{idx_a + 1} and edit #{idx_b + 1} affect overlapping line ranges"
                         )
                     }
 
@@ -409,6 +416,15 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             return {"error": f"Failed to write file: {e}"}
 
+        # Re-record the new file state so a second edit in the same turn
+        # sees the post-write hash instead of tripping the stale guard.
+        try:
+            record_read(agent_id, secure_path, content_bytes=joined.encode(encoding))
+        except Exception:
+            # Hash record is best-effort; a failure here must not break
+            # the edit that already succeeded on disk.
+            pass
+
         # 10. Build response
         updated_lines = joined.splitlines()
         hashline_content = format_hashlines(updated_lines)
@@ -424,7 +440,5 @@ def register_tools(mcp: FastMCP) -> None:
         if cleanup_actions:
             result["cleanup_applied"] = cleanup_actions
         if replace_counts:
-            result["replacements"] = {
-                f"edit_{op_idx + 1}": count for op_idx, count in replace_counts
-            }
+            result["replacements"] = {f"edit_{op_idx + 1}": count for op_idx, count in replace_counts}
         return result

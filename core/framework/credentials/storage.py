@@ -136,8 +136,7 @@ class EncryptedFileStorage(CredentialStorage):
             from cryptography.fernet import Fernet
         except ImportError as e:
             raise ImportError(
-                "Encrypted storage requires 'cryptography'. "
-                "Install with: uv pip install cryptography"
+                "Encrypted storage requires 'cryptography'. Install with: uv pip install cryptography"
             ) from e
 
         self.base_path = Path(base_path or self.DEFAULT_PATH).expanduser()
@@ -160,6 +159,14 @@ class EncryptedFileStorage(CredentialStorage):
                 )
 
         self._fernet = Fernet(self._key)
+
+        # Rebuild the metadata index from disk if it's missing or older than
+        # the current index schema. The index is a developer-readable JSON
+        # snapshot of the encrypted store; the .enc files remain authoritative.
+        try:
+            self._maybe_rebuild_index()
+        except Exception:
+            logger.debug("Initial index rebuild failed (non-fatal)", exc_info=True)
 
     def _ensure_dirs(self) -> None:
         """Create directory structure."""
@@ -186,8 +193,8 @@ class EncryptedFileStorage(CredentialStorage):
         with open(cred_path, "wb") as f:
             f.write(encrypted)
 
-        # Update index
-        self._update_index(credential.id, "save", credential.credential_type.value)
+        # Update developer-readable index
+        self._index_upsert(credential)
         logger.debug(f"Saved encrypted credential '{credential.id}'")
 
     def load(self, credential_id: str) -> CredentialObject | None:
@@ -205,9 +212,7 @@ class EncryptedFileStorage(CredentialStorage):
             json_bytes = self._fernet.decrypt(encrypted)
             data = json.loads(json_bytes.decode("utf-8-sig"))
         except Exception as e:
-            raise CredentialDecryptionError(
-                f"Failed to decrypt credential '{credential_id}': {e}"
-            ) from e
+            raise CredentialDecryptionError(f"Failed to decrypt credential '{credential_id}': {e}") from e
 
         # Deserialize
         return self._deserialize_credential(data)
@@ -217,7 +222,7 @@ class EncryptedFileStorage(CredentialStorage):
         cred_path = self._cred_path(credential_id)
         if cred_path.exists():
             cred_path.unlink()
-            self._update_index(credential_id, "delete")
+            self._index_remove(credential_id)
             logger.debug(f"Deleted credential '{credential_id}'")
             return True
         return False
@@ -258,33 +263,151 @@ class EncryptedFileStorage(CredentialStorage):
 
         return CredentialObject.model_validate(data)
 
-    def _update_index(
-        self,
-        credential_id: str,
-        operation: str,
-        credential_type: str | None = None,
-    ) -> None:
-        """Update the metadata index."""
-        index_path = self.base_path / "metadata" / "index.json"
+    # ------------------------------------------------------------------
+    # Developer-readable metadata index
+    #
+    # The index lives at ``<base_path>/metadata/index.json`` and mirrors what
+    # is in the encrypted store at a glance: credential id, provider, alias,
+    # identity, key names, timestamps, and earliest expiry. It contains NO
+    # secret values and is safe to share when filing a bug report. The .enc
+    # files remain authoritative — the index is purely for human inspection
+    # and for cheap ``list_all()`` enumeration.
+    #
+    # Schema version is bumped whenever the entry shape changes; the store
+    # rebuilds the index from the encrypted files on load when the on-disk
+    # version is older.
+    # ------------------------------------------------------------------
 
-        if index_path.exists():
-            with open(index_path, encoding="utf-8-sig") as f:
-                index = json.load(f)
-        else:
-            index = {"credentials": {}, "version": "1.0"}
+    INDEX_VERSION = "2.0"
+    INDEX_INTERNAL_KEY_NAMES = ("_alias", "_integration_type")
 
-        if operation == "save":
-            index["credentials"][credential_id] = {
-                "updated_at": datetime.now(UTC).isoformat(),
-                "type": credential_type,
-            }
-        elif operation == "delete":
-            index["credentials"].pop(credential_id, None)
+    def _index_path(self) -> Path:
+        return self.base_path / "metadata" / "index.json"
 
-        index["last_modified"] = datetime.now(UTC).isoformat()
+    def _read_index(self) -> dict[str, Any]:
+        """Read the index from disk; return an empty skeleton if missing."""
+        path = self._index_path()
+        if not path.exists():
+            return {"version": self.INDEX_VERSION, "credentials": {}}
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except Exception:
+            logger.debug("Failed to read credential index, starting fresh", exc_info=True)
+            return {"version": self.INDEX_VERSION, "credentials": {}}
 
-        with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(index, f, indent=2)
+    def _write_index(self, index: dict[str, Any]) -> None:
+        """Write the index to disk with consistent envelope fields."""
+        index["version"] = self.INDEX_VERSION
+        index["store_path"] = str(self.base_path)
+        index["generated_at"] = datetime.now(UTC).isoformat()
+        path = self._index_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=2, sort_keys=False, default=str)
+
+    def _index_entry_for(self, credential: CredentialObject) -> dict[str, Any]:
+        """Build a single index entry from a CredentialObject (no secrets)."""
+        # Visible key names: drop internal markers like _alias / _integration_type
+        # / _identity_* so the entry shows what's actually a credential key.
+        visible_keys = [
+            name
+            for name in credential.keys.keys()
+            if name not in self.INDEX_INTERNAL_KEY_NAMES and not name.startswith("_identity_")
+        ]
+
+        # Earliest expiry across all keys (most likely the access_token).
+        earliest_expiry: datetime | None = None
+        for key in credential.keys.values():
+            if key.expires_at is None:
+                continue
+            if earliest_expiry is None or key.expires_at < earliest_expiry:
+                earliest_expiry = key.expires_at
+
+        return {
+            "credential_type": credential.credential_type.value,
+            "provider": credential.provider_type,
+            "alias": credential.alias,
+            "identity": credential.identity.to_dict(),
+            "key_names": sorted(visible_keys),
+            "created_at": credential.created_at.isoformat() if credential.created_at else None,
+            "updated_at": credential.updated_at.isoformat() if credential.updated_at else None,
+            "last_refreshed": (credential.last_refreshed.isoformat() if credential.last_refreshed else None),
+            "expires_at": earliest_expiry.isoformat() if earliest_expiry else None,
+            "auto_refresh": credential.auto_refresh,
+            "tags": list(credential.tags),
+        }
+
+    def _index_upsert(self, credential: CredentialObject) -> None:
+        """Insert or update one credential entry in the index."""
+        try:
+            index = self._read_index()
+            if index.get("version") != self.INDEX_VERSION:
+                # Old schema — rebuild from disk so we don't blend formats.
+                self._rebuild_index()
+                return
+            credentials = index.setdefault("credentials", {})
+            credentials[credential.id] = self._index_entry_for(credential)
+            self._write_index(index)
+        except Exception:
+            logger.debug("Index upsert failed (non-fatal)", exc_info=True)
+
+    def _index_remove(self, credential_id: str) -> None:
+        """Remove one credential entry from the index."""
+        try:
+            index = self._read_index()
+            if index.get("version") != self.INDEX_VERSION:
+                self._rebuild_index()
+                return
+            credentials = index.setdefault("credentials", {})
+            credentials.pop(credential_id, None)
+            self._write_index(index)
+        except Exception:
+            logger.debug("Index remove failed (non-fatal)", exc_info=True)
+
+    def _maybe_rebuild_index(self) -> None:
+        """Rebuild the index if it's missing, malformed, or on an old schema.
+
+        Called once at startup. The check is cheap — read the version field
+        and bail out if it matches. Encrypted files remain authoritative; this
+        only refreshes the developer-facing snapshot.
+        """
+        path = self._index_path()
+        if path.exists():
+            try:
+                with open(path, encoding="utf-8-sig") as f:
+                    index = json.load(f)
+                if index.get("version") == self.INDEX_VERSION:
+                    return
+            except Exception:
+                pass  # fall through to rebuild
+        self._rebuild_index()
+
+    def _rebuild_index(self) -> None:
+        """Walk the encrypted credentials directory and rewrite a fresh index."""
+        cred_dir = self.base_path / "credentials"
+        if not cred_dir.is_dir():
+            return
+
+        entries: dict[str, Any] = {}
+        for cred_file in sorted(cred_dir.glob("*.enc")):
+            credential_id = cred_file.stem
+            try:
+                cred = self.load(credential_id)
+            except Exception:
+                logger.debug(
+                    "Failed to load %s during index rebuild — skipping",
+                    credential_id,
+                    exc_info=True,
+                )
+                continue
+            if cred is None:
+                continue
+            entries[cred.id] = self._index_entry_for(cred)
+
+        index = {"credentials": entries}
+        self._write_index(index)
+        logger.info("Rebuilt credential index with %d entries", len(entries))
 
 
 class EnvVarStorage(CredentialStorage):
@@ -351,8 +474,7 @@ class EnvVarStorage(CredentialStorage):
     def save(self, credential: CredentialObject) -> None:
         """Cannot save to environment variables at runtime."""
         raise NotImplementedError(
-            "EnvVarStorage is read-only. Set environment variables "
-            "externally or use EncryptedFileStorage."
+            "EnvVarStorage is read-only. Set environment variables externally or use EncryptedFileStorage."
         )
 
     def load(self, credential_id: str) -> CredentialObject | None:
@@ -372,9 +494,7 @@ class EnvVarStorage(CredentialStorage):
 
     def delete(self, credential_id: str) -> bool:
         """Cannot delete environment variables at runtime."""
-        raise NotImplementedError(
-            "EnvVarStorage is read-only. Unset environment variables externally."
-        )
+        raise NotImplementedError("EnvVarStorage is read-only. Unset environment variables externally.")
 
     def list_all(self) -> list[str]:
         """List credentials that are available in environment."""
