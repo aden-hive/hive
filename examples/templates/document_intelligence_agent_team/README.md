@@ -4,7 +4,7 @@
 
 ## Architecture
 
-```
+```text
 User Input
     ↓
 [Intake]           ← Client-facing: receive document, clarify needs
