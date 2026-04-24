@@ -129,6 +129,7 @@ from .telegram_tool import register_tools as register_telegram
 from .terraform_tool import register_tools as register_terraform
 from .time_tool import register_tools as register_time
 from .tines_tool import register_tools as register_tines
+from .todoist_tool import register_tools as register_todoist
 from .trello_tool import register_tools as register_trello
 from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
@@ -324,6 +325,7 @@ def _register_unverified(
     register_supabase(mcp, credentials=credentials)
     register_terraform(mcp, credentials=credentials)
     register_tines(mcp, credentials=credentials)
+    register_todoist(mcp, credentials=credentials)
     register_trello(mcp, credentials=credentials)
     register_twilio(mcp, credentials=credentials)
     register_twitter(mcp, credentials=credentials)
