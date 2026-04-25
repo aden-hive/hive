@@ -6,7 +6,8 @@ Extracted from the former orchestrator/prompting module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,7 @@ class PromptSpec:
     memory_prompt: str = ""
     agent_type: str = "event_loop"
     output_keys: tuple[str, ...] = ()
+    input_data: dict[str, Any] = field(default_factory=dict)
 
 
 def stamp_prompt_datetime(prompt: str) -> str:
@@ -62,6 +64,9 @@ def build_prompt_spec(
             raw_catalog = ctx.skills_catalog_prompt or ""
     skills_catalog_prompt = augment_catalog_for_tools(raw_catalog, tool_names)
 
+    # Collect input_data for injection into system prompt
+    input_data = dict(getattr(ctx, "input_data", None) or {})
+
     return PromptSpec(
         identity_prompt=ctx.identity_prompt or "",
         focus_prompt=focus_prompt if focus_prompt is not None else (ctx.agent_spec.system_prompt or ""),
@@ -72,6 +77,7 @@ def build_prompt_spec(
         memory_prompt=resolved_memory,
         agent_type=ctx.agent_spec.agent_type,
         output_keys=tuple(ctx.agent_spec.output_keys or ()),
+        input_data=input_data,
     )
 
 
@@ -79,6 +85,21 @@ def build_system_prompt(spec: PromptSpec) -> str:
     parts: list[str] = []
     if spec.identity_prompt:
         parts.append(spec.identity_prompt)
+
+    # INPUT DATA: Inject at the TOP of the prompt, immediately after identity.
+    # This ensures the LLM sees critical input values (like current_date) before
+    # processing instructions that reference them.
+    if spec.input_data:
+        input_lines: list[str] = ["INPUT DATA:"]
+        for key, value in spec.input_data.items():
+            if value is not None:
+                # Serialize value safely to prevent prompt injection
+                # JSON encoding escapes newlines, quotes, and special characters
+                rendered = json.dumps(value, ensure_ascii=False, default=str)
+                input_lines.append(f"  - {key}: {rendered}")
+        if len(input_lines) > 1:  # Only add if there's actual data
+            parts.append("\n".join(input_lines))
+
     if spec.accounts_prompt:
         parts.append(f"\n{spec.accounts_prompt}")
     if spec.skills_catalog_prompt:

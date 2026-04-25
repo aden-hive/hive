@@ -7,6 +7,9 @@ from pathlib import Path
 def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8"):
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
+        # Ensure parent directory exists (defensive)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
         with open(tmp_path, mode, encoding=encoding) as f:
             yield f
             f.flush()

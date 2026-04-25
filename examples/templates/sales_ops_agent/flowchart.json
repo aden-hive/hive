@@ -1,0 +1,229 @@
+{
+  "original_draft": {
+    "agent_name": "sales_ops_agent",
+    "goal": "Automated sales territory rebalancing. Runs monthly on the 1st to analyze sales performance metrics, detect under-allocated territories (less than 20% untouched ICP accounts), and rebalance accounts from unassigned pools to ensure fair opportunity distribution across the sales team.",
+    "description": "",
+    "success_criteria": [
+      "Sales territories are analyzed and reps with less than 20% untouched accounts are correctly identified for rebalancing",
+      "Available unassigned accounts are successfully reassigned to under-allocated reps respecting territory constraints",
+      "All rebalance actions are logged to the CRM with proper audit trail including timestamp, affected accounts, and owner changes"
+    ],
+    "constraints": [
+      "Accounts must only be reassigned to reps within matching territories/regions",
+      "The same account must never be assigned to multiple reps",
+      "All account reassignments must be logged to the CRM for compliance",
+      "The agent should only perform rebalancing on the 1st of the month"
+    ],
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Trigger Check",
+        "description": "Check if today is the 1st of the month. If not, the agent exits early. If yes, set the month_year context for downstream nodes.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "current_date"
+        ],
+        "output_keys": [
+          "is_first_of_month",
+          "month_year"
+        ],
+        "success_criteria": "The current date has been evaluated. is_first_of_month is set to 'true' or 'false'. month_year is set to a readable format like 'April 2026'. Both values are written via set_output.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "monitor",
+        "name": "Monitor Sales Data",
+        "description": "Fetch sales data from the configured CRM. Retrieves sales representatives, their assigned accounts, pipeline metrics, and the unassigned account pool.",
+        "node_type": "event_loop",
+        "tools": [
+          "salesforce_soql_query",
+          "hubspot_search_contacts",
+          "hubspot_search_companies",
+          "hubspot_search_deals",
+          "load_data",
+          "append_data"
+        ],
+        "input_keys": [
+          "crm_type",
+          "month_year"
+        ],
+        "output_keys": [
+          "sales_data",
+          "unassigned_pool"
+        ],
+        "success_criteria": "Sales data has been fetched from the CRM. sales_data.jsonl contains reps with their accounts, pipeline metrics, and win rates. unassigned_pool.jsonl contains available unassigned accounts. Both filenames are set via set_output.",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "analyze",
+        "name": "Analyze Territory Coverage",
+        "description": "Analyze sales data to compute coverage metrics and detect reps with insufficient ICP account coverage (less than 20% untouched accounts). Calculate win rates, pipeline sizes, and flag candidates for rebalancing.",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data",
+          "append_data"
+        ],
+        "input_keys": [
+          "sales_data"
+        ],
+        "output_keys": [
+          "rep_analysis",
+          "rebalance_candidates"
+        ],
+        "success_criteria": "Each rep has been analyzed with untouched_ratio, win_rate, and pipeline_size calculated. Reps with untouched_ratio < 0.20 are flagged as rebalance_candidates. rep_analysis.jsonl contains all rep metrics. rebalance_candidates.jsonl contains only flagged reps. Both filenames are set via set_output.",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "rebalance",
+        "name": "Rebalance Territories",
+        "description": "Reassign accounts from the unassigned pool to under-allocated sales reps. Respects territory constraints, avoids duplicates, and prioritizes reps with lowest pipeline and win rates.",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data",
+          "append_data"
+        ],
+        "input_keys": [
+          "rep_analysis",
+          "unassigned_pool"
+        ],
+        "output_keys": [
+          "rebalance_actions"
+        ],
+        "success_criteria": "Accounts have been reassigned from the unassigned pool to flagged reps. rebalance_actions.jsonl records each reassignment with rep_id, account_ids, count, and timestamp. The filename is set via set_output.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "log",
+        "name": "Log Actions and Report",
+        "description": "Log all rebalance actions to the CRM for auditability and present a summary report to the user. Updates account ownership and creates audit trail records.",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data",
+          "salesforce_update_record",
+          "salesforce_create_record",
+          "hubspot_update_company",
+          "hubspot_create_deal"
+        ],
+        "input_keys": [
+          "crm_type",
+          "rebalance_actions",
+          "month_year"
+        ],
+        "output_keys": [
+          "summary_report"
+        ],
+        "success_criteria": "All rebalance actions have been logged to the CRM (account ownership updated, audit records created). A summary report has been presented to the user showing actions taken, accounts reassigned, and any warnings.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "trigger",
+        "target": "monitor",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "monitor",
+        "target": "analyze",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "analyze",
+        "target": "rebalance",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "rebalance",
+        "target": "log",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "trigger",
+    "terminal_nodes": [
+      "log"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "trigger": [
+      "trigger"
+    ],
+    "monitor": [
+      "monitor"
+    ],
+    "analyze": [
+      "analyze"
+    ],
+    "rebalance": [
+      "rebalance"
+    ],
+    "log": [
+      "log"
+    ]
+  }
+}

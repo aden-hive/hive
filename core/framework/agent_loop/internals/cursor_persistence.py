@@ -17,8 +17,8 @@ from typing import Any
 
 from framework.agent_loop.conversation import ConversationStore, NodeConversation
 from framework.agent_loop.internals.types import LoopConfig, OutputAccumulator, TriggerEvent
+from framework.agent_loop.types import AgentContext
 from framework.llm.capabilities import supports_image_tool_results
-from framework.orchestrator.node import NodeContext
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class RestoredState:
 
 async def restore(
     conversation_store: ConversationStore | None,
-    ctx: NodeContext,
+    ctx: AgentContext,
     config: LoopConfig,
 ) -> RestoredState | None:
     """Attempt to restore from a previous checkpoint.
@@ -122,7 +122,7 @@ async def restore(
 
 async def write_cursor(
     conversation_store: ConversationStore | None,
-    ctx: NodeContext,
+    ctx: AgentContext,
     conversation: NodeConversation,
     accumulator: OutputAccumulator,
     iteration: int,
@@ -161,7 +161,7 @@ async def drain_injection_queue(
     queue: asyncio.Queue,
     conversation: NodeConversation,
     *,
-    ctx: NodeContext,
+    ctx: AgentContext,
     describe_images_as_text_fn: (Callable[[list[dict[str, Any]]], Awaitable[str | None]] | None) = None,
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
@@ -216,11 +216,24 @@ async def drain_injection_queue(
 async def drain_trigger_queue(
     queue: asyncio.Queue,
     conversation: NodeConversation,
+    *,
+    ctx: AgentContext | None = None,
 ) -> int:
     """Drain all pending trigger events as a single batched user message.
 
     Multiple triggers are merged so the LLM sees them atomically and can
     reason about all pending triggers before acting.
+
+    Args:
+        queue: The trigger queue to drain
+        conversation: The conversation to add trigger messages to
+        ctx: Optional AgentContext. If provided, trigger payload keys are
+            injected into ctx.input_data for structured access. Existing
+            keys in input_data are not overwritten — explicit input takes
+            precedence over trigger payload.
+
+    Returns:
+        The number of trigger events drained
     """
     triggers: list[TriggerEvent] = []
     while not queue.empty():
@@ -231,6 +244,44 @@ async def drain_trigger_queue(
 
     if not triggers:
         return 0
+
+    # Inject trigger payload into ctx.input_data for structured access.
+    # This allows nodes to reference trigger data via input_keys without
+    # parsing JSON from the conversation history.
+    #
+    # IMPORTANT: Clear previously injected trigger keys to avoid stale data
+    # persisting across loop iterations. Track which keys we inject so we can
+    # clean them up on the next drain.
+    if ctx:
+        # Get the set of keys injected by previous trigger drain
+        previous_keys = getattr(ctx, "_trigger_injected_keys", set())
+
+        # Clear stale trigger-injected keys from previous drain
+        for key in previous_keys:
+            if key in ctx.input_data:
+                del ctx.input_data[key]
+                logger.debug(
+                    "[drain_trigger_queue] cleared stale trigger key '%s' from input_data",
+                    key,
+                )
+
+        # Track keys we're about to inject in this drain
+        current_injected_keys = set()
+
+        for t in triggers:
+            for key, value in t.payload.items():
+                # Don't override existing keys — explicit input wins
+                if key not in ctx.input_data:
+                    ctx.input_data[key] = value
+                    current_injected_keys.add(key)
+                    logger.debug(
+                        "[drain_trigger_queue] injected payload key '%s' = '%s' into input_data",
+                        key,
+                        value,
+                    )
+
+        # Store injected keys for cleanup on next drain
+        ctx._trigger_injected_keys = current_injected_keys
 
     parts: list[str] = []
     for t in triggers:
@@ -249,7 +300,7 @@ async def drain_trigger_queue(
 
 
 async def check_pause(
-    ctx: NodeContext,
+    ctx: AgentContext,
     conversation: NodeConversation,
     iteration: int,
 ) -> bool:
