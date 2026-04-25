@@ -3012,6 +3012,12 @@ class AgentLoop(AgentProtocol):
                         value = tc.tool_input.get("value", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
+                        await self._publish_output_key_set(
+                            stream_id,
+                            node_id,
+                            key,
+                            execution_id,
+                        )
                     results_by_id[tc.tool_use_id] = result
                     # Log after side-effects - compute safe preview for non-string values
                     if not result.is_error:
