@@ -156,6 +156,8 @@ def _make_session_with_queen_state(
         queen_identity_prompt="You are Charlotte, head of finance.",
         _cached_global_recall_block="",
         get_current_prompt=lambda: "you are the queen",
+        global_memory_dir=None,
+        queen_memory_dir=None,
     )
 
     session = Session(
