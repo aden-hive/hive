@@ -1,0 +1,11 @@
+[
+  {
+    "id": "monthly-sales-ops-rebalance",
+    "name": "Monthly Sales Territory Rebalance",
+    "trigger_type": "timer",
+    "trigger_config": {
+      "cron": "0 9 1 * *"
+    },
+    "task": "Run sales territory analysis and rebalancing on the 1st of each month at 9 AM"
+  }
+]

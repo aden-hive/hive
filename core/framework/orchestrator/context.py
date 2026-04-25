@@ -37,6 +37,15 @@ _ALWAYS_AVAILABLE_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+# Minimal tool set for trigger/decision nodes that should only output
+# or escalate, not perform file I/O or search operations.
+_MINIMAL_TOOLS: frozenset[str] = frozenset(
+    {
+        "set_output",
+        "escalate",
+    }
+)
+
 
 @dataclass
 class GraphContext:
@@ -151,6 +160,7 @@ def _resolve_available_tools(
                         PLUS framework-default tools (read_file, set_output, etc.).
                         If the list is empty, only defaults are given.
     - ``"none"``     -- only framework-default tools (read_file, set_output, etc.).
+    - ``"minimal"``  -- only essential tools (set_output, escalate). No file I/O.
 
     Framework-default tools (``_ALWAYS_AVAILABLE_TOOLS``) are always included
     regardless of policy — agents need file I/O and output/escalate to function.
@@ -164,7 +174,11 @@ def _resolve_available_tools(
 
     policy = getattr(node_spec, "tool_access_policy", "explicit")
 
-    # Always include framework-default tools
+    # "minimal": only set_output and escalate
+    if policy == "minimal":
+        return [t for t in tools if t.name in _MINIMAL_TOOLS]
+
+    # Always include framework-default tools for other policies
     always_tools = [t for t in tools if t.name in _ALWAYS_AVAILABLE_TOOLS]
 
     if policy == "none":
@@ -200,7 +214,7 @@ def build_node_context(
     tools: list[Any],
     max_tokens: int,
     input_data: dict[str, Any] | None = None,
-    derive_input_data_from_buffer: bool = False,
+    derive_input_data_from_buffer: bool = True,
     runtime_logger: Any = None,
     pause_event: Any = None,
     continuous_mode: bool = False,

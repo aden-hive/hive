@@ -75,6 +75,11 @@ class ConcurrentStorage:
         """
         self.base_path = Path(base_path)
 
+        # Ensure base_path and required subdirectories exist at init
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        (self.base_path / "runs").mkdir(parents=True, exist_ok=True)
+        (self.base_path / "summaries").mkdir(parents=True, exist_ok=True)
+
         # Caching
         self._cache: dict[str, CacheEntry] = {}
         self._cache_ttl = cache_ttl
@@ -195,6 +200,8 @@ class ConcurrentStorage:
         never leaves a partially written file on disk.
         """
         self._validate_key(run.id)
+        # Ensure base_path exists before creating runs/ subdirectory
+        self.base_path.mkdir(parents=True, exist_ok=True)
         runs_dir = self.base_path / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
         run_path = runs_dir / f"{run.id}.json"
@@ -420,7 +427,11 @@ class ConcurrentStorage:
                     # This fixes the race condition where cache was updated before write completed
                     self._cache[f"run:{item.id}"] = CacheEntry(item, time.time())
             except Exception as e:
-                logger.error(f"Failed to save {item_type}: {e}")
+                # Suppress error if file actually exists (race condition during shutdown)
+                if item_type == "run" and (self.base_path / "runs" / f"{item.id}.json").exists():
+                    logger.debug(f"Run {item.id} saved despite exception (likely shutdown race): {e}")
+                else:
+                    logger.error(f"Failed to save {item_type}: {e}")
                 # Cache is NOT updated on failure - prevents stale/inconsistent cache state
 
     async def _flush_pending(self) -> None:

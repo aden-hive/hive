@@ -1,0 +1,144 @@
+{
+  "sales_reps": [
+    {
+      "rep_id": "rep_001",
+      "rep_name": "Alice Johnson",
+      "email": "alice@company.com",
+      "territory": "Northeast",
+      "region": "East",
+      "total_accounts": 100,
+      "untouched_accounts": 15,
+      "pipeline_value": 250000,
+      "won_deals": 8,
+      "total_deals": 20
+    },
+    {
+      "rep_id": "rep_002",
+      "rep_name": "Bob Smith",
+      "email": "bob@company.com",
+      "territory": "Southeast",
+      "region": "East",
+      "total_accounts": 80,
+      "untouched_accounts": 25,
+      "pipeline_value": 180000,
+      "won_deals": 6,
+      "total_deals": 18
+    },
+    {
+      "rep_id": "rep_003",
+      "rep_name": "Carol Williams",
+      "email": "carol@company.com",
+      "territory": "Midwest",
+      "region": "Central",
+      "total_accounts": 120,
+      "untouched_accounts": 8,
+      "pipeline_value": 450000,
+      "won_deals": 15,
+      "total_deals": 25
+    },
+    {
+      "rep_id": "rep_004",
+      "rep_name": "David Brown",
+      "email": "david@company.com",
+      "territory": "West",
+      "region": "West",
+      "total_accounts": 90,
+      "untouched_accounts": 5,
+      "pipeline_value": 320000,
+      "won_deals": 12,
+      "total_deals": 22
+    }
+  ],
+  "unassigned_accounts": [
+    {
+      "account_id": "acct_101",
+      "name": "Tech Innovations Inc",
+      "type": "Prospect",
+      "territory": "Northeast",
+      "region": "East",
+      "annual_revenue": 5000000,
+      "industry": "Technology"
+    },
+    {
+      "account_id": "acct_102",
+      "name": "Global Solutions LLC",
+      "type": "Prospect",
+      "territory": "Northeast",
+      "region": "East",
+      "annual_revenue": 3500000,
+      "industry": "Software"
+    },
+    {
+      "account_id": "acct_103",
+      "name": "Peak Performance Inc",
+      "type": "Prospect",
+      "territory": "Southeast",
+      "region": "East",
+      "annual_revenue": 2800000,
+      "industry": "Consulting"
+    },
+    {
+      "account_id": "acct_104",
+      "name": "Apex Dynamics",
+      "type": "Customer",
+      "territory": "Midwest",
+      "region": "Central",
+      "annual_revenue": 4200000,
+      "industry": "Manufacturing"
+    },
+    {
+      "account_id": "acct_105",
+      "name": "Strategic Partners Co",
+      "type": "Prospect",
+      "territory": "West",
+      "region": "West",
+      "annual_revenue": 6000000,
+      "industry": "Financial Services"
+    },
+    {
+      "account_id": "acct_106",
+      "name": "Innovate Labs",
+      "type": "Prospect",
+      "territory": "Northeast",
+      "region": "East",
+      "annual_revenue": 1800000,
+      "industry": "Technology"
+    },
+    {
+      "account_id": "acct_107",
+      "name": "Summit Holdings",
+      "type": "Prospect",
+      "territory": "Southeast",
+      "region": "East",
+      "annual_revenue": 3200000,
+      "industry": "Healthcare"
+    },
+    {
+      "account_id": "acct_108",
+      "name": "Catalyst Systems",
+      "type": "Customer",
+      "territory": "Midwest",
+      "region": "Central",
+      "annual_revenue": 5500000,
+      "industry": "Technology"
+    },
+    {
+      "account_id": "acct_109",
+      "name": "Frontier Ventures",
+      "type": "Prospect",
+      "territory": "West",
+      "region": "West",
+      "annual_revenue": 4100000,
+      "industry": "Software"
+    },
+    {
+      "account_id": "acct_110",
+      "name": "Meridian Group",
+      "type": "Prospect",
+      "territory": "Northeast",
+      "region": "East",
+      "annual_revenue": 2900000,
+      "industry": "Consulting"
+    }
+  ]
+}

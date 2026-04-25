@@ -82,3 +82,4 @@ screenshots/*
 
 .gemini/*
 .coverage
+/graphify-out

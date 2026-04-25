@@ -216,11 +216,24 @@ async def drain_injection_queue(
 async def drain_trigger_queue(
     queue: asyncio.Queue,
     conversation: NodeConversation,
+    *,
+    ctx: NodeContext | None = None,
 ) -> int:
     """Drain all pending trigger events as a single batched user message.
 
     Multiple triggers are merged so the LLM sees them atomically and can
     reason about all pending triggers before acting.
+
+    Args:
+        queue: The trigger queue to drain
+        conversation: The conversation to add trigger messages to
+        ctx: Optional NodeContext. If provided, trigger payload keys are
+            injected into ctx.input_data for structured access. Existing
+            keys in input_data are not overwritten — explicit input takes
+            precedence over trigger payload.
+
+    Returns:
+        The number of trigger events drained
     """
     triggers: list[TriggerEvent] = []
     while not queue.empty():
@@ -231,6 +244,21 @@ async def drain_trigger_queue(
 
     if not triggers:
         return 0
+
+    # Inject trigger payload into ctx.input_data for structured access.
+    # This allows nodes to reference trigger data via input_keys without
+    # parsing JSON from the conversation history.
+    if ctx:
+        for t in triggers:
+            for key, value in t.payload.items():
+                # Don't override existing keys — explicit input wins
+                if key not in ctx.input_data:
+                    ctx.input_data[key] = value
+                    logger.debug(
+                        "[drain_trigger_queue] injected payload key '%s' = '%s' into input_data",
+                        key,
+                        value,
+                    )
 
     parts: list[str] = []
     for t in triggers:
