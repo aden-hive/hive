@@ -44,20 +44,26 @@ monitor_node = NodeSpec(
     description=(
         "Fetch sales data from the configured CRM. Retrieves sales representatives, "
         "their assigned accounts, pipeline metrics, and the unassigned account pool. "
-        "Supports Salesforce, HubSpot, and Demo mode."
+        "Supports Salesforce, HubSpot, and Demo mode. "
+        "Stops early if today is not the first of the month."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["crm_type", "month_year"],
+    input_keys=["crm_type", "month_year", "is_first_of_month"],
     output_keys=["sales_data", "unassigned_pool"],
     success_criteria=(
         "Sales data has been fetched. sales_data.jsonl contains reps with their "
         "accounts, pipeline metrics, and win rates. unassigned_pool.jsonl contains "
-        "available unassigned accounts. Both filenames are set via set_output."
+        "available unassigned accounts. Both filenames are set via set_output. "
+        "If is_first_of_month is 'false', the node exits early without fetching data."
     ),
     system_prompt="""\
 You are the data collection node for the Sales Ops Agent. Your job is to fetch sales data from the CRM.
+
+**STEP 0 — Check is_first_of_month from INPUT DATA above.**
+- If is_first_of_month = "false": Call escalate with message "Not the first of the month - sales ops agent exiting early." then STOP.
+- If is_first_of_month = "true": Proceed to STEP 1.
 
 **STEP 1 — Read crm_type from INPUT DATA above.** It will be "demo", "salesforce", or "hubspot".
 
@@ -131,9 +137,11 @@ You are the analysis node for the Sales Ops Agent. Your job is to compute metric
 **Use only these tools:** load_data, append_data, set_output, escalate
 
 **STEP 1 — Load the sales data:**
-Call load_data(filename="sales_data.jsonl")
+Read the "sales_data" key from INPUT DATA above — it contains the filename to load.
+Call load_data(filename=<that filename>)
+If the response has has_more=true, call load_data again with offset=<next_offset> to get the next page.
+Repeat until has_more=false (all records loaded).
 If the file is not found or load fails, retry once. If it fails again, call escalate with the error.
-Process chunk by chunk if has_more=true.
 
 **STEP 2 — Compute metrics for each rep:**
 For each sales representative, calculate:
@@ -188,8 +196,11 @@ You are the rebalancing node for the Sales Ops Agent. Your job is to assign unas
 **Use only these tools:** load_data, append_data, set_output, escalate
 
 **STEP 1 — Load the data:**
-Call load_data(filename="rep_analysis.jsonl") to get rep metrics.
-Call load_data(filename="unassigned_pool.jsonl") to get available accounts.
+Read "rep_analysis" and "unassigned_pool" keys from INPUT DATA above — they contain the filenames to load.
+Call load_data(filename=<rep_analysis filename>) to get rep metrics.
+If has_more=true, call again with offset=<next_offset> to get all reps.
+Call load_data(filename=<unassigned_pool filename>) to get available accounts.
+If has_more=true, call again with offset=<next_offset> to get all accounts.
 If a file is not found, retry once. If it fails again, call escalate with the error.
 
 **STEP 2 — Sort candidates by priority:**
@@ -262,7 +273,9 @@ You are the logging and reporting node for the Sales Ops Agent. Your job is to l
 (Plus Salesforce/HubSpot tools if crm_type requires them)
 
 **STEP 1 — Load rebalance actions:**
-Call load_data(filename="rebalance_actions.jsonl")
+Read the "rebalance_actions" key from INPUT DATA above — it contains the filename to load.
+Call load_data(filename=<that filename>)
+If has_more=true, call again with offset=<next_offset> to get all actions.
 If file not found, retry once. If it fails again, call escalate with the error.
 
 **STEP 2 — Read crm_type from INPUT DATA above.** ("demo", "salesforce", or "hubspot")

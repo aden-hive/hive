@@ -188,7 +188,7 @@ def build_ask_user_tool() -> Tool:
     )
 
 
-def build_set_output_tool(output_keys: list[str] | None) -> Tool | None:
+def build_set_output_tool(output_keys: list[str] | tuple[str, ...] | None) -> Tool | None:
     """Build the synthetic set_output tool for explicit output declaration."""
     if not output_keys:
         return None
@@ -336,7 +336,7 @@ def handle_report_to_parent(tool_input: dict[str, Any]) -> ToolResult:
 
 def handle_set_output(
     tool_input: dict[str, Any],
-    output_keys: list[str] | None,
+    output_keys: list[str] | tuple[str, ...] | None,
 ) -> ToolResult:
     """Handle set_output tool call. Returns ToolResult (sync)."""
     import logging

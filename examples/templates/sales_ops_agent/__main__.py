@@ -122,16 +122,20 @@ def tui(mock: bool, verbose: bool, debug: bool):
         storage_path.mkdir(parents=True, exist_ok=True)
 
         tool_registry = ToolRegistry()
+        # Skip MCP in mock mode to avoid cleanup timeouts (aligns with agent.py::_setup)
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
-        if mcp_config_path.exists():
+        if not mock and mcp_config_path.exists():
             tool_registry.load_mcp_config(mcp_config_path)
 
         tools_path = Path(__file__).parent / "tools.py"
         if tools_path.exists():
             tool_registry.discover_from_module(tools_path)
 
-        llm = None
-        if not mock:
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=agent.config.model,
                 api_key=agent.config.api_key,
@@ -218,9 +222,9 @@ def shell(verbose: bool, crm_type: str):
     click.echo("Enter 'run' to execute, 'quit' to exit:\n")
 
     agent = SalesOpsAgent()
-    asyncio.run(agent.start())
 
     async def _interactive_shell():
+        await agent.start()
         try:
             while True:
                 try:

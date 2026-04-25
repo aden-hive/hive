@@ -102,7 +102,6 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.orchestrator.node import NodeContext
 from framework.tracker.llm_debug_logger import log_llm_turn
 from framework.utils.task_registry import TaskRegistry
 
@@ -3011,8 +3010,11 @@ class AgentLoop(AgentProtocol):
                         value = tc.tool_input.get("value", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
-                        logger.debug("[%s] set_output: %s = %s", node_id, key, value[:100] if value else None)
                     results_by_id[tc.tool_use_id] = result
+                    # Log after side-effects - compute safe preview for non-string values
+                    if not result.is_error:
+                        preview = str(value)[:100] if value is not None else None
+                        logger.debug("[%s] set_output: %s = %s", node_id, key, preview)
 
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
@@ -3690,7 +3692,7 @@ class AgentLoop(AgentProtocol):
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         return build_escalate_tool()
 
-    def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
+    def _build_set_output_tool(self, output_keys: list[str] | tuple[str, ...] | None) -> Tool | None:
         """Build the synthetic set_output tool. Delegates to synthetic_tools module."""
         return build_set_output_tool(output_keys)
 
@@ -4162,7 +4164,7 @@ class AgentLoop(AgentProtocol):
             describe_images_as_text_fn=_describe_images_as_text,
         )
 
-    async def _drain_trigger_queue(self, conversation: NodeConversation, *, ctx: NodeContext | None = None) -> int:
+    async def _drain_trigger_queue(self, conversation: NodeConversation, *, ctx: AgentContext | None = None) -> int:
         """Drain all pending trigger events as a single batched user message.
 
         Multiple triggers are merged so the LLM sees them atomically and can

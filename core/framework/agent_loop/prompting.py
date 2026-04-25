@@ -6,7 +6,7 @@ Extracted from the former orchestrator/prompting module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -22,7 +22,7 @@ class PromptSpec:
     memory_prompt: str = ""
     agent_type: str = "event_loop"
     output_keys: tuple[str, ...] = ()
-    input_data: dict[str, Any] = ()  # type: ignore[assignment]
+    input_data: dict[str, Any] = field(default_factory=dict)
 
 
 def stamp_prompt_datetime(prompt: str) -> str:

@@ -23,7 +23,8 @@ TOOLS = {
         name="load_data",
         description=(
             "Load data from a JSONL file in the session data directory. "
-            "Returns the file contents with has_more flag for pagination."
+            "Returns the file contents with has_more flag for pagination. "
+            "Use offset and limit to navigate through large files."
         ),
         parameters={
             "type": "object",
@@ -31,6 +32,14 @@ TOOLS = {
                 "filename": {
                     "type": "string",
                     "description": "Name of the JSONL file to load (e.g., 'sales_data.jsonl').",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Zero-based record offset for pagination. Use the next_offset from the previous call to get the next page.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of records to return. Default is 10.",
                 },
             },
             "required": ["filename"],
@@ -108,25 +117,62 @@ def _get_data_dir() -> str:
     return ctx["data_dir"]
 
 
+def _resolve_safe_path(filename: str) -> Path:
+    """Resolve a user-supplied filename safely within the data directory.
+
+    Prevents path traversal attacks by ensuring the resolved path is within
+    the session data directory.
+
+    Args:
+        filename: User-supplied filename (may contain path traversal attempts)
+
+    Returns:
+        Resolved Path within data_dir
+
+    Raises:
+        ValueError: If the path would escape the data directory
+    """
+    data_dir = _get_data_dir()
+    data_dir_path = Path(data_dir).resolve()
+
+    # Join with data_dir and resolve to handle any ".." or absolute paths
+    resolved_path = (data_dir_path / filename).resolve()
+
+    # Verify the resolved path is within data_dir
+    try:
+        resolved_path.relative_to(data_dir_path)
+    except ValueError:
+        raise ValueError(
+            f"Path traversal detected: '{filename}' resolves outside the data directory. "
+            f"Only files within {data_dir_path} are accessible."
+        )
+
+    return resolved_path
+
+
 # ---------------------------------------------------------------------------
 # Core implementation
 # ---------------------------------------------------------------------------
 
 
-def _load_data(filename: str) -> dict:
+def _load_data(filename: str, offset: int = 0, limit: int = 10) -> dict:
     """Load data from a JSONL file in the session data directory.
 
     Args:
         filename: Name of the JSONL file to load.
+        offset: Zero-based record offset for pagination.
+        limit: Maximum number of records to return.
 
     Returns:
-        dict with records list and has_more pagination flag.
+        dict with records list, has_more pagination flag, total count, and next_offset.
     """
-    data_dir = _get_data_dir()
-    file_path = Path(data_dir) / filename
+    try:
+        file_path = _resolve_safe_path(filename)
+    except ValueError as e:
+        return {"error": str(e), "records": [], "has_more": False, "total": 0, "next_offset": None}
 
     if not file_path.exists():
-        return {"error": f"File not found: {filename}", "records": [], "has_more": False}
+        return {"error": f"File not found: {filename}", "records": [], "has_more": False, "total": 0, "next_offset": None}
 
     try:
         records = []
@@ -136,18 +182,21 @@ def _load_data(filename: str) -> dict:
                 if line:
                     records.append(json.loads(line))
 
-        # For chunking/pagination support
-        # Default chunk size of 10 records per call
-        chunk_size = 10
+        total = len(records)
+        page = records[offset : offset + limit]
+        next_offset = offset + len(page) if page else None
+        has_more = offset + len(page) < total
 
-        if len(records) > chunk_size:
-            return {"records": records[:chunk_size], "has_more": True, "total": len(records)}
-
-        return {"records": records, "has_more": False, "total": len(records)}
+        return {
+            "records": page,
+            "has_more": has_more,
+            "total": total,
+            "next_offset": next_offset,
+        }
     except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON in file: {e}", "records": [], "has_more": False}
+        return {"error": f"Invalid JSON in file: {e}", "records": [], "has_more": False, "total": 0, "next_offset": None}
     except Exception as e:
-        return {"error": f"Error reading file: {e}", "records": [], "has_more": False}
+        return {"error": f"Error reading file: {e}", "records": [], "has_more": False, "total": 0, "next_offset": None}
 
 
 def _append_data(filename: str, data: dict) -> dict:
@@ -160,10 +209,13 @@ def _append_data(filename: str, data: dict) -> dict:
     Returns:
         dict with success status and record count.
     """
-    data_dir = _get_data_dir()
-    file_path = Path(data_dir) / filename
-    data_dir_path = Path(data_dir)
-    data_dir_path.mkdir(parents=True, exist_ok=True)
+    try:
+        file_path = _resolve_safe_path(filename)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Ensure data directory exists
+    file_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         with open(file_path, "a", encoding="utf-8") as f:
@@ -186,17 +238,24 @@ def _load_demo_sales_data(data_file: str = "") -> dict:
     """Load mock sales data from demo_data.json.
 
     Args:
-        data_file: Optional path to demo data file.
+        data_file: Optional path to demo data file. Must be within the agent directory.
 
     Returns:
         dict with sales_reps and unassigned_accounts.
     """
     # If no file specified, use the default demo_data.json
     if not data_file:
-        agent_dir = Path(__file__).parent
+        agent_dir = Path(__file__).parent.resolve()
         demo_file = agent_dir / "demo_data.json"
     else:
-        demo_file = Path(data_file)
+        # Validate user-provided path is within agent directory
+        agent_dir = Path(__file__).parent.resolve()
+        requested_file = (agent_dir / data_file).resolve()
+        try:
+            requested_file.relative_to(agent_dir)
+            demo_file = requested_file
+        except ValueError:
+            return {"error": f"Path traversal detected: '{data_file}' is outside the agent directory", "sales_reps": [], "unassigned_accounts": []}
 
     if not demo_file.exists():
         return {"error": f"Demo data file not found: {demo_file}", "sales_reps": [], "unassigned_accounts": []}
@@ -276,7 +335,9 @@ def tool_executor(tool_use: ToolUse) -> ToolResult:
     if tool_use.name == "load_data":
         try:
             filename = tool_use.input.get("filename", "")
-            result = _load_data(filename=filename)
+            offset = tool_use.input.get("offset", 0)
+            limit = tool_use.input.get("limit", 10)
+            result = _load_data(filename=filename, offset=offset, limit=limit)
             return ToolResult(
                 tool_use_id=tool_use.id,
                 content=json.dumps(result),

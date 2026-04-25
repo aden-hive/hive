@@ -426,12 +426,20 @@ class ConcurrentStorage:
                     # Update cache only after successful batched write
                     # This fixes the race condition where cache was updated before write completed
                     self._cache[f"run:{item.id}"] = CacheEntry(item, time.time())
-            except Exception as e:
-                # Suppress error if file actually exists (race condition during shutdown)
+            except asyncio.CancelledError:
+                # Task cancelled during shutdown - if file exists, write likely completed
                 if item_type == "run" and (self.base_path / "runs" / f"{item.id}.json").exists():
-                    logger.debug(f"Run {item.id} saved despite exception (likely shutdown race): {e}")
+                    logger.debug(f"Run {item.id} saved despite cancellation (shutdown race)")
                 else:
-                    logger.error(f"Failed to save {item_type}: {e}")
+                    logger.warning(f"Run {item.id} not saved due to cancellation")
+                # Don't re-raise - allow batch to continue processing remaining items
+            except Exception as e:
+                # Check if this is a shutdown race where file was actually saved
+                if item_type == "run" and (self.base_path / "runs" / f"{item.id}.json").exists():
+                    logger.debug(f"Run {item.id} saved despite exception (shutdown race): {e}")
+                else:
+                    # Real write failure - log as error
+                    logger.error(f"Failed to save {item_type} {item.id}: {e}")
                 # Cache is NOT updated on failure - prevents stale/inconsistent cache state
 
     async def _flush_pending(self) -> None:

@@ -21,7 +21,7 @@ Trigger → Monitor → Analyze → Rebalance → Log
 ## Quickstart
 
 ```bash
-cd examples/templates/sales_ops_agent
+cd examples/templates
 
 # Run with Demo mode (mock data, no CRM required)
 python -m sales_ops_agent run --crm-type demo
@@ -93,6 +93,21 @@ export HUBSPOT_ACCESS_TOKEN="your_token_here"
 ```
 
 Or use the Hive credential store (`~/.hive/credentials.json`) to manage credentials securely.
+
+### Security Note: Unverified Tools
+
+This template's `mcp_servers.json` sets `INCLUDE_UNVERIFIED_TOOLS=true`, which enables loading of community/unverified tool integrations from the Hive tools MCP server. This is required to access Salesforce tools that are not yet in the verified core set.
+
+**Security implications:**
+- Expands the tool surface to include community-contributed tools
+- These tools may not have undergone the same security review as verified tools
+- Code execution occurs within your agent's runtime environment
+
+**Recommendations for production:**
+- Review the tool implementations in `tools/mcp_server.py` before deployment
+- Consider pinning to specific tool versions rather than loading all unverified tools
+- If Salesforce tools become verified, remove this flag and use verified tools only
+- Run in isolated environments with restricted network access when possible
 
 ## Metrics Calculated
 
