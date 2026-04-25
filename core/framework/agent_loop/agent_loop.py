@@ -4162,9 +4162,7 @@ class AgentLoop(AgentProtocol):
             describe_images_as_text_fn=_describe_images_as_text,
         )
 
-    async def _drain_trigger_queue(
-        self, conversation: NodeConversation, *, ctx: NodeContext | None = None
-    ) -> int:
+    async def _drain_trigger_queue(self, conversation: NodeConversation, *, ctx: NodeContext | None = None) -> int:
         """Drain all pending trigger events as a single batched user message.
 
         Multiple triggers are merged so the LLM sees them atomically and can
