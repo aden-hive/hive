@@ -24,12 +24,12 @@ def test_default_models_exist_in_each_provider_catalogue():
 
 
 def test_find_model_returns_curated_token_limits():
-    model = model_catalog.find_model("openai", "gpt-5.4")
+    model = model_catalog.find_model("openai", "gpt-5.5")
 
     assert model is not None
-    assert model["label"] == "GPT-5.4 - Best intelligence"
+    assert model["label"] == "GPT-5.5 - Frontier coding + reasoning"
     assert model["max_tokens"] == 128000
-    assert model["max_context_tokens"] == 960000
+    assert model["max_context_tokens"] == 1050000
 
 
 def test_anthropic_curated_limits_track_documented_caps_with_safe_input_budget():
@@ -125,15 +125,22 @@ def test_deepseek_catalog_tracks_current_api_models():
     deepseek_default = model_catalog.get_default_models()["deepseek"]
     deepseek_models = model_catalog.get_models_catalogue()["deepseek"]
 
-    assert deepseek_default == "deepseek-chat"
+    assert deepseek_default == "deepseek-v4-pro"
     assert [model["id"] for model in deepseek_models] == [
-        "deepseek-chat",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "deepseek-reasoner",
     ]
-    assert deepseek_models[0]["max_tokens"] == 8192
-    assert deepseek_models[0]["max_context_tokens"] == 128000
-    assert deepseek_models[1]["max_tokens"] == 64000
-    assert deepseek_models[1]["max_context_tokens"] == 128000
+    # V4 family — 1M context, 384k max output, mirrors api-docs.deepseek.com pricing.
+    assert deepseek_models[0]["max_tokens"] == 384000
+    assert deepseek_models[0]["max_context_tokens"] == 1000000
+    assert deepseek_models[0]["pricing_usd_per_mtok"]["input"] == 1.74
+    assert deepseek_models[0]["pricing_usd_per_mtok"]["output"] == 3.48
+    assert deepseek_models[1]["pricing_usd_per_mtok"]["input"] == 0.14
+    assert deepseek_models[1]["pricing_usd_per_mtok"]["output"] == 0.28
+    # Legacy reasoner kept for back-compat while users migrate.
+    assert deepseek_models[2]["max_tokens"] == 64000
+    assert deepseek_models[2]["max_context_tokens"] == 128000
 
 
 def test_openrouter_catalog_tracks_current_frontier_set():

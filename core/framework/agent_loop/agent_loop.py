@@ -228,22 +228,16 @@ def _vision_fallback_active(model: str | None) -> bool:
     """Return True if tool-result images for *model* should be routed
     through the vision-fallback chain rather than sent to the model.
 
-    Trigger: the model appears in Hive's curated text-only deny list
-    (``capabilities.supports_image_tool_results`` returns False).
-    That list is the only reliable signal — LiteLLM's
-    ``supports_vision`` returns False for any unknown model
-    (including custom-served vision-capable models like Jackrong/Qwopus3.5)
-    so it cannot be used as a gate; and LiteLLM's openai chat
-    transformer doesn't strip image blocks anyway, so passing them
-    through to a vision-capable but litellm-unrecognised model still
-    works end-to-end.
+    Trigger: the model's catalog entry has ``supports_vision: false``
+    (resolved via :func:`capabilities.supports_image_tool_results`,
+    which reads ``model_catalog.json``). Unknown models default to
+    vision-capable, so the fallback only fires when the catalog
+    explicitly says the model is text-only.
 
     The ``vision_fallback`` config block is the *substitution* model —
-    it doesn't widen the trigger. To force fallback for a model the
-    deny list doesn't cover yet, add it to
-    ``capabilities._TEXT_ONLY_MODEL_BARE_PREFIXES`` /
-    ``_TEXT_ONLY_PROVIDER_PREFIXES`` rather than relying on a runtime
-    config.
+    it doesn't widen the trigger. To force fallback for a model that
+    isn't catalogued yet, add an entry to ``model_catalog.json`` with
+    ``supports_vision: false`` rather than relying on a runtime config.
     """
     if not model:
         return False

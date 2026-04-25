@@ -1352,9 +1352,11 @@ fi
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 8-13) API key providers — show (credential detected) if key already set
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
+# 8-N) API key providers — show (credential detected) if key already set.
+# Order is reflected directly in the menu numbering; the case dispatcher
+# below resolves choice numbers via $((8 + index_in_arrays)).
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
@@ -1365,14 +1367,16 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-# 14) Local (Ollama) — no API key needed
+# Local (Ollama) — slot computed from the provider list so adding/removing
+# API-key providers above doesn't require renumbering by hand.
+OLLAMA_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
 if [ "$OLLAMA_DETECTED" = true ]; then
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+    echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
 else
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed"
+    echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed"
 fi
 
-SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]} + 1))
+SKIP_CHOICE=$((OLLAMA_CHOICE + 1))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1578,6 +1582,13 @@ case $choice in
         SIGNUP_URL="https://openrouter.ai/keys"
         ;;
     14)
+        SELECTED_ENV_VAR="DEEPSEEK_API_KEY"
+        SELECTED_PROVIDER_ID="deepseek"
+        SELECTED_API_BASE="https://api.deepseek.com"
+        PROVIDER_NAME="DeepSeek"
+        SIGNUP_URL="https://platform.deepseek.com/api_keys"
+        ;;
+    "$OLLAMA_CHOICE")
         # Local (Ollama) — no API key; pick model from ollama list
         if [ "$OLLAMA_DETECTED" != true ]; then
             echo ""
@@ -1824,12 +1835,29 @@ echo ""
 # image through a separate VLM subagent that returns a text caption,
 # preserving the agent's ability to reason about visual state.
 #
-# We always offer the prompt — even for vision-capable main models —
-# so the user gets a working fallback if they ever swap to a text-only
-# model. The block is dormant for vision-capable mains (the gating
-# in agent_loop only fires for models on Hive's deny list).
+# Skip entirely when the chosen main model already supports vision per
+# the catalog's ``supports_vision`` flag — the fallback would never fire
+# in that case, and prompting for it just adds friction. For text-only
+# mains we still offer the prompt so the user can wire up a captioning
+# subagent.
 
-if [ -n "$SELECTED_PROVIDER_ID" ]; then
+MAIN_MODEL_HAS_VISION="false"
+if [ -n "$SELECTED_MODEL" ]; then
+    MAIN_MODEL_HAS_VISION=$(uv run python - "$SELECTED_MODEL" <<'PY' 2>/dev/null || echo "false"
+import sys
+from framework.llm.model_catalog import model_supports_vision
+print("true" if model_supports_vision(sys.argv[1]) else "false")
+PY
+)
+fi
+
+if [ -n "$SELECTED_PROVIDER_ID" ] && [ "$MAIN_MODEL_HAS_VISION" = "true" ]; then
+    # Drop any stale vision_fallback block so the config reflects the
+    # current main model's capabilities.
+    save_vision_fallback "" "" "" "" > /dev/null 2>&1 || true
+    echo -e "${GREEN}⬢${NC} Vision fallback ${DIM}skipped — ${SELECTED_MODEL} already supports vision${NC}"
+    echo ""
+elif [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Vision fallback subagent${NC}"
     echo ""
     echo -e "  ${DIM}When a screenshot/image tool is called from a text-only model,${NC}"
@@ -1840,9 +1868,13 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
 
     # Build the candidate list from the same model_catalog.json the main
     # LLM step uses — never hardcode model IDs in this script. For each
-    # provider in the catalogue, take the catalogue's default model and
-    # the env var name it expects, then keep only providers the user
-    # already has an API key for. Output one TSV row per candidate:
+    # provider in the catalogue, pick a model whose ``supports_vision``
+    # flag is true (since the fallback subagent's whole purpose is to
+    # caption images — a text-only candidate would be useless). Prefer
+    # the provider's default when it supports vision, otherwise fall
+    # back to the first vision-capable model in the provider's list.
+    # Skip the provider entirely if no model in its catalog supports
+    # vision. Output one TSV row per candidate:
     # provider_id<TAB>model<TAB>env_var<TAB>display_name
     VISION_CANDIDATES_TSV=$(uv run python - <<'PY'
 import os
@@ -1879,9 +1911,25 @@ for provider_id, default_model in sorted(defaults.items()):
             env = "GOOGLE_API_KEY"
     if not has_key:
         continue
+    # Pick a vision-capable model: prefer the catalog default if it has
+    # supports_vision=true, else the first vision-capable model in the
+    # provider's list. Skip the provider if none exist.
+    models = catalog.get(provider_id, [])
+    chosen = None
+    for m in models:
+        if m["id"] == default_model and m.get("supports_vision") is True:
+            chosen = m["id"]
+            break
+    if chosen is None:
+        for m in models:
+            if m.get("supports_vision") is True:
+                chosen = m["id"]
+                break
+    if chosen is None:
+        continue
     # Display name: provider/model from the catalogue verbatim
-    display = f"{provider_id}/{default_model}"
-    print(f"{provider_id}\t{default_model}\t{env}\t{display}")
+    display = f"{provider_id}/{chosen}"
+    print(f"{provider_id}\t{chosen}\t{env}\t{display}")
 PY
 )
 

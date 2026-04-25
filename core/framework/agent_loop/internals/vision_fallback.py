@@ -1,10 +1,10 @@
 """Vision-fallback subagent for tool-result images on text-only LLMs.
 
 When a tool returns image content but the main agent's model can't
-accept image blocks (per ``supports_image_tool_results``), the framework
-strips the images before they ever reach the LLM. Without this module,
-the agent then sees only the tool's text envelope (URL, dimensions,
-size) and is blind to whatever the image actually shows.
+accept image blocks (i.e. its catalog entry has ``supports_vision: false``),
+the framework strips the images before they ever reach the LLM. Without
+this module, the agent then sees only the tool's text envelope (URL,
+dimensions, size) and is blind to whatever the image actually shows.
 
 This module provides:
 

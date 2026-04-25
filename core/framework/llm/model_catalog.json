@@ -9,47 +9,65 @@
           "label": "Haiku 4.5 - Fast + cheap",
           "recommended": false,
           "max_tokens": 64000,
-          "max_context_tokens": 136000
+          "max_context_tokens": 136000,
+          "supports_vision": true
         },
         {
           "id": "claude-sonnet-4-5-20250929",
           "label": "Sonnet 4.5 - Best balance",
           "recommended": false,
           "max_tokens": 64000,
-          "max_context_tokens": 136000
+          "max_context_tokens": 136000,
+          "supports_vision": true
         },
         {
           "id": "claude-opus-4-6",
           "label": "Opus 4.6 - Most capable",
           "recommended": true,
           "max_tokens": 128000,
-          "max_context_tokens": 872000
+          "max_context_tokens": 872000,
+          "supports_vision": true
         }
       ]
     },
     "openai": {
-      "default_model": "gpt-5.4",
+      "default_model": "gpt-5.5",
       "models": [
         {
-          "id": "gpt-5.4",
-          "label": "GPT-5.4 - Best intelligence",
+          "id": "gpt-5.5",
+          "label": "GPT-5.5 - Frontier coding + reasoning",
           "recommended": true,
           "max_tokens": 128000,
-          "max_context_tokens": 960000
+          "max_context_tokens": 1050000,
+          "pricing_usd_per_mtok": {
+            "input": 5.00,
+            "output": 30.00
+          },
+          "supports_vision": true
+        },
+        {
+          "id": "gpt-5.4",
+          "label": "GPT-5.4 - Previous flagship",
+          "recommended": false,
+          "max_tokens": 128000,
+          "max_context_tokens": 960000,
+          "supports_vision": true
         },
         {
           "id": "gpt-5.4-mini",
           "label": "GPT-5.4 Mini - Faster + cheaper",
           "recommended": false,
           "max_tokens": 128000,
-          "max_context_tokens": 400000
+          "max_context_tokens": 400000,
+          "supports_vision": true
         },
         {
           "id": "gpt-5.4-nano",
           "label": "GPT-5.4 Nano - Cheapest high-volume",
           "recommended": false,
           "max_tokens": 128000,
-          "max_context_tokens": 400000
+          "max_context_tokens": 400000,
+          "supports_vision": true
         }
       ]
     },
@@ -61,14 +79,16 @@
           "label": "Gemini 3 Flash - Fast",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 240000
+          "max_context_tokens": 240000,
+          "supports_vision": true
         },
         {
           "id": "gemini-3.1-pro-preview-customtools",
           "label": "Gemini 3.1 Pro - Best quality",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 240000
+          "max_context_tokens": 240000,
+          "supports_vision": true
         }
       ]
     },
@@ -80,28 +100,32 @@
           "label": "GPT-OSS 120B - Best reasoning",
           "recommended": true,
           "max_tokens": 65536,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         },
         {
           "id": "openai/gpt-oss-20b",
           "label": "GPT-OSS 20B - Fast + cheaper",
           "recommended": false,
           "max_tokens": 65536,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         },
         {
           "id": "llama-3.3-70b-versatile",
           "label": "Llama 3.3 70B - General purpose",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         },
         {
           "id": "llama-3.1-8b-instant",
           "label": "Llama 3.1 8B - Fastest",
           "recommended": false,
           "max_tokens": 131072,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         }
       ]
     },
@@ -113,21 +137,24 @@
           "label": "GPT-OSS 120B - Best production reasoning",
           "recommended": true,
           "max_tokens": 40960,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         },
         {
           "id": "zai-glm-4.7",
           "label": "Z.ai GLM 4.7 - Strong coding preview",
           "recommended": true,
           "max_tokens": 40960,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         },
         {
           "id": "qwen-3-235b-a22b-instruct-2507",
           "label": "Qwen 3 235B Instruct - Frontier preview",
           "recommended": false,
           "max_tokens": 40960,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         }
       ]
     },
@@ -143,14 +170,16 @@
           "pricing_usd_per_mtok": {
             "input": 0.30,
             "output": 1.20
-          }
+          },
+          "supports_vision": false
         },
         {
           "id": "MiniMax-M2.5",
           "label": "MiniMax M2.5 - Strong value",
           "recommended": false,
           "max_tokens": 40960,
-          "max_context_tokens": 180000
+          "max_context_tokens": 180000,
+          "supports_vision": false
         }
       ]
     },
@@ -162,28 +191,32 @@
           "label": "Mistral Large 3 - Best quality",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 256000
+          "max_context_tokens": 256000,
+          "supports_vision": true
         },
         {
           "id": "mistral-medium-2508",
           "label": "Mistral Medium 3.1 - Balanced",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 128000
+          "max_context_tokens": 128000,
+          "supports_vision": true
         },
         {
           "id": "mistral-small-2603",
           "label": "Mistral Small 4 - Fast + capable",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 256000
+          "max_context_tokens": 256000,
+          "supports_vision": true
         },
         {
           "id": "codestral-2508",
           "label": "Codestral - Coding specialist",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 128000
+          "max_context_tokens": 128000,
+          "supports_vision": false
         }
       ]
     },
@@ -195,47 +228,71 @@
           "label": "DeepSeek V3.1 - Best general coding",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 128000
+          "max_context_tokens": 128000,
+          "supports_vision": false
         },
         {
           "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
           "label": "Qwen3 Coder 480B - Advanced coding",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 262144
+          "max_context_tokens": 262144,
+          "supports_vision": false
         },
         {
           "id": "openai/gpt-oss-120b",
           "label": "GPT-OSS 120B - Strong reasoning",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 128000
+          "max_context_tokens": 128000,
+          "supports_vision": false
         },
         {
           "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
           "label": "Llama 3.3 70B Turbo - Fast baseline",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 131072
+          "max_context_tokens": 131072,
+          "supports_vision": false
         }
       ]
     },
     "deepseek": {
-      "default_model": "deepseek-chat",
+      "default_model": "deepseek-v4-pro",
       "models": [
         {
-          "id": "deepseek-chat",
-          "label": "DeepSeek Chat - Fast default",
+          "id": "deepseek-v4-pro",
+          "label": "DeepSeek V4 Pro - Most capable",
           "recommended": true,
-          "max_tokens": 8192,
-          "max_context_tokens": 128000
+          "max_tokens": 384000,
+          "max_context_tokens": 1000000,
+          "pricing_usd_per_mtok": {
+            "input": 1.74,
+            "output": 3.48,
+            "cache_read": 0.145
+          },
+          "supports_vision": false
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "label": "DeepSeek V4 Flash - Fast + cheap",
+          "recommended": true,
+          "max_tokens": 384000,
+          "max_context_tokens": 1000000,
+          "pricing_usd_per_mtok": {
+            "input": 0.14,
+            "output": 0.28,
+            "cache_read": 0.028
+          },
+          "supports_vision": false
         },
         {
           "id": "deepseek-reasoner",
-          "label": "DeepSeek Reasoner - Deep thinking",
+          "label": "DeepSeek Reasoner - Legacy (deprecating)",
           "recommended": false,
           "max_tokens": 64000,
-          "max_context_tokens": 128000
+          "max_context_tokens": 128000,
+          "supports_vision": false
         }
       ]
     },
@@ -252,7 +309,8 @@
             "input": 0.60,
             "output": 2.50,
             "cache_read": 0.15
-          }
+          },
+          "supports_vision": true
         }
       ]
     },
@@ -264,14 +322,16 @@
           "label": "Queen - Hive native",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 180000
+          "max_context_tokens": 180000,
+          "supports_vision": false
         },
         {
           "id": "kimi-2.5",
           "label": "Kimi 2.5 - Via Hive",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 240000
+          "max_context_tokens": 240000,
+          "supports_vision": true
         },
         {
           "id": "glm-5.1",
@@ -284,7 +344,8 @@
             "output": 4.40,
             "cache_read": 0.26,
             "cache_creation": 0.0
-          }
+          },
+          "supports_vision": false
         }
       ]
     },
@@ -296,42 +357,48 @@
           "label": "GPT-5.4 - Best overall",
           "recommended": true,
           "max_tokens": 128000,
-          "max_context_tokens": 872000
+          "max_context_tokens": 872000,
+          "supports_vision": true
         },
         {
           "id": "anthropic/claude-sonnet-4.6",
           "label": "Claude Sonnet 4.6 - Best coding balance",
           "recommended": false,
           "max_tokens": 64000,
-          "max_context_tokens": 872000
+          "max_context_tokens": 872000,
+          "supports_vision": true
         },
         {
           "id": "anthropic/claude-opus-4.6",
           "label": "Claude Opus 4.6 - Most capable",
           "recommended": false,
           "max_tokens": 128000,
-          "max_context_tokens": 872000
+          "max_context_tokens": 872000,
+          "supports_vision": true
         },
         {
           "id": "google/gemini-3.1-pro-preview-customtools",
           "label": "Gemini 3.1 Pro Preview - Long-context reasoning",
           "recommended": false,
           "max_tokens": 32768,
-          "max_context_tokens": 872000
+          "max_context_tokens": 872000,
+          "supports_vision": true
         },
         {
           "id": "qwen/qwen3.6-plus",
           "label": "Qwen 3.6 Plus - Strong reasoning",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 240000
+          "max_context_tokens": 240000,
+          "supports_vision": false
         },
         {
           "id": "z-ai/glm-5v-turbo",
           "label": "GLM-5V Turbo - Vision capable",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 192000
+          "max_context_tokens": 192000,
+          "supports_vision": true
         },
         {
           "id": "z-ai/glm-5.1",
@@ -344,7 +411,8 @@
             "output": 4.40,
             "cache_read": 0.26,
             "cache_creation": 0.0
-          }
+          },
+          "supports_vision": false
         },
         {
           "id": "minimax/minimax-m2.7",
@@ -355,14 +423,16 @@
           "pricing_usd_per_mtok": {
             "input": 0.30,
             "output": 1.20
-          }
+          },
+          "supports_vision": false
         },
         {
           "id": "xiaomi/mimo-v2-pro",
           "label": "MiMo V2 Pro - Xiaomi multimodal",
           "recommended": true,
           "max_tokens": 64000,
-          "max_context_tokens": 240000
+          "max_context_tokens": 240000,
+          "supports_vision": true
         }
       ]
     }

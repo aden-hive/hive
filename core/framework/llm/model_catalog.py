@@ -95,6 +95,10 @@ def _validate_model_catalog(data: dict[str, Any]) -> dict[str, Any]:
             if pricing is not None:
                 _validate_pricing(pricing, f"{model_path}.pricing_usd_per_mtok")
 
+            supports_vision = model_map.get("supports_vision")
+            if supports_vision is not None and not isinstance(supports_vision, bool):
+                raise ModelCatalogError(f"{model_path}.supports_vision must be a boolean when present")
+
         if not default_found:
             raise ModelCatalogError(
                 f"{provider_path}.default_model={default_model!r} is not present in {provider_path}.models"
@@ -227,6 +231,34 @@ def get_model_pricing(model_id: str) -> dict[str, float] | None:
                     return None
                 return {key: float(rate) for key, rate in pricing.items()}
     return None
+
+
+def model_supports_vision(model_id: str) -> bool:
+    """Return whether *model_id* supports image inputs per the curated catalog.
+
+    Looks up the bare model id (and the provider-prefix-stripped form) in the
+    catalog. Returns the model's ``supports_vision`` flag when found, defaulting
+    to ``True`` for unknown models or when the flag is absent — assume vision
+    capable for hosted providers, since modern frontier models support images
+    by default and the captioning fallback is more expensive than just letting
+    the provider handle the image.
+    """
+    if not model_id:
+        return True
+
+    candidates = [model_id]
+    if "/" in model_id:
+        candidates.append(model_id.split("/", 1)[1])
+
+    for candidate in candidates:
+        for provider_info in load_model_catalog()["providers"].values():
+            for model in provider_info["models"]:
+                if model["id"] == candidate:
+                    flag = model.get("supports_vision")
+                    if isinstance(flag, bool):
+                        return flag
+                    return True
+    return True
 
 
 def get_preset(preset_id: str) -> dict[str, Any] | None:
