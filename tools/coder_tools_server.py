@@ -114,10 +114,16 @@ def _resolve_read_path(path: str) -> str:
         path = os.path.expanduser(path)
 
     if os.path.isabs(path):
-        resolved = os.path.abspath(path)
+        resolved = os.path.normcase(
+            os.path.abspath(path)
+        )
 
         # Allow access to ~/.hive/ for agent session data
-        hive_dir = os.path.expanduser("~/.hive")
+        hive_dir = os.path.normcase(
+            os.path.abspath(
+                os.path.expanduser("~/.hive")
+            )
+        )
         try:
             if os.path.commonpath([resolved, hive_dir]) == hive_dir:
                 return resolved  # Path is under ~/.hive, allow it
@@ -146,7 +152,11 @@ def _resolve_read_path(path: str) -> str:
                     suffix = path_norm[len(prefix_stripped) :].lstrip("/")
                     if suffix:
                         path = suffix.replace("/", os.sep)
-                        resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                        resolved = os.path.normcase(
+                            os.path.abspath(
+                                os.path.join(PROJECT_ROOT, path)
+                                )
+                            )
                         break
             else:
                 # Try extracting exports/ or core/ subpath from the absolute path
@@ -154,15 +164,27 @@ def _resolve_read_path(path: str) -> str:
                 if "exports" in parts:
                     idx = parts.index("exports")
                     path = os.sep.join(parts[idx:])
-                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                    resolved = os.path.normcase(
+                        os.path.abspath(
+                            os.path.join(PROJECT_ROOT, path)
+                        )
+                    )
                 elif "core" in parts:
                     idx = parts.index("core")
                     path = os.sep.join(parts[idx:])
-                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                    resolved = os.path.normcase(
+                        os.path.abspath(
+                            os.path.join(PROJECT_ROOT, path)
+                        )
+                    )
                 else:
                     raise ValueError(f"Access denied: '{path}' is outside the project root.")
     else:
-        resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+        resolved = os.path.normcase(
+            os.path.abspath(
+                os.path.join(PROJECT_ROOT, path)
+            )
+        )
     try:
         common = os.path.commonpath([resolved, PROJECT_ROOT])
     except ValueError as err:
@@ -192,10 +214,16 @@ def _resolve_write_path(path: str) -> str:
     if path.startswith("~"):
         path = os.path.expanduser(path)
 
-    hive_dir = os.path.expanduser("~/.hive")
+    hive_dir = os.path.normcase(
+        os.path.abspath(
+            os.path.expanduser("~/.hive")
+        )
+    )
 
     if os.path.isabs(path):
-        resolved = os.path.abspath(path)
+        resolved = os.path.normcase(
+            os.path.abspath(path)
+        )
 
         # Always allow writes under ~/.hive/
         try:
@@ -227,7 +255,11 @@ def _resolve_write_path(path: str) -> str:
         )
     else:
         # Relative path: resolve against WRITE_ROOT, not PROJECT_ROOT.
-        resolved = os.path.abspath(os.path.join(WRITE_ROOT, path))
+        resolved = os.path.normcase(
+            os.path.abspath(
+                os.path.join(WRITE_ROOT, path)
+            )
+        )
 
     # Double-check the resolved absolute path is inside WRITE_ROOT or
     # ~/.hive/ (covers edge cases like "../../etc/passwd" that escape).
@@ -1754,9 +1786,21 @@ def main() -> None:
     parser.add_argument("--stdio", action="store_true")
     args = parser.parse_args()
 
-    PROJECT_ROOT = os.path.abspath(args.project_root) if args.project_root else _find_project_root()
+    PROJECT_ROOT = (
+        os.path.normcase(
+            os.path.abspath(args.project_root)
+        )
+        if args.project_root
+        else os.path.normcase(
+            os.path.abspath(_find_project_root())
+        )
+    )   
     if args.write_root:
-        WRITE_ROOT = os.path.abspath(os.path.expanduser(args.write_root))
+        WRITE_ROOT = os.path.normcase(
+            os.path.abspath(
+                os.path.expanduser(args.write_root)
+            )
+        )
         os.makedirs(WRITE_ROOT, exist_ok=True)
     else:
         WRITE_ROOT = PROJECT_ROOT  # legacy: no split
