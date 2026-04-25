@@ -128,6 +128,7 @@ from .shell_config import (
     get_shell_source_command,
 )
 from .shopify import SHOPIFY_CREDENTIALS
+from .similarweb import SIMILARWEB_CREDENTIALS
 from .slack import SLACK_CREDENTIALS
 from .snowflake import SNOWFLAKE_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
@@ -209,6 +210,7 @@ CREDENTIAL_SPECS = {
     **SAP_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
+    **SIMILARWEB_CREDENTIALS,
     **SHOPIFY_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SNOWFLAKE_CREDENTIALS,
@@ -306,6 +308,7 @@ __all__ = [
     "SAP_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
+    "SIMILARWEB_CREDENTIALS",
     "SHOPIFY_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "SNOWFLAKE_CREDENTIALS",

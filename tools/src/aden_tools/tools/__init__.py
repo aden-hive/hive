@@ -118,6 +118,7 @@ from .salesforce_tool import register_tools as register_salesforce
 from .sap_tool import register_tools as register_sap
 from .serpapi_tool import register_tools as register_serpapi
 from .shopify_tool import register_tools as register_shopify
+from .similarweb_tool import register_tools as register_similarweb
 from .slack_tool import register_tools as register_slack
 from .snowflake_tool import register_tools as register_snowflake
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
@@ -320,6 +321,7 @@ def _register_unverified(
     register_salesforce(mcp, credentials=credentials)
     register_sap(mcp, credentials=credentials)
     register_shopify(mcp, credentials=credentials)
+    register_similarweb(mcp, credentials=credentials)
     register_snowflake(mcp, credentials=credentials)
     register_supabase(mcp, credentials=credentials)
     register_terraform(mcp, credentials=credentials)

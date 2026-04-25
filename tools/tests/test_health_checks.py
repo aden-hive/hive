@@ -91,6 +91,7 @@ class TestHealthCheckerRegistry:
             "prometheus",
             "resend",
             "serpapi",
+            "similarweb",
             "slack",
             "stripe",
             "telegram",
