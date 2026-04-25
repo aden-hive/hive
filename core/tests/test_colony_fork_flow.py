@@ -148,12 +148,18 @@ def _make_session_with_queen_state(
     )
     queen_executor = SimpleNamespace(node_registry={"queen": fake_loop})
 
-    # Fake phase_state with the attributes the spawn handler reads
+    # Fake phase_state with the attributes the spawn handler reads.
+    # global_memory_dir / queen_memory_dir are read by
+    # SessionManager.stop_session's shutdown-reflection path; missing
+    # them on this SimpleNamespace surfaces as an AttributeError in
+    # captured logs during teardown (harmless, but noisy).
     phase_state = SimpleNamespace(
         phase="planning",
         queen_id=queen_name,
         queen_identity_prompt="You are Charlotte, head of finance.",
         _cached_global_recall_block="",
+        global_memory_dir=None,
+        queen_memory_dir=None,
         get_current_prompt=lambda: "you are the queen",
     )
 
@@ -326,6 +332,20 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
     # ── duplicated queen session dir ──────────────────────────────
     dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
     assert dest_queen_dir.is_dir(), f"Forked session dir not under {queen_name}/, got {dest_queen_dir}"
+
+    # The colony-spawn handler runs the worker-storage copy inside a
+    # fire-and-forget background task (_finalize_fork) and writes a
+    # compaction_status.json marker on completion. Production callers
+    # await that marker via create_session_with_worker_colony; the
+    # test must do the same to avoid racing the handler's response
+    # against the disk write below.
+    from framework.server import compaction_status
+
+    final_status = await compaction_status.await_completion(dest_queen_dir, timeout=10.0, poll=0.05)
+    assert final_status is not None, "compaction_status.json marker was never written"
+    assert final_status.get("status") in {"done", "failed"}, (
+        f"_finalize_fork did not reach a terminal state in time: {final_status!r}"
+    )
 
     # Conversations were copied
     assert (dest_queen_dir / "conversations" / "parts" / "0000000000.json").is_file()
