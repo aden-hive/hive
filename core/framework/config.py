@@ -15,6 +15,16 @@ from typing import Any
 DEFAULT_MAX_TOKENS = 8192
 
 # ---------------------------------------------------------------------------
+# Desktop mode
+# ---------------------------------------------------------------------------
+# Set by the Electron shell when it spawns `hive serve` so the runtime knows
+# it's hosted inside a desktop client rather than served standalone. Today
+# this only gates the frontend-build step in `hive serve` (the desktop ships
+# its own renderer), but it's also a useful hook for future single-user /
+# telemetry-off branching.
+DESKTOP_MODE: bool = bool(os.environ.get("HIVE_DESKTOP_MODE"))
+
+# ---------------------------------------------------------------------------
 # Hive home directory structure
 # ---------------------------------------------------------------------------
 

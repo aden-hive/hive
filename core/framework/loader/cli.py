@@ -92,7 +92,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from aiohttp import web
 
-    _build_frontend()
+    from framework.config import DESKTOP_MODE
+
+    # Skip frontend build when running inside the desktop shell — Electron
+    # ships its own renderer, and running `npm` from a packaged install
+    # often fails (no toolchain on the user's machine).
+    if not DESKTOP_MODE:
+        _build_frontend()
 
     from framework.observability import configure_logging
     from framework.server.app import create_app
