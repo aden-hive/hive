@@ -64,7 +64,7 @@ def register_tools(mcp: FastMCP) -> None:
         spf = _check_spf(resolver, domain)
         dmarc = _check_dmarc(resolver, domain)
         dkim = _check_dkim(resolver, domain)
-        dnssec = _check_dnssec(resolver, domain)
+        dnssec = _check_dnssec(domain)
         mx = _check_mx(resolver, domain)
         caa = _check_caa(resolver, domain)
         zone_transfer = _check_zone_transfer(resolver, domain)
@@ -198,7 +198,7 @@ def _check_dkim(resolver: dns.resolver.Resolver, domain: str) -> dict:
     }
 
 
-def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
+def _check_dnssec(domain: str) -> dict:
     """Check if DNSSEC is enabled and validated."""
     try:
         # Create an isolated resolver to avoid polluting the default one
@@ -217,9 +217,7 @@ def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
         if answers.response.flags & dns.flags.AD:
             return {"enabled": True, "issues": []}
             
-    except dns.resolver.NoAnswer:
-        pass
-    except (dns.resolver.NXDOMAIN, dns.exception.DNSException):
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.exception.DNSException):
         pass
 
     return {
