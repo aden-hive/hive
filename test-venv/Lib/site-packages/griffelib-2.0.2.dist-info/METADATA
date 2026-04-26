@@ -1,0 +1,28 @@
+Metadata-Version: 2.4
+Name: griffelib
+Version: 2.0.2
+Summary: Signatures for entire Python programs. Extract the structure, the frame, the skeleton of your project, to generate API documentation or find breaking changes in your API.
+Author-email: Timothée Mazzucotelli <dev@pawamoy.fr>
+License-Expression: ISC
+License-File: LICENSE
+Keywords: api,breaking-changes,dynamic-analysis,signature,static-analysis
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Topic :: Documentation
+Classifier: Topic :: Software Development
+Classifier: Topic :: Software Development :: Documentation
+Classifier: Topic :: Utilities
+Classifier: Typing :: Typed
+Requires-Python: >=3.10
+Provides-Extra: pypi
+Requires-Dist: pip>=24.0; extra == 'pypi'
+Requires-Dist: platformdirs>=4.2; extra == 'pypi'
+Requires-Dist: wheel>=0.42; extra == 'pypi'

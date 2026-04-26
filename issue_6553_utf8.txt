@@ -1,0 +1,52 @@
+﻿title:	[Bug]: history and cold-session disk lookups bypass session_id path validation
+state:	OPEN
+author:	dipeshbabu
+labels:	bug, size: small
+comments:	3
+assignees:	
+projects:	
+milestone:	
+number:	6553
+--
+## Describe the Bug
+
+Session history and cold-session disk lookup paths do not consistently validate `session_id` with `safe_path_segment()` before building filesystem paths.
+
+The server already has a shared path validator to reject invalid path segments such as `/`, `\`, `..`, empty values, and decoded traversal-like input. However, several session history and cold-session codepaths still join raw `session_id` values into paths under:
+
+`~/.hive/queen/session/{session_id}/...`
+
+This creates inconsistent behavior across session-related endpoints because other routes already sanitize path parameters, while these do not.
+
+Affected codepaths include:
+
+- `handle_queen_messages()`
+- `handle_session_events_history()`
+- `handle_delete_history_session()`
+- `cold_sessions_dir()`
+- `SessionManager.get_cold_session_info()`
+
+One of the affected routes is destructive (`DELETE /api/sessions/history/{session_id}`), so this is not limited to read-only behavior.
+
+## To Reproduce
+
+Steps to reproduce the behavior:
+
+1. Start the server normally.
+2. Send requests to one of these endpoints using traversal-like or encoded `session_id` values:
+   - `GET /api/sessions/{session_id}/queen-messages`
+   - `GET /api/sessions/{session_id}/events/history`
+   - `DELETE /api/sessions/history/{session_id}`
+3. Use values such as:
+   - `..`
+   - `%2F`
+   - `..%2Fescape`
+   - `..\\escape`
+4. Observe that these handlers build disk paths from raw `session_id` instead of validating first.
+
+Example requests:
+
+```bash
+curl -i http://localhost:8000/api/sessions/..%2Fescape/queen-messages
+curl -i http://localhost:8000/api/sessions/..%2Fescape/events/history
+curl -i -X DELETE http://localhost:8000/api/sessions/history/..%2Fescape

@@ -1,0 +1,15 @@
+aiofile-3.9.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+aiofile-3.9.0.dist-info/LICENCE,sha256=7GQBUOA3dNG1Jk-yaPOCncNnRVURCRMev23QpZ1ew-s,10495
+aiofile-3.9.0.dist-info/LICENCE.md,sha256=7GQBUOA3dNG1Jk-yaPOCncNnRVURCRMev23QpZ1ew-s,10495
+aiofile-3.9.0.dist-info/METADATA,sha256=zlrmdokR-TvPMaMTeGvp9rtpqqoSkMIG76QPqfB50lI,14046
+aiofile-3.9.0.dist-info/RECORD,,
+aiofile-3.9.0.dist-info/WHEEL,sha256=sP946D7jFCHeNz5Iq4fL4Lu-PrWrFsgfLXbbkciIZwg,88
+aiofile/__init__.py,sha256=7yc9jKAQNFC1bYghRlMM_tvMlqNXBoWFC0DHrVtZimg,618
+aiofile/__pycache__/__init__.cpython-312.pyc,,
+aiofile/__pycache__/aio.cpython-312.pyc,,
+aiofile/__pycache__/utils.cpython-312.pyc,,
+aiofile/__pycache__/version.cpython-312.pyc,,
+aiofile/aio.py,sha256=YvUNB51-p7MjwcTwQsZUKnahrNnfloJohyQRhhGONOU,9147
+aiofile/py.typed,sha256=AbpHGcgLb-kRsJGnwFEktk7uzpZOCcBY74-YBdrKVGs,1
+aiofile/utils.py,sha256=fSmImBPaZrFmiHXn0x0UrUa3T9NPa13YK6kcqO1Viow,10607
+aiofile/version.py,sha256=4JIbHoxFpAICH6rY5oqXJ8_iP-wLwyx3U2YNgk2nUZI,483

@@ -37,8 +37,10 @@ from aiohttp import web
 from framework.server.app import (
     cold_sessions_dir,
     resolve_session,
-    safe_path_segment,
     sessions_dir,
+)
+from framework.server.path_utils import (
+    safe_path_segment,
     validate_agent_path,
 )
 from framework.server.session_manager import SessionManager
@@ -525,7 +527,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
             await _start_trigger_webhook(session, trigger_id, tdef)
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
-        session_id = safe_path_segment(request.match_info["session_id"])
+        session_id = session.id
         await _persist_active_triggers(session, session_id)
 
     _save_trigger_to_agent(session, trigger_id, tdef)
@@ -589,7 +591,7 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = safe_path_segment(request.match_info["session_id"])
+        sid = request.match_info["session_id"]
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
@@ -761,7 +763,7 @@ async def handle_messages(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = safe_path_segment(request.match_info["session_id"])
+        sid = request.match_info["session_id"]
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
@@ -989,7 +991,10 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
 
     # Delete the queen session directory from disk
     queen_session_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+    expected_base = Path.home() / ".hive" / "queen" / "session"
     if queen_session_dir.exists() and queen_session_dir.is_dir():
+        if not queen_session_dir.resolve().is_relative_to(expected_base):
+            return web.json_response({"error": "Invalid session path"}, status=400)
         try:
             shutil.rmtree(queen_session_dir)
         except OSError as e:

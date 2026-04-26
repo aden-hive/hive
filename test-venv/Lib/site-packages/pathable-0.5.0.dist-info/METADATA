@@ -1,0 +1,201 @@
+Metadata-Version: 2.4
+Name: pathable
+Version: 0.5.0
+Summary: Object-oriented paths
+License: Apache-2.0
+License-File: LICENSE
+Keywords: dict,dictionary,list,lookup,path,pathable
+Author: Artur Maciag
+Author-email: maciag.artur@gmail.com
+Requires-Python: >=3.10,<4.0
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Project-URL: Repository, https://github.com/p1c2u/pathable
+Description-Content-Type: text/markdown
+
+# pathable
+
+[![Package version](https://img.shields.io/pypi/v/pathable.svg)](https://pypi.org/project/pathable/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pathable.svg)](https://pypi.org/project/pathable/)
+[![License](https://img.shields.io/pypi/l/pathable.svg)](https://pypi.org/project/pathable/)
+
+## About
+
+Pathable provides a small set of "path" objects for traversing hierarchical data (mappings, lists, and other subscriptable trees) using a familiar path-like syntax.
+
+It’s especially handy when you want to:
+
+* express deep lookups as a single object (and pass it around)
+* build paths incrementally (`p / "a" / 0 / "b"`)
+* safely probe (`exists()`, `get(...)`) or strictly require segments (`//`)
+
+## Key features
+
+* Intuitive path-based navigation for nested data (e.g., dicts/lists)
+* Pluggable accessor layer for custom backends
+* Pythonic, chainable API for concise and readable code
+* Per-instance (bounded LRU) cached lookup accessor for repeated reads of the same tree
+
+## Quickstart
+
+```python
+from pathable import LookupPath
+
+data = {
+    "parts": {
+        "part1": {"name": "Part One"},
+        "part2": {"name": "Part Two"},
+    }
+}
+
+root = LookupPath.from_lookup(data)
+
+name = (root / "parts" / "part2" / "name").read_value()
+assert name == "Part Two"
+```
+
+## Usage
+
+```python
+from pathable import LookupPath
+
+data = {
+    "parts": {
+        "part1": {"name": "Part One"},
+        "part2": {"name": "Part Two"},
+    }
+}
+
+p = LookupPath.from_lookup(data)
+
+# Concatenate path segments with /
+parts = p / "parts"
+
+# Check membership (mapping keys or list indexes)
+assert "part2" in parts
+
+# Read a value
+assert (parts / "part2" / "name").read_value() == "Part Two"
+
+# Iterate children as paths
+for child in parts:
+    print(child, child.read_value())
+
+# Work with keys/items
+print(list(parts.keys()))
+print({k: v.read_value() for k, v in parts.items()})
+
+# Safe access
+print(parts.get("missing", default=None))
+
+# Strict access (raises KeyError if missing)
+must_exist = parts // "part2"
+
+# "Open" yields the current value as a context manager
+with parts.open() as parts_value:
+    assert isinstance(parts_value, dict)
+
+# Optional metadata
+print(parts.stat())
+```
+
+## Filesystem example
+
+Pathable can also traverse the filesystem via an accessor.
+
+```python
+from pathlib import Path
+
+from pathable import FilesystemPath
+
+root_dir = Path(".")
+p = FilesystemPath.from_path(root_dir)
+
+readme = p / "README.md"
+if readme.exists():
+    content = readme.read_value()  # bytes
+    print(content[:100])
+```
+
+## Core concepts
+
+* `BasePath` is a pure path (segments + separator) with `/` joining.
+* `AccessorPath` is a `BasePath` bound to a `NodeAccessor`, enabling `read_value()`, `exists()`, `keys()`, iteration, etc.
+* `FilesystemPath` is an `AccessorPath` specialized for filesystem objects.
+* `LookupPath` is an `AccessorPath` specialized for mapping/list lookups.
+
+Notes on parsing:
+
+* A segment like `"a/b"` is split into parts using the separator.
+* `None` segments are ignored.
+* `"."` segments are ignored (relative no-op).
+* Operations like `relative_to()` and `is_relative_to()` also respect the instance separator.
+
+Equality and ordering:
+
+* `BasePath` equality, hashing, and ordering are all based on both `separator` and `parts`.
+* Ordering is separator-sensitive and deterministic, even when parts mix types (e.g. ints and strings).
+* Path parts are type-sensitive (`0` is not equal to `"0"`).
+
+Lookup caching:
+
+* `LookupPath` uses a per-instance LRU cache (default maxsize: 128) on its accessor.
+* You can control it via `path.accessor.clear_cache()`, `path.accessor.disable_cache()`, and `path.accessor.enable_cache(maxsize=...)`.
+* `path.accessor.node` is immutable; to point at a different tree, create a new `LookupPath`/accessor.
+
+## Installation
+
+Recommended way (via pip):
+
+``` console
+pip install pathable
+```
+
+Alternatively you can download the code and install from the repository:
+
+``` console
+pip install -e git+https://github.com/p1c2u/pathable.git#egg=pathable
+```
+
+## Benchmarks
+
+Benchmarks live in `tests/benchmarks/` and produce JSON reports.
+
+Local run (recommended as modules):
+
+```console
+poetry run python -m tests.benchmarks.bench_parse --output reports/bench-parse.json
+poetry run python -m tests.benchmarks.bench_lookup --output reports/bench-lookup.json
+```
+
+Quick sanity run:
+
+```console
+poetry run python -m tests.benchmarks.bench_parse --quick --output reports/bench-parse.quick.json
+poetry run python -m tests.benchmarks.bench_lookup --quick --output reports/bench-lookup.quick.json
+```
+
+Compare two results (fails if candidate is >20% slower in any scenario):
+
+```console
+poetry run python -m tests.benchmarks.compare_results \
+    --baseline reports/bench-before.json \
+    --candidate reports/bench-after.json \
+    --tolerance 0.20
+```
+
+CI (on-demand):
+
+- GitHub Actions workflow `Benchmarks` runs via `workflow_dispatch` and uploads the JSON artifacts.
+
+

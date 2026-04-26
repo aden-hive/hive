@@ -1,0 +1,93 @@
+Metadata-Version: 2.4
+Name: joserfc
+Version: 1.6.4
+Summary: The ultimate Python library for JOSE RFCs, including JWS, JWE, JWK, JWA, JWT
+Author-email: Hsiaoming Yang <me@lepture.com>
+License: BSD-3-Clause
+Project-URL: Documentation, https://jose.authlib.org/
+Project-URL: Source, https://github.com/authlib/joserfc
+Project-URL: Funding, https://github.com/sponsors/authlib
+Project-URL: Blog, https://blog.authlib.org/
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Console
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Classifier: Topic :: Security
+Classifier: Topic :: Security :: Cryptography
+Requires-Python: >=3.9
+Description-Content-Type: text/x-rst
+License-File: LICENSE
+Requires-Dist: cryptography>=45.0.1
+Provides-Extra: drafts
+Requires-Dist: pycryptodome; extra == "drafts"
+Dynamic: license-file
+
+JOSE RFC
+========
+
+``joserfc`` is a Python library that provides a comprehensive implementation of several
+essential JSON Object Signing and Encryption (JOSE) standards.
+
+This package contains implementation of:
+
+- RFC7515: JSON Web Signature
+- RFC7516: JSON Web Encryption
+- RFC7517: JSON Web Key
+- RFC7518: JSON Web Algorithms
+- RFC7519: JSON Web Token
+- RFC7520: Examples of Protecting Content Using JSON Object Signing and Encryption
+- RFC7638: JSON Web Key (JWK) Thumbprint
+- RFC7797: JSON Web Signature (JWS) Unencoded Payload Option
+- RFC8037: OKP Key and EdDSA algorithm
+- RFC8812: ES256K algorithm
+- RFC9278: JWK Thumbprint URI
+- RFC9864: ``Ed25519`` and ``Ed448`` algorithms
+
+And draft RFCs implementation of:
+
+- draft-ietf-jose-deprecate-none-rsa15-02
+- draft-amringer-jose-chacha-02
+- draft-madden-jose-ecdh-1pu-04
+
+Usage
+-----
+
+A quick and simple JWT encoding and decoding would look something like this:
+
+.. code-block:: python
+
+    >>> from joserfc import jwt, jwk
+    >>> key = jwk.import_key("your-secret-key", "oct")
+    >>> encoded_jwt = jwt.encode({"alg": "HS256"}, {"k": "value"}, key)
+    >>> encoded_jwt
+    'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJrIjoidmFsdWUifQ._M8ViO_GK6TnZ9G9eqdlS7IpNWzhoGwaYYDQ3hEwwmA'
+    >>> token = jwt.decode(encoded_jwt, key)
+    >>> token.header
+    {'alg': 'HS256', 'typ': 'JWT'}
+    >>> token.claims
+    {'key': 'value'}
+    >>> claims_requests = jwt.JWTClaimsRegistry()
+    >>> claims_requests.validate(token.claims)
+
+Useful Links
+------------
+
+1. GitHub: https://github.com/authlib/joserfc
+2. Docs: https://jose.authlib.org/en/
+
+License
+-------
+
+Licensed under BSD. Please see LICENSE for licensing details.

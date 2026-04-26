@@ -1,0 +1,64 @@
+Metadata-Version: 2.4
+Name: uncalled-for
+Version: 0.3.1
+Summary: Async dependency injection for Python functions
+Project-URL: Repository, https://github.com/chrisguidry/uncalled-for
+Project-URL: Bug Tracker, https://github.com/chrisguidry/uncalled-for/issues
+Author-email: Chris Guidry <guid@omg.lol>
+License: # Released under MIT License
+        
+        Copyright (c) 2025 Chris Guidry.
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+License-File: LICENSE
+Classifier: Development Status :: 3 - Alpha
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Typing :: Typed
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# uncalled-for
+
+Async dependency injection for Python functions.
+
+Declare what your function needs as parameter defaults. They show up resolved
+when the function runs. No ceremony, no container, no configuration.
+
+```python
+from uncalled_for import Depends
+
+async def get_db():
+    db = await connect()
+    try:
+        yield db
+    finally:
+        await db.close()
+
+async def handle_request(db: Connection = Depends(get_db)):
+    await db.execute("SELECT 1")
+```
+
+## Features
+
+- **Zero dependencies** — standard library only
+- **Async-native** — built on `AsyncExitStack` and `ContextVar`
+- **Context manager lifecycle** — sync and async generators get proper cleanup
+- **Nested dependencies** — dependencies can depend on other dependencies
+- **Caching** — each dependency resolves once per call, even if referenced multiple times
+
+## Install
+
+```
+pip install uncalled-for
+```

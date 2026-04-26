@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from framework.runtime.triggers import TriggerDefinition
+from framework.server.path_utils import safe_path_segment
 
 logger = logging.getLogger(__name__)
 
@@ -950,7 +951,6 @@ class SessionManager:
         ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
-        from framework.server.app import safe_path_segment
         session_id = safe_path_segment(session_id)
         
         queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id

@@ -1,0 +1,43 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:452b374e-2a82-45a2-bd7d-9cf0ba5869c5",
+  "metadata": {
+    "timestamp": "2026-04-24T19:15:01Z"
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "openssl",
+      "version": "4.0.0",
+      "purl": "pkg:generic/openssl@4.0.0?download_url=https://github.com/openssl/openssl/releases/download/openssl-4.0.0/openssl-4.0.0.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c32cf49a959c4f345f9606982dd36e7d28f7c58b19c2e25d75624d2b3d2f79ac"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/openssl/openssl/releases/download/openssl-4.0.0/openssl-4.0.0.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "build:operating-system",
+          "value": "windows"
+        },
+        {
+          "name": "build:architecture",
+          "value": "win64"
+        },
+        {
+          "name": "build:flags",
+          "value": "no-zlib no-shared no-module no-comp no-apps no-docs no-sm2-precomp no-atexit"
+        }
+      ]
+    }
+  ]
+}

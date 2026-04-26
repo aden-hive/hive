@@ -1,0 +1,190 @@
+Metadata-Version: 2.4
+Name: jsonschema-path
+Version: 0.4.5
+Summary: JSONSchema Spec with object-oriented paths
+License: Apache-2.0
+License-File: LICENSE
+Keywords: jsonschema,swagger,spec
+Author: Artur Maciag
+Author-email: maciag.artur@gmail.com
+Requires-Python: >=3.10,<4.0.0
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Provides-Extra: requests
+Requires-Dist: PyYAML (>=5.1)
+Requires-Dist: pathable (>=0.5.0,<0.6.0)
+Requires-Dist: referencing (<0.38.0)
+Requires-Dist: requests (>=2.31.0,<3.0.0) ; extra == "requests"
+Project-URL: Repository, https://github.com/p1c2u/jsonschema-path
+Description-Content-Type: text/x-rst
+
+***************
+JSONSchema Path
+***************
+
+.. image:: https://img.shields.io/pypi/v/jsonschema-path.svg
+     :target: https://pypi.python.org/pypi/jsonschema-path
+.. image:: https://travis-ci.org/p1c2u/jsonschema-path.svg?branch=master
+     :target: https://travis-ci.org/p1c2u/jsonschema-path
+.. image:: https://img.shields.io/codecov/c/github/p1c2u/jsonschema-path/master.svg?style=flat
+     :target: https://codecov.io/github/p1c2u/jsonschema-path?branch=master
+.. image:: https://img.shields.io/pypi/pyversions/jsonschema-path.svg
+     :target: https://pypi.python.org/pypi/jsonschema-path
+.. image:: https://img.shields.io/pypi/format/jsonschema-path.svg
+     :target: https://pypi.python.org/pypi/jsonschema-path
+.. image:: https://img.shields.io/pypi/status/jsonschema-path.svg
+     :target: https://pypi.python.org/pypi/jsonschema-path
+
+About
+#####
+
+Object-oriented JSONSchema
+
+Key features
+############
+
+* Traverse schema like paths
+* Access schema on demand with separate dereferencing accessor layer
+
+Installation
+############
+
+.. code-block:: console
+
+   pip install jsonschema-path
+
+Alternatively you can download the code and install from the repository:
+
+.. code-block:: console
+
+   pip install -e git+https://github.com/p1c2u/jsonschema-path.git#egg=jsonschema_path
+
+
+Usage
+#####
+
+.. code-block:: python
+
+   >>> from jsonschema_path import SchemaPath
+   
+   >>> d = {
+   ...     "properties": {
+   ...        "info": {
+   ...            "$ref": "#/$defs/Info",
+   ...        },
+   ...     },
+   ...     "$defs": {
+   ...         "Info": {
+   ...             "properties": {
+   ...                 "title": {
+   ...                     "$ref": "http://example.com",
+   ...                 },
+   ...                 "version": {
+   ...                     "type": "string",
+   ...                     "default": "1.0",
+   ...                 },
+   ...             },
+   ...         },
+   ...     },
+   ... }
+   
+   >>> path = SchemaPath.from_dict(d)
+   
+   >>> # Stat keys
+   >>> "properties" in path
+   True
+   
+   >>> # Concatenate paths with /
+   >>> info_path = path / "properties" / "info"
+   
+   >>> # Stat keys with implicit dereferencing
+   >>> "properties" in info_path
+   True
+   
+   >>> # Concatenate paths with implicit dereferencing
+   >>> version_path = info_path / "properties" / "version"
+   
+   >>> # Open content with implicit dereferencing
+   >>> with version_path.open() as contents:
+   ...     print(contents)
+   {'type': 'string', 'default': '1.0'}
+
+
+Resolved cache
+##############
+
+The resolved-path cache is intended for repeated path lookups and may significantly improve
+``read_value``/membership hot paths. Cache entries are invalidated when the
+resolver registry evolves during reference resolution.
+
+This cache is optional and disabled by default
+(``resolved_cache_maxsize=0``). You can enable it when creating paths or
+accessors, for example:
+
+.. code-block:: python
+
+   >>> path = SchemaPath.from_dict(d, resolved_cache_maxsize=64)
+
+Benchmarks
+##########
+
+Benchmarks mirror the lightweight (dependency-free) JSON output format used in
+`pathable`.
+
+Run locally with Poetry:
+
+.. code-block:: console
+
+   poetry run python -m tests.benchmarks.bench_parse --output reports/bench-parse.json
+   poetry run python -m tests.benchmarks.bench_lookup --output reports/bench-lookup.json
+
+For a quick smoke run:
+
+.. code-block:: console
+
+   poetry run python -m tests.benchmarks.bench_parse --output reports/bench-parse.quick.json --quick
+   poetry run python -m tests.benchmarks.bench_lookup --output reports/bench-lookup.quick.json --quick
+
+You can also control repeats/warmup and resolved cache maxsize via env vars:
+
+.. code-block:: console
+
+   export JSONSCHEMA_PATH_BENCH_REPEATS=5
+   export JSONSCHEMA_PATH_BENCH_WARMUP=1
+   export JSONSCHEMA_PATH_BENCH_RESOLVED_CACHE_MAXSIZE=64
+
+Compare two results:
+
+.. code-block:: console
+
+    poetry run python -m tests.benchmarks.compare_results \
+       --baseline reports/bench-lookup-master.json \
+       --candidate reports/bench-lookup.json \
+       --tolerance 0.20
+
+
+Related projects
+################
+
+* `openapi-core <https://github.com/p1c2u/openapi-core>`__
+   Python library that adds client-side and server-side support for the OpenAPI.
+* `openapi-spec-validator <https://github.com/p1c2u/openapi-spec-validator>`__
+   Python library that validates OpenAPI Specs against the OpenAPI 2.0 (aka Swagger) and OpenAPI 3.0 specification
+* `openapi-schema-validator <https://github.com/p1c2u/openapi-schema-validator>`__
+   Python library that validates schema against the OpenAPI Schema Specification v3.0.
+
+License
+#######
+
+Copyright (c) 2017-2025, Artur Maciag, All rights reserved. Apache-2.0
+
