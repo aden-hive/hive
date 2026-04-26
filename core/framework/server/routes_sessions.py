@@ -199,7 +199,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     This lets the frontend detect a server restart and restore message history.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -260,7 +260,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
 async def handle_stop_session(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id} — stop a session entirely."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     stopped = await manager.stop_session(session_id)
     if not stopped:
@@ -283,7 +283,7 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     Body: {"agent_path": "...", "worker_id": "..." (optional), "model": "..." (optional)}
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     body = await request.json()
 
     agent_path = body.get("agent_path")
@@ -322,7 +322,7 @@ async def handle_load_worker(request: web.Request) -> web.Response:
 async def handle_unload_worker(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id}/worker — unload worker, keep queen alive."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     removed = await manager.unload_worker(session_id)
     if not removed:
@@ -348,7 +348,7 @@ async def handle_unload_worker(request: web.Request) -> web.Response:
 async def handle_session_stats(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/stats — runtime statistics."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -364,7 +364,7 @@ async def handle_session_stats(request: web.Request) -> web.Response:
 async def handle_session_entry_points(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/entry-points — list entry points."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -525,7 +525,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
             await _start_trigger_webhook(session, trigger_id, tdef)
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
-        session_id = request.match_info["session_id"]
+        session_id = safe_path_segment(request.match_info["session_id"])
         await _persist_active_triggers(session, session_id)
 
     _save_trigger_to_agent(session, trigger_id, tdef)
@@ -566,7 +566,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
 async def handle_session_graphs(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/graphs — list loaded graphs."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -589,7 +589,7 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = request.match_info["session_id"]
+        sid = safe_path_segment(request.match_info["session_id"])
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
@@ -761,7 +761,7 @@ async def handle_messages(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = request.match_info["session_id"]
+        sid = safe_path_segment(request.match_info["session_id"])
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
