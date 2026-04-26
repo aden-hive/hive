@@ -486,8 +486,12 @@ class TestReportToParentGatingByStream:
         try:
             # Spawn a parallel worker — its tool list should include report_to_parent
             await colony.spawn(task="test", count=1)
-            # After the worker's first LLM call, check the recorded tools
-            await asyncio.sleep(0.2)  # let the background task run
+            # Poll until the worker fires its first LLM call. Bare sleeps were
+            # flaky on slow Windows CI; loop with a generous deadline instead.
+            for _ in range(100):
+                if llm.stream_calls:
+                    break
+                await asyncio.sleep(0.05)
             assert llm.stream_calls, "Worker never called the LLM"
             worker_tools = llm.stream_calls[0]["tools"]
             tool_names = [t.name for t in (worker_tools or [])]
