@@ -14,7 +14,7 @@ PROMETHEUS_CREDENTIALS = {
         help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
         description="Base URL of Prometheus server",
         aden_supported=False,
-        direct_api_key_supported=False,
+        direct_api_key_supported=True,
         api_key_instructions="""To configure Prometheus access:
 
 1. Set your Prometheus base URL:
@@ -49,7 +49,7 @@ Notes:
         help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
         description="Optional Bearer token for Prometheus authentication",
         aden_supported=False,
-        direct_api_key_supported=False,
+        direct_api_key_supported=True,
         api_key_instructions="""Optional: set a bearer token for authenticated Prometheus instances:
 
 export PROMETHEUS_TOKEN=your-token
@@ -69,7 +69,7 @@ export PROMETHEUS_TOKEN=your-token
         help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
         description="Optional username for basic auth",
         aden_supported=False,
-        direct_api_key_supported=False,
+        direct_api_key_supported=True,
         api_key_instructions="""Optional: set username for basic authentication:
 
 export PROMETHEUS_USERNAME=admin
@@ -89,7 +89,7 @@ export PROMETHEUS_USERNAME=admin
         help_url="https://prometheus.io/docs/prometheus/latest/querying/api/",
         description="Optional password for basic auth",
         aden_supported=False,
-        direct_api_key_supported=False,
+        direct_api_key_supported=True,
         api_key_instructions="""Optional: set password for basic authentication:
 
 export PROMETHEUS_PASSWORD=secret
