@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 
 try:
     import dns.exception
+    import dns.flags
     import dns.name
     import dns.query
     import dns.rdatatype
@@ -198,11 +199,24 @@ def _check_dkim(resolver: dns.resolver.Resolver, domain: str) -> dict:
 
 
 def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
-    """Check if DNSSEC is enabled."""
+    """Check if DNSSEC is enabled and validated."""
     try:
-        answers = resolver.resolve(domain, "DNSKEY")
-        if answers:
+        # Create an isolated resolver to avoid polluting the default one
+        sec_resolver = dns.resolver.Resolver()
+        
+        # Use known validating nameservers (Google, Cloudflare)
+        sec_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+        
+        # Use EDNS to request DNSSEC validation (DO flag) and increase packet size
+        sec_resolver.use_edns(0, dns.flags.DO, 4096)
+        
+        # Query for SOA records (mandatory for all domains)
+        answers = sec_resolver.resolve(domain, "SOA")
+        
+        # Verify the Authenticated Data (AD) flag is present
+        if answers.response.flags & dns.flags.AD:
             return {"enabled": True, "issues": []}
+            
     except dns.resolver.NoAnswer:
         pass
     except (dns.resolver.NXDOMAIN, dns.exception.DNSException):
@@ -211,7 +225,7 @@ def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
     return {
         "enabled": False,
         "issues": [
-            "DNSSEC not enabled. The domain is vulnerable to DNS spoofing and cache poisoning."
+            "DNSSEC is not enabled or could not be validated. The domain is vulnerable to DNS spoofing and cache poisoning."
         ],
     }
 
