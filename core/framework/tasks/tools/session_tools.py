@@ -259,11 +259,7 @@ def _make_update_executor(store: TaskStore):
         # Auto-owner on in_progress.
         owner_in = inputs.get("owner", _OwnerSentinel)
         status_enum = TaskStatus(status_in) if status_in else None
-        if (
-            status_enum == TaskStatus.IN_PROGRESS
-            and owner_in is _OwnerSentinel
-            and agent_id
-        ):
+        if status_enum == TaskStatus.IN_PROGRESS and owner_in is _OwnerSentinel and agent_id:
             owner_in = agent_id
 
         # task_completed hook — fires BEFORE the write (Claude Code's
@@ -336,8 +332,7 @@ def _make_update_executor(store: TaskStore):
                 (
                     r
                     for r in others
-                    if r.status == TaskStatus.PENDING
-                    and not [b for b in r.blocked_by if b not in completed_ids]
+                    if r.status == TaskStatus.PENDING and not [b for b in r.blocked_by if b not in completed_ids]
                 ),
                 None,
             )
@@ -351,10 +346,7 @@ def _make_update_executor(store: TaskStore):
                     f"Mark it in_progress before starting."
                 )
             else:
-                message += (
-                    " All tasks complete. Wrap up: report results to the user "
-                    "and stop."
-                )
+                message += " All tasks complete. Wrap up: report results to the user and stop."
 
         return {
             "success": True,
@@ -384,9 +376,7 @@ def _make_list_executor(store: TaskStore):
             if r.owner:
                 line_parts.append(f"({r.owner})")
             if unresolved_blockers:
-                line_parts.append(
-                    f"[blocked by {', '.join(f'#{b}' for b in unresolved_blockers)}]"
-                )
+                line_parts.append(f"[blocked by {', '.join(f'#{b}' for b in unresolved_blockers)}]")
             rendered.append(" ".join(line_parts))
         return {
             "success": True,

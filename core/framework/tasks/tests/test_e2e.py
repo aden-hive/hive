@@ -1,9 +1,9 @@
 """End-to-end tests:
 
-  - Session task tools fire EventBus events
-  - REST routes return correct snapshots
-  - run_parallel_workers-style flow stamps assigned_session
-  - Durability: store survives a process boundary (subprocess)
+- Session task tools fire EventBus events
+- REST routes return correct snapshots
+- run_parallel_workers-style flow stamps assigned_session
+- Durability: store survives a process boundary (subprocess)
 """
 
 from __future__ import annotations
@@ -72,9 +72,7 @@ async def test_task_created_emits_event(registry: ToolRegistry) -> None:
 
     bus.subscribe([EventType.TASK_CREATED], handler)
 
-    token = ToolRegistry.set_execution_context(
-        agent_id="alice", task_list_id="session:alice:s1"
-    )
+    token = ToolRegistry.set_execution_context(agent_id="alice", task_list_id="session:alice:s1")
     try:
         await _invoke(registry, "task_create", subject="hello")
     finally:
@@ -99,9 +97,7 @@ async def test_task_updated_emits_event(registry: ToolRegistry) -> None:
 
     bus.subscribe([EventType.TASK_UPDATED], handler)
 
-    token = ToolRegistry.set_execution_context(
-        agent_id="alice", task_list_id="session:alice:s1"
-    )
+    token = ToolRegistry.set_execution_context(agent_id="alice", task_list_id="session:alice:s1")
     try:
         await _invoke(registry, "task_create", subject="x")
         await _invoke(registry, "task_update", id=1, status="in_progress")

@@ -140,14 +140,13 @@ class TaskStore:
         first time the list is read. Until then, we still want to expose
         the list's tasks via REST.
         """
+
         def _check() -> bool:
             root = self._list_root(task_list_id)
             if (root / "meta.json").exists():
                 return True
             tasks_dir = root / "tasks"
-            if tasks_dir.exists() and any(
-                p.suffix == ".json" for p in tasks_dir.iterdir()
-            ):
+            if tasks_dir.exists() and any(p.suffix == ".json" for p in tasks_dir.iterdir()):
                 return True
             return False
 
@@ -405,11 +404,7 @@ class TaskStore:
             # ensure_task_list call); without this backfill the REST
             # endpoint can't discover them. Role is inferred from prefix.
             if not self._meta_path(task_list_id).exists():
-                inferred_role = (
-                    TaskListRole.TEMPLATE
-                    if task_list_id.startswith("colony:")
-                    else TaskListRole.SESSION
-                )
+                inferred_role = TaskListRole.TEMPLATE if task_list_id.startswith("colony:") else TaskListRole.SESSION
                 self._write_meta_sync(
                     task_list_id,
                     TaskListMeta(

@@ -938,9 +938,8 @@ async def create_queen(
 
             queen_agent_id = getattr(session, "agent_id", None) or "queen"
             queen_list_id = session_task_list_id(queen_agent_id, session.id)
-            colony_id = (
-                getattr(session, "colony_id", None)
-                or getattr(getattr(session, "colony_runtime", None), "_colony_id", None)
+            colony_id = getattr(session, "colony_id", None) or getattr(
+                getattr(session, "colony_runtime", None), "_colony_id", None
             )
             ToolRegistry.set_execution_context(
                 profile=session.id,

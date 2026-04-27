@@ -964,9 +964,7 @@ class ColonyRuntime:
 
             _worker_list_id = _session_list_id(worker_id, worker_id)
             _picked_up = None
-            _template_id = (
-                input_data.get("__template_task_id") if isinstance(input_data, dict) else None
-            )
+            _template_id = input_data.get("__template_task_id") if isinstance(input_data, dict) else None
             if _template_id is not None:
                 try:
                     _picked_up = (_colony_list_id(self._colony_id), int(_template_id))

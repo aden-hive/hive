@@ -116,9 +116,7 @@ async def test_queen_plans_workers_pick_up(tmp_path: Path) -> None:
     for wid in worker_ids:
         worker_reg = ToolRegistry()
         register_task_tools(worker_reg, store=store)
-        wtoken = ToolRegistry.set_execution_context(
-            agent_id=wid, task_list_id=session_task_list_id(wid, wid)
-        )
+        wtoken = ToolRegistry.set_execution_context(agent_id=wid, task_list_id=session_task_list_id(wid, wid))
         try:
             await _invoke(worker_reg, "task_create", subject=f"setup for {wid}")
             await _invoke(worker_reg, "task_update", id=1, status="in_progress")
@@ -128,10 +126,7 @@ async def test_queen_plans_workers_pick_up(tmp_path: Path) -> None:
     # 4. Verify the colony template entries are stamped + workers have
     #    their own private lists.
     template_after = await store.list_tasks(template_list_id)
-    assert all(
-        t.metadata.get("assigned_worker_id") in {"w1", "w2", "w3"}
-        for t in template_after
-    )
+    assert all(t.metadata.get("assigned_worker_id") in {"w1", "w2", "w3"} for t in template_after)
 
     for wid in worker_ids:
         worker_tasks = await store.list_tasks(session_task_list_id(wid, wid))

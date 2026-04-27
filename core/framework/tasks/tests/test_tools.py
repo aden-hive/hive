@@ -50,9 +50,7 @@ async def _invoke(registry: ToolRegistry, name: str, **inputs):
 
 
 def _set_ctx(*, agent_id: str, task_list_id: str, **extra):
-    return ToolRegistry.set_execution_context(
-        agent_id=agent_id, task_list_id=task_list_id, **extra
-    )
+    return ToolRegistry.set_execution_context(agent_id=agent_id, task_list_id=task_list_id, **extra)
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +306,7 @@ async def test_hook_blocks_task_completed_never_writes(
         assert after is not None
         assert after.status == TaskStatus.IN_PROGRESS
         assert after.updated_at == ts_before, (
-            "veto-before-write violated: updated_at changed, indicating a "
-            "transient write happened"
+            "veto-before-write violated: updated_at changed, indicating a transient write happened"
         )
     finally:
         ToolRegistry.reset_execution_context(token)
@@ -349,9 +346,7 @@ async def test_colony_template_add_and_list(queen_registry: ToolRegistry) -> Non
 @pytest.mark.asyncio
 async def test_colony_template_remove(queen_registry: ToolRegistry) -> None:
     reg = queen_registry
-    token = _set_ctx(
-        agent_id="queen", task_list_id="session:queen:sess_1", colony_id="abc"
-    )
+    token = _set_ctx(agent_id="queen", task_list_id="session:queen:sess_1", colony_id="abc")
     try:
         await _invoke(reg, "colony_template_add", subject="a")
         await _invoke(reg, "colony_template_add", subject="b")

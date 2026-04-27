@@ -65,10 +65,7 @@ def resolve_task_list_id(ctx: Any) -> str:
 
     agent_id = getattr(ctx, "agent_id", None) or ""
     session_id = (
-        getattr(ctx, "run_id", None)
-        or getattr(ctx, "execution_id", None)
-        or getattr(ctx, "stream_id", None)
-        or ""
+        getattr(ctx, "run_id", None) or getattr(ctx, "execution_id", None) or getattr(ctx, "stream_id", None) or ""
     )
     if agent_id and session_id:
         return session_task_list_id(agent_id, session_id)

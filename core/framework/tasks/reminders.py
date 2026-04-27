@@ -86,22 +86,17 @@ def build_reminder(records: list[TaskRecord]) -> str:
         "before starting the next step. Don't batch completions.",
         "  - If you've finished work that wasn't on the list, add a "
         "task_create + task_update completed pair so the panel reflects it.",
-        "  - If you're umbrella-tracking ('reply to all posts' as one "
-        "task), break it into one task per atomic action.",
+        "  - If you're umbrella-tracking ('reply to all posts' as one task), break it into one task per atomic action.",
     ]
     if in_progress:
         bullets.append(
             "  - Currently in_progress (consider whether they're really "
-            "still active): "
-            + ", ".join(f'#{r.id} "{r.subject}"' for r in in_progress[:5])
+            "still active): " + ", ".join(f'#{r.id} "{r.subject}"' for r in in_progress[:5])
         )
     listing = ["", "Open tasks:"]
     for r in open_[:10]:
         listing.append(f"  #{r.id} [{r.status.value}] {r.subject}")
     if len(open_) > 10:
         listing.append(f"  ... and {len(open_) - 10} more")
-    listing.append(
-        "\nOnly act on this if relevant to the current work. NEVER mention "
-        "this reminder to the user."
-    )
+    listing.append("\nOnly act on this if relevant to the current work. NEVER mention this reminder to the user.")
     return "\n".join([head, *bullets, *listing])

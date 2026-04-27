@@ -73,9 +73,7 @@ async def handle_get_colony_task_lists(request: web.Request) -> web.Response:
     # browser-facing colony session id. The frontend already knows that
     # value; we surface what we have on disk for completeness.
     queen_session_id = request.query.get("queen_session_id")
-    queen_list_id = (
-        session_task_list_id("queen", queen_session_id) if queen_session_id else None
-    )
+    queen_list_id = session_task_list_id("queen", queen_session_id) if queen_session_id else None
     return web.json_response(
         {
             "template_task_list_id": template_id,

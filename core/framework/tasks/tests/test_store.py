@@ -75,9 +75,7 @@ async def test_list_filters_internal(store: TaskStore, list_id: str) -> None:
 @pytest.mark.asyncio
 async def test_concurrent_create_distinct_ids(store: TaskStore, list_id: str) -> None:
     await store.ensure_task_list(list_id, role=TaskListRole.SESSION)
-    results = await asyncio.gather(
-        *(store.create_task(list_id, subject=f"t{i}") for i in range(20))
-    )
+    results = await asyncio.gather(*(store.create_task(list_id, subject=f"t{i}") for i in range(20)))
     ids = sorted(r.id for r in results)
     assert ids == list(range(1, 21))
 
@@ -91,9 +89,7 @@ async def test_concurrent_create_distinct_ids(store: TaskStore, list_id: str) ->
 async def test_update_returns_changed_fields(store: TaskStore, list_id: str) -> None:
     await store.ensure_task_list(list_id, role=TaskListRole.SESSION)
     rec = await store.create_task(list_id, subject="orig")
-    new, fields = await store.update_task(
-        list_id, rec.id, subject="orig", status=TaskStatus.IN_PROGRESS
-    )
+    new, fields = await store.update_task(list_id, rec.id, subject="orig", status=TaskStatus.IN_PROGRESS)
     assert fields == ["status"]  # subject unchanged shouldn't appear
     assert new.status == TaskStatus.IN_PROGRESS
 
