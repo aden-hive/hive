@@ -127,6 +127,8 @@ class ToolRegistry:
         name: str,
         tool: Tool,
         executor: Callable[[dict], Any],
+        *,
+        overwrite: bool = True,
     ) -> None:
         """
         Register a single tool with its executor.
@@ -135,8 +137,13 @@ class ToolRegistry:
             name: Tool name (must match tool.name)
             tool: Tool definition
             executor: Function that takes tool input dict and returns result
+            overwrite: If False, log a warning and keep the existing
+                registration when ``name`` is already present. Defaults to
+                True to preserve the documented idempotent-overwrite
+                contract used by ``register_task_tools`` and
+                ``AgentLoader.register_tool``.
         """
-        if name in self._tools:
+        if name in self._tools and not overwrite:
             logger.warning(
                 "⚠ Tool '%s' already registered, skipping duplicate. "
                 "Existing: %s",
