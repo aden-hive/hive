@@ -232,3 +232,192 @@ async def test_accepts_uncompressed_tar(colonies_dir: Path) -> None:
         )
         assert resp.status == 201
     assert (colonies_dir / "x_daily" / "file.txt").read_text() == "plain"
+
+
+# --------------------------------------------------------------------------
+# Multi-root tar tests — the desktop's pushColonyToWorkspace ships the colony
+# dir + worker conversations + the queen's forked session in one tar so the
+# queen has full context on resume. Each recognised top-level prefix unpacks
+# into its corresponding HIVE_HOME subtree.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_multi_root_unpacks_three_subtrees(colonies_dir: Path) -> None:
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/metadata.json": b'{"queen_session_id":"session_x"}',
+            "colonies/x_daily/data/progress.db": b"sqlite",
+            "agents/x_daily/worker/": None,
+            "agents/x_daily/worker/conversations/": None,
+            "agents/x_daily/worker/conversations/0001.json": b'{"role":"user"}',
+            "agents/x_daily/worker/conversations/0002.json": b'{"role":"assistant"}',
+            "agents/queens/queen_alpha/sessions/session_x/": None,
+            "agents/queens/queen_alpha/sessions/session_x/queen.json": b'{"id":"x"}',
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 201, await resp.text()
+        body = await resp.json()
+    # Colony files
+    assert (colonies_dir / "x_daily" / "metadata.json").exists()
+    assert (colonies_dir / "x_daily" / "data" / "progress.db").exists()
+    # Worker conversations under HIVE_HOME/agents/<colony>/worker/
+    hive_home = colonies_dir.parent
+    assert (hive_home / "agents" / "x_daily" / "worker" / "conversations" / "0001.json").read_bytes() == b'{"role":"user"}'
+    # Queen forked session under HIVE_HOME/agents/queens/<queen>/sessions/<sid>/
+    assert (hive_home / "agents" / "queens" / "queen_alpha" / "sessions" / "session_x" / "queen.json").exists()
+    # Summary in response
+    assert body["name"] == "x_daily"
+    assert body["files_imported"] == 5
+    by_root = body["by_root"]
+    assert by_root["colonies"]["files"] == 2
+    assert by_root["agents_worker"]["files"] == 2
+    assert by_root["agents_queen"]["files"] == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_root_colonies_only_succeeds(colonies_dir: Path) -> None:
+    """The agents/ subtrees are optional — a fresh colony has no history."""
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/metadata.json": b"{}",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 201, await resp.text()
+        body = await resp.json()
+    assert body["files_imported"] == 1
+    assert (colonies_dir / "x_daily" / "metadata.json").read_bytes() == b"{}"
+
+
+@pytest.mark.asyncio
+async def test_multi_root_rejects_missing_colonies_root(colonies_dir: Path) -> None:
+    """Worker / queen trees alone aren't valid — every push must include
+    the colony dir, otherwise the desktop's intent is unclear and we
+    refuse rather than silently leave HIVE_HOME in a half-state."""
+    archive = _build_tar(
+        {
+            "agents/x_daily/worker/": None,
+            "agents/x_daily/worker/log.json": b"{}",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 400, await resp.text()
+        err = (await resp.json())["error"]
+        assert "colonies/" in err
+
+
+@pytest.mark.asyncio
+async def test_multi_root_replace_existing_colony(colonies_dir: Path) -> None:
+    (colonies_dir / "x_daily").mkdir()
+    (colonies_dir / "x_daily" / "old.txt").write_text("preserved")
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/new.txt": b"new",
+        }
+    )
+    # Without flag → 409
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 409
+    assert (colonies_dir / "x_daily" / "old.txt").read_text() == "preserved"
+    # With flag → wipes + replaces
+    async with await _client(_app()) as c:
+        resp = await c.post(
+            "/api/colonies/import",
+            data=_form(archive, replace_existing="true"),
+        )
+        assert resp.status == 201, await resp.text()
+    assert not (colonies_dir / "x_daily" / "old.txt").exists()
+    assert (colonies_dir / "x_daily" / "new.txt").read_text() == "new"
+
+
+@pytest.mark.asyncio
+async def test_multi_root_rejects_traversal_in_worker_subtree(colonies_dir: Path) -> None:
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/m.json": b"{}",
+            "agents/x_daily/worker/": None,
+            "agents/x_daily/worker/../escape.txt": b"oops",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 400
+    hive_home = colonies_dir.parent
+    assert not (hive_home / "agents" / "escape.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_multi_root_rejects_unknown_prefix(colonies_dir: Path) -> None:
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/m.json": b"{}",
+            "etc/passwd": b"oops",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        # The unknown root is silently ignored (it doesn't match any
+        # recognised prefix); the colony root is required and present, so
+        # extraction succeeds and only the colonies subtree lands. We don't
+        # write outside HIVE_HOME because the dispatcher only routes to
+        # known destinations.
+        assert resp.status == 201, await resp.text()
+    hive_home = colonies_dir.parent
+    assert not (hive_home.parent / "etc" / "passwd").exists()
+    assert not (hive_home / "etc" / "passwd").exists()
+
+
+@pytest.mark.asyncio
+async def test_multi_root_rejects_invalid_segment(colonies_dir: Path) -> None:
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/m.json": b"{}",
+            "agents/queens/Bad-Queen/sessions/sess_1/": None,
+            "agents/queens/Bad-Queen/sessions/sess_1/x.json": b"{}",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post("/api/colonies/import", data=_form(archive))
+        assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_multi_root_overwrites_agents_subtree_in_place(colonies_dir: Path) -> None:
+    """Worker/queen subtrees are append-mostly stores — the import handler
+    extracts in place without an existence-conflict gate so the desktop can
+    re-push from another machine without explicit overwrite."""
+    hive_home = colonies_dir.parent
+    worker_dir = hive_home / "agents" / "x_daily" / "worker" / "conversations"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "0000_old.json").write_text("old")
+    archive = _build_tar(
+        {
+            "colonies/x_daily/": None,
+            "colonies/x_daily/m.json": b"{}",
+            "agents/x_daily/worker/": None,
+            "agents/x_daily/worker/conversations/": None,
+            "agents/x_daily/worker/conversations/0001_new.json": b"new",
+        }
+    )
+    async with await _client(_app()) as c:
+        resp = await c.post(
+            "/api/colonies/import",
+            data=_form(archive, replace_existing="true"),
+        )
+        assert resp.status == 201, await resp.text()
+    # Old conversation file untouched (extraction is additive on agents/),
+    # new one written.
+    assert (worker_dir / "0000_old.json").read_text() == "old"
+    assert (worker_dir / "0001_new.json").read_text() == "new"
