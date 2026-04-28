@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/aden-hive-hive-badge.png)](https://mseep.ai/app/aden-hive-hive)
+
 <p align="center">
   <img width="100%" alt="Hive Banner" src="https://asset.acho.io/github/img/banner.gif" />
 </p>
