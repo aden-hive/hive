@@ -174,7 +174,12 @@ class StreamDecisionTracker:
         try:
             await self._storage.save_run(run)
         except Exception as e:
-            logger.error(f"Failed to save run {run.id}: {e}")
+            # Suppress error if file actually exists (shutdown race condition)
+            run_path = self._storage.base_path / "runs" / f"{run.id}.json"
+            if run_path.exists():
+                logger.debug(f"Run {run.id} saved despite exception (shutdown race): {e}")
+            else:
+                logger.error(f"Failed to save run {run.id}: {e}")
         finally:
             # Clean up
             self._runs.pop(execution_id, None)

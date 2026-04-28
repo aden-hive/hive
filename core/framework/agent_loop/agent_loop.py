@@ -69,7 +69,9 @@ from framework.agent_loop.internals.synthetic_tools import (
     build_ask_user_tool,
     build_escalate_tool,
     build_report_to_parent_tool,
+    build_set_output_tool,
     handle_report_to_parent,
+    handle_set_output,
 )
 from framework.agent_loop.internals.tool_input_coercer import coerce_tool_input
 from framework.agent_loop.internals.tool_result_handler import (
@@ -672,6 +674,10 @@ class AgentLoop(AgentProtocol):
         # The overseer is client-facing like the queen and has neither.
         if stream_id not in ("queen", "judge", "overseer"):
             tools.append(self._build_escalate_tool())
+        # Add set_output tool for nodes with output_keys
+        set_output_tool = self._build_set_output_tool(ctx.agent_spec.output_keys)
+        if set_output_tool:
+            tools.append(set_output_tool)
         # Only parallel workers (stream_id="worker:{uuid}") get report_to_parent.
         if isinstance(stream_id, str) and stream_id.startswith("worker:"):
             tools.append(build_report_to_parent_tool())
@@ -795,7 +801,7 @@ class AgentLoop(AgentProtocol):
                 drained_injections,
             )
             # 6b1. Drain trigger queue (framework-level signals)
-            drained_triggers = await self._drain_trigger_queue(conversation)
+            drained_triggers = await self._drain_trigger_queue(conversation, ctx=ctx)
             logger.debug(
                 "[AgentLoop.execute] iteration=%d: drained %d triggers",
                 iteration,
@@ -861,6 +867,7 @@ class AgentLoop(AgentProtocol):
                 _synthetic_names = {
                     "ask_user",
                     "escalate",
+                    "set_output",
                 }
                 synthetic = [t for t in tools if t.name in _synthetic_names]
                 tools.clear()
@@ -1458,6 +1465,7 @@ class AgentLoop(AgentProtocol):
                 for tc in logged_tool_calls
                 if tc.get("tool_name")
                 not in (
+                    "set_output",
                     "ask_user",
                     "escalate",
                 )
@@ -3010,13 +3018,30 @@ class AgentLoop(AgentProtocol):
                 )
 
                 if tc.tool_name == "set_output":
-                    # set_output is no longer supported — inform the agent
+                    # Handle set_output: validate and store in accumulator
+                    result = handle_set_output(tc.tool_input, ctx.agent_spec.output_keys)
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content="set_output is no longer available. Report your results via conversation instead.",
-                        is_error=True,
+                        content=result.content,
+                        is_error=result.is_error,
                     )
+                    if not result.is_error:
+                        # Set the output in the accumulator
+                        key = tc.tool_input.get("key", "")
+                        value = tc.tool_input.get("value", "")
+                        await accumulator.set(key, value)
+                        outputs_set_this_turn.append(key)
+                        await self._publish_output_key_set(
+                            stream_id,
+                            node_id,
+                            key,
+                            execution_id,
+                        )
                     results_by_id[tc.tool_use_id] = result
+                    # Log after side-effects - compute safe preview for non-string values
+                    if not result.is_error:
+                        preview = str(value)[:100] if value is not None else None
+                        logger.debug("[%s] set_output: %s = %s", node_id, key, preview)
 
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
@@ -3480,6 +3505,7 @@ class AgentLoop(AgentProtocol):
                 if tc.tool_name not in (
                     "ask_user",
                     "escalate",
+                    "set_output",
                 ):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
@@ -3693,6 +3719,10 @@ class AgentLoop(AgentProtocol):
     def _build_escalate_tool(self) -> Tool:
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         return build_escalate_tool()
+
+    def _build_set_output_tool(self, output_keys: list[str] | tuple[str, ...] | None) -> Tool | None:
+        """Build the synthetic set_output tool. Delegates to synthetic_tools module."""
+        return build_set_output_tool(output_keys)
 
     # -------------------------------------------------------------------
     # Judge evaluation
@@ -4162,7 +4192,7 @@ class AgentLoop(AgentProtocol):
             describe_images_as_text_fn=_describe_images_as_text,
         )
 
-    async def _drain_trigger_queue(self, conversation: NodeConversation) -> int:
+    async def _drain_trigger_queue(self, conversation: NodeConversation, *, ctx: AgentContext | None = None) -> int:
         """Drain all pending trigger events as a single batched user message.
 
         Multiple triggers are merged so the LLM sees them atomically and can
@@ -4171,6 +4201,7 @@ class AgentLoop(AgentProtocol):
         return await drain_trigger_queue(
             queue=self._trigger_queue,
             conversation=conversation,
+            ctx=ctx,
         )
 
     async def _check_pause(

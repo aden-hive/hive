@@ -40,6 +40,7 @@ class NodePromptSpec:
     memory_prompt: str = ""
     node_type: str = "event_loop"
     output_keys: tuple[str, ...] = ()
+    input_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,9 @@ def build_prompt_spec_from_node_context(
     tool_names = [getattr(t, "name", "") for t in (getattr(ctx, "available_tools", None) or [])]
     skills_catalog_prompt = augment_catalog_for_tools(ctx.skills_catalog_prompt or "", tool_names)
 
+    # Collect input_data for injection into system prompt
+    input_data = dict(getattr(ctx, "input_data", None) or {})
+
     return NodePromptSpec(
         identity_prompt=ctx.identity_prompt or "",
         focus_prompt=focus_prompt if focus_prompt is not None else (ctx.node_spec.system_prompt or ""),
@@ -190,6 +194,7 @@ def build_prompt_spec_from_node_context(
         memory_prompt=resolved_memory_prompt,
         node_type=ctx.node_spec.node_type,
         output_keys=tuple(ctx.node_spec.output_keys or ()),
+        input_data=input_data,
     )
 
 
@@ -199,6 +204,17 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
 
     if spec.identity_prompt:
         parts.append(spec.identity_prompt)
+
+    # INPUT DATA: Inject at the TOP of the prompt, immediately after identity.
+    # This ensures the LLM sees critical input values (like current_date) before
+    # processing instructions that reference them.
+    if spec.input_data:
+        input_lines: list[str] = ["INPUT DATA:"]
+        for key, value in spec.input_data.items():
+            if value is not None:
+                input_lines.append(f"  - {key}: {value}")
+        if len(input_lines) > 1:  # Only add if there's actual data
+            parts.append("\n".join(input_lines))
 
     if spec.accounts_prompt:
         parts.append(f"\n{spec.accounts_prompt}")
