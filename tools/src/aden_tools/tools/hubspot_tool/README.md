@@ -30,6 +30,9 @@ Set the following environment variable or use Aden OAuth:
 |----------|-------------|
 | `HUBSPOT_ACCESS_TOKEN` | HubSpot private app access token |
 
+Alternatively, configure credentials in the Aden credential store:
+- `hubspot`
+
 Get a token at: [HubSpot Developer Portal](https://developers.hubspot.com/docs/api/creating-an-app)
 
 Supports multi-account via `account` parameter for Aden OAuth users.
