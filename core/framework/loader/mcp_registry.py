@@ -51,6 +51,10 @@ _DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
         "description": "File I/O: read, write, edit, search, list, run commands",
         "args": ["run", "python", "files_server.py", "--stdio"],
     },
+    "shell-tools": {
+        "description": "Terminal/shell capabilities: process exec, background jobs, PTY shells, fs search. Bash-only on POSIX.",
+        "args": ["run", "python", "shell_tools_server.py", "--stdio"],
+    },
 }
 
 # Aliases that earlier versions of ensure_defaults wrote under the wrong name.
