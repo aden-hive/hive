@@ -1109,7 +1109,7 @@ def ensure_default_queens() -> None:
         if profile_path.exists():
             continue
         queen_dir.mkdir(parents=True, exist_ok=True)
-        profile_path.write_text(yaml.safe_dump(profile, sort_keys=False, allow_unicode=True))
+        profile_path.write_text(yaml.safe_dump(profile, sort_keys=False, allow_unicode=True), encoding="UTF-8")
         created += 1
     if created:
         logger.info("Created %d default queen profile(s) at %s", created, QUEENS_DIR)
@@ -1123,7 +1123,7 @@ def list_queens() -> list[dict[str, str]]:
     for profile_path in sorted(QUEENS_DIR.glob("*/profile.yaml")):
         queen_id = profile_path.parent.name
         try:
-            data = yaml.safe_load(profile_path.read_text())
+            data = yaml.safe_load(profile_path.read_text(encoding="UTF-8"))
             results.append(
                 {
                     "id": queen_id,
@@ -1131,8 +1131,8 @@ def list_queens() -> list[dict[str, str]]:
                     "title": data.get("title", ""),
                 }
             )
-        except Exception:
-            logger.warning("Failed to read queen profile %s", profile_path)
+        except Exception as error:
+            logger.error("Failed to read queen profile %s. Reason: %s", profile_path, str(error))
     return results
 
 
@@ -1144,7 +1144,7 @@ def load_queen_profile(queen_id: str) -> dict[str, Any]:
     profile_path = QUEENS_DIR / queen_id / "profile.yaml"
     if not profile_path.exists():
         raise FileNotFoundError(f"Queen profile not found: {queen_id}")
-    data = yaml.safe_load(profile_path.read_text())
+    data = yaml.safe_load(profile_path.read_text(encoding="UTF-8"))
     return data
 
 
@@ -1161,13 +1161,13 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
     profile_path = QUEENS_DIR / queen_id / "profile.yaml"
     if not profile_path.exists():
         raise FileNotFoundError(f"Queen profile not found: {queen_id}")
-    data = yaml.safe_load(profile_path.read_text())
+    data = yaml.safe_load(profile_path.read_text(encoding="UTF-8"))
     for key, value in updates.items():
         if isinstance(value, dict) and isinstance(data.get(key), dict):
             data[key].update(value)
         else:
             data[key] = value
-    profile_path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+    profile_path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="UTF-8")
     return data
 
 
