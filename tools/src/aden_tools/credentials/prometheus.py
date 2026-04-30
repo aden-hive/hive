@@ -55,8 +55,8 @@ Notes:
 export PROMETHEUS_TOKEN=your-token
 """,
         health_check_endpoint="",
-        credential_id="prometheus",
-        credential_key="token",
+        credential_id="prometheus_token",
+        credential_key="api_key",
     ),
     "prometheus_username": CredentialSpec(
         env_var="PROMETHEUS_USERNAME",
@@ -75,7 +75,7 @@ export PROMETHEUS_TOKEN=your-token
 export PROMETHEUS_USERNAME=admin
 """,
         health_check_endpoint="",
-        credential_id="prometheus",
+        credential_id="prometheus_username",
         credential_key="username",
     ),
     "prometheus_password": CredentialSpec(
@@ -95,7 +95,7 @@ export PROMETHEUS_USERNAME=admin
 export PROMETHEUS_PASSWORD=secret
 """,
         health_check_endpoint="",
-        credential_id="prometheus",
+        credential_id="prometheus_password",
         credential_key="password",
     ),
 }
