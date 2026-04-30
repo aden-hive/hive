@@ -15,10 +15,29 @@ from typing import Any
 DEFAULT_MAX_TOKENS = 8192
 
 # ---------------------------------------------------------------------------
+# Desktop mode — set by Electron shell to skip frontend builds, etc.
+# ---------------------------------------------------------------------------
+DESKTOP_MODE: bool = bool(os.environ.get("HIVE_DESKTOP_MODE"))
+
+# ---------------------------------------------------------------------------
 # Hive home directory structure
+#
+# The runtime normally stores state in ``~/.hive/``. When the runtime is
+# spawned by the Electron desktop shell, the shell passes ``HIVE_HOME`` as
+# an env var pointing at the platform-native userData directory (e.g.
+# ``~/Library/Application Support/Hive/`` on macOS), so the desktop app
+# does NOT share state with an OSS ``hive`` install on the same machine.
 # ---------------------------------------------------------------------------
 
-HIVE_HOME = Path.home() / ".hive"
+
+def _resolve_hive_home() -> Path:
+    override = os.environ.get("HIVE_HOME")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".hive"
+
+
+HIVE_HOME = _resolve_hive_home()
 QUEENS_DIR = HIVE_HOME / "agents" / "queens"
 COLONIES_DIR = HIVE_HOME / "colonies"
 MEMORIES_DIR = HIVE_HOME / "memories"
@@ -56,7 +75,10 @@ HIVE_CONFIG_FILE = HIVE_HOME / "configuration.json"
 
 # Hive LLM router endpoint (Anthropic-compatible).
 # litellm's Anthropic handler appends /v1/messages, so this is just the base host.
-HIVE_LLM_ENDPOINT = "https://api.adenhq.com"
+# Production proxy is `llm.open-hive.com`; the legacy `api.adenhq.com` host is
+# kept only for the Bearer-auth allow-list in litellm.py (some old configs
+# still point at it). New deployments should target the open-hive endpoint.
+HIVE_LLM_ENDPOINT = "https://llm.open-hive.com"
 logger = logging.getLogger(__name__)
 
 

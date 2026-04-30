@@ -481,7 +481,7 @@
       "model": "queen",
       "max_tokens": 32768,
       "max_context_tokens": 180000,
-      "api_base": "https://api.adenhq.com",
+      "api_base": "https://llm.open-hive.com",
       "model_choices": [
         {
           "id": "queen",

@@ -256,12 +256,30 @@ def check_minimax(api_key: str, api_base: str = "https://api.minimax.io/v1", **_
 
 
 def check_anthropic_compatible(api_key: str, endpoint: str, name: str) -> dict:
-    """POST empty messages to an Anthropic-compatible endpoint to validate key."""
+    """POST empty messages to an Anthropic-compatible endpoint to validate key.
+
+    Sends both ``x-api-key`` (Anthropic native + most clones) and
+    ``Authorization: Bearer`` (hive-llm proxy + other JWT-auth proxies that
+    speak Anthropic's Messages API but reject x-api-key). Servers that
+    only check one header silently ignore the other, so the dual-auth
+    request validates correctly against either backend.
+
+    Status mapping:
+      - 200 / 400 / 429 → key authenticated (request rejected on other grounds)
+      - 401             → invalid key
+      - 403             → key lacks permissions for this endpoint
+      - 5xx             → service-side issue (e.g. hive-llm "no healthy key
+                           for model X" when the validator probes with a
+                           model the user's plan doesn't include); we trust
+                           the key — it got past auth — and surface a
+                           non-fatal warning.
+    """
     with httpx.Client(timeout=TIMEOUT) as client:
         r = client.post(
             endpoint,
             headers={
                 "x-api-key": api_key,
+                "Authorization": f"Bearer {api_key}",
                 "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json",
             },
@@ -273,6 +291,11 @@ def check_anthropic_compatible(api_key: str, endpoint: str, name: str) -> dict:
         return {"valid": False, "message": f"Invalid {name} API key"}
     if r.status_code == 403:
         return {"valid": False, "message": f"{name} API key lacks permissions"}
+    if 500 <= r.status_code < 600:
+        return {
+            "valid": True,
+            "message": f"{name} API returned {r.status_code} (service-side, treating key as valid)",
+        }
     return {"valid": False, "message": f"{name} API returned status {r.status_code}"}
 
 
