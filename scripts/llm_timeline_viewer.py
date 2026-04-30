@@ -430,6 +430,7 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
     let activeSessionId = initialSessionId || (summaries[0] ? summaries[0].execution_id : "");
     let activeRecords = [];
     let activeEvents = [];
+    let activeToolMeta = new Map();  // tool_call_id -> {{toolName, isError, ...}}
     let activeEventId = null;
 
     const $ = (id) => document.getElementById(id);
@@ -504,15 +505,17 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
      * and tool_results that triggered turn N). Then we add an output event for
      * the assistant text and one event per tool_call from this turn.
      */
-    function buildEvents(records) {{
-      // Build a global tool_use_id -> {{startTs, durationS, toolName, isError}}
-      // map across ALL turns. The records use OpenAI-style envelopes:
-      //   - assistant message: {{role, content: null, tool_calls: [{{id, function:{{name,arguments}}}}]}}
-      //   - tool message:      {{role:"tool", tool_call_id, content}}
-      // rec.tool_calls carries each invocation's real start_timestamp + duration_s,
-      // which is what we need so tool_uses sit at their actual execution time
-      // (not the much later "turn was logged" wall clock) and tool_results
-      // sit just after their matching call.
+    /**
+     * Build a global tool_use_id -> {{startTs, durationS, toolName, isError}}
+     * map across ALL turns. The records use OpenAI-style envelopes:
+     *   - assistant message: {{role, content: null, tool_calls: [{{id, function:{{name,arguments}}}}]}}
+     *   - tool message:      {{role:"tool", tool_call_id, content}}
+     * rec.tool_calls carries each invocation's real start_timestamp + duration_s,
+     * which is what we need so tool_uses sit at their actual execution time
+     * (not the much later "turn was logged" wall clock) and tool_results
+     * sit just after their matching call.
+     */
+    function buildToolMeta(records) {{
       const toolMeta = new Map();
       for (const rec of records) {{
         for (const tc of (rec.tool_calls || [])) {{
@@ -526,6 +529,10 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
           }});
         }}
       }}
+      return toolMeta;
+    }}
+
+    function buildEvents(records, toolMeta) {{
       const addSeconds = (iso, sec) => {{
         if (!iso) return iso;
         const d = new Date(iso);
@@ -782,15 +789,51 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
         </div>`;
 
       // Messages section: highlight the message this event refers to (if any).
+      // Use the SAME semantic labels the timeline uses — an assistant message
+      // with tool_calls is a tool_use, a `tool` role message is a tool_result.
+      // Render each message's BODY in the most informative way for its kind:
+      //   - user / system / asst-text: show content as plain text (wrapping
+      //     it in a JSON envelope obscures readable prose)
+      //   - assistant tool_calls: show the tool_calls array (content is null)
+      //   - tool result: show content (tool_call_id is already in the badge)
       const msgHtml = messages.map((m, idx) => {{
         const hl = idx === event.messageIndex ? " hl-msg scroll-target" : "";
         const role = String(m.role || "?");
+        let kind = role === "tool" ? "tool_result"
+                 : role === "assistant" ? "assistant"
+                 : role === "system" ? "system" : "user";
+        let label = role;
+        let bodyHtml = "";
+        if (role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length) {{
+          kind = "tool_use";
+          const names = m.tool_calls
+            .map((tc) => (tc.function && tc.function.name) || tc.tool_name || "?")
+            .join(", ");
+          label = `tool_use · ${{names}}`;
+          bodyHtml = `<pre class="json">${{escapeHtml(JSON.stringify(m.tool_calls, null, 2))}}</pre>`;
+          if (typeof m.content === "string" && m.content.trim()) {{
+            // Rare but possible: assistant message with both text + tool_calls.
+            bodyHtml = `<pre class="text">${{escapeHtml(m.content)}}</pre>` + bodyHtml;
+          }}
+        }} else if (role === "tool") {{
+          const meta = activeToolMeta.get(m.tool_call_id || "");
+          label = meta ? `tool_result · ${{meta.toolName}}` : "tool_result";
+          const c = m.content;
+          bodyHtml = typeof c === "string"
+            ? `<pre class="text">${{escapeHtml(c)}}</pre>`
+            : `<pre class="json">${{escapeHtml(JSON.stringify(c, null, 2))}}</pre>`;
+        }} else {{
+          const c = m.content;
+          bodyHtml = typeof c === "string"
+            ? `<pre class="text">${{escapeHtml(c)}}</pre>`
+            : `<pre class="json">${{escapeHtml(JSON.stringify(c, null, 2))}}</pre>`;
+        }}
         return `<div class="msg${{hl}}" id="msg-${{idx}}">
           <div class="msg-head">
-            <span class="badge kind-${{role === "tool" ? "tool_result" : (role === "assistant" ? "assistant" : (role === "system" ? "system" : "user"))}}">${{escapeHtml(role)}}</span>
+            <span class="badge kind-${{kind}}">${{escapeHtml(label)}}</span>
             <span class="iter">[${{idx}}]</span>
           </div>
-          <pre class="json">${{escapeHtml(JSON.stringify(m.content, null, 2))}}</pre>
+          ${{bodyHtml}}
         </div>`;
       }}).join("") || '<div class="empty">No messages.</div>';
 
@@ -865,7 +908,8 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
       }}
       if (activeSessionId !== sid) return;
       activeRecords = records || [];
-      activeEvents = buildEvents(activeRecords);
+      activeToolMeta = buildToolMeta(activeRecords);
+      activeEvents = buildEvents(activeRecords, activeToolMeta);
       renderTimeline();
       $("raw").innerHTML = '<div class="empty">Click any event on the left to view the raw request payload.</div>';
       history.replaceState(null, "", `#${{encodeURIComponent(sid)}}`);
