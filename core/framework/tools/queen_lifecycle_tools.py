@@ -1326,6 +1326,16 @@ def register_queen_lifecycle_tools(
         # the entries' template ids can be threaded into the spawn data
         # (workers' ctx.picked_up_from references them). This mirrors the
         # plan §5d "auto-populated by run_parallel_workers" behavior.
+        # Preserve the task text in spec["data"] before any template-store
+        # mutation. Once spec["data"] is non-empty, spawn()'s
+        # ``input_data or {"task": task}`` fallback no longer fires, so the
+        # task description would otherwise vanish from the worker's first
+        # user message. Hoisted out of the try below so a non-fatal template
+        # failure cannot drop task text from the spawn payload.
+        for spec in normalised:
+            spec["data"] = dict(spec.get("data") or {})
+            spec["data"].setdefault("task", spec["task"])
+
         _template_ids: list[int | None] = [None] * len(normalised)
         try:
             from framework.tasks import TaskListRole, get_task_store
@@ -1343,7 +1353,6 @@ def register_queen_lifecycle_tools(
                 _template_ids[i] = rec.id
                 # Thread the template id into the worker's spawn data so
                 # ColonyRuntime.spawn populates ctx.picked_up_from correctly.
-                spec["data"] = dict(spec.get("data") or {})
                 spec["data"]["__template_task_id"] = rec.id
         except Exception:
             logger.warning(
