@@ -20,6 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
+from framework.config import HIVE_HOME
 from framework.skills.parser import ParsedSkill
 
 logger = logging.getLogger(__name__)
@@ -30,17 +31,11 @@ _ENV_TRUST_ALL = "HIVE_TRUST_PROJECT_SKILLS"
 # Env var for comma-separated own-remote glob patterns (e.g. "github.com/myorg/*").
 _ENV_OWN_REMOTES = "HIVE_OWN_REMOTES"
 
+# Persisted store of trusted git remotes (one-shot consent per repo).
+_TRUSTED_REPOS_PATH = HIVE_HOME / "trusted_repos.json"
 
-def _trusted_repos_path() -> Path:
-    from framework.config import HIVE_HOME
-
-    return HIVE_HOME / "trusted_repos.json"
-
-
-def _notice_sentinel_path() -> Path:
-    from framework.config import HIVE_HOME
-
-    return HIVE_HOME / ".skill_trust_notice_shown"
+# Sentinel for the one-time security notice (NFR-5).
+_NOTICE_SENTINEL_PATH = HIVE_HOME / ".skill_trust_notice_shown"
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +54,7 @@ class TrustedRepoStore:
     """Persists permanently-trusted repo keys to ~/.hive/trusted_repos.json."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or _trusted_repos_path()
+        self._path = path or _TRUSTED_REPOS_PATH
         self._entries: dict[str, TrustedRepoEntry] = {}
         self._loaded = False
 
@@ -426,7 +421,7 @@ class TrustGate:
 
     def _maybe_show_security_notice(self, Colors) -> None:  # noqa: N803
         """Show the one-time security notice if not already shown (NFR-5)."""
-        sentinel = _notice_sentinel_path()
+        sentinel = _NOTICE_SENTINEL_PATH
         if sentinel.exists():
             return
         self._print("")

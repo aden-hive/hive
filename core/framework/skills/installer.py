@@ -15,26 +15,17 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from framework.config import HIVE_HOME
 from framework.skills.parser import ParsedSkill
 from framework.skills.skill_errors import SkillError, SkillErrorCode
 
+# Default install destination for user-scope skills.
+# Anchored on HIVE_HOME so the desktop shell can override the install
+# root via $HIVE_HOME without patching every call site.
+USER_SKILLS_DIR = HIVE_HOME / "skills"
 
-# Default install destination for user-scope skills + sentinel file for
-# the one-time security notice on first install (NFR-5). Computed via
-# helpers so HIVE_HOME (set by the desktop shell to a per-user dir)
-# is honoured. ``framework.config.HIVE_HOME`` is module-global and
-# resolved at first import — so a single call here is enough; we don't
-# need to re-resolve on every access.
-def _user_skills_dir() -> Path:
-    from framework.config import HIVE_HOME
-
-    return HIVE_HOME / "skills"
-
-
-def _install_notice_sentinel() -> Path:
-    from framework.config import HIVE_HOME
-
-    return HIVE_HOME / ".install_notice_shown"
+# Sentinel file for the one-time security notice on first install (NFR-5).
+INSTALL_NOTICE_SENTINEL = HIVE_HOME / ".install_notice_shown"
 
 
 _INSTALL_NOTICE = """\
@@ -60,13 +51,12 @@ def maybe_show_install_notice() -> None:
     Touches a sentinel file in $HIVE_HOME after showing the notice so it is
     only displayed once across all future installs.
     """
-    sentinel = _install_notice_sentinel()
-    if sentinel.exists():
+    if INSTALL_NOTICE_SENTINEL.exists():
         return
     print(_INSTALL_NOTICE, flush=True)
     try:
-        sentinel.parent.mkdir(parents=True, exist_ok=True)
-        sentinel.touch()
+        INSTALL_NOTICE_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        INSTALL_NOTICE_SENTINEL.touch()
     except OSError:
         pass  # If we can't write the sentinel, just show the notice every time
 
@@ -107,7 +97,7 @@ def install_from_git(
             fix="Install git (https://git-scm.com/) and retry.",
         )
 
-    dest = (target_dir or _user_skills_dir()) / skill_name
+    dest = (target_dir or USER_SKILLS_DIR) / skill_name
     if dest.exists():
         raise SkillError(
             code=SkillErrorCode.SKILL_ACTIVATION_FAILED,
@@ -208,7 +198,7 @@ def remove_skill(name: str, skills_dir: Path | None = None) -> bool:
     Raises:
         SkillError: If the directory exists but cannot be removed.
     """
-    target = (skills_dir or _user_skills_dir()) / name
+    target = (skills_dir or USER_SKILLS_DIR) / name
     if not target.exists():
         return False
     try:
