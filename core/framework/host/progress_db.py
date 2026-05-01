@@ -7,7 +7,7 @@ verify SOP gates before marking a task done. This gives cross-run memory
 that the existing per-iteration stall detectors don't have.
 
 The DB is driven by agents via the ``sqlite3`` CLI through
-``execute_command_tool``. This module handles framework-side lifecycle:
+``terminal_exec``. This module handles framework-side lifecycle:
 creation, migration, queen-side bulk seeding, stale-claim reclamation.
 
 Concurrency model:

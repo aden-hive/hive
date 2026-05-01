@@ -59,11 +59,7 @@ from .docker_hub_tool import register_tools as register_docker_hub
 from .duckduckgo_tool import register_tools as register_duckduckgo
 from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
-from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
-from .file_system_toolkits.execute_command_tool import (
-    register_tools as register_execute_command,
-)
 from .freshdesk_tool import register_tools as register_freshdesk
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
@@ -157,7 +153,6 @@ def _register_verified(
     """Register verified (stable) tools."""
     _verified_before = set(mcp._tool_manager._tools.keys())
     # --- No credentials ---
-    register_example(mcp)
     if register_web_scrape:
         register_web_scrape(mcp)
     register_pdf_read(mcp)
@@ -199,7 +194,6 @@ def _register_verified(
     # defaults to CWD here; framework callers that own a session-specific
     # workspace should call register_file_tools directly with home set.
     register_file_tools(mcp)
-    register_execute_command(mcp)
     register_csv(mcp)
     register_excel(mcp)
 

@@ -683,11 +683,10 @@ class Orchestrator:
         # Set per-execution data_dir and agent_id so data tools and
         # spillover files share the same session-scoped directory, and
         # so MCP tools whose server-side schemas mark agent_id as a
-        # required field (execute_command_tool's bash_*, etc.) get a valid
-        # value injected even on
-        # registry instances where agent_loader.setup() didn't populate
-        # the session_context. Without this, FastMCP rejects those
-        # calls with "agent_id is a required property".
+        # required field get a valid value injected even on registry
+        # instances where agent_loader.setup() didn't populate the
+        # session_context. Without this, FastMCP rejects those calls
+        # with "agent_id is a required property".
         _ctx_token = None
         if self._storage_path:
             from framework.loader.tool_registry import ToolRegistry

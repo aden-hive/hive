@@ -334,7 +334,7 @@ Update incrementally — do not rewrite from scratch each time.
 
 **Background:** Replaces the older in-memory `_batch_ledger` (and `_working_notes → Current Plan` decomposition) — both were removed on 2026-04-15 because they duplicated state that belongs in SQLite. The queue, per-task `steps` decomposition, and `sop_checklist` hard-gates now all live in `progress.db` and are authoritative.
 
-**Protocol (injected into system prompt):** Workers receive `db_path` and `colony_id` (and optionally `task_id`) in their spawn message and interact with the ledger via `sqlite3` through `execute_command_tool`. The full claim → load plan → execute step → SOP-gate → mark done loop is documented in the skill's `SKILL.md`.
+**Protocol (injected into system prompt):** Workers receive `db_path` and `colony_id` (and optionally `task_id`) in their spawn message and interact with the ledger via `sqlite3` through `terminal_exec`. The full claim → load plan → execute step → SOP-gate → mark done loop is documented in the skill's `SKILL.md`.
 
 **Tables:**
 - `tasks` — queue: pending → claimed → done|failed, with `worker_id` and atomic claim tokens

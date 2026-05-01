@@ -56,10 +56,12 @@ async def reproduce_agent_session(session: BrowserSession):
     print("=" * 100)
     total_start = time.time()
 
-    # ── Turn 1 (seq 1-2): browser_start ──────────────────────────────────
+    # ── Turn 1 (seq 1-2): session start ──────────────────────────────────
+    # Original 2026-02 transcript called the now-deleted browser_start MCP
+    # tool here; cold-start is now folded into browser_open via lazy-start.
     t0 = time.time()
     result = await session.start(headless=False, persistent=True)
-    log(1, "browser_start()", f"ok={result['ok']}, status={result.get('status')}", time.time() - t0)
+    log(1, "session.start()", f"ok={result['ok']}, status={result.get('status')}", time.time() - t0)
 
     # ── Turn 2 (seq 3-4): browser_open ───────────────────────────────────
     t0 = time.time()
@@ -235,10 +237,10 @@ async def demonstrate_correct_approach(session: BrowserSession):
     print("=" * 100)
     total_start = time.time()
 
-    # ── Turn 1: browser_start ────────────────────────────────────────────
+    # ── Turn 1: session start ────────────────────────────────────────────
     t0 = time.time()
     result = await session.start(headless=False, persistent=True)
-    log(1, "browser_start()", f"ok={result['ok']}", time.time() - t0)
+    log(1, "session.start()", f"ok={result['ok']}", time.time() - t0)
 
     # ── Turn 2: browser_open + browser_wait for SPA ──────────────────────
     t0 = time.time()

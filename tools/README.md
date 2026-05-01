@@ -72,10 +72,7 @@ verbatim; system + credential paths are on a deny list).
 | `read_file` | Read file contents (with optional hashline anchors) |
 | `write_file` | Create or overwrite a file |
 | `edit_file` | Find/replace with fuzzy fallback |
-| `hashline_edit` | Anchor-based structural edits validated by line hashes |
-| `apply_patch` | Apply a diff_match_patch text |
 | `search_files` | Grep file contents (`target='content'`) or list/find files (`target='files'`) — replaces grep, find, and ls |
-| `execute_command_tool` | Execute shell commands |
 | `save_data` / `load_data` | Persist and retrieve structured data across steps |
 | `serve_file_to_user` | Serve a file for the user to download |
 | `list_data_files` | List persisted data files in the session |
@@ -176,11 +173,8 @@ tools/
 │   ├── file_ops.py          # ALL file tools (read, write, edit, hashline_edit, search_files, apply_patch)
 │   ├── credentials/         # Credential management
 │   └── tools/               # Tool implementations
-│       ├── example_tool/
-│       ├── file_system_toolkits/  # Shell only — file tools moved to file_ops.py
-│       │   ├── security.py
-│       │   ├── command_sanitizer.py
-│       │   └── execute_command_tool/
+│       ├── file_system_toolkits/  # Sandbox path helpers (security.py)
+│       │   └── security.py
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
 │       ├── pdf_read_tool/

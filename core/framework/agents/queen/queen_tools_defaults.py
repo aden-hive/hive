@@ -145,7 +145,7 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
         "risk_score",
     ],
     # Lightweight context helpers — good default for every queen.
-    "time_context": [
+    "context_awareness": [
         "get_current_time",
         "get_account_info",
     ],
@@ -181,7 +181,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
         "charts",
     ],
     # Head of Growth — data, experiments, competitor research; no security.
@@ -191,7 +191,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
         "charts",
     ],
     # Head of Product Strategy — user research + roadmaps; no security.
@@ -201,7 +201,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
         "charts",
     ],
     # Head of Finance — financial models (CSV/Excel heavy), market research.
@@ -212,7 +212,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
         "charts",
     ],
     # Head of Legal — reads contracts/PDFs, researches; no data/security.
@@ -222,7 +222,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
     ],
     # Head of Brand & Design — visual refs, style guides; no data/security.
     "queen_brand_design": [
@@ -231,17 +231,16 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
     ],
     # Head of Talent — candidate pipelines, resumes; data + browser heavy.
     "queen_talent": [
         "file_ops",
         "terminal_basic",
-        "spreadsheet_advanced",
         "browser_basic",
         "browser_interaction",
         "research",
-        "time_context",
+        "context_awareness",
     ],
     # Head of Operations — processes, automation, observability.
     "queen_operations": [
@@ -250,7 +249,7 @@ QUEEN_DEFAULT_CATEGORIES: dict[str, list[str]] = {
         "spreadsheet_advanced",
         "browser_basic",
         "browser_interaction",
-        "time_context",
+        "context_awareness",
         "charts",
     ],
 }

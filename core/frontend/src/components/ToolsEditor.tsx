@@ -8,7 +8,7 @@ import {
   Wrench,
   AlertCircle,
 } from "lucide-react";
-import type { ToolMeta, McpServerTools } from "@/api/queens";
+import type { ToolMeta, McpServerTools, ToolCategory } from "@/api/queens";
 
 /** Shape every Tools section (Queen / Colony) shares. */
 export interface ToolsSnapshot {
@@ -17,9 +17,84 @@ export interface ToolsSnapshot {
   lifecycle: ToolMeta[];
   synthetic: ToolMeta[];
   mcp_servers: McpServerTools[];
+  /** Optional: curated category groupings (queens only today). When
+   * present, tools that belong to a category are grouped under that
+   * category instead of their MCP server. */
+  categories?: ToolCategory[];
   /** Optional: when true, the allowlist came from the role-based
    * default (no explicit save). Only queens surface this today. */
   is_role_default?: boolean;
+}
+
+type ToolWithEnabled = ToolMeta & { enabled: boolean };
+
+interface RenderGroup {
+  /** Stable key for expansion state and React keys. */
+  key: string;
+  /** Display title shown in the collapsible header. */
+  title: string;
+  tools: ToolWithEnabled[];
+}
+
+/** Snake_case / kebab-case → Title Case for category labels so they
+ * read naturally next to MCP server names. */
+function formatCategoryTitle(name: string): string {
+  return name
+    .split(/[_-]+/)
+    .filter((w) => w.length > 0)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** Build display groups with the priority: category → MCP server → "Other tools".
+ * A tool that belongs to multiple categories lands in the first one (input order). */
+function buildGroups(
+  mcpServers: McpServerTools[],
+  categories: ToolCategory[] | undefined,
+): RenderGroup[] {
+  const toolCategory = new Map<string, string>();
+  categories?.forEach((cat) => {
+    cat.tools.forEach((toolName) => {
+      if (!toolCategory.has(toolName)) toolCategory.set(toolName, cat.name);
+    });
+  });
+
+  const groupMap = new Map<string, RenderGroup>();
+  // Pre-seed category groups in their original order so categories
+  // come before MCP servers regardless of which tool we encounter first.
+  categories?.forEach((cat) => {
+    groupMap.set(`cat:${cat.name}`, {
+      key: `cat:${cat.name}`,
+      title: formatCategoryTitle(cat.name),
+      tools: [],
+    });
+  });
+
+  mcpServers.forEach((srv) => {
+    srv.tools.forEach((t) => {
+      const cat = toolCategory.get(t.name);
+      let key: string;
+      let title: string;
+      if (cat) {
+        key = `cat:${cat}`;
+        title = formatCategoryTitle(cat);
+      } else if (srv.name && srv.name !== "(unknown)") {
+        key = `srv:${srv.name}`;
+        title = srv.name;
+      } else {
+        key = "other";
+        title = "Other tools";
+      }
+      let group = groupMap.get(key);
+      if (!group) {
+        group = { key, title, tools: [] };
+        groupMap.set(key, group);
+      }
+      group.tools.push(t);
+    });
+  });
+
+  return Array.from(groupMap.values()).filter((g) => g.tools.length > 0);
 }
 
 export interface ToolsEditorProps {
@@ -219,6 +294,11 @@ export default function ToolsEditor({
     return s;
   }, [data]);
 
+  const groups = useMemo(
+    () => (data ? buildGroups(data.mcp_servers, data.categories) : []),
+    [data],
+  );
+
   const dirty = useMemo(() => {
     const a = draftAllowed;
     const b = baselineRef.current;
@@ -401,10 +481,10 @@ export default function ToolsEditor({
         </CollapsibleGroup>
       )}
 
-      {data.mcp_servers.map((srv) => {
-        const toolNames = srv.tools.map((t) => t.name);
+      {groups.map((group) => {
+        const toolNames = group.tools.map((t) => t.name);
         const state = triStateForServer(toolNames, draftAllowed);
-        const enabledInServer =
+        const enabledInGroup =
           draftAllowed === null
             ? toolNames.length
             : toolNames.reduce(
@@ -413,13 +493,13 @@ export default function ToolsEditor({
               );
         return (
           <CollapsibleGroup
-            key={srv.name}
-            title={srv.name === "(unknown)" ? "MCP Tools" : srv.name}
-            count={srv.tools.length}
-            badge={`${enabledInServer}/${srv.tools.length}`}
-            expanded={!!expanded[srv.name]}
+            key={group.key}
+            title={group.title}
+            count={group.tools.length}
+            badge={`${enabledInGroup}/${group.tools.length}`}
+            expanded={!!expanded[group.key]}
             onToggle={() =>
-              setExpanded((p) => ({ ...p, [srv.name]: !p[srv.name] }))
+              setExpanded((p) => ({ ...p, [group.key]: !p[group.key] }))
             }
             leading={
               <TriStateCheckbox
@@ -429,12 +509,12 @@ export default function ToolsEditor({
             }
           >
             <div className="flex flex-col">
-              {srv.tools.map((t) => {
+              {group.tools.map((t) => {
                 const enabled =
                   draftAllowed === null ? true : draftAllowed.has(t.name);
                 return (
                   <ToolRow
-                    key={`${srv.name}-${t.name}`}
+                    key={`${group.key}-${t.name}`}
                     name={t.name}
                     description={t.description}
                     enabled={enabled}

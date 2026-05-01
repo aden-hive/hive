@@ -1,16 +1,15 @@
 # File System Toolkits (post-consolidation)
 
-This package now contains only the shell tool. **All file tools live in
-`aden_tools.file_ops`** (read_file, write_file, edit_file, hashline_edit,
-search_files, apply_patch) — they share one path policy and one home dir.
+This package contains only sandbox path helpers used by `csv_tool` and
+`excel_tool`. **All file tools live in `aden_tools.file_ops`** (read_file,
+write_file, edit_file, hashline_edit, search_files, apply_patch) — they
+share one path policy and one home dir.
 
 ## Sub-modules
 
 | Module | Description |
 |--------|-------------|
-| `execute_command_tool/` | Shell command execution with sanitization (run_command, bash_kill, bash_output) |
-| `command_sanitizer.py` | Validates and sanitizes shell command strings |
-| `security.py` | Sandbox path resolver still used by execute_command_tool |
+| `security.py` | Sandbox path resolver used by csv_tool and excel_tool |
 
 ## File tools
 
@@ -30,12 +29,4 @@ model is uniform across all six tools:
 from aden_tools.file_ops import register_file_tools
 
 register_file_tools(mcp, home="/path/to/agent/home")
-```
-
-For shell:
-
-```python
-from aden_tools.tools.file_system_toolkits.execute_command_tool import register_tools as register_shell
-
-register_shell(mcp)
 ```

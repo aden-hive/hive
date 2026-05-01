@@ -235,10 +235,6 @@ _SYSTEM_TOOLS: frozenset[str] = frozenset(
     {
         "get_account_info",
         "get_current_time",
-        "bash_kill",
-        "bash_output",
-        "execute_command_tool",
-        "example_tool",
     }
 )
 
