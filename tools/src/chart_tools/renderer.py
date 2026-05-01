@@ -273,13 +273,40 @@ async def _render_in_page(
                 // data points are missing (the 2026-05-01 "all data
                 // points are gone" bug). We don't need animation in
                 // a static PNG anyway.
+                //
+                // Force layout positions for title/legend/grid so the
+                // agent's spec can't collide with itself. Specifically:
+                // when the agent writes legend.top: "8%" assuming title
+                // is at top:0, but our theme puts title at top:28, the
+                // legend lands INSIDE the title (the 2026-05-01 overlap
+                // bug). We strip user-provided top values and compute
+                // based on whether title has subtext + legend exists.
+                // User's other fields (text, data, formatter, etc.)
+                // still win.
+                const userTitle = option.title || {};
+                const userLegend = option.legend;
+                const userGrid = option.grid || {};
+                const hasSubtext = !!(userTitle.subtext || userTitle.subtextStyle);
+                const titleTop = 20;
+                const legendTop = hasSubtext ? 72 : 56;
+                const gridTop = userLegend ? (hasSubtext ? 116 : 100)
+                                           : (hasSubtext ? 80 : 64);
                 const sanitized = Object.assign({}, option, {
                   animation: false,
                   animationDuration: 0,
                   animationDurationUpdate: 0,
                   animationEasing: 'linear',
                   animationEasingUpdate: 'linear',
+                  title: Object.assign({left: 'center'}, userTitle, {top: titleTop}),
+                  grid: Object.assign({
+                    left: 56, right: 56, bottom: 56, containLabel: true,
+                  }, userGrid, {top: gridTop}),
                 });
+                if (userLegend) {
+                  sanitized.legend = Object.assign({
+                    icon: 'roundRect', itemWidth: 12, itemHeight: 12, itemGap: 16,
+                  }, userLegend, {top: legendTop});
+                }
 
                 // Signal "render complete" via window.__chartReady so
                 // the Python side knows when it's safe to screenshot.
