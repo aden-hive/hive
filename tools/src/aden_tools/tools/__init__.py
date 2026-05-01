@@ -92,6 +92,7 @@ from .linear_tool import register_tools as register_linear
 from .lusha_tool import register_tools as register_lusha
 from .mattermost_tool import register_tools as register_mattermost
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
+from .mlflow_tool import register_tools as register_mlflow
 from .mongodb_tool import register_tools as register_mongodb
 from .n8n_tool import register_tools as register_n8n
 from .news_tool import register_tools as register_news
@@ -301,6 +302,7 @@ def _register_unverified(
     register_kafka(mcp, credentials=credentials)
     register_langfuse(mcp, credentials=credentials)
     register_linear(mcp, credentials=credentials)
+    register_mlflow(mcp, credentials=credentials)
     register_lusha(mcp, credentials=credentials)
     register_mattermost(mcp, credentials=credentials)
     register_microsoft_graph(mcp, credentials=credentials)

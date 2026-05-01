@@ -1,0 +1,200 @@
+{
+  "agent": {
+    "id": "ml_experiment_monitor_agent",
+    "name": "ML Experiment Monitor",
+    "version": "1.0.0",
+    "description": "Monitors MLflow experiments for accuracy regressions and sends a Slack alert with the failing run details, or an all-clear message when all runs are healthy."
+  },
+  "graph": {
+    "id": "ml_experiment_monitor_agent-graph",
+    "goal_id": "ml-experiment-monitor",
+    "version": "1.0.0",
+    "entry_node": "query_experiments",
+    "entry_points": {
+      "start": "query_experiments"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "send_alert"
+    ],
+    "nodes": [
+      {
+        "id": "query_experiments",
+        "name": "Query Experiments",
+        "description": "Fetch recent runs from the configured MLflow experiment and return their metrics",
+        "node_type": "event_loop",
+        "input_keys": [
+          "experiment_id",
+          "max_results"
+        ],
+        "output_keys": [
+          "runs"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "mlflow_list_runs"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "evaluate_results",
+        "name": "Evaluate Results",
+        "description": "Compare each run's accuracy metric against the threshold and produce a human-readable summary of any failing runs",
+        "node_type": "event_loop",
+        "input_keys": [
+          "runs",
+          "accuracy_threshold"
+        ],
+        "output_keys": [
+          "alert_needed",
+          "summary"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "send_alert",
+        "name": "Send Alert",
+        "description": "Send the summary to the configured Slack channel — a warning with failing run details when alert_needed is true, or an all-clear message otherwise",
+        "node_type": "event_loop",
+        "input_keys": [
+          "summary",
+          "alert_needed",
+          "slack_channel"
+        ],
+        "output_keys": [
+          "notification_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "slack_send_message"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "query-to-evaluate",
+        "source": "query_experiments",
+        "target": "evaluate_results",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "evaluate-to-alert",
+        "source": "evaluate_results",
+        "target": "send_alert",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 30,
+    "max_retries_per_node": 3,
+    "description": "Monitors MLflow experiments for accuracy regressions and sends a Slack alert with the failing run details.",
+    "created_at": "2026-05-02T00:00:00.000000"
+  },
+  "goal": {
+    "id": "ml-experiment-monitor",
+    "name": "ML Experiment Monitor",
+    "description": "Monitor a set of MLflow experiments, identify runs where accuracy dropped below a configurable threshold, and send a Slack alert with the run details.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "sc-runs-fetched",
+        "description": "Recent runs are successfully retrieved from the MLflow tracking server",
+        "metric": "runs_fetched",
+        "target": "true",
+        "weight": 0.33,
+        "met": false
+      },
+      {
+        "id": "sc-threshold-evaluated",
+        "description": "Each run's accuracy is compared against the configured threshold",
+        "metric": "threshold_evaluated",
+        "target": "true",
+        "weight": 0.33,
+        "met": false
+      },
+      {
+        "id": "sc-slack-sent",
+        "description": "A Slack message is sent regardless of whether any runs failed",
+        "metric": "slack_sent",
+        "target": "true",
+        "weight": 0.34,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-no-fabrication",
+        "description": "Only report runs and metrics that actually exist in MLflow",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      },
+      {
+        "id": "c-always-notify",
+        "description": "Always send a Slack message — either an alert or an all-clear",
+        "constraint_type": "hard",
+        "category": "behavior",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-05-02T00:00:00.000000",
+    "updated_at": "2026-05-02T00:00:00.000000"
+  },
+  "required_tools": [
+    "mlflow_list_runs",
+    "slack_send_message"
+  ],
+  "metadata": {
+    "created_at": "2026-05-02T00:00:00.000000",
+    "node_count": 3,
+    "edge_count": 2
+  }
+}
