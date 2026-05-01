@@ -162,9 +162,7 @@ async def drain_injection_queue(
     conversation: NodeConversation,
     *,
     ctx: NodeContext,
-    caption_image_fn: (
-        Callable[[str, list[dict[str, Any]]], Awaitable[tuple[str, str] | None]] | None
-    ) = None,
+    caption_image_fn: (Callable[[str, list[dict[str, Any]]], Awaitable[tuple[str, str] | None]] | None) = None,
 ) -> int:
     """Drain all pending injected events as user messages. Returns count.
 
@@ -196,9 +194,7 @@ async def drain_injection_queue(
                     ctx.llm.model,
                 )
                 if caption_image_fn is not None:
-                    intent = content or (
-                        "Describe these user-injected images for a text-only agent."
-                    )
+                    intent = content or ("Describe these user-injected images for a text-only agent.")
                     caption_result = await caption_image_fn(intent, image_content)
                     if caption_result:
                         description, vision_model = caption_result
