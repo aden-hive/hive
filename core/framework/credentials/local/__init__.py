@@ -5,8 +5,10 @@ Provides feature parity with Aden OAuth credentials for locally-stored API keys:
 aliases, identity metadata, status tracking, CRUD, and health validation.
 
 Usage:
+    import logging
     from framework.credentials.local import LocalCredentialRegistry, LocalAccountInfo
-
+    
+    logger = logging.getLogger(__name__)
     registry = LocalCredentialRegistry.default()
 
     # Add a named account

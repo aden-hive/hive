@@ -13,6 +13,9 @@ Storage convention:
                                    _identity_username: "acme", ... }
 
 Usage:
+    import logging
+    from framework.credentials.local.registry import LocalCredentialRegistry
+    logger = logging.getLogger(__name__)
     registry = LocalCredentialRegistry.default()
 
     # Add a new account
