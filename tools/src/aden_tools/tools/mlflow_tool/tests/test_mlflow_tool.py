@@ -165,48 +165,48 @@ class TestToolRegistration:
 
 
 class TestCredentialPaths:
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_uses_env_uri_when_no_credential_store(self, mock_get, monkeypatch):
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_uses_env_uri_when_no_credential_store(self, mock_post, monkeypatch):
         monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://env-host:5000")
         monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
-        mock_get.return_value = _mock_resp(200, {"experiments": []})
+        mock_post.return_value = _mock_resp(200, {"experiments": []})
 
         mcp = _make_mcp_with_tools(credentials=None)
         result = _tool(mcp, "mlflow_list_experiments")()
 
         assert "error" not in result
-        call_url = mock_get.call_args[0][0]
+        call_url = mock_post.call_args[0][0]
         assert "env-host:5000" in call_url
 
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_uses_credential_store_uri(self, mock_get):
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_uses_credential_store_uri(self, mock_post):
         mock_creds = MagicMock()
         mock_creds.get.side_effect = lambda k: {
             "mlflow_tracking_uri": "http://cred-store-host:5000",
             "mlflow_tracking_token": None,
         }.get(k)
-        mock_get.return_value = _mock_resp(200, {"experiments": []})
+        mock_post.return_value = _mock_resp(200, {"experiments": []})
 
         mcp = _make_mcp_with_tools(credentials=mock_creds)
         result = _tool(mcp, "mlflow_list_experiments")()
 
         assert "error" not in result
-        call_url = mock_get.call_args[0][0]
+        call_url = mock_post.call_args[0][0]
         assert "cred-store-host:5000" in call_url
 
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_bearer_token_sent_in_header(self, mock_get):
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_bearer_token_sent_in_header(self, mock_post):
         mock_creds = MagicMock()
         mock_creds.get.side_effect = lambda k: {
             "mlflow_tracking_uri": "http://secure-mlflow:5000",
             "mlflow_tracking_token": "secret-bearer",
         }.get(k)
-        mock_get.return_value = _mock_resp(200, {"experiments": []})
+        mock_post.return_value = _mock_resp(200, {"experiments": []})
 
         mcp = _make_mcp_with_tools(credentials=mock_creds)
         _tool(mcp, "mlflow_list_experiments")()
 
-        sent_headers = mock_get.call_args[1]["headers"]
+        sent_headers = mock_post.call_args[1]["headers"]
         assert sent_headers.get("Authorization") == "Bearer secret-bearer"
 
 
@@ -226,9 +226,9 @@ class TestCredentialPaths:
     ],
 )
 class TestHttpErrors:
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_list_experiments_http_errors(self, mock_get, status_code, expected_fragment):
-        mock_get.return_value = _mock_resp(status_code, json_body={"message": "err"})
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_list_experiments_http_errors(self, mock_post, status_code, expected_fragment):
+        mock_post.return_value = _mock_resp(status_code, json_body={"message": "err"})
         mcp = _make_mcp_with_tools()
         result = _tool(mcp, "mlflow_list_experiments")()
         assert "error" in result
@@ -273,9 +273,9 @@ class TestHttpErrors:
 
 
 class TestNetworkErrors:
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_timeout_list_experiments(self, mock_get):
-        mock_get.side_effect = httpx.TimeoutException("timed out")
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_timeout_list_experiments(self, mock_post):
+        mock_post.side_effect = httpx.TimeoutException("timed out")
         mcp = _make_mcp_with_tools()
         result = _tool(mcp, "mlflow_list_experiments")()
         assert "error" in result
@@ -379,6 +379,54 @@ class TestParameterValidation:
         assert "error" in result
         assert "version" in result["error"]
 
+    def test_get_experiment_whitespace_id(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_get_experiment")(experiment_id="   ")
+        assert "error" in result
+        assert "experiment_id" in result["error"]
+
+    def test_get_run_whitespace_run_id(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_get_run")(run_id="  \t  ")
+        assert "error" in result
+        assert "run_id" in result["error"]
+
+    def test_log_metric_whitespace_run_id(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_log_metric")(run_id="   ", key="loss", value=0.5)
+        assert "error" in result
+        assert "run_id" in result["error"]
+
+    def test_log_metric_whitespace_key(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_log_metric")(run_id="r1", key="   ", value=0.5)
+        assert "error" in result
+        assert "key" in result["error"]
+
+    def test_log_param_whitespace_run_id(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_log_param")(run_id="   ", key="lr", value="0.01")
+        assert "error" in result
+        assert "run_id" in result["error"]
+
+    def test_log_param_whitespace_key(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_log_param")(run_id="r1", key="   ", value="0.01")
+        assert "error" in result
+        assert "key" in result["error"]
+
+    def test_get_model_version_whitespace_name(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_get_model_version")(name="   ", version="1")
+        assert "error" in result
+        assert "name" in result["error"]
+
+    def test_get_model_version_whitespace_version(self):
+        mcp = _make_mcp_with_tools()
+        result = _tool(mcp, "mlflow_get_model_version")(name="my-model", version="   ")
+        assert "error" in result
+        assert "version" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # Happy-path tests — one per tool
@@ -386,9 +434,9 @@ class TestParameterValidation:
 
 
 class TestHappyPaths:
-    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
-    def test_list_experiments_happy(self, mock_get):
-        mock_get.return_value = _mock_resp(
+    @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post")
+    def test_list_experiments_happy(self, mock_post):
+        mock_post.return_value = _mock_resp(
             200,
             {
                 "experiments": [
@@ -408,6 +456,9 @@ class TestHappyPaths:
         assert "error" not in result
         assert result["count"] == 1
         assert result["experiments"][0]["name"] == "fraud-detection"
+        sent_body = mock_post.call_args[1]["json"]
+        assert sent_body["view_type"] == "ACTIVE_ONLY"
+        assert "experiments/search" in mock_post.call_args[0][0]
 
     @patch("aden_tools.tools.mlflow_tool.mlflow_tool.httpx.get")
     def test_get_experiment_happy(self, mock_get):

@@ -7,6 +7,7 @@ metrics.accuracy < threshold, then posts a Slack message with the
 failing run details — or an all-clear if every run passes.
 """
 
+import asyncio
 from typing import Any, TYPE_CHECKING
 
 from framework.orchestrator import (
@@ -304,8 +305,24 @@ class MLExperimentMonitorAgent:
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
-        if mcp_config_path.exists():
+        if not mcp_config_path.exists():
+            raise RuntimeError(
+                f"mcp_servers.json not found at {mcp_config_path}. "
+                "Copy the template and create the file before running the agent."
+            )
+        try:
             self._tool_registry.load_mcp_config(mcp_config_path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load MCP tool configuration: {exc}") from exc
+
+        required_tools = {"mlflow_list_runs", "slack_send_message"}
+        registered = set(self._tool_registry.get_tools().keys())
+        missing = required_tools - registered
+        if missing:
+            raise RuntimeError(
+                f"Required tools not registered after loading mcp_servers.json: {sorted(missing)}. "
+                "Ensure the MCP server exposes these tools."
+            )
 
         llm = LiteLLMProvider(
             model=self.config.model,
@@ -364,13 +381,19 @@ class MLExperimentMonitorAgent:
             raise RuntimeError("Agent not started. Call start() first.")
         if self._graph is None:
             raise RuntimeError("Graph not built. Call start() first.")
+        if entry_point not in self.entry_points:
+            valid = list(self.entry_points.keys())
+            raise ValueError(f"Unknown entry_point {entry_point!r}. Valid options: {valid}")
 
-        return await self._executor.execute(
+        coro = self._executor.execute(
             graph=self._graph,
             goal=self.goal,
             input_data=input_data,
             session_state=session_state,
         )
+        if timeout is not None:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        return await coro
 
     async def run(
         self,

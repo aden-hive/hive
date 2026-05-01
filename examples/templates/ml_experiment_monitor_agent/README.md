@@ -29,8 +29,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 cp -r examples/templates/ml_experiment_monitor_agent exports/my_monitor
 
 # 3. Run the agent
-cd examples/templates
-uv run python -m ml_experiment_monitor_agent run \
+cd exports
+uv run python -m my_monitor run \
   --experiment-id 1 \
   --accuracy-threshold 0.85 \
   --slack-channel "#ml-alerts" \
@@ -48,7 +48,7 @@ uv run python -m ml_experiment_monitor_agent run \
 
 ## Agent graph
 
-```
+```text
 query_experiments  →  evaluate_results  →  send_alert
 ```
 
@@ -62,7 +62,7 @@ query_experiments  →  evaluate_results  →  send_alert
 
 **When a regression is detected:**
 
-```
+```text
 🚨 MLflow Alert
 
 The following runs in experiment #1 fell below the accuracy threshold of 0.85:
@@ -75,7 +75,7 @@ The following runs in experiment #1 fell below the accuracy threshold of 0.85:
 
 **When all runs pass:**
 
-```
+```text
 ✅ MLflow OK
 
 All 15 recent runs in experiment #1 met or exceeded the accuracy threshold of 0.85.

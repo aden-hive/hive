@@ -99,11 +99,12 @@ def register_tools(
             Dict with an "experiments" list and a "count" of returned items.
         """
         uri, token = _get_creds(credentials)
+        body: dict[str, Any] = {"max_results": max_results, "view_type": view_type}
         try:
-            resp = httpx.get(
-                f"{uri}/api/2.0/mlflow/experiments/list",
+            resp = httpx.post(
+                f"{uri}/api/2.0/mlflow/experiments/search",
                 headers=_headers(token),
-                params={"view_type": view_type, "max_results": max_results},
+                json=body,
                 timeout=30.0,
             )
         except httpx.TimeoutException:
@@ -139,7 +140,7 @@ def register_tools(
         Returns:
             Dict with experiment metadata including name, artifact location, and tags.
         """
-        if not experiment_id:
+        if not experiment_id.strip():
             return {"error": "experiment_id is required"}
 
         uri, token = _get_creds(credentials)
@@ -256,7 +257,7 @@ def register_tools(
         Returns:
             Dict with run info, final metrics, params, and tags.
         """
-        if not run_id:
+        if not run_id.strip():
             return {"error": "run_id is required"}
 
         uri, token = _get_creds(credentials)
@@ -312,9 +313,9 @@ def register_tools(
         Returns:
             Dict with success confirmation or an error message.
         """
-        if not run_id:
+        if not run_id.strip():
             return {"error": "run_id is required"}
-        if not key:
+        if not key.strip():
             return {"error": "key is required"}
 
         uri, token = _get_creds(credentials)
@@ -355,9 +356,9 @@ def register_tools(
         Returns:
             Dict with success confirmation or an error message.
         """
-        if not run_id:
+        if not run_id.strip():
             return {"error": "run_id is required"}
-        if not key:
+        if not key.strip():
             return {"error": "key is required"}
 
         uri, token = _get_creds(credentials)
@@ -391,9 +392,9 @@ def register_tools(
         Returns:
             Dict with model version metadata including stage, source, and run ID.
         """
-        if not name:
+        if not name.strip():
             return {"error": "name is required"}
-        if not version:
+        if not version.strip():
             return {"error": "version is required"}
 
         uri, token = _get_creds(credentials)
