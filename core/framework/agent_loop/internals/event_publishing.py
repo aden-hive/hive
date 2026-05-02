@@ -184,7 +184,8 @@ async def publish_context_usage(
     from framework.host.event_bus import AgentEvent, EventType
 
     estimated = conversation.estimate_tokens()
-    max_tokens = conversation._max_context_tokens
+    # Fallback to a safe default if _max_context_tokens is None
+    max_tokens = conversation._max_context_tokens or 32000
     ratio = estimated / max_tokens if max_tokens > 0 else 0.0
     await event_bus.publish(
         AgentEvent(
