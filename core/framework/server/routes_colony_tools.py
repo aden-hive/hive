@@ -202,7 +202,7 @@ async def handle_get_tools(request: web.Request) -> web.Response:
     if not colony_metadata_path(colony_name).exists():
         return web.json_response({"error": f"Colony '{colony_name}' not found"}, status=404)
 
-    manager = request.app.get(MANAGER_KEY)
+    manager = request.app[MANAGER_KEY]
     # Allowlist now lives in a dedicated tools.json sidecar; helper
     # migrates any legacy metadata.json field on first read.
     enabled = load_colony_tools_config(colony_name)
@@ -246,7 +246,7 @@ async def handle_patch_tools(request: web.Request) -> web.Response:
                 status=400,
             )
 
-    manager = request.app.get(MANAGER_KEY)
+    manager = request.app[MANAGER_KEY]
 
     # Validate names against the known MCP catalog — lifts the same
     # typo-catching guarantee we already offer on queen tools.
