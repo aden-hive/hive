@@ -258,6 +258,28 @@ uv run pytest
 **ruff** — Fast Python linter and formatter (replaces black, isort, flake8)
 
 ```bash
+sudo apt install make
+```
+
+### `uv: command not found`
+Install uv using:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+```
+
+### `ruff: not found`
+If linting fails due to a missing ruff command, install it with:
+
+```bash
+uv tool install ruff
+```
+
+### WSL Path Recommendation
+When using WSL, it is recommended to clone the repository inside your Linux home directory (e.g., `~/hive`) instead of under `/mnt/c/...` to avoid potential performance and permission issues.
+
+
 # Format code
 uv run ruff format .
 
@@ -1187,5 +1209,7 @@ As Anders Hejlsberg (TypeScript) says: *"Make it work, make it right, make it fa
 ---
 
 **Thank you for contributing to Aden Hive.** Together, we're building the most reliable, performant, and developer-friendly AI agent framework in the world.
+
+Thank you for contributing!
 
 Now go build something amazing. 🚀
