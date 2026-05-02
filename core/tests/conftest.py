@@ -61,6 +61,21 @@ _HIVE_PATH_NAMES = (
 
 
 @pytest.fixture(autouse=True)
+def _no_seed_mcp_defaults(monkeypatch):
+    """Skip bundled-server seeding in MCPRegistry.initialize() for tests.
+
+    Production wants ``initialize()`` to seed ``hive_tools`` / ``gcu-tools``
+    / ``files-tools`` / ``terminal-tools`` / ``chart-tools`` so a fresh
+    HIVE_HOME comes up with working defaults. Tests want a deterministic
+    empty registry — every assertion about counts, "no servers installed"
+    output, or first-element identity breaks otherwise. Patching here
+    keeps the production API clean and avoids a test-only flag on
+    ``initialize()``.
+    """
+    monkeypatch.setattr(_mcp_registry.MCPRegistry, "_seed_defaults", lambda self: [])
+
+
+@pytest.fixture(autouse=True)
 def _isolate_hive_home_autouse(tmp_path, monkeypatch):
     """Per-test isolation of ``~/.hive`` to ``tmp_path/.hive``.
 
