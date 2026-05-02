@@ -5,7 +5,7 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 ## Prerequisites
 
 - **Python 3.11+** ([Download](https://www.python.org/downloads/)) - Python 3.12 or 3.13 recommended
-- **pip** - Package installer for Python (comes with Python)
+- **uv** ([Install](https://docs.astral.sh/uv/getting-started/installation/)) - Fast Python package manager (this workspace uses `uv` exclusively; do not mix with `pip`)
 - **git** - Version control
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
 
@@ -197,20 +197,12 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Troubleshooting
 
-### ModuleNotFoundError: No module named 'framework'
+### ModuleNotFoundError: No module named 'framework' or 'aden_tools'
+
+Re-sync the workspace from the repo root:
 
 ```bash
-# Reinstall framework package
-cd core
-uv pip install -e .
-```
-
-### ModuleNotFoundError: No module named 'aden_tools'
-
-```bash
-# Reinstall tools package
-cd tools
-uv pip install -e .
+uv sync
 ```
 
 ### LLM API Errors
@@ -225,10 +217,20 @@ echo $HIVE_API_KEY
 
 ### Package Installation Issues
 
+**Linux / macOS:**
+
 ```bash
-# Remove and reinstall
-pip uninstall -y framework tools
+# Remove the virtualenv and re-run setup
+rm -rf .venv
 ./quickstart.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Remove the virtualenv and re-run setup
+Remove-Item -Recurse -Force .venv
+.\quickstart.ps1
 ```
 
 ## Getting Help
