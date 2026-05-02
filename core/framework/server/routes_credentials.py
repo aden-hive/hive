@@ -9,7 +9,7 @@ from pydantic import SecretStr
 
 from framework.credentials.models import CredentialDecryptionError, CredentialKey, CredentialObject
 from framework.credentials.store import CredentialStore
-from framework.server.app import validate_agent_path
+from framework.server.app import CREDENTIAL_STORE_KEY, MANAGER_KEY, validate_agent_path
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _get_llm_key_providers() -> dict:
 
 
 def _get_store(request: web.Request) -> CredentialStore:
-    return request.app["credential_store"]
+    return request.app[CREDENTIAL_STORE_KEY]
 
 
 def _invalidate_queen_credentials_cache(request: web.Request) -> None:
@@ -50,7 +50,7 @@ def _invalidate_queen_credentials_cache(request: web.Request) -> None:
     appear in the Queen's prompt on her next turn instead of waiting for the
     cache TTL to expire.
     """
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     if manager is None:
         return
     sessions = getattr(manager, "_sessions", None)

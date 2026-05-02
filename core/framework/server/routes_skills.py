@@ -38,6 +38,7 @@ from typing import Any
 from aiohttp import web
 
 from framework.config import COLONIES_DIR, QUEENS_DIR
+from framework.server.app import MANAGER_KEY
 from framework.skills.authoring import (
     build_draft,
     remove_skill as authoring_remove_skill,
@@ -365,7 +366,7 @@ def _serialize_skill(
 
 
 async def handle_list_queen_skills(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     queen_id = request.match_info["queen_id"]
     scope = _queen_scope(manager, queen_id)
     if scope is None:
@@ -386,7 +387,7 @@ async def handle_list_queen_skills(request: web.Request) -> web.Response:
 
 
 async def handle_list_colony_skills(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     colony_name = request.match_info["colony_name"]
     scope = _colony_scope(manager, colony_name)
     if scope is None:
@@ -775,7 +776,7 @@ def _requester_id(request: web.Request) -> str:
 
 
 async def handle_create_queen_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _queen_scope(manager, request.match_info["queen_id"])
     if scope is None:
         return web.json_response({"error": "queen not found"}, status=404)
@@ -787,7 +788,7 @@ async def handle_create_queen_skill(request: web.Request) -> web.Response:
 
 
 async def handle_patch_queen_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _queen_scope(manager, request.match_info["queen_id"])
     if scope is None:
         return web.json_response({"error": "queen not found"}, status=404)
@@ -799,7 +800,7 @@ async def handle_patch_queen_skill(request: web.Request) -> web.Response:
 
 
 async def handle_put_queen_skill_body(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _queen_scope(manager, request.match_info["queen_id"])
     if scope is None:
         return web.json_response({"error": "queen not found"}, status=404)
@@ -811,7 +812,7 @@ async def handle_put_queen_skill_body(request: web.Request) -> web.Response:
 
 
 async def handle_delete_queen_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _queen_scope(manager, request.match_info["queen_id"])
     if scope is None:
         return web.json_response({"error": "queen not found"}, status=404)
@@ -819,7 +820,7 @@ async def handle_delete_queen_skill(request: web.Request) -> web.Response:
 
 
 async def handle_reload_queen_skills(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _queen_scope(manager, request.match_info["queen_id"])
     if scope is None:
         return web.json_response({"error": "queen not found"}, status=404)
@@ -827,7 +828,7 @@ async def handle_reload_queen_skills(request: web.Request) -> web.Response:
 
 
 async def handle_create_colony_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _colony_scope(manager, request.match_info["colony_name"])
     if scope is None:
         return web.json_response({"error": "colony not found"}, status=404)
@@ -839,7 +840,7 @@ async def handle_create_colony_skill(request: web.Request) -> web.Response:
 
 
 async def handle_patch_colony_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _colony_scope(manager, request.match_info["colony_name"])
     if scope is None:
         return web.json_response({"error": "colony not found"}, status=404)
@@ -851,7 +852,7 @@ async def handle_patch_colony_skill(request: web.Request) -> web.Response:
 
 
 async def handle_put_colony_skill_body(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _colony_scope(manager, request.match_info["colony_name"])
     if scope is None:
         return web.json_response({"error": "colony not found"}, status=404)
@@ -863,7 +864,7 @@ async def handle_put_colony_skill_body(request: web.Request) -> web.Response:
 
 
 async def handle_delete_colony_skill(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _colony_scope(manager, request.match_info["colony_name"])
     if scope is None:
         return web.json_response({"error": "colony not found"}, status=404)
@@ -871,7 +872,7 @@ async def handle_delete_colony_skill(request: web.Request) -> web.Response:
 
 
 async def handle_reload_colony_skills(request: web.Request) -> web.Response:
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     scope = _colony_scope(manager, request.match_info["colony_name"])
     if scope is None:
         return web.json_response({"error": "colony not found"}, status=404)
@@ -894,7 +895,7 @@ async def handle_upload_skill(request: web.Request) -> web.Response:
       ``replace_existing``          — "true"/"false" (defaults false)
       ``name``                      — optional override for single-.md uploads
     """
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     if not request.content_type.startswith("multipart/"):
         return web.json_response({"error": "expected multipart/form-data"}, status=400)
 
