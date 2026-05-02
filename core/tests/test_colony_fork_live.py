@@ -129,7 +129,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
       5. Conversations are copied through to worker storage
     """
     from framework.agents.queen.queen_profiles import ensure_default_queens
-    from framework.server.app import create_app
+    from framework.server.app import MANAGER_KEY, create_app
     from framework.server.session_manager import _queen_session_dir
 
     # Pre-populate queen profiles in the temp ~/.hive so the identity
@@ -137,7 +137,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
     ensure_default_queens()
 
     app = create_app()  # picks up model from copied configuration.json
-    manager = app["manager"]
+    manager = app[MANAGER_KEY]
 
     async with TestClient(TestServer(app)) as client:
         # ── 1. Create a queen-only session ─────────────────────────

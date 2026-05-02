@@ -9,6 +9,7 @@
 from aiohttp import web
 
 from framework.agents.queen.queen_profiles import ensure_default_queens, select_queen
+from framework.server.app import MANAGER_KEY
 
 
 async def handle_classify_message(request: web.Request) -> web.Response:
@@ -16,7 +17,7 @@ async def handle_classify_message(request: web.Request) -> web.Response:
     import traceback as _tb
 
     try:
-        manager = request.app["manager"]
+        manager = request.app[MANAGER_KEY]
         body = await request.json() if request.can_read_body else {}
         message = body.get("message")
         if not isinstance(message, str) or not message.strip():

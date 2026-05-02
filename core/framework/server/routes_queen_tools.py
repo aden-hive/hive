@@ -40,6 +40,7 @@ from framework.agents.queen.queen_tools_defaults import (
     queen_role_categories,
     resolve_category_tools,
 )
+from framework.server.app import MANAGER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +289,7 @@ async def handle_get_tools(request: web.Request) -> web.Response:
     except FileNotFoundError:
         return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
 
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     session = _live_queen_session(manager, queen_id) if manager is not None else None
 
     # Prefer a live session's registry for freshness. Otherwise use (or
@@ -398,7 +399,7 @@ async def handle_patch_tools(request: web.Request) -> web.Response:
     # Validate names against the known MCP tool catalog. We prefer a live
     # session's registry for the most up-to-date set, then fall back to
     # the manager-level snapshot (building it on demand if absent).
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     session = _live_queen_session(manager, queen_id) if manager is not None else None
     if session is not None:
         catalog = _catalog_from_live_session(session)
@@ -484,7 +485,7 @@ async def handle_delete_tools(request: web.Request) -> web.Response:
     # Recompute the queen's effective allowlist from the role defaults
     # so we can hot-reload live sessions in one pass (same shape as
     # PATCH).
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     session = _live_queen_session(manager, queen_id) if manager is not None else None
     if session is not None:
         catalog = _catalog_from_live_session(session)

@@ -11,7 +11,7 @@ from aiohttp import web
 from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.credentials.validation import validate_agent_credentials
 from framework.host.execution_manager import ExecutionAlreadyRunningError
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import MANAGER_KEY, resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
@@ -334,7 +334,7 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     # Queen is dead — try to revive her
     logger.warning("[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id)
-    manager: Any = request.app["manager"]
+    manager: Any = request.app[MANAGER_KEY]
     try:
         logger.debug("[handle_chat] Calling manager.revive_queen()...")
         await manager.revive_queen(session)
@@ -387,7 +387,7 @@ async def handle_queen_context(request: web.Request) -> web.Response:
         "Queen is dead for session '%s', reviving on /queen-context request",
         session.id,
     )
-    manager: Any = request.app["manager"]
+    manager: Any = request.app[MANAGER_KEY]
     try:
         await manager.revive_queen(session)
         # After revival, deliver the message
@@ -982,7 +982,7 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
     except OSError:
         logger.warning("compact_and_fork: failed to write new meta.json", exc_info=True)
 
-    manager: Any = request.app["manager"]
+    manager: Any = request.app[MANAGER_KEY]
     try:
         new_session = await manager.create_session(
             session_id=None,

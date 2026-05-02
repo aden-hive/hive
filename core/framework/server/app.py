@@ -11,6 +11,10 @@ from framework.server.session_manager import Session, SessionManager
 
 logger = logging.getLogger(__name__)
 
+MANAGER_KEY = web.AppKey("manager", SessionManager)
+CREDENTIAL_STORE_KEY = web.AppKey("credential_store", object)
+QUEEN_TOOL_REGISTRY_KEY = web.AppKey("queen_tool_registry", object)
+
 
 # Anchor to the repository root so allowed roots are independent of CWD.
 # app.py lives at core/framework/server/app.py, so four .parent calls
@@ -88,7 +92,7 @@ def resolve_session(request: web.Request):
 
     Returns (session, None) on success or (None, error_response) on failure.
     """
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[MANAGER_KEY]
     sid = request.match_info["session_id"]
     session = manager.get_session(sid)
     if not session:
@@ -210,13 +214,13 @@ async def error_middleware(request: web.Request, handler):
 
 async def _on_shutdown(app: web.Application) -> None:
     """Gracefully unload all agents on server shutdown."""
-    manager: SessionManager = app["manager"]
+    manager: SessionManager = app[MANAGER_KEY]
     await manager.shutdown_all()
 
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /api/health — simple health check."""
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[MANAGER_KEY]
     sessions = manager.list_sessions()
     return web.json_response(
         {
@@ -358,12 +362,12 @@ def create_app(model: str | None = None) -> web.Application:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
         credential_store = CredentialStore.for_testing({})
 
-    app["credential_store"] = credential_store
+    app[CREDENTIAL_STORE_KEY] = credential_store
 
     # Let queen sessions build their registry lazily on first use instead of
     # paying the MCP discovery cost during `hive open`.
-    app["queen_tool_registry"] = None
-    app["manager"] = SessionManager(
+    app[QUEEN_TOOL_REGISTRY_KEY] = None
+    app[MANAGER_KEY] = SessionManager(
         model=model,
         credential_store=credential_store,
         queen_tool_registry=None,

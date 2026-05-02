@@ -35,6 +35,7 @@ from framework.host.colony_tools_config import (
     load_colony_tools_config,
     update_colony_tools_config,
 )
+from framework.server.app import MANAGER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,7 @@ async def handle_get_tools(request: web.Request) -> web.Response:
     if not colony_metadata_path(colony_name).exists():
         return web.json_response({"error": f"Colony '{colony_name}' not found"}, status=404)
 
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     # Allowlist now lives in a dedicated tools.json sidecar; helper
     # migrates any legacy metadata.json field on first read.
     enabled = load_colony_tools_config(colony_name)
@@ -245,7 +246,7 @@ async def handle_patch_tools(request: web.Request) -> web.Response:
                 status=400,
             )
 
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
 
     # Validate names against the known MCP catalog — lifts the same
     # typo-catching guarantee we already offer on queen tools.
