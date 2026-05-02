@@ -22,13 +22,11 @@ Usage:
 
 from __future__ import annotations
 
-import contextlib
 import difflib
 import fnmatch
 import os
 import re
 import subprocess
-import sys
 import threading as _threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -924,8 +922,7 @@ def _apply_hunk(content: str, hunk: _Hunk) -> tuple[str, str | None]:
             count = content.count(hunk.context_hint)
             if count > 1:
                 return content, (
-                    f"addition-only hunk: context hint "
-                    f"'{hunk.context_hint}' is ambiguous ({count} occurrences)"
+                    f"addition-only hunk: context hint '{hunk.context_hint}' is ambiguous ({count} occurrences)"
                 )
             if count == 1:
                 idx = content.find(hunk.context_hint)
@@ -1045,9 +1042,7 @@ def _apply_v4a(
             for hunk_idx, hunk in enumerate(op.hunks):
                 new_content, herr = _apply_hunk(content, hunk)
                 if herr:
-                    errors.append(
-                        f"Op #{op_idx + 1} update {op.path} hunk #{hunk_idx + 1}: {herr}"
-                    )
+                    errors.append(f"Op #{op_idx + 1} update {op.path} hunk #{hunk_idx + 1}: {herr}")
                     break
                 content = new_content
             fs_state[resolved] = content
@@ -1063,9 +1058,7 @@ def _apply_v4a(
                 errors.append(f"Op #{op_idx + 1} move {op.path}: {err}")
                 continue
             if os.path.exists(dst_resolved) and fs_exists.get(dst_resolved, True):
-                errors.append(
-                    f"Op #{op_idx + 1} move {op.path}: destination already exists"
-                )
+                errors.append(f"Op #{op_idx + 1} move {op.path}: destination already exists")
                 continue
             fs_state[dst_resolved] = fs_state[resolved]
             fs_exists[dst_resolved] = True
@@ -1121,8 +1114,7 @@ def _apply_v4a(
 
     if apply_errors:
         return None, (
-            "Apply phase failed (state may be inconsistent — run `git diff` to assess):\n  "
-            + "\n  ".join(apply_errors)
+            "Apply phase failed (state may be inconsistent — run `git diff` to assess):\n  " + "\n  ".join(apply_errors)
         )
 
     summary_parts: list[str] = []
@@ -1177,10 +1169,7 @@ def _patch_replace(
             f"harness can track its state before you edit it."
         )
     if _fresh.status is Freshness.STALE:
-        return (
-            f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with "
-            f"read_file before editing."
-        )
+        return f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with read_file before editing."
 
     try:
         with open(resolved, encoding="utf-8") as f:
@@ -1217,9 +1206,7 @@ def _patch_replace(
                 break
 
         if matched is None:
-            close = difflib.get_close_matches(
-                old_string[:200], content.split("\n"), n=3, cutoff=0.4
-            )
+            close = difflib.get_close_matches(old_string[:200], content.split("\n"), n=3, cutoff=0.4)
             msg = (
                 f"Error: Could not find a unique match for old_string in {path}. "
                 f"Use read_file to verify the current content, or search_files "
@@ -1352,14 +1339,8 @@ EDIT_FILE_PARAMS = {
         "tabs vs spaces, smart quotes vs ASCII, and literal \\n/\\t/\\r "
         "vs real control chars."
     ),
-    "new_string": (
-        "Replace mode only. Replacement text. Pass an empty string to "
-        "delete the matched text."
-    ),
-    "replace_all": (
-        "Replace mode only. Replace every occurrence instead of requiring "
-        "a unique match. Default False."
-    ),
+    "new_string": ("Replace mode only. Replacement text. Pass an empty string to delete the matched text."),
+    "replace_all": ("Replace mode only. Replace every occurrence instead of requiring a unique match. Default False."),
     "patch_text": (
         "Patch mode only. Structured patch body. File paths are embedded "
         "inside the body via '*** Update File: <path>' / "
@@ -1396,18 +1377,14 @@ SEARCH_FILES_DOC = (
 )
 SEARCH_FILES_PARAMS = {
     "pattern": (
-        "Regex (content mode) or glob (files mode, e.g. '*.py'). For an "
-        "'ls'-style listing pass '*' or '*.<ext>'."
+        "Regex (content mode) or glob (files mode, e.g. '*.py'). For an 'ls'-style listing pass '*' or '*.<ext>'."
     ),
     "target": (
         "'content' to grep inside files, 'files' to list/find files. "
         "Legacy aliases: 'grep' -> 'content', 'find'/'ls' -> 'files'. "
         "Default 'content'."
     ),
-    "path": (
-        "Directory (or, in content mode, a single file) to search. "
-        "Default '.'."
-    ),
+    "path": ("Directory (or, in content mode, a single file) to search. Default '.'."),
     "file_glob": (
         "Restrict content search to filenames matching this glob. "
         "Ignored in files mode (use the 'pattern' argument instead)."
@@ -1419,14 +1396,8 @@ SEARCH_FILES_PARAMS = {
         "default), 'files_only' (paths only), 'count' (per-file match "
         "counts)."
     ),
-    "context": (
-        "Lines of context before and after each match (content mode "
-        "only). Default 0."
-    ),
-    "hashline": (
-        "Content mode: include N:hhhh hash anchors in matched lines. "
-        "Default False."
-    ),
+    "context": ("Lines of context before and after each match (content mode only). Default 0."),
+    "hashline": ("Content mode: include N:hhhh hash anchors in matched lines. Default False."),
     "task_id": (
         "Optional anti-loop scope key. Defaults to a shared bucket; pass "
         "a per-task id when multiple agents share a process."
@@ -1719,4 +1690,3 @@ def register_file_tools(
                 "Results have not changed — use what you have instead of re-searching.]"
             )
         return result
-

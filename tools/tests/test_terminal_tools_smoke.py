@@ -20,9 +20,7 @@ def test_register_terminal_tools_lands_all_ten(mcp):
     from terminal_tools import register_terminal_tools
 
     names = register_terminal_tools(mcp)
-    assert set(names) == EXPECTED_TOOLS, (
-        f"missing: {EXPECTED_TOOLS - set(names)}, extra: {set(names) - EXPECTED_TOOLS}"
-    )
+    assert set(names) == EXPECTED_TOOLS, f"missing: {EXPECTED_TOOLS - set(names)}, extra: {set(names) - EXPECTED_TOOLS}"
 
 
 def test_all_tools_have_terminal_prefix(mcp):

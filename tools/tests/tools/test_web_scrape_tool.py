@@ -466,9 +466,7 @@ class TestWebScrapeToolAIFriendlyOutput:
 
         result = await web_scrape_fn(url="https://example.com")
         assert "structured_data" in result
-        assert result["structured_data"]["json_ld"] == [
-            {"@type": "Article", "headline": "Hello"}
-        ]
+        assert result["structured_data"]["json_ld"] == [{"@type": "Article", "headline": "Hello"}]
 
     @pytest.mark.asyncio
     @patch(_STEALTH_PATH)

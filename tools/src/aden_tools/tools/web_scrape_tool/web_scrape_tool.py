@@ -137,10 +137,7 @@ def register_tools(mcp: FastMCP) -> None:
                             "error": f"Blocked by robots.txt: {url}",
                             "url": url,
                             "skipped": True,
-                            "hint": (
-                                "Pass respect_robots_txt=False if you have "
-                                "authorization to scrape this site."
-                            ),
+                            "hint": ("Pass respect_robots_txt=False if you have authorization to scrape this site."),
                         }
                 except Exception:
                     pass  # If robots.txt can't be fetched, proceed anyway
@@ -343,8 +340,19 @@ def register_tools(mcp: FastMCP) -> None:
                 for br in content_elem.find_all("br"):
                     br.replace_with(NavigableString("\n"))
                 block_tags = (
-                    "p", "h1", "h2", "h3", "h4", "h5", "h6",
-                    "li", "tr", "div", "section", "article", "blockquote",
+                    "p",
+                    "h1",
+                    "h2",
+                    "h3",
+                    "h4",
+                    "h5",
+                    "h6",
+                    "li",
+                    "tr",
+                    "div",
+                    "section",
+                    "article",
+                    "blockquote",
                 )
                 for block in content_elem.find_all(block_tags):
                     block.insert_before(NavigableString("\n"))
@@ -375,7 +383,7 @@ def register_tools(mcp: FastMCP) -> None:
             truncated = end < total_length
             sliced = text[offset:end]
             if truncated and len(sliced) >= 3:
-                sliced = sliced[: -3] + "..."
+                sliced = sliced[:-3] + "..."
 
             structured_data: dict[str, Any] = {}
             if json_ld:

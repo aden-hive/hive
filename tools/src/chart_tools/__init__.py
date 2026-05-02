@@ -29,11 +29,7 @@ def register_chart_tools(mcp: FastMCP) -> list[str]:
 
     register_tools(mcp)
 
-    return [
-        name
-        for name in mcp._tool_manager._tools.keys()
-        if name.startswith("chart_")
-    ]
+    return [name for name in mcp._tool_manager._tools.keys() if name.startswith("chart_")]
 
 
 __all__ = ["register_chart_tools"]

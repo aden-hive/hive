@@ -247,9 +247,7 @@ async def _render_in_page(
         # expected to have already coerced JSON-string specs into dicts
         # in chart_tools/tools.py — this is a defense-in-depth check.
         if isinstance(spec, str):
-            raise RendererError(
-                "spec arrived as a string; it should have been parsed to a dict in chart_render"
-            )
+            raise RendererError("spec arrived as a string; it should have been parsed to a dict in chart_render")
         try:
             json.dumps(spec)
         except (TypeError, ValueError) as exc:

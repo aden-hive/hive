@@ -52,11 +52,11 @@ _DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
         "args": ["run", "python", "files_server.py", "--stdio"],
     },
     "terminal-tools": {
-        "description": "Terminal capabilities: process exec, background jobs, PTY sessions, fs search. Bash-only on POSIX.",
+        "description": "Terminal capabilities",
         "args": ["run", "python", "terminal_tools_server.py", "--stdio"],
     },
     "chart-tools": {
-        "description": "BI/financial chart + diagram rendering: ECharts, Mermaid. Returns spec + downloadable PNG; chat embeds live.",
+        "description": "BI/financial chart + diagram rendering: ECharts, Mermaid",
         "args": ["run", "python", "chart_tools_server.py", "--stdio"],
     },
 }

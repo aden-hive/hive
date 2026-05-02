@@ -168,8 +168,8 @@ def build_theme(theme: str = "light") -> dict:
         # being CSS-hello-world green/red.
         "candlestick": {
             "itemStyle": {
-                "color": "#3d7a4a",      # up body
-                "color0": "#a8453d",     # down body
+                "color": "#3d7a4a",  # up body
+                "color0": "#a8453d",  # down body
                 "borderColor": "#3d7a4a",
                 "borderColor0": "#a8453d",
             },

@@ -63,9 +63,7 @@ def test_merge_stderr(job_tools):
         merge_stderr=True,
     )
     job_id = started["job_id"]
-    result = job_tools["logs"](
-        job_id=job_id, stream="merged", wait_until_exit=True, wait_timeout_sec=5
-    )
+    result = job_tools["logs"](job_id=job_id, stream="merged", wait_until_exit=True, wait_timeout_sec=5)
     assert "stdout1" in result["data"]
     assert "stderr1" in result["data"]
 

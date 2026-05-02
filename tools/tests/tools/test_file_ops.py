@@ -280,7 +280,7 @@ class TestPatchToolReplaceMode:
         result = edit_fn(
             mode="replace",
             path="b.py",
-            old_string='print(“hi”)',
+            old_string="print(“hi”)",
             new_string='print("HELLO")',
         )
         assert "Error" not in result
@@ -331,14 +331,7 @@ class TestPatchToolPatchMode:
         """A V4A Update hunk replaces matched lines and writes."""
         target = tmp_path / "u.py"
         target.write_text("def f():\n    return 1\n", encoding="utf-8")
-        body = (
-            "*** Begin Patch\n"
-            "*** Update File: u.py\n"
-            " def f():\n"
-            "-    return 1\n"
-            "+    return 42\n"
-            "*** End Patch\n"
-        )
+        body = "*** Begin Patch\n*** Update File: u.py\n def f():\n-    return 1\n+    return 42\n*** End Patch\n"
         edit_fn = _get_tool_fn(file_ops_mcp, "edit_file")
         result = edit_fn(mode="patch", patch_text=body)
         assert "Error" not in result
@@ -347,13 +340,7 @@ class TestPatchToolPatchMode:
 
     def test_patch_add_file(self, file_ops_mcp, tmp_path):
         """Add File: creates a new file from + lines."""
-        body = (
-            "*** Begin Patch\n"
-            "*** Add File: new.py\n"
-            "+# new\n"
-            "+x = 1\n"
-            "*** End Patch\n"
-        )
+        body = "*** Begin Patch\n*** Add File: new.py\n+# new\n+x = 1\n*** End Patch\n"
         edit_fn = _get_tool_fn(file_ops_mcp, "edit_file")
         result = edit_fn(mode="patch", patch_text=body)
         assert "Error" not in result

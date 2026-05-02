@@ -129,10 +129,7 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
     # Research — paper search, Wikipedia, ad-hoc web scrape. Pair with
     # browser_basic for richer site-by-site research; this category is the
     # lightweight always-available fallback.
-    "research": [
-        "web_scrape",
-        "pdf_read"
-    ],
+    "research": ["web_scrape", "pdf_read"],
     # Security — defensive scanning and reconnaissance. Engineering-only
     # surface; the rest of the queens shouldn't see port scanners.
     "security": [

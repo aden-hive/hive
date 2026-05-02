@@ -20,9 +20,7 @@ def test_register_chart_tools_lands_all(mcp):
     from chart_tools import register_chart_tools
 
     names = register_chart_tools(mcp)
-    assert set(names) == EXPECTED_TOOLS, (
-        f"missing: {EXPECTED_TOOLS - set(names)}, extra: {set(names) - EXPECTED_TOOLS}"
-    )
+    assert set(names) == EXPECTED_TOOLS, f"missing: {EXPECTED_TOOLS - set(names)}, extra: {set(names) - EXPECTED_TOOLS}"
 
 
 def test_all_tools_have_chart_prefix(mcp):

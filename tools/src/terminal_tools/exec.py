@@ -53,9 +53,7 @@ if TYPE_CHECKING:
 # directly — the alternative is spawning the first program with the rest
 # of the line as junk argv, which either errors or returns fake success
 # (e.g. `echo "..." && ps ...` → echo prints the literal command).
-_SHELL_METACHARS: frozenset[str] = frozenset(
-    {"|", "&&", "||", ";", ">", "<", ">>", "<<", "&", "2>", "2>&1", "|&"}
-)
+_SHELL_METACHARS: frozenset[str] = frozenset({"|", "&&", "||", ";", ">", "<", ">>", "<<", "&", "2>", "2>&1", "|&"})
 
 
 def register_exec_tools(mcp: FastMCP) -> None:
@@ -126,7 +124,8 @@ def register_exec_tools(mcp: FastMCP) -> None:
                         return _err_envelope(command, "command was empty")
                     if any(t in _SHELL_METACHARS for t in tokens) or any(
                         # globs that shlex left unexpanded (`*`, `?`, `[`)
-                        any(c in t for c in "*?[") and t != "[" for t in tokens
+                        any(c in t for c in "*?[") and t != "["
+                        for t in tokens
                     ):
                         auto_shell = True
 

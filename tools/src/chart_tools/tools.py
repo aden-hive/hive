@@ -174,9 +174,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # browser-side flakes. We retry once for the latter; if
                 # the second attempt fails too, surface the error so the
                 # agent can fix it.
-                logger.warning(
-                    "chart_render attempt %d/%d failed: %s", attempt + 1, 2, exc
-                )
+                logger.warning("chart_render attempt %d/%d failed: %s", attempt + 1, 2, exc)
                 if attempt == 0:
                     await asyncio.sleep(0.15)
                     continue

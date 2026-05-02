@@ -20,7 +20,6 @@ from gcu.browser.bridge import BeelineBridge
 from gcu.browser.tools.advanced import register_advanced_tools
 from gcu.browser.tools.inspection import register_inspection_tools
 from gcu.browser.tools.interactions import register_interaction_tools
-from gcu.browser.tools.lifecycle import register_lifecycle_tools
 from gcu.browser.tools.navigation import register_navigation_tools
 from gcu.browser.tools.tabs import register_tab_tools
 
