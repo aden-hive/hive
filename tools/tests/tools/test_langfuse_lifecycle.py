@@ -24,24 +24,25 @@ ENV = {
 PATCH_TARGET = "aden_tools.tools.langfuse_tool.tool.get_client"
 
 
-def _make_client(trace_id="trace-abc123", span_id="span-xyz789", score_id="score-q42"):
+def _make_client(trace_id="trace-abc123", span_id="span-xyz789"):
     """Build a fully-mocked Langfuse client whose return values are inspectable."""
     client = MagicMock()
 
-    # trace() returns an object with .id
-    mock_trace = MagicMock()
-    mock_trace.id = trace_id
-    client.trace.return_value = mock_trace
+    # create_trace_id returns a string
+    client.create_trace_id.return_value = trace_id
 
-    # span() returns an object with .id
+    # create_event returns an object with .id
+    mock_event = MagicMock()
+    mock_event.id = "event-id"
+    client.create_event.return_value = mock_event
+
+    # start_observation returns an object with .id
     mock_span = MagicMock()
     mock_span.id = span_id
-    client.span.return_value = mock_span
+    client.start_observation.return_value = mock_span
 
-    # score() returns an object with .id
-    mock_score = MagicMock()
-    mock_score.id = score_id
-    client.score.return_value = mock_score
+    # create_score returns None in v3
+    client.create_score.return_value = None
 
     return client
 
@@ -74,9 +75,9 @@ class TestStartAgentTrace:
             )
         assert result == "trace-001"
 
-    def test_calls_trace_with_correct_args(self):
-        """start_agent_trace must forward all arguments to lf.trace()."""
-        mock_client = _make_client()
+    def test_calls_create_event_with_correct_args(self):
+        """start_agent_trace must call lf.create_trace_id and lf.create_event with trace metadata."""
+        mock_client = _make_client(trace_id="trace-99")
         with patch(PATCH_TARGET, return_value=mock_client):
             start_agent_trace(
                 agent_name="my-agent",
@@ -86,39 +87,42 @@ class TestStartAgentTrace:
                 tags=["prod", "v2"],
             )
 
-        mock_client.trace.assert_called_once_with(
+        mock_client.create_trace_id.assert_called_once()
+        mock_client.create_event.assert_called_once_with(
             name="my-agent",
-            session_id="sess-99",
             input={"key": "value"},
-            user_id="user-7",
-            tags=["prod", "v2"],
+            trace_context={"trace_id": "trace-99"},
         )
 
-    def test_empty_user_id_becomes_none(self):
-        """An empty user_id string should be passed as None to avoid noisy traces."""
+    def test_empty_user_id_propagation(self):
+        """An empty user_id should still trigger propagate_attributes (handled by start_agent_trace)."""
         mock_client = _make_client()
-        with patch(PATCH_TARGET, return_value=mock_client):
+        # We patch propagate_attributes to verify it's called
+        with (
+            patch(PATCH_TARGET, return_value=mock_client),
+            patch("aden_tools.tools.langfuse_tool.tool.propagate_attributes") as mock_prop,
+        ):
             start_agent_trace(
                 agent_name="agent",
                 session_id="s1",
                 input_data={},
-                user_id="",  # empty → should become None
+                user_id="",
             )
 
-        _kwargs = mock_client.trace.call_args.kwargs
+        mock_prop.assert_called_once()
+        _kwargs = mock_prop.call_args.kwargs
         assert _kwargs["user_id"] is None
 
-    def test_default_tags_is_empty_list(self):
-        """When tags is omitted the SDK must receive an empty list, not None."""
+    def test_default_tags_propagation(self):
+        """When tags is omitted, an empty list should be propagated."""
         mock_client = _make_client()
-        with patch(PATCH_TARGET, return_value=mock_client):
-            start_agent_trace(
-                agent_name="agent",
-                session_id="s1",
-                input_data={},
-            )
+        with (
+            patch(PATCH_TARGET, return_value=mock_client),
+            patch("aden_tools.tools.langfuse_tool.tool.propagate_attributes") as mock_prop,
+        ):
+            start_agent_trace(agent_name="agent", session_id="s1", input_data={})
 
-        _kwargs = mock_client.trace.call_args.kwargs
+        _kwargs = mock_prop.call_args.kwargs
         assert _kwargs["tags"] == []
 
     def test_does_not_call_flush(self):
@@ -148,8 +152,8 @@ class TestLogNodeSpan:
             )
         assert result == "span-001"
 
-    def test_calls_span_with_required_args(self):
-        """log_node_span must forward trace_id, name, input, and output to lf.span()."""
+    def test_calls_observation_with_required_args(self):
+        """log_node_span must call start_observation with required trace context."""
         mock_client = _make_client()
         with patch(PATCH_TARGET, return_value=mock_client):
             log_node_span(
@@ -159,8 +163,8 @@ class TestLogNodeSpan:
                 output={"summary": "short"},
             )
 
-        call_kwargs = mock_client.span.call_args.kwargs
-        assert call_kwargs["trace_id"] == "trace-abc"
+        call_kwargs = mock_client.start_observation.call_args.kwargs
+        assert call_kwargs["trace_context"] == {"trace_id": "trace-abc"}
         assert call_kwargs["name"] == "summarise"
         assert call_kwargs["input"] == {"text": "long article"}
         assert call_kwargs["output"] == {"summary": "short"}
@@ -177,7 +181,7 @@ class TestLogNodeSpan:
                 latency_ms=342.7,
             )
 
-        call_kwargs = mock_client.span.call_args.kwargs
+        call_kwargs = mock_client.start_observation.call_args.kwargs
         assert call_kwargs["metadata"]["latency_ms"] == 342.7
 
     def test_token_counts_forwarded(self):
@@ -192,7 +196,7 @@ class TestLogNodeSpan:
                 tokens={"input": 100, "output": 50, "total": 150},
             )
 
-        usage = mock_client.span.call_args.kwargs["usage"]
+        usage = mock_client.start_observation.call_args.kwargs["usage_details"]
         assert usage["input"] == 100
         assert usage["output"] == 50
         assert usage["total"] == 150
@@ -209,7 +213,7 @@ class TestLogNodeSpan:
                 tokens={"input": 200, "output": 75},
             )
 
-        usage = mock_client.span.call_args.kwargs["usage"]
+        usage = mock_client.start_observation.call_args.kwargs["usage_details"]
         assert usage["total"] == 275
 
     def test_no_tokens_passes_none_usage(self):
@@ -218,7 +222,7 @@ class TestLogNodeSpan:
         with patch(PATCH_TARGET, return_value=mock_client):
             log_node_span(trace_id="t1", node_name="n", input={}, output={})
 
-        usage = mock_client.span.call_args.kwargs["usage"]
+        usage = mock_client.start_observation.call_args.kwargs["usage_details"]
         assert usage is None
 
     def test_empty_model_becomes_none(self):
@@ -233,7 +237,7 @@ class TestLogNodeSpan:
                 model="",
             )
 
-        call_kwargs = mock_client.span.call_args.kwargs
+        call_kwargs = mock_client.start_observation.call_args.kwargs
         assert call_kwargs["model"] is None
 
     def test_flush_called_after_span(self):
@@ -245,10 +249,10 @@ class TestLogNodeSpan:
         mock_client.flush.assert_called_once()
 
     def test_flush_called_after_span_not_before(self):
-        """flush() must come after span() — calling it before would be wrong order."""
+        """flush() must come after start_observation() — correct ordering guarantees delivery."""
         mock_client = _make_client()
         call_order = []
-        mock_client.span.side_effect = lambda **_: call_order.append("span") or MagicMock(id="s1")
+        mock_client.start_observation.side_effect = lambda **_: call_order.append("span") or MagicMock(id="s1")
         mock_client.flush.side_effect = lambda: call_order.append("flush")
 
         with patch(PATCH_TARGET, return_value=mock_client):
@@ -265,7 +269,7 @@ class TestLogNodeSpan:
             m = MagicMock()
             m.id = sid
             side_effects.append(m)
-        mock_client.span.side_effect = side_effects
+        mock_client.start_observation.side_effect = side_effects
 
         with patch(PATCH_TARGET, return_value=mock_client):
             r1 = log_node_span("trace-X", "node1", {}, {})
@@ -276,8 +280,8 @@ class TestLogNodeSpan:
         # flush must have been called once per span
         assert mock_client.flush.call_count == 3
         # All spans share the same trace_id
-        for c in mock_client.span.call_args_list:
-            assert c.kwargs["trace_id"] == "trace-X"
+        for c in mock_client.start_observation.call_args_list:
+            assert c.kwargs["trace_context"]["trace_id"] == "trace-X"
 
 
 # ===========================================================================
@@ -286,16 +290,16 @@ class TestLogNodeSpan:
 
 
 class TestScoreAgentRun:
-    def test_returns_score_id(self):
-        """score_agent_run must return the score ID from the SDK."""
-        mock_client = _make_client(score_id="score-001")
+    def test_returns_trace_id(self):
+        """score_agent_run must return the trace ID in v3."""
+        mock_client = _make_client()
         with patch(PATCH_TARGET, return_value=mock_client):
             result = score_agent_run(
                 trace_id="trace-abc",
                 score_name="quality",
                 score_value=0.87,
             )
-        assert result == "score-001"
+        assert result == "trace-abc"
 
     def test_calls_score_with_correct_args(self):
         """score_agent_run must forward trace_id, name, value, and comment to lf.score()."""
@@ -308,7 +312,7 @@ class TestScoreAgentRun:
                 comment="Excellent output",
             )
 
-        mock_client.score.assert_called_once_with(
+        mock_client.create_score.assert_called_once_with(
             trace_id="trace-abc",
             name="correctness",
             value=0.95,
@@ -326,7 +330,7 @@ class TestScoreAgentRun:
                 comment="",
             )
 
-        call_kwargs = mock_client.score.call_args.kwargs
+        call_kwargs = mock_client.create_score.call_args.kwargs
         assert call_kwargs["comment"] is None
 
     def test_flush_called_after_score(self):
@@ -341,7 +345,7 @@ class TestScoreAgentRun:
         """flush() must come after score() — correct ordering guarantees delivery."""
         mock_client = _make_client()
         call_order = []
-        mock_client.score.side_effect = lambda **_: call_order.append("score") or MagicMock(id="sc1")
+        mock_client.create_score.side_effect = lambda **_: call_order.append("score")
         mock_client.flush.side_effect = lambda: call_order.append("flush")
 
         with patch(PATCH_TARGET, return_value=mock_client):
@@ -366,7 +370,7 @@ class TestScoreAgentRun:
         with patch(PATCH_TARGET, return_value=mock_client):
             score_agent_run("trace-abc", "quality", value)
 
-        call_kwargs = mock_client.score.call_args.kwargs
+        call_kwargs = mock_client.create_score.call_args.kwargs
         assert call_kwargs["value"] == value
 
 
@@ -386,7 +390,6 @@ class TestFullLifecycle:
         mock_client = _make_client(
             trace_id="trace-lifecycle",
             span_id="span-base",
-            score_id="score-final",
         )
 
         # Give each span call a unique id
@@ -395,7 +398,7 @@ class TestFullLifecycle:
             m = MagicMock()
             m.id = f"span-{i}"
             span_side.append(m)
-        mock_client.span.side_effect = span_side
+        mock_client.start_observation.side_effect = span_side
 
         with patch(PATCH_TARGET, return_value=mock_client):
             # 1. Open trace
@@ -416,20 +419,20 @@ class TestFullLifecycle:
         # Correct IDs returned
         assert trace_id == "trace-lifecycle"
         assert [s1, s2, s3] == ["span-1", "span-2", "span-3"]
-        assert score_id == "score-final"
+        assert score_id == "trace-lifecycle"
 
-        # trace() called once, span() 3 times, score() once
-        mock_client.trace.assert_called_once()
-        assert mock_client.span.call_count == 3
-        mock_client.score.assert_called_once()
+        # create_trace_id called once, start_observation 3 times (+1 event), create_score once
+        mock_client.create_trace_id.assert_called_once()
+        assert mock_client.start_observation.call_count == 3
+        mock_client.create_score.assert_called_once()
 
         # flush() called exactly 4 times: once per span + once for score
         # (start_agent_trace must NOT flush)
         assert mock_client.flush.call_count == 4
 
         # All spans carry the same trace_id
-        for c in mock_client.span.call_args_list:
-            assert c.kwargs["trace_id"] == "trace-lifecycle"
+        for c in mock_client.start_observation.call_args_list:
+            assert c.kwargs["trace_context"]["trace_id"] == "trace-lifecycle"
 
         # Score carries the same trace_id
-        assert mock_client.score.call_args.kwargs["trace_id"] == "trace-lifecycle"
+        assert mock_client.create_score.call_args.kwargs["trace_id"] == "trace-lifecycle"

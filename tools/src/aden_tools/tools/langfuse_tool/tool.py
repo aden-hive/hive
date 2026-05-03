@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langfuse import get_client
+from langfuse import get_client, propagate_attributes
 
 
 def start_agent_trace(
@@ -55,19 +55,22 @@ def start_agent_trace(
         )
     """
     lf = get_client()
+    trace_id = lf.create_trace_id()
 
-    trace = lf.trace(
-        name=agent_name,
+    # In v3, we use propagate_attributes to set trace-level metadata and
+    # start a root observation (event) to seed the trace in Langfuse.
+    with propagate_attributes(
         session_id=session_id,
-        input=input_data,
         user_id=user_id or None,
         tags=tags or [],
-    )
+    ):
+        lf.create_event(
+            name=agent_name,
+            input=input_data,
+            trace_context={"trace_id": trace_id},
+        )
 
-    # flush() is NOT needed after trace creation — spans carry the trace's
-    # context and will be flushed individually. Flushing here would add latency
-    # before the first node even runs.
-    return trace.id
+    return trace_id
 
 
 def log_node_span(
@@ -119,15 +122,15 @@ def log_node_span(
             "total": tokens.get("total", tokens.get("input", 0) + tokens.get("output", 0)),
         }
 
-    span = lf.span(
-        trace_id=trace_id,
+    span = lf.start_observation(
+        as_type="span",
+        trace_context={"trace_id": trace_id},
         name=node_name,
         input=input,
         output=output,
         model=model or None,
-        # Langfuse expects latency in seconds, so convert from ms
         metadata={"latency_ms": latency_ms},
-        usage=usage,
+        usage_details=usage,
     )
 
     # CRITICAL: flush after every span so fast-running agents don't lose data.
@@ -176,7 +179,7 @@ def score_agent_run(
 
     lf = get_client()
 
-    score = lf.score(
+    lf.create_score(
         trace_id=trace_id,
         name=score_name,
         value=score_value,
@@ -187,4 +190,6 @@ def score_agent_run(
     # when the agent process exits immediately after this call.
     lf.flush()
 
-    return score.id
+    # v3 create_score does not return a score object with an ID; we return
+    # the trace_id to maintain a consistent return type of a useful identifier.
+    return trace_id
