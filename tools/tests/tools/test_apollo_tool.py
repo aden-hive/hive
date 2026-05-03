@@ -18,7 +18,6 @@ import httpx
 import pytest
 
 from aden_tools.tools.apollo_tool.apollo_tool import (
-    APOLLO_API_BASE,
     _ApolloClient,
     register_tools,
 )
