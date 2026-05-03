@@ -29,6 +29,7 @@ from framework.orchestrator.orchestrator import ParallelExecutionConfig
 
 
 def _make_graph_spec(entry_node: str = "n1") -> GraphSpec:
+    """Minimal GraphSpec for test GraphContext construction."""
     return GraphSpec(
         id="test-graph",
         goal_id="test-goal",
@@ -40,6 +41,7 @@ def _make_graph_spec(entry_node: str = "n1") -> GraphSpec:
 
 
 def _make_goal() -> Goal:
+    """Minimal Goal for test GraphContext construction."""
     return Goal(
         id="test-goal",
         name="test-goal",
@@ -59,6 +61,7 @@ def _make_goal() -> Goal:
 def _make_graph_context(
     buffer_conflict_strategy: str = "last_wins",
 ) -> GraphContext:
+    """Construct a GraphContext with a given buffer conflict strategy."""
     return GraphContext(
         graph=_make_graph_spec(),
         goal=_make_goal(),
@@ -105,6 +108,7 @@ def _make_worker(
 
 
 def _result(output: dict) -> NodeResult:
+    """Shorthand for a successful NodeResult with the given output."""
     return NodeResult(success=True, output=output)
 
 
