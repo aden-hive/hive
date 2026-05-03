@@ -135,19 +135,33 @@ class TestApolloClientMethods:
         self.client = _ApolloClient("test-api-key")
 
     async def test_enrich_person_by_email(self):
-        r = _mock_response(200, {
-            "person": {
-                "id": "p123", "first_name": "John", "last_name": "Doe",
-                "name": "John Doe", "title": "VP Sales", "email": "john@acme.com",
-                "email_status": "verified", "phone_numbers": [],
-                "linkedin_url": None, "twitter_url": None,
-                "city": "SF", "state": "CA", "country": "US",
-                "organization": {
-                    "id": "o1", "name": "Acme", "primary_domain": "acme.com",
-                    "industry": "Tech", "estimated_num_employees": 250,
-                },
-            }
-        })
+        r = _mock_response(
+            200,
+            {
+                "person": {
+                    "id": "p123",
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "name": "John Doe",
+                    "title": "VP Sales",
+                    "email": "john@acme.com",
+                    "email_status": "verified",
+                    "phone_numbers": [],
+                    "linkedin_url": None,
+                    "twitter_url": None,
+                    "city": "SF",
+                    "state": "CA",
+                    "country": "US",
+                    "organization": {
+                        "id": "o1",
+                        "name": "Acme",
+                        "primary_domain": "acme.com",
+                        "industry": "Tech",
+                        "estimated_num_employees": 250,
+                    },
+                }
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.enrich_person(email="john@acme.com")
 
@@ -162,20 +176,38 @@ class TestApolloClientMethods:
         assert result["match_found"] is False
 
     async def test_enrich_company(self):
-        r = _mock_response(200, {
-            "organization": {
-                "id": "o1", "name": "OpenAI", "primary_domain": "openai.com",
-                "website_url": None, "linkedin_url": None, "twitter_url": None,
-                "facebook_url": None, "industry": "AI", "keywords": [],
-                "estimated_num_employees": 1500, "employee_count_range": "1001-5000",
-                "annual_revenue": None, "annual_revenue_printed": None,
-                "total_funding": None, "total_funding_printed": None,
-                "latest_funding_round_date": None, "latest_funding_stage": None,
-                "founded_year": 2015, "phone": None, "city": "SF", "state": "CA",
-                "country": "US", "street_address": None, "technologies": [],
-                "short_description": "AI company",
-            }
-        })
+        r = _mock_response(
+            200,
+            {
+                "organization": {
+                    "id": "o1",
+                    "name": "OpenAI",
+                    "primary_domain": "openai.com",
+                    "website_url": None,
+                    "linkedin_url": None,
+                    "twitter_url": None,
+                    "facebook_url": None,
+                    "industry": "AI",
+                    "keywords": [],
+                    "estimated_num_employees": 1500,
+                    "employee_count_range": "1001-5000",
+                    "annual_revenue": None,
+                    "annual_revenue_printed": None,
+                    "total_funding": None,
+                    "total_funding_printed": None,
+                    "latest_funding_round_date": None,
+                    "latest_funding_stage": None,
+                    "founded_year": 2015,
+                    "phone": None,
+                    "city": "SF",
+                    "state": "CA",
+                    "country": "US",
+                    "street_address": None,
+                    "technologies": [],
+                    "short_description": "AI company",
+                }
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.enrich_company("openai.com")
 
@@ -189,20 +221,32 @@ class TestApolloClientMethods:
         assert result["match_found"] is False
 
     async def test_search_people(self):
-        r = _mock_response(200, {
-            "pagination": {"total_entries": 150, "page": 1, "per_page": 10},
-            "people": [
-                {"id": "p1", "first_name": "Alice", "last_name": "J", "name": "Alice J",
-                 "title": "VP Sales", "email": "alice@co.com", "email_status": "verified",
-                 "linkedin_url": None, "city": "NY", "state": "NY", "country": "US",
-                 "seniority": "vp", "organization": {"id": "o1", "name": "Co", "primary_domain": "co.com"}},
-            ],
-        })
+        r = _mock_response(
+            200,
+            {
+                "pagination": {"total_entries": 150, "page": 1, "per_page": 10},
+                "people": [
+                    {
+                        "id": "p1",
+                        "first_name": "Alice",
+                        "last_name": "J",
+                        "name": "Alice J",
+                        "title": "VP Sales",
+                        "email": "alice@co.com",
+                        "email_status": "verified",
+                        "linkedin_url": None,
+                        "city": "NY",
+                        "state": "NY",
+                        "country": "US",
+                        "seniority": "vp",
+                        "organization": {"id": "o1", "name": "Co", "primary_domain": "co.com"},
+                    },
+                ],
+            },
+        )
         mock_client = _mock_async_client(r)
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await self.client.search_people(
-                titles=["VP Sales"], seniorities=["vp"], limit=10
-            )
+            result = await self.client.search_people(titles=["VP Sales"], seniorities=["vp"], limit=10)
 
         assert result["total"] == 150
         assert len(result["results"]) == 1
@@ -219,16 +263,29 @@ class TestApolloClientMethods:
         assert call_json["per_page"] == 100
 
     async def test_search_companies(self):
-        r = _mock_response(200, {
-            "pagination": {"total_entries": 50, "page": 1, "per_page": 10},
-            "organizations": [
-                {"id": "o1", "name": "Tech Corp", "primary_domain": "tc.io",
-                 "website_url": None, "linkedin_url": None, "industry": "Technology",
-                 "estimated_num_employees": 75, "employee_count_range": "51-200",
-                 "annual_revenue_printed": None, "city": "Austin", "state": "TX",
-                 "country": "US", "short_description": "A tech co"},
-            ],
-        })
+        r = _mock_response(
+            200,
+            {
+                "pagination": {"total_entries": 50, "page": 1, "per_page": 10},
+                "organizations": [
+                    {
+                        "id": "o1",
+                        "name": "Tech Corp",
+                        "primary_domain": "tc.io",
+                        "website_url": None,
+                        "linkedin_url": None,
+                        "industry": "Technology",
+                        "estimated_num_employees": 75,
+                        "employee_count_range": "51-200",
+                        "annual_revenue_printed": None,
+                        "city": "Austin",
+                        "state": "TX",
+                        "country": "US",
+                        "short_description": "A tech co",
+                    },
+                ],
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.search_companies(industries=["technology"], limit=10)
 
@@ -236,37 +293,67 @@ class TestApolloClientMethods:
         assert result["results"][0]["name"] == "Tech Corp"
 
     async def test_bulk_enrich_people(self):
-        r = _mock_response(200, {
-            "matches": [
-                {"id": "p1", "name": "John", "title": "CEO", "email": "j@co.com",
-                 "email_status": "verified", "linkedin_url": None, "organization": {"name": "Co"}},
-            ]
-        })
+        r = _mock_response(
+            200,
+            {
+                "matches": [
+                    {
+                        "id": "p1",
+                        "name": "John",
+                        "title": "CEO",
+                        "email": "j@co.com",
+                        "email_status": "verified",
+                        "linkedin_url": None,
+                        "organization": {"name": "Co"},
+                    },
+                ]
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.bulk_enrich_people([{"email": "j@co.com"}])
         assert result["count"] == 1
         assert result["results"][0]["match_found"] is True
 
     async def test_list_email_accounts(self):
-        r = _mock_response(200, {
-            "email_accounts": [
-                {"id": "e1", "email": "test@co.com", "type": "smtp", "active": True,
-                 "default": True, "last_synced_at": None, "sending_daily_limit": 200,
-                 "emails_sent_today": 10}
-            ]
-        })
+        r = _mock_response(
+            200,
+            {
+                "email_accounts": [
+                    {
+                        "id": "e1",
+                        "email": "test@co.com",
+                        "type": "smtp",
+                        "active": True,
+                        "default": True,
+                        "last_synced_at": None,
+                        "sending_daily_limit": 200,
+                        "emails_sent_today": 10,
+                    }
+                ]
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.list_email_accounts()
         assert result["count"] == 1
 
     async def test_get_person_activities(self):
-        r = _mock_response(200, {
-            "activities": [
-                {"id": "a1", "type": "email", "subject": "Hello", "body": "Hi there",
-                 "created_at": "2024-01-01", "completed_at": None,
-                 "status": "sent", "priority": "normal"}
-            ]
-        })
+        r = _mock_response(
+            200,
+            {
+                "activities": [
+                    {
+                        "id": "a1",
+                        "type": "email",
+                        "subject": "Hello",
+                        "body": "Hi there",
+                        "created_at": "2024-01-01",
+                        "completed_at": None,
+                        "status": "sent",
+                        "priority": "normal",
+                    }
+                ]
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self.client.get_person_activities("person-123")
         assert result["count"] == 1
@@ -306,16 +393,38 @@ class TestToolRegistration:
         register_tools(mcp, credentials=cred)
 
         enrich_fn = next(fn for fn in fns if fn.__name__ == "apollo_enrich_company")
-        r = _mock_response(200, {"organization": {"id": "1", "name": "Test", "primary_domain": "t.com",
-                                                   "website_url": None, "linkedin_url": None, "twitter_url": None,
-                                                   "facebook_url": None, "industry": None, "keywords": [],
-                                                   "estimated_num_employees": None, "employee_count_range": None,
-                                                   "annual_revenue": None, "annual_revenue_printed": None,
-                                                   "total_funding": None, "total_funding_printed": None,
-                                                   "latest_funding_round_date": None, "latest_funding_stage": None,
-                                                   "founded_year": None, "phone": None, "city": None, "state": None,
-                                                   "country": None, "street_address": None, "technologies": [],
-                                                   "short_description": None}})
+        r = _mock_response(
+            200,
+            {
+                "organization": {
+                    "id": "1",
+                    "name": "Test",
+                    "primary_domain": "t.com",
+                    "website_url": None,
+                    "linkedin_url": None,
+                    "twitter_url": None,
+                    "facebook_url": None,
+                    "industry": None,
+                    "keywords": [],
+                    "estimated_num_employees": None,
+                    "employee_count_range": None,
+                    "annual_revenue": None,
+                    "annual_revenue_printed": None,
+                    "total_funding": None,
+                    "total_funding_printed": None,
+                    "latest_funding_round_date": None,
+                    "latest_funding_stage": None,
+                    "founded_year": None,
+                    "phone": None,
+                    "city": None,
+                    "state": None,
+                    "country": None,
+                    "street_address": None,
+                    "technologies": [],
+                    "short_description": None,
+                }
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await enrich_fn(domain="test.com")
 
@@ -389,6 +498,7 @@ class TestEnrichPersonValidation:
 
     async def test_bulk_enrich_people_too_many(self):
         import json
+
         details = [{"email": f"p{i}@co.com"} for i in range(11)]
         result = await self._fn("apollo_bulk_enrich_people")(details_json=json.dumps(details))
         assert "maximum 10" in result["error"]
@@ -408,20 +518,38 @@ class TestEnrichCompanyTool:
         return next(f for f in self._fns if f.__name__ == name)
 
     async def test_enrich_company_success(self):
-        r = _mock_response(200, {
-            "organization": {
-                "id": "o1", "name": "Acme Inc", "primary_domain": "acme.com",
-                "industry": "Technology", "estimated_num_employees": 500,
-                "website_url": None, "linkedin_url": None, "twitter_url": None,
-                "facebook_url": None, "keywords": [], "employee_count_range": None,
-                "annual_revenue": None, "annual_revenue_printed": None,
-                "total_funding": None, "total_funding_printed": None,
-                "latest_funding_round_date": None, "latest_funding_stage": None,
-                "founded_year": None, "phone": None, "city": None, "state": None,
-                "country": None, "street_address": None, "technologies": [],
-                "short_description": None,
-            }
-        })
+        r = _mock_response(
+            200,
+            {
+                "organization": {
+                    "id": "o1",
+                    "name": "Acme Inc",
+                    "primary_domain": "acme.com",
+                    "industry": "Technology",
+                    "estimated_num_employees": 500,
+                    "website_url": None,
+                    "linkedin_url": None,
+                    "twitter_url": None,
+                    "facebook_url": None,
+                    "keywords": [],
+                    "employee_count_range": None,
+                    "annual_revenue": None,
+                    "annual_revenue_printed": None,
+                    "total_funding": None,
+                    "total_funding_printed": None,
+                    "latest_funding_round_date": None,
+                    "latest_funding_stage": None,
+                    "founded_year": None,
+                    "phone": None,
+                    "city": None,
+                    "state": None,
+                    "country": None,
+                    "street_address": None,
+                    "technologies": [],
+                    "short_description": None,
+                }
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self._fn("apollo_enrich_company")(domain="acme.com")
         assert result["match_found"] is True
@@ -448,14 +576,29 @@ class TestSearchPeopleTool:
         return next(f for f in self._fns if f.__name__ == name)
 
     async def test_search_people_success(self):
-        r = _mock_response(200, {
-            "pagination": {"total_entries": 100},
-            "people": [{"id": "p1", "first_name": "Alice", "last_name": "X",
-                        "name": "Alice", "title": "VP Sales", "email": None,
-                        "email_status": None, "linkedin_url": None,
-                        "city": None, "state": None, "country": None,
-                        "seniority": None, "organization": None}],
-        })
+        r = _mock_response(
+            200,
+            {
+                "pagination": {"total_entries": 100},
+                "people": [
+                    {
+                        "id": "p1",
+                        "first_name": "Alice",
+                        "last_name": "X",
+                        "name": "Alice",
+                        "title": "VP Sales",
+                        "email": None,
+                        "email_status": None,
+                        "linkedin_url": None,
+                        "city": None,
+                        "state": None,
+                        "country": None,
+                        "seniority": None,
+                        "organization": None,
+                    }
+                ],
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self._fn("apollo_search_people")(titles=["VP Sales"])
         assert result["total"] == 100
@@ -466,9 +609,13 @@ class TestSearchPeopleTool:
         mock_client = _mock_async_client(r)
         with patch("httpx.AsyncClient", return_value=mock_client):
             await self._fn("apollo_search_people")(
-                titles=["CEO"], seniorities=["c_suite"], locations=["San Francisco"],
-                company_sizes=["51-200"], industries=["technology"],
-                technologies=["salesforce"], limit=25,
+                titles=["CEO"],
+                seniorities=["c_suite"],
+                locations=["San Francisco"],
+                company_sizes=["51-200"],
+                industries=["technology"],
+                technologies=["salesforce"],
+                limit=25,
             )
         call_json = mock_client.post.call_args.kwargs["json"]
         assert call_json["person_titles"] == ["CEO"]
@@ -491,17 +638,29 @@ class TestSearchCompaniesTool:
         return next(f for f in self._fns if f.__name__ == name)
 
     async def test_search_companies_success(self):
-        r = _mock_response(200, {
-            "pagination": {"total_entries": 50},
-            "organizations": [{"id": "o1", "name": "Tech Corp",
-                               "primary_domain": "tc.io", "website_url": None,
-                               "linkedin_url": None, "industry": "Technology",
-                               "estimated_num_employees": None,
-                               "employee_count_range": None,
-                               "annual_revenue_printed": None, "city": None,
-                               "state": None, "country": None,
-                               "short_description": None}],
-        })
+        r = _mock_response(
+            200,
+            {
+                "pagination": {"total_entries": 50},
+                "organizations": [
+                    {
+                        "id": "o1",
+                        "name": "Tech Corp",
+                        "primary_domain": "tc.io",
+                        "website_url": None,
+                        "linkedin_url": None,
+                        "industry": "Technology",
+                        "estimated_num_employees": None,
+                        "employee_count_range": None,
+                        "annual_revenue_printed": None,
+                        "city": None,
+                        "state": None,
+                        "country": None,
+                        "short_description": None,
+                    }
+                ],
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_async_client(r)):
             result = await self._fn("apollo_search_companies")(industries=["technology"])
         assert result["total"] == 50
@@ -512,8 +671,11 @@ class TestSearchCompaniesTool:
         mock_client = _mock_async_client(r)
         with patch("httpx.AsyncClient", return_value=mock_client):
             await self._fn("apollo_search_companies")(
-                industries=["finance"], employee_counts=["201-500"],
-                locations=["New York"], technologies=["aws"], limit=15,
+                industries=["finance"],
+                employee_counts=["201-500"],
+                locations=["New York"],
+                technologies=["aws"],
+                limit=15,
             )
         call_json = mock_client.post.call_args.kwargs["json"]
         assert call_json["organization_industry_tag_ids"] == ["finance"]
@@ -529,18 +691,25 @@ class TestSearchCompaniesTool:
 class TestCredentialSpec:
     def test_apollo_credential_spec_exists(self):
         from aden_tools.credentials import CREDENTIAL_SPECS
+
         assert "apollo" in CREDENTIAL_SPECS
 
     def test_apollo_spec_env_var(self):
         from aden_tools.credentials import CREDENTIAL_SPECS
+
         assert CREDENTIAL_SPECS["apollo"].env_var == "APOLLO_API_KEY"
 
     def test_apollo_spec_tools(self):
         from aden_tools.credentials import CREDENTIAL_SPECS
+
         spec = CREDENTIAL_SPECS["apollo"]
         expected = {
-            "apollo_enrich_person", "apollo_enrich_company", "apollo_search_people",
-            "apollo_search_companies", "apollo_get_person_activities",
-            "apollo_list_email_accounts", "apollo_bulk_enrich_people",
+            "apollo_enrich_person",
+            "apollo_enrich_company",
+            "apollo_search_people",
+            "apollo_search_companies",
+            "apollo_get_person_activities",
+            "apollo_list_email_accounts",
+            "apollo_bulk_enrich_people",
         }
         assert expected == set(spec.tools)

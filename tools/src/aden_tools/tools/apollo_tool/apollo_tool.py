@@ -83,7 +83,7 @@ class _ApolloClient:
             for attempt in range(max_retries + 1):
                 response = await getattr(client, method)(url, **kwargs)
                 if response.status_code == 429 and attempt < max_retries:
-                    retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+                    retry_after = int(response.headers.get("Retry-After", 2**attempt))
                     await asyncio.sleep(retry_after)
                     continue
                 return response
