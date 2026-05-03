@@ -35,9 +35,6 @@ export default class RouteErrorBoundary extends Component<
             <p className="mt-3 text-sm text-muted-foreground">
               Something went wrong while loading the requested route.
             </p>
-            <pre className="mt-4 overflow-x-auto rounded-xl bg-muted p-4 text-xs text-muted-foreground">
-              {this.state.error?.message}
-            </pre>
             <button
               type="button"
               onClick={() => window.location.reload()}
