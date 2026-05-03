@@ -311,7 +311,7 @@ class NodeWorker:
             # Handle result
             if result.success:
                 # Validate and write outputs
-                self._write_outputs(result)
+                await self._write_outputs(result)
 
                 # Evaluate outgoing edges
                 activations = await self._evaluate_outgoing_edges(result)
@@ -517,7 +517,7 @@ class NodeWorker:
     # Output handling
     # ------------------------------------------------------------------
 
-    def _write_outputs(self, result: NodeResult) -> None:
+    async def _write_outputs(self, result: NodeResult) -> None:
         """Validate and write node outputs to buffer."""
         gc = self._gc
         node_spec = self.node_spec
@@ -548,35 +548,36 @@ class NodeWorker:
             value = result.output.get(key)
             if value is not None:
                 if is_fanout_branch:
-                    conflict_strategy = (
-                        getattr(gc.parallel_config, "buffer_conflict_strategy", "last_wins")
-                        if gc.parallel_config
-                        else "last_wins"
-                    )
-                    prior_worker = gc._fanout_written_keys.get(key)
-                    if prior_worker and prior_worker != node_spec.id:
-                        if conflict_strategy == "error":
-                            raise RuntimeError(
-                                f"Buffer write failed (conflict): key '{key}' already written "
-                                f"by worker '{prior_worker}', "
-                                f"conflicting write from '{node_spec.id}'"
-                            )
-                        elif conflict_strategy == "first_wins":
-                            logger.debug(
-                                "Skipping write to '%s' (first_wins: already set by %s)",
-                                key,
-                                prior_worker,
-                            )
-                            continue
-                        else:
-                            # last_wins: log and overwrite
-                            logger.debug(
-                                "Key '%s' overwritten (last_wins: %s -> %s)",
-                                key,
-                                prior_worker,
-                                node_spec.id,
-                            )
-                    gc._fanout_written_keys[key] = node_spec.id
+                    async with gc._fanout_lock:
+                        conflict_strategy = (
+                            getattr(gc.parallel_config, "buffer_conflict_strategy", "last_wins")
+                            if gc.parallel_config
+                            else "last_wins"
+                        )
+                        prior_worker = gc._fanout_written_keys.get(key)
+                        if prior_worker and prior_worker != node_spec.id:
+                            if conflict_strategy == "error":
+                                raise RuntimeError(
+                                    f"Buffer write failed (conflict): key '{key}' already written "
+                                    f"by worker '{prior_worker}', "
+                                    f"conflicting write from '{node_spec.id}'"
+                                )
+                            elif conflict_strategy == "first_wins":
+                                logger.debug(
+                                    "Skipping write to '%s' (first_wins: already set by %s)",
+                                    key,
+                                    prior_worker,
+                                )
+                                continue
+                            else:
+                                # last_wins: log and overwrite
+                                logger.debug(
+                                    "Key '%s' overwritten (last_wins: %s -> %s)",
+                                    key,
+                                    prior_worker,
+                                    node_spec.id,
+                                )
+                        gc._fanout_written_keys[key] = node_spec.id
                 gc.buffer.write(key, value, validate=False)
 
     # ------------------------------------------------------------------

@@ -81,6 +81,7 @@ class GraphContext:
     _visits_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Fan-out buffer conflict tracking: key → worker_id that wrote it
     _fanout_written_keys: dict[str, str] = field(default_factory=dict)
+    _fanout_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Retry tracking: worker_id → retry_count (for execution quality assessment)
     retry_counts: dict[str, int] = field(default_factory=dict)
     nodes_with_retries: set[str] = field(default_factory=set)
