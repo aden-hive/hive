@@ -15,6 +15,7 @@ API Reference: https://apolloio.github.io/apollo-api-docs/
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -60,7 +61,8 @@ class _ApolloClient:
                 detail = response.text
             return {"error": f"Invalid parameters: {detail}"}
         if response.status_code == 429:
-            return {"error": "Apollo rate limit exceeded. Try again later."}
+            retry_after = int(response.headers.get("Retry-After", 60))
+            return {"error": "Apollo rate limit exceeded. Try again later.", "retry_after_seconds": retry_after}
         if response.status_code >= 400:
             try:
                 detail = response.json().get("error", response.text)
@@ -69,7 +71,25 @@ class _ApolloClient:
             return {"error": f"Apollo API error (HTTP {response.status_code}): {detail}"}
         return response.json()
 
-    def enrich_person(
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        max_retries: int = 3,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Async HTTP request with Retry-After-aware backoff on 429."""
+        async with httpx.AsyncClient() as client:
+            for attempt in range(max_retries + 1):
+                response = await getattr(client, method)(url, **kwargs)
+                if response.status_code == 429 and attempt < max_retries:
+                    retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+                    await asyncio.sleep(retry_after)
+                    continue
+                return response
+        return response  # unreachable but satisfies type checker
+
+    async def enrich_person(
         self,
         email: str | None = None,
         linkedin_url: str | None = None,
@@ -99,7 +119,8 @@ class _ApolloClient:
         if domain:
             body["domain"] = domain
 
-        response = httpx.post(
+        response = await self._request(
+            "post",
             f"{APOLLO_API_BASE}/people/match",
             headers=self._headers,
             params=body if not email and not linkedin_url else None,
@@ -141,13 +162,14 @@ class _ApolloClient:
             }
         return result
 
-    def enrich_company(self, domain: str) -> dict[str, Any]:
+    async def enrich_company(self, domain: str) -> dict[str, Any]:
         """Enrich a company by domain."""
         body: dict[str, Any] = {
             "domain": domain,
         }
 
-        response = httpx.post(
+        response = await self._request(
+            "post",
             f"{APOLLO_API_BASE}/organizations/enrich",
             headers=self._headers,
             json=body,
@@ -193,7 +215,7 @@ class _ApolloClient:
             }
         return result
 
-    def search_people(
+    async def search_people(
         self,
         titles: list[str] | None = None,
         seniorities: list[str] | None = None,
@@ -222,7 +244,8 @@ class _ApolloClient:
         if technologies:
             body["currently_using_any_of_technology_uids"] = technologies
 
-        response = httpx.post(
+        response = await self._request(
+            "post",
             f"{APOLLO_API_BASE}/mixed_people/search",
             headers=self._headers,
             json=body,
@@ -263,12 +286,13 @@ class _ApolloClient:
             }
         return result
 
-    def get_person_activities(
+    async def get_person_activities(
         self,
         person_id: str,
     ) -> dict[str, Any]:
         """Get activity history for a person (emails, calls, tasks)."""
-        response = httpx.get(
+        response = await self._request(
+            "get",
             f"{APOLLO_API_BASE}/activities",
             headers=self._headers,
             params={"contact_id": person_id},
@@ -296,9 +320,10 @@ class _ApolloClient:
             }
         return result
 
-    def list_email_accounts(self) -> dict[str, Any]:
+    async def list_email_accounts(self) -> dict[str, Any]:
         """List email accounts connected to Apollo."""
-        response = httpx.get(
+        response = await self._request(
+            "get",
             f"{APOLLO_API_BASE}/email_accounts",
             headers=self._headers,
             timeout=30.0,
@@ -324,13 +349,14 @@ class _ApolloClient:
             }
         return result
 
-    def bulk_enrich_people(
+    async def bulk_enrich_people(
         self,
         details: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Bulk enrich up to 10 people at once."""
         body: dict[str, Any] = {"details": details[:10]}
-        response = httpx.post(
+        response = await self._request(
+            "post",
             f"{APOLLO_API_BASE}/people/bulk_match",
             headers=self._headers,
             json=body,
@@ -359,7 +385,7 @@ class _ApolloClient:
             return {"count": len(enriched), "results": enriched}
         return result
 
-    def search_companies(
+    async def search_companies(
         self,
         industries: list[str] | None = None,
         employee_counts: list[str] | None = None,
@@ -382,7 +408,8 @@ class _ApolloClient:
         if technologies:
             body["currently_using_any_of_technology_uids"] = technologies
 
-        response = httpx.post(
+        response = await self._request(
+            "post",
             f"{APOLLO_API_BASE}/mixed_companies/search",
             headers=self._headers,
             json=body,
@@ -451,7 +478,7 @@ def register_tools(
     # --- Person Enrichment ---
 
     @mcp.tool()
-    def apollo_enrich_person(
+    async def apollo_enrich_person(
         email: str | None = None,
         linkedin_url: str | None = None,
         first_name: str | None = None,
@@ -504,7 +531,7 @@ def register_tools(
                 )
             }
         try:
-            return client.enrich_person(
+            return await client.enrich_person(
                 email=email,
                 linkedin_url=linkedin_url,
                 first_name=first_name,
@@ -522,7 +549,7 @@ def register_tools(
     # --- Company Enrichment ---
 
     @mcp.tool()
-    def apollo_enrich_company(domain: str) -> dict:
+    async def apollo_enrich_company(domain: str) -> dict:
         """
         Enrich a company by domain.
 
@@ -546,7 +573,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.enrich_company(domain)
+            return await client.enrich_company(domain)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -555,7 +582,7 @@ def register_tools(
     # --- People Search ---
 
     @mcp.tool()
-    def apollo_search_people(
+    async def apollo_search_people(
         titles: list[str] | None = None,
         seniorities: list[str] | None = None,
         locations: list[str] | None = None,
@@ -600,7 +627,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_people(
+            return await client.search_people(
                 titles=titles,
                 seniorities=seniorities,
                 locations=locations,
@@ -617,7 +644,7 @@ def register_tools(
     # --- Person Activities ---
 
     @mcp.tool()
-    def apollo_get_person_activities(person_id: str) -> dict:
+    async def apollo_get_person_activities(person_id: str) -> dict:
         """
         Get activity history for a person in Apollo (emails, calls, tasks).
 
@@ -633,7 +660,7 @@ def register_tools(
         if not person_id:
             return {"error": "person_id is required"}
         try:
-            return client.get_person_activities(person_id)
+            return await client.get_person_activities(person_id)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -642,7 +669,7 @@ def register_tools(
     # --- Email Accounts ---
 
     @mcp.tool()
-    def apollo_list_email_accounts() -> dict:
+    async def apollo_list_email_accounts() -> dict:
         """
         List email accounts connected to Apollo for sending sequences.
 
@@ -653,7 +680,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.list_email_accounts()
+            return await client.list_email_accounts()
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -662,7 +689,7 @@ def register_tools(
     # --- Bulk Enrichment ---
 
     @mcp.tool()
-    def apollo_bulk_enrich_people(details_json: str) -> dict:
+    async def apollo_bulk_enrich_people(details_json: str) -> dict:
         """
         Bulk enrich up to 10 people at once by email or domain+name.
 
@@ -691,7 +718,7 @@ def register_tools(
         if len(details) > 10:
             return {"error": "maximum 10 people per bulk request"}
         try:
-            return client.bulk_enrich_people(details)
+            return await client.bulk_enrich_people(details)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -700,7 +727,7 @@ def register_tools(
     # --- Company Search ---
 
     @mcp.tool()
-    def apollo_search_companies(
+    async def apollo_search_companies(
         industries: list[str] | None = None,
         employee_counts: list[str] | None = None,
         locations: list[str] | None = None,
@@ -739,7 +766,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_companies(
+            return await client.search_companies(
                 industries=industries,
                 employee_counts=employee_counts,
                 locations=locations,
