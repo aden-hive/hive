@@ -349,6 +349,16 @@ class TestScoreAgentRun:
 
         assert call_order == ["score", "flush"]
 
+    @pytest.mark.parametrize("value", [-0.1, 1.1, "not-a-number"])
+    def test_score_invalid_values(self, value):
+        """score_agent_run must raise ValueError for scores outside [0, 1] or non-numeric types."""
+        mock_client = _make_client()
+        with (
+            patch(PATCH_TARGET, return_value=mock_client),
+            pytest.raises(ValueError, match=r"score_value must be a number in \[0, 1\]"),
+        ):
+            score_agent_run("trace-abc", "quality", value)
+
     @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
     def test_score_boundary_values(self, value):
         """Score values 0.0, 0.5, and 1.0 (the full valid range) must all be accepted."""

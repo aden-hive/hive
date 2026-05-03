@@ -168,6 +168,12 @@ def score_agent_run(
             comment="Output was accurate and well-structured.",
         )
     """
+    if not isinstance(score_value, (int, float)) or not (0.0 <= score_value <= 1.0):
+        raise ValueError(
+            f"score_value must be a number in [0, 1], got {score_value!r}. "
+            "Use 0.0 for worst and 1.0 for best."
+        )
+
     lf = get_client()
 
     score = lf.score(
