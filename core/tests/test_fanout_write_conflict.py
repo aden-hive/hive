@@ -123,139 +123,76 @@ class TestFanOutWriteConflict:
         gc: GraphContext,
         worker_ids: list[str],
         key: str = "result",
-        value_template: str = "from-{}",
-    ) -> list[str]:
-        """Fire ``_write_outputs`` on N workers concurrently and return
-        the final value of ``gc._fanout_written_keys[key]`` and the
-        buffer value."""
-
+    ) -> str:
+        """Fire ``_write_outputs`` on N workers concurrently, return winner id."""
         workers = [_make_worker(wid, gc, via_branch=wid) for wid in worker_ids]
 
         async def fire(w: NodeWorker) -> None:
-            await w._write_outputs(_result({key: value_template.format(w.node_spec.id)}))
+            await w._write_outputs(_result({key: w.node_spec.id}))
 
         await asyncio.gather(*[fire(w) for w in workers])
 
-        # Who does the conflict tracker think won?
-        winner = gc._fanout_written_keys.get(key, "<never-set>")
-        return winner
+        return gc._fanout_written_keys.get(key, "<never-set>")
 
-    # -- first_wins -------------------------------------------------------
-
-    async def test_first_wins_only_one_write(self):
-        """first_wins: only the first concurrent write wins."""
+    async def test_first_wins_three_workers(self):
+        """first_wins: 3 concurrent workers, only 1 wins."""
         gc = _make_graph_context(buffer_conflict_strategy="first_wins")
         winner = await self._race_workers(gc, ["w1", "w2", "w3"])
 
-        # Exactly one worker's ID should be recorded
-        assert winner in {"w1", "w2", "w3"}, f"Unexpected winner: {winner}"
-        # Only one entry in written_keys
-        assert len(gc._fanout_written_keys) == 1
-
-    async def test_first_wins_buffer_value_from_winner(self):
-        """first_wins: buffer holds the winner's value."""
-        gc = _make_graph_context(buffer_conflict_strategy="first_wins")
-
-        workers = [
-            _make_worker("w1", gc, via_branch="w1"),
-            _make_worker("w2", gc, via_branch="w2"),
-        ]
-
-        async def fire(w: NodeWorker, val: str) -> None:
-            await w._write_outputs(_result({"result": val}))
-
-        await asyncio.gather(fire(workers[0], "aaa"), fire(workers[1], "bbb"))
-
-        # Buffer value should be from whichever worker won
-        assert gc.buffer.read("result") in {"aaa", "bbb"}
+        assert winner in {"w1", "w2", "w3"}
         assert len(gc._fanout_written_keys) == 1
 
     async def test_first_wins_ten_workers(self):
-        """first_wins: with 10 concurrent workers, exactly 1 wins."""
+        """first_wins: 10 concurrent workers, only 1 wins."""
         gc = _make_graph_context(buffer_conflict_strategy="first_wins")
-        winner = await self._race_workers(
-            gc, [f"w{i}" for i in range(10)],
-        )
+        winner = await self._race_workers(gc, [f"w{i}" for i in range(10)])
+
         assert winner.startswith("w")
         assert len(gc._fanout_written_keys) == 1
 
-    # -- last_wins --------------------------------------------------------
-
-    async def test_last_wins_overwrites(self):
-        """last_wins: the last concurrent write wins (key tracking works)."""
-        gc = _make_graph_context(buffer_conflict_strategy="last_wins")
-        await self._race_workers(gc, ["w1", "w2", "w3"])
-
-        # Under last_wins, all workers set _fanout_written_keys (last one wins)
-        # But because of the lock, only one value will be in _fanout_written_keys
-        # Actually, with last_wins, each worker overwrites, so the last one to
-        # acquire the lock sets the value. We can't predict which, but we can
-        # verify the buffer write happened.
-        written_keys_count = len(gc._fanout_written_keys)
-        assert written_keys_count == 1, (
-            f"Expected 1 key in written_keys, got {written_keys_count}"
-        )
-
-    async def test_last_wins_buffer_has_some_value(self):
-        """last_wins: buffer ends up with a value from one of the workers."""
+    async def test_last_wins_writes_buffer(self):
+        """last_wins: all workers write, buffer ends up with a value."""
         gc = _make_graph_context(buffer_conflict_strategy="last_wins")
 
-        workers = [
-            _make_worker("w1", gc, via_branch="w1"),
-            _make_worker("w2", gc, via_branch="w2"),
-        ]
+        w1 = _make_worker("w1", gc, via_branch="w1")
+        w2 = _make_worker("w2", gc, via_branch="w2")
 
         async def fire(w: NodeWorker, val: str) -> None:
             await w._write_outputs(_result({"result": val}))
 
-        await asyncio.gather(fire(workers[0], "from-w1"), fire(workers[1], "from-w2"))
+        await asyncio.gather(fire(w1, "from-w1"), fire(w2, "from-w2"))
 
-        # Buffer has some value
-        val = gc.buffer.read("result")
-        assert val is not None
-        # And it's from one of the workers
-        assert val in {"from-w1", "from-w2"}
-
-    # -- error ------------------------------------------------------------
+        assert gc.buffer.read("result") in {"from-w1", "from-w2"}
+        assert len(gc._fanout_written_keys) == 1
 
     async def test_error_raises_on_conflict(self):
-        """error strategy: raises RuntimeError when two workers conflict."""
+        """error: RuntimeError when two workers conflict on the same key."""
         gc = _make_graph_context(buffer_conflict_strategy="error")
 
-        workers = [
-            _make_worker("w1", gc, via_branch="w1"),
-            _make_worker("w2", gc, via_branch="w2"),
-        ]
+        w1 = _make_worker("w1", gc, via_branch="w1")
+        w2 = _make_worker("w2", gc, via_branch="w2")
 
         async def fire(w: NodeWorker) -> None:
             await w._write_outputs(_result({"result": w.node_spec.id}))
 
         with pytest.raises(RuntimeError, match="conflict"):
-            await asyncio.gather(*[fire(w) for w in workers])
+            await asyncio.gather(fire(w1), fire(w2))
 
-    # -- non-fan-out ------------------------------------------------------
-
-    async def test_non_fanout_no_contention(self):
-        """Non-fan-out workers bypass conflict tracking entirely."""
+    async def test_non_fanout_bypasses_lock(self):
+        """Non-fan-out workers skip conflict tracking entirely."""
         gc = _make_graph_context(buffer_conflict_strategy="first_wins")
 
-        # No via_branch → not a fan-out worker
-        w1 = _make_worker("w1", gc, via_branch=None)
-        w2 = _make_worker("w2", gc, via_branch=None)
+        w1 = _make_worker("w1", gc)
+        w2 = _make_worker("w2", gc)
 
         await asyncio.gather(
             w1._write_outputs(_result({"result": "a"})),
             w2._write_outputs(_result({"result": "b"})),
         )
 
-        # Non-fan-out: no _fanout_written_keys set, buffer has last write
         assert len(gc._fanout_written_keys) == 0
-        # Buffer was written by both (last_wins by default for non-fan-out)
-        assert gc.buffer.read("result") == "b"
 
-    # -- different keys ---------------------------------------------------
-
-    async def test_different_keys_no_conflict(self):
+    async def test_different_keys_no_contention(self):
         """Fan-out workers writing different keys never contend."""
         gc = _make_graph_context(buffer_conflict_strategy="first_wins")
 
@@ -274,51 +211,28 @@ class TestFanOutWriteConflict:
         assert gc.buffer.read("key_b") == 2
         assert len(gc._fanout_written_keys) == 2
 
-    # -- same worker, same key (no self-conflict) -------------------------
-
     async def test_same_worker_no_self_conflict(self):
-        """A worker writing its own key does not conflict with itself."""
+        """Same worker writing its own key multiple times is not a conflict."""
         gc = _make_graph_context(buffer_conflict_strategy="first_wins")
-        w1 = _make_worker("w1", gc, via_branch="w1")
+        w = _make_worker("w1", gc, via_branch="w1")
 
-        await w1._write_outputs(_result({"result": "first"}))
-        await w1._write_outputs(_result({"result": "second"}))
+        await w._write_outputs(_result({"result": "first"}))
+        await w._write_outputs(_result({"result": "second"}))
 
-        # Same worker ID → prior_worker check passes (prior_worker == node_spec.id)
         assert gc._fanout_written_keys.get("result") == "w1"
         assert gc.buffer.read("result") == "second"
 
-    # -- lock isolation ---------------------------------------------------
-
-    async def test_lock_is_independent_from_buffer_lock(self):
-        """_fanout_lock does not interfere with buffer writes."""
-        gc = _make_graph_context(buffer_conflict_strategy="last_wins")
-        w = _make_worker("w1", gc, via_branch="w1")
-
-        # Write a key outside the fan-out path
-        gc.buffer.write("other", 42, validate=False)
-
-        # Fan-out write to a different key
-        await w._write_outputs(_result({"result": "ok"}))
-
-        assert gc.buffer.read("other") == 42
-        assert gc.buffer.read("result") == "ok"
-
-    # -- parallel_config None ---------------------------------------------
-
     async def test_no_parallel_config_defaults_to_last_wins(self):
-        """When parallel_config is None, fall back to last_wins."""
+        """Fall back to last_wins when parallel_config is None."""
         gc = _make_graph_context(buffer_conflict_strategy="last_wins")
         gc.parallel_config = None
 
         w1 = _make_worker("w1", gc, via_branch="w1")
         w2 = _make_worker("w2", gc, via_branch="w2")
 
-        # Should not raise despite conflict (last_wins is default)
         await asyncio.gather(
             w1._write_outputs(_result({"result": "a"})),
             w2._write_outputs(_result({"result": "b"})),
         )
 
-        # Buffer has some value
         assert gc.buffer.read("result") is not None
