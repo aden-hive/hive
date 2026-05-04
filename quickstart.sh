@@ -167,6 +167,9 @@ fi
 echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
 echo ""
 
+# Keep uv on the interpreter we just validated (3.11+).
+export UV_PYTHON="$PYTHON_CMD"
+
 # Check for uv (install automatically if missing)
 if ! command -v uv &> /dev/null; then
     echo -e "${YELLOW}  uv not found. Installing...${NC}"
@@ -264,6 +267,8 @@ if [ -f "pyproject.toml" ]; then
         echo -e "${GREEN}  ✓ workspace packages installed${NC}"
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
+        echo -e "${DIM}    quickstart selected: $PYTHON_CMD (Python $PYTHON_VERSION)${NC}"
+        echo -e "${DIM}    If this machine also has a pinned Python version file, ensure that interpreter exists.${NC}"
         exit 1
     fi
 else
