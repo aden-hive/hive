@@ -89,4 +89,4 @@ Returns error dicts for common issues:
 - `Exa rate limit exceeded` - Too many requests (429)
 - `Query must be 1-500 characters` - Invalid query length
 - `Maximum 10 URLs per request` - URL list too long for `exa_get_contents`
-- `Exa search request timed out` - Request timed out (30s)
+- `Exa search request timed out` - Request timed out (Note: request timeout is 30s)
