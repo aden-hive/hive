@@ -202,6 +202,10 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 Re-sync the workspace from the repo root:
 
 ```bash
+# Navigate to repo root
+cd "$(git rev-parse --show-toplevel)"
+
+# Re-sync workspace
 uv sync
 ```
 
@@ -216,6 +220,8 @@ echo $HIVE_API_KEY
 ```
 
 ### Package Installation Issues
+
+If `uv sync` doesn't resolve import errors, or if you encounter persistent installation or dependency conflicts, remove the virtual environment completely and re-run the setup:
 
 **Linux / macOS:**
 
