@@ -762,7 +762,7 @@ class CredentialStore:
             logger.info("ADEN_API_KEY not set, using local-only credential storage")
             return cls(storage=local_storage, **kwargs)
 
-        # Try to setup Aden sync
+        # Try to import Aden components
         try:
             from .aden import (
                 AdenCachedStorage,
@@ -770,7 +770,12 @@ class CredentialStore:
                 AdenCredentialClient,
                 AdenSyncProvider,
             )
+        except ImportError:
+            logger.warning("Aden components not available, using local storage")
+            return cls(storage=local_storage, **kwargs)
 
+        # Try to setup Aden sync
+        try:
             # Create Aden client
             client = AdenCredentialClient(AdenClientConfig(base_url=base_url))
 
@@ -797,10 +802,6 @@ class CredentialStore:
                 logger.info(f"Synced {synced} credentials from Aden server")
 
             return store
-
-        except ImportError:
-            logger.warning("Aden components not available, using local storage")
-            return cls(storage=local_storage, **kwargs)
 
         except Exception as e:
             from .models import CredentialError
