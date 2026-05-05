@@ -179,6 +179,81 @@ class _MattermostClient:
         """Delete a post."""
         return self._request_with_retry("DELETE", f"{self._base_url}/posts/{post_id}")
 
+    def update_post(
+        self,
+        post_id: str,
+        message: str,
+    ) -> dict[str, Any]:
+        """Update (edit) an existing post."""
+        return self._request_with_retry(
+            "PUT",
+            f"{self._base_url}/posts/{post_id}",
+            json={"id": post_id, "message": message},
+        )
+
+    def search_posts(
+        self,
+        team_id: str,
+        terms: str,
+        is_or_search: bool = False,
+    ) -> dict[str, Any]:
+        """Search for posts across a team.
+
+        API ref: POST /teams/{team_id}/posts/search
+        """
+        return self._request_with_retry(
+            "POST",
+            f"{self._base_url}/teams/{team_id}/posts/search",
+            json={"terms": terms, "is_or_search": is_or_search},
+        )
+
+    def get_user(self, user_id: str) -> dict[str, Any]:
+        """Get information about a user by ID or username.
+
+        Pass a user ID (e.g. 'abc123') or use 'me' for the authenticated user.
+        """
+        return self._request_with_retry("GET", f"{self._base_url}/users/{user_id}")
+
+    def create_direct_channel(self, other_user_id: str) -> dict[str, Any]:
+        """Open (or retrieve) a direct message channel with another user.
+
+        Returns the channel object; use channel['id'] to send messages.
+        """
+        me = self.get_me()
+        if isinstance(me, dict) and "error" in me:
+            return me
+        my_id = me.get("id", "")
+        return self._request_with_retry(
+            "POST",
+            f"{self._base_url}/channels/direct",
+            json=[my_id, other_user_id],
+        )
+
+    def upload_file(
+        self,
+        channel_id: str,
+        filename: str,
+        content: bytes,
+        mime_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Upload a file to a channel.
+
+        Returns the file info including file_id which can be passed to
+        send_message's file_ids field to attach the file to a post.
+        """
+        import httpx as _httpx
+
+        files = {"files": (filename, content, mime_type)}
+        params = {"channel_id": channel_id}
+        response = _httpx.post(
+            f"{self._base_url}/files",
+            headers={"Authorization": f"Bearer {self._token}"},
+            files=files,
+            params=params,
+            timeout=60.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -435,6 +510,195 @@ def register_tools(
             if isinstance(result, dict) and "error" in result:
                 return result
             return {"success": True, "deleted_post_id": post_id}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def mattermost_update_post(
+        post_id: str,
+        message: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Edit an existing Mattermost post.
+
+        Args:
+            post_id: ID of the post to update
+            message: New message text (supports Markdown, max 16383 chars)
+
+        Returns:
+            Dict with updated post details or error
+        """
+        if len(message) > MAX_MESSAGE_LENGTH:
+            return {
+                "error": f"Message exceeds {MAX_MESSAGE_LENGTH} character limit",
+                "max_length": MAX_MESSAGE_LENGTH,
+                "provided": len(message),
+            }
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.update_post(post_id, message)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            return {"success": True, "post": result}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def mattermost_search_posts(
+        team_id: str,
+        terms: str,
+        is_or_search: bool = False,
+        account: str = "",
+    ) -> dict:
+        """
+        Search for posts across a Mattermost team.
+
+        Args:
+            team_id: Team ID. Use mattermost_list_teams to find IDs.
+            terms: Search terms (supports Mattermost syntax e.g. 'from:user in:channel')
+            is_or_search: If True, treats space-separated terms as OR (default: AND)
+
+        Returns:
+            Dict with matching posts or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.search_posts(team_id, terms, is_or_search)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            posts = result.get("posts", result) if isinstance(result, dict) else result
+            return {"success": True, "posts": posts}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def mattermost_get_user(user_id: str, account: str = "") -> dict:
+        """
+        Get information about a Mattermost user.
+
+        Args:
+            user_id: User ID (e.g. 'abc123') or 'me' for the authenticated user
+
+        Returns:
+            Dict with user profile (id, username, email, roles) or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.get_user(user_id)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            return {
+                "success": True,
+                "user": {
+                    "id": result.get("id"),
+                    "username": result.get("username"),
+                    "email": result.get("email"),
+                    "first_name": result.get("first_name"),
+                    "last_name": result.get("last_name"),
+                    "nickname": result.get("nickname"),
+                    "roles": result.get("roles"),
+                    "locale": result.get("locale"),
+                },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def mattermost_create_direct_channel(user_id: str, account: str = "") -> dict:
+        """
+        Open (or retrieve) a direct message channel with another user.
+
+        Use the returned channel ID with mattermost_send_message to DM the user.
+
+        Args:
+            user_id: ID of the user to open a DM with
+
+        Returns:
+            Dict with channel details including channel ID, or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.create_direct_channel(user_id)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            return {
+                "success": True,
+                "channel": {
+                    "id": result.get("id"),
+                    "name": result.get("name"),
+                    "type": result.get("type"),
+                    "display_name": result.get("display_name"),
+                },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def mattermost_upload_file(
+        channel_id: str,
+        filename: str,
+        content: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Upload a text file to a Mattermost channel.
+
+        After uploading, pass the returned file_id(s) to a subsequent
+        mattermost_send_message call to attach the file to a post.
+
+        Args:
+            channel_id: Channel ID to upload into
+            filename: Name for the file (e.g. 'report.txt', 'data.csv')
+            content: Text content of the file
+
+        Returns:
+            Dict with file_ids and file info, or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.upload_file(
+                channel_id,
+                filename,
+                content.encode("utf-8"),
+                mime_type="text/plain",
+            )
+            if isinstance(result, dict) and "error" in result:
+                return result
+            file_infos = result.get("file_infos", [])
+            return {
+                "success": True,
+                "file_ids": [f.get("id") for f in file_infos if f.get("id")],
+                "files": [
+                    {
+                        "id": f.get("id"),
+                        "name": f.get("name"),
+                        "size": f.get("size"),
+                        "mime_type": f.get("mime_type"),
+                    }
+                    for f in file_infos
+                ],
+            }
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
