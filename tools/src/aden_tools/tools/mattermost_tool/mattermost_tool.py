@@ -55,7 +55,9 @@ class _MattermostClient:
             response = httpx.request(method, url, **request_kwargs)
             if response.status_code == 429 and attempt < MAX_RETRIES:
                 try:
-                    wait = min(float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT)
+                    wait = min(
+                        float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT
+                    )
                 except (ValueError, TypeError):
                     wait = min(2**attempt, MAX_RETRY_WAIT)
                 time.sleep(wait)
@@ -106,7 +108,9 @@ class _MattermostClient:
 
     def get_channel(self, channel_id: str) -> dict[str, Any]:
         """Get detailed information about a channel."""
-        return self._request_with_retry("GET", f"{self._base_url}/channels/{channel_id}")
+        return self._request_with_retry(
+            "GET", f"{self._base_url}/channels/{channel_id}"
+        )
 
     def send_message(
         self,
@@ -114,6 +118,7 @@ class _MattermostClient:
         message: str,
         *,
         root_id: str = "",
+        file_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a post in a channel."""
         body: dict[str, Any] = {
@@ -122,6 +127,8 @@ class _MattermostClient:
         }
         if root_id:
             body["root_id"] = root_id
+        if file_ids:
+            body["file_ids"] = file_ids
         return self._request_with_retry(
             "POST",
             f"{self._base_url}/posts",
@@ -156,11 +163,7 @@ class _MattermostClient:
         post_id: str,
         emoji_name: str,
     ) -> dict[str, Any]:
-        """Add a reaction to a post.
-
-        API ref: POST /reactions
-        """
-        # Need user_id for the reaction; fetch from /users/me
+        """Add a reaction to a post."""
         me = self.get_me()
         if isinstance(me, dict) and "error" in me:
             return me
@@ -179,11 +182,7 @@ class _MattermostClient:
         """Delete a post."""
         return self._request_with_retry("DELETE", f"{self._base_url}/posts/{post_id}")
 
-    def update_post(
-        self,
-        post_id: str,
-        message: str,
-    ) -> dict[str, Any]:
+    def update_post(self, post_id: str, message: str) -> dict[str, Any]:
         """Update (edit) an existing post."""
         return self._request_with_retry(
             "PUT",
@@ -197,10 +196,7 @@ class _MattermostClient:
         terms: str,
         is_or_search: bool = False,
     ) -> dict[str, Any]:
-        """Search for posts across a team.
-
-        API ref: POST /teams/{team_id}/posts/search
-        """
+        """Search for posts across a team."""
         return self._request_with_retry(
             "POST",
             f"{self._base_url}/teams/{team_id}/posts/search",
@@ -208,17 +204,11 @@ class _MattermostClient:
         )
 
     def get_user(self, user_id: str) -> dict[str, Any]:
-        """Get information about a user by ID or username.
-
-        Pass a user ID (e.g. 'abc123') or use 'me' for the authenticated user.
-        """
+        """Get information about a user by ID or username."""
         return self._request_with_retry("GET", f"{self._base_url}/users/{user_id}")
 
     def create_direct_channel(self, other_user_id: str) -> dict[str, Any]:
-        """Open (or retrieve) a direct message channel with another user.
-
-        Returns the channel object; use channel['id'] to send messages.
-        """
+        """Open (or retrieve) a direct message channel with another user."""
         me = self.get_me()
         if isinstance(me, dict) and "error" in me:
             return me
@@ -236,21 +226,14 @@ class _MattermostClient:
         content: bytes,
         mime_type: str = "application/octet-stream",
     ) -> dict[str, Any]:
-        """Upload a file to a channel.
-
-        Returns the file info including file_id which can be passed to
-        send_message's file_ids field to attach the file to a post.
-        """
-        import httpx as _httpx
-
+        """Upload a file to a channel."""
         files = {"files": (filename, content, mime_type)}
         params = {"channel_id": channel_id}
         return self._request_with_retry(
+            "POST",
             f"{self._base_url}/files",
-            headers={"Authorization": f"Bearer {self._token}"},
             files=files,
             params=params,
-            timeout=60.0,
         )
 
 
@@ -267,7 +250,9 @@ def register_tools(
                 return credentials.get_by_alias("mattermost", account)
             token = credentials.get("mattermost")
             if token is not None and not isinstance(token, str):
-                raise TypeError(f"Expected string from credentials.get('mattermost'), got {type(token).__name__}")
+                raise TypeError(
+                    f"Expected string from credentials.get('mattermost'), got {type(token).__name__}"
+                )
             return token
         return os.getenv("MATTERMOST_ACCESS_TOKEN")
 
@@ -276,7 +261,9 @@ def register_tools(
         if credentials is not None:
             url = credentials.get("mattermost_url")
             if url is not None and not isinstance(url, str):
-                raise TypeError(f"Expected string from credentials.get('mattermost_url'), got {type(url).__name__}")
+                raise TypeError(
+                    f"Expected string from credentials.get('mattermost_url'), got {type(url).__name__}"
+                )
             if url:
                 return url
         return os.getenv("MATTERMOST_URL")
@@ -327,7 +314,9 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def mattermost_list_channels(team_id: str, per_page: int = 100, account: str = "") -> dict:
+    def mattermost_list_channels(
+        team_id: str, per_page: int = 100, account: str = ""
+    ) -> dict:
         """
         List public channels for a Mattermost team.
 
@@ -356,9 +345,6 @@ def register_tools(
         """
         Get detailed information about a Mattermost channel.
 
-        Returns channel metadata including name, display name, header, purpose,
-        and type.
-
         Args:
             channel_id: Channel ID
 
@@ -383,6 +369,7 @@ def register_tools(
         channel_id: str,
         message: str,
         root_id: str = "",
+        file_ids: str = "",
         account: str = "",
     ) -> dict:
         """
@@ -392,6 +379,7 @@ def register_tools(
             channel_id: Channel ID to post in
             message: Message text (max 16383 characters). Supports Markdown.
             root_id: Optional post ID to reply to (creates a thread)
+            file_ids: Optional comma-separated file IDs to attach (from mattermost_upload_file)
 
         Returns:
             Dict with post details or error
@@ -406,7 +394,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            result = client.send_message(channel_id, message, root_id=root_id)
+            ids = [f.strip() for f in file_ids.split(",") if f.strip()] if file_ids else None
+            result = client.send_message(channel_id, message, root_id=root_id, file_ids=ids)
             if isinstance(result, dict) and "error" in result:
                 return result
             return {"success": True, "post": result}
@@ -486,14 +475,9 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def mattermost_delete_post(
-        post_id: str,
-        account: str = "",
-    ) -> dict:
+    def mattermost_delete_post(post_id: str, account: str = "") -> dict:
         """
         Delete a post from Mattermost.
-
-        Requires appropriate permissions (post author or admin).
 
         Args:
             post_id: ID of the post to delete
@@ -515,11 +499,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def mattermost_update_post(
-        post_id: str,
-        message: str,
-        account: str = "",
-    ) -> dict:
+    def mattermost_update_post(post_id: str, message: str, account: str = "") -> dict:
         """
         Edit an existing Mattermost post.
 
@@ -661,8 +641,8 @@ def register_tools(
         """
         Upload a text file to a Mattermost channel.
 
-        After uploading, pass the returned file_id(s) to a subsequent
-        mattermost_send_message call to attach the file to a post.
+        After uploading, pass the returned file_ids to mattermost_send_message
+        to attach the file to a post.
 
         Args:
             channel_id: Channel ID to upload into
