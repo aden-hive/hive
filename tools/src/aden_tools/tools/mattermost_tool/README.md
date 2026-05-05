@@ -1,124 +1,130 @@
-# Musik 🎵
+# Mattermost Tool
 
-A music streaming app built with React Native (Expo) and TypeScript, powered by the JioSaavn API.
+Interact with Mattermost servers — send messages, manage channels, react to posts, and more — within the Aden agent framework.
 
----
+## Installation
+
+The Mattermost tool uses `httpx` which is already included in the base dependencies. No additional installation required.
 
 ## Setup
 
-### Prerequisites
-- Node.js 18+
-- Expo CLI: `npm install -g expo-cli`
-- Android device or emulator (or iOS simulator on Mac)
+You need a Mattermost **Personal Access Token** and the **URL** of your Mattermost server.
 
-### Install & Run
+### Getting a Personal Access Token
 
-```bash
-git clone <repo-url>
-cd Musik
-npm install
-npx expo start
-```
+1. Log into your Mattermost instance
+2. Go to **Profile → Security → Personal Access Tokens**
+3. Click **Create Token**, give it a description (e.g., "Hive Agent")
+4. Copy the token (shown only once)
 
-Scan the QR code with the Expo Go app, or press `a` for Android emulator / `i` for iOS simulator.
+> **Note:** Personal Access Tokens must be enabled by your Mattermost admin under **System Console → Integrations → Integration Management**.
 
-### Build APK
+### Configuration
+
+Set the following environment variables:
 
 ```bash
-npx expo build:android
-# or with EAS
-eas build --platform android --profile preview
+export MATTERMOST_ACCESS_TOKEN="your-token-here"
+export MATTERMOST_URL="https://your-mattermost.example.com"
 ```
 
----
+Or configure via the Hive credential store:
 
-## Architecture
-
-```
-src/
-├── components/          # Reusable UI (MiniPlayer, SongItem, option sheets)
-├── context/             # ThemeContext (dark/light mode)
-├── hooks/               # usePlayer, useSetupPlayer, useDownload
-├── navigation/          # AppNavigator (Stack) + BottomTabNavigator
-├── screens/             # Home, Player, Search, Queue, Favorites, Playlists, Downloads, Artist, Album
-├── services/            # api.ts (JioSaavn), trackPlayerService.ts (expo-av), downloadService.ts
-├── store/               # Zustand stores: playerStore, playlistStore, favoriteStore
-└── utils/               # helpers.ts (parseSong, parseArtist, parseAlbum, formatDuration)
+```bash
+hive credentials set mattermost
 ```
 
-### State Management — Zustand
+## Available Tools
 
-Three stores, each persisted to AsyncStorage:
-
-- **playerStore** — current song, queue, queueIndex, shuffle, repeat, playback state. Persisted as `player_state_v1`.
-- **playlistStore** — user-created playlists with songs. Persisted as `mume_playlists_v1`.
-- **favoriteStore** — liked songs. Persisted as `mume_favorites_v1`.
-
-### Audio — expo-av
-
-`trackPlayerService.ts` manages a single `Audio.Sound` instance with a generation counter to prevent race conditions when songs change quickly. Position and duration are tracked via internal refs and a custom listener system — avoiding Zustand updates on every 500ms tick and keeping the seek bar smooth with zero unnecessary re-renders.
-
-### Navigation — React Navigation v6
-
-Stack navigator wrapping a bottom tab navigator. Player opens as a `fullScreenModal` with a slide-up animation. MiniPlayer sits above the tab bar on every tab screen.
-
----
-
-## Features
-
-### Core
-- **Home** — Suggested/Songs/Artists/Albums tabs, infinite scroll pagination, sort options
-- **Search** — Live search across songs, artists, albums with recent search history
-- **Full Player** — Artwork, seek bar, play/pause, prev/next, ±10s skip, shuffle, repeat (none/all/one), favorites, options sheet
-- **Mini Player** — Persistent bar across all tabs, perfectly synced with full player
-- **Queue** — Add, reorder (drag), remove songs; queue count badge on tab icon; persisted across sessions
-- **Favorites** — Heart any song from any screen; persisted locally
-- **Playlists** — Create, rename, delete playlists; add/remove songs
-- **Downloads** — Save songs for reference; shuffle play downloaded songs
-- **Artist / Album screens** — Browse songs and albums by artist, full album tracklists
-
-### Bonus
-- Shuffle mode with random queue traversal
-- Repeat modes: off → repeat all → repeat one
-- Download songs (metadata saved to AsyncStorage; plays from CDN URL)
-- Dark / Light theme toggle
-- Session restore — last played song reloads on app launch, ready to play immediately
-
----
-
-## Trade-offs & Known Limitations
-
-**Download is CDN-backed, not truly offline.** `downloadService.ts` saves song metadata locally so the Downloads screen persists across sessions, but audio still streams from the JioSaavn CDN URL. True offline playback would require `expo-file-system` to download the `.mp4` to device storage. This was skipped to avoid the complexity of managing local file paths across OS versions and the EAS build configuration it requires.
-
-**API host fallback.** Three JioSaavn mirror hosts are tried in sequence if a request fails. This improves reliability but adds latency on failover.
-
-**Lyrics, Speed, Timer, Cast** buttons are present in the UI but not functional — the JioSaavn API doesn't provide lyrics data, and the other controls were scoped out for time.
-
-**Folders tab** shows an empty state — device file system access requires `expo-media-library` permissions which are out of scope for a streaming app.
-
----
-
-## Extra Features Added Beyond Requirements
-
-- Recent search history with per-item and clear-all controls
-- Song options sheet available from every screen (Home, Search, Queue, Artist, Album, Player)
-- Add to playlist flow with inline create-new-playlist option
-- Queue badge showing live song count on the tab bar
-- Drag-to-reorder queue rows
-- Per-session audio state restore (mini player and audio loaded on cold start)
-- API retry logic across 3 mirror hosts
-- Optimistic play/pause UI (no waiting for audio status callbacks)
-
----
-
-## Tech Stack
-
-| | |
+| Tool | Description |
 |---|---|
-| Framework | React Native (Expo SDK 51) |
-| Language | TypeScript |
-| Navigation | React Navigation v6 — Native Stack + Bottom Tabs |
-| State | Zustand |
-| Storage | AsyncStorage |
-| Audio | expo-av |
-| API | JioSaavn (saavn.sumit.co) |
+| `mattermost_list_teams` | List all teams the bot belongs to |
+| `mattermost_list_channels` | List public channels for a team |
+| `mattermost_get_channel` | Get info about a specific channel |
+| `mattermost_send_message` | Send a message to a channel |
+| `mattermost_get_posts` | Fetch posts (messages) from a channel |
+| `mattermost_create_reaction` | Add an emoji reaction to a post |
+| `mattermost_delete_post` | Delete a post |
+| `mattermost_update_post` | Edit an existing post |
+| `mattermost_search_posts` | Search for posts across the server |
+| `mattermost_get_user` | Get information about a user |
+| `mattermost_create_direct_channel` | Open a direct message channel with a user |
+| `mattermost_upload_file` | Upload a file to a channel |
+
+## Example Usage
+
+### Send a message
+
+```python
+result = mattermost_send_message(
+    channel_id="abc123",
+    message="Hello from Hive! :wave:"
+)
+```
+
+### Reply in a thread
+
+```python
+result = mattermost_send_message(
+    channel_id="abc123",
+    message="This is a thread reply",
+    root_id="parent_post_id_here"
+)
+```
+
+### Search for posts
+
+```python
+result = mattermost_search_posts(
+    team_id="team123",
+    terms="deployment failed",
+    is_or_search=False
+)
+```
+
+### Send a direct message
+
+```python
+# First open a DM channel
+dm = mattermost_create_direct_channel(user_id="user123")
+channel_id = dm["channel"]["id"]
+
+# Then send
+mattermost_send_message(channel_id=channel_id, message="Hey, quick question...")
+```
+
+## Required Permissions
+
+The token needs the following Mattermost permissions:
+
+- `read_channel` — to list and read channels
+- `post_all` — to send messages in any channel
+- `create_post` — to create posts
+- `delete_post` — to delete posts (own posts, or admin for others)
+- `edit_post` — to edit posts
+- `create_direct_channel` — to open DMs
+- `upload_file` — to attach files
+
+For most use cases, a standard user token with default permissions is sufficient.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `MATTERMOST_ACCESS_TOKEN` | Yes | Personal Access Token |
+| `MATTERMOST_URL` | Yes | Full URL of your Mattermost server (e.g., `https://chat.example.com`) |
+
+## Notes
+
+- The Mattermost API base path (`/api/v4`) is appended automatically — do not include it in `MATTERMOST_URL`
+- Message length is capped at **16,383 characters** (Mattermost API limit)
+- Rate-limited requests (HTTP 429) are automatically retried up to 2 times with backoff
+- Self-hosted and Mattermost Cloud instances are both supported
+
+## API Reference
+
+[https://api.mattermost.com/](https://api.mattermost.com/)
+
+## Contributed by
+
+
