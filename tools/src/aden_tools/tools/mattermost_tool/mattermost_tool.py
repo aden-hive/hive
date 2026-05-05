@@ -245,14 +245,13 @@ class _MattermostClient:
 
         files = {"files": (filename, content, mime_type)}
         params = {"channel_id": channel_id}
-        response = _httpx.post(
+        return self._request_with_retry(
             f"{self._base_url}/files",
             headers={"Authorization": f"Bearer {self._token}"},
             files=files,
             params=params,
             timeout=60.0,
         )
-        return self._handle_response(response)
 
 
 def register_tools(

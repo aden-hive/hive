@@ -46,7 +46,7 @@ hive credentials set mattermost
 | `mattermost_create_reaction` | Add an emoji reaction to a post |
 | `mattermost_delete_post` | Delete a post |
 | `mattermost_update_post` | Edit an existing post |
-| `mattermost_search_posts` | Search for posts across the server |
+| `mattermost_search_posts` | Search for posts across a team |
 | `mattermost_get_user` | Get information about a user |
 | `mattermost_create_direct_channel` | Open a direct message channel with a user |
 | `mattermost_upload_file` | Upload a file to a channel |
