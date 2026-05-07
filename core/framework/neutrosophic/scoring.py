@@ -8,6 +8,7 @@ The score keeps three independent signals:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final
@@ -56,7 +57,10 @@ class NeutrosophicDecision(StrEnum):
 
 
 def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, float(value)))
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("Neutrosophic score components must be finite numbers.")
+    return max(0.0, min(1.0, parsed))
 
 
 @dataclass(frozen=True)

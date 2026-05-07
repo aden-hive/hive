@@ -1,3 +1,7 @@
+import math
+
+import pytest
+
 from framework.neutrosophic import NeutrosophicDecision, NeutrosophicScore, aggregate_scores, score_worker_report
 
 
@@ -7,6 +11,14 @@ def test_score_clamps_values() -> None:
     assert score.truth == 1.0
     assert score.indeterminacy == 0.0
     assert score.falsity == 0.5
+
+
+def test_score_rejects_non_finite_values() -> None:
+    with pytest.raises(ValueError, match="finite numbers"):
+        NeutrosophicScore(math.nan, 0.0, 0.0)
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        NeutrosophicScore(0.0, math.inf, 0.0)
 
 
 def test_success_worker_report_accepts_with_evidence() -> None:
@@ -75,6 +87,12 @@ def test_high_indeterminacy_takes_priority_over_high_falsity() -> None:
     score = NeutrosophicScore(truth=0.1, indeterminacy=0.8, falsity=0.7)
 
     assert score.decision == NeutrosophicDecision.CLARIFY
+
+
+def test_moderate_falsity_retries_without_escalating() -> None:
+    score = NeutrosophicScore(truth=0.5, indeterminacy=0.2, falsity=0.5)
+
+    assert score.decision == NeutrosophicDecision.RETRY
 
 
 def test_to_dict_contract() -> None:
