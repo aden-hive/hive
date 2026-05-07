@@ -310,8 +310,8 @@ class NodeWorker:
 
             # Handle result
             if result.success:
-                # Validate and write outputs
-                self._write_outputs(result)
+                # Validate and write outputs (may be async for safe parallel writes)
+                await self._write_outputs(result)
 
                 # Evaluate outgoing edges
                 activations = await self._evaluate_outgoing_edges(result)
@@ -517,20 +517,35 @@ class NodeWorker:
     # Output handling
     # ------------------------------------------------------------------
 
-    def _write_outputs(self, result: NodeResult) -> None:
-        """Validate and write node outputs to buffer."""
+    async def _write_outputs(self, result: NodeResult) -> None:
+        """Validate and write node outputs to buffer.
+
+        This method is async so it can acquire per-key locks and use
+        ``DataBuffer.write_async`` when running in parallel contexts.
+        """
+        from framework.orchestrator.locks import AsyncLockRegistry
+
         gc = self._gc
         node_spec = self.node_spec
 
         # Event loop nodes skip executor-level validation (judge is the authority)
         if node_spec.node_type != "event_loop":
-            errors = self._validator.validate_all(
-                output=result.output,
-                output_keys=node_spec.output_keys,
-                nullable_keys=getattr(node_spec, "nullable_output_keys", []) or [],
-                output_schema=getattr(node_spec, "output_schema", None),
-                output_model=getattr(node_spec, "output_model", None),
-            )
+            errors: list[str] = []
+            nullable_keys = getattr(node_spec, "nullable_output_keys", []) or []
+            if node_spec.output_keys:
+                vr = self._validator.validate_output_keys(
+                    output=result.output, expected_keys=node_spec.output_keys, nullable_keys=nullable_keys
+                )
+                if not vr.success:
+                    errors.extend(vr.errors)
+
+            # Pydantic model validation if provided
+            model = getattr(node_spec, "output_model", None)
+            if model is not None:
+                vr2, _ = self._validator.validate_with_pydantic(result.output, model)
+                if not vr2.success:
+                    errors.extend(vr2.errors)
+
             if errors:
                 logger.warning("Worker %s output validation warnings: %s", node_spec.id, errors)
 
@@ -543,11 +558,20 @@ class NodeWorker:
         if is_fanout_branch:
             keys_to_write |= set(result.output.keys())
 
-        # Write all keys to buffer
+        # Lazy init lock registry on GraphContext
+        registry = getattr(gc, "_fanout_lock_registry", None)
+        if registry is None:
+            gc._fanout_lock_registry = AsyncLockRegistry()
+            registry = gc._fanout_lock_registry
+
+        # Write all keys to buffer with per-key locking for fan-out branches
         for key in keys_to_write:
             value = result.output.get(key)
-            if value is not None:
-                if is_fanout_branch:
+            if value is None:
+                continue
+
+            if is_fanout_branch:
+                async with registry.lock(key):
                     conflict_strategy = (
                         getattr(gc.parallel_config, "buffer_conflict_strategy", "last_wins")
                         if gc.parallel_config
@@ -558,8 +582,7 @@ class NodeWorker:
                         if conflict_strategy == "error":
                             raise RuntimeError(
                                 f"Buffer write failed (conflict): key '{key}' already written "
-                                f"by worker '{prior_worker}', "
-                                f"conflicting write from '{node_spec.id}'"
+                                f"by worker '{prior_worker}', conflicting write from '{node_spec.id}'"
                             )
                         elif conflict_strategy == "first_wins":
                             logger.debug(
@@ -577,6 +600,9 @@ class NodeWorker:
                                 node_spec.id,
                             )
                     gc._fanout_written_keys[key] = node_spec.id
+                    await gc.buffer.write_async(key, value, validate=False)
+            else:
+                # Non-fanout branch: simple write
                 gc.buffer.write(key, value, validate=False)
 
     # ------------------------------------------------------------------
