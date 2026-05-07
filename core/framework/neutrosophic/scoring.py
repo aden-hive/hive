@@ -10,7 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final
+
+# Decision thresholds — named here so reviewers can audit them without
+# tracing magic numbers through the decision property.
+_I_CLARIFY_MIN: Final = 0.65  # indeterminacy above this → CLARIFY
+_F_ESCALATE_MIN: Final = 0.65  # falsity above this → ESCALATE
+_T_ACCEPT_MIN: Final = 0.72  # truth must reach this for a clean ACCEPT
+_I_ACCEPT_MAX: Final = 0.35  # indeterminacy must stay below this for ACCEPT
+_F_ACCEPT_MAX: Final = 0.35  # falsity must stay below this for ACCEPT
+_F_RETRY_MIN: Final = 0.45  # moderate falsity (below escalate) → RETRY
 
 
 class NeutrosophicDecision(StrEnum):
@@ -43,14 +52,20 @@ class NeutrosophicScore:
 
     @property
     def decision(self) -> NeutrosophicDecision:
-        """Return the default decision policy for the score."""
-        if self.falsity >= 0.65:
-            return NeutrosophicDecision.ESCALATE
-        if self.indeterminacy >= 0.65:
+        """Return the default decision policy for the score.
+
+        Priority order follows the RFC: high indeterminacy triggers CLARIFY
+        before high falsity triggers ESCALATE.  A score that is simultaneously
+        high-I and high-F is ambiguous enough to clarify first rather than
+        immediately escalate.
+        """
+        if self.indeterminacy >= _I_CLARIFY_MIN:
             return NeutrosophicDecision.CLARIFY
-        if self.truth >= 0.72 and self.indeterminacy <= 0.35 and self.falsity <= 0.35:
+        if self.falsity >= _F_ESCALATE_MIN:
+            return NeutrosophicDecision.ESCALATE
+        if self.truth >= _T_ACCEPT_MIN and self.indeterminacy <= _I_ACCEPT_MAX and self.falsity <= _F_ACCEPT_MAX:
             return NeutrosophicDecision.ACCEPT
-        if self.falsity >= 0.45:
+        if self.falsity >= _F_RETRY_MIN:
             return NeutrosophicDecision.RETRY
         return NeutrosophicDecision.CAVEAT
 
@@ -140,5 +155,5 @@ def aggregate_scores(scores: list[NeutrosophicScore]) -> NeutrosophicScore:
     truth = sum(score.truth for score in scores) / count
     indeterminacy = sum(score.indeterminacy for score in scores) / count
     falsity = sum(score.falsity for score in scores) / count
-    rationale = tuple(f"aggregate_count={count}" for _ in range(1))
+    rationale = (f"aggregate_count={count}",)
     return NeutrosophicScore(truth, indeterminacy, falsity, rationale)

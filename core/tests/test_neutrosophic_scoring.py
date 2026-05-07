@@ -56,3 +56,40 @@ def test_aggregate_scores_averages_triplets() -> None:
     assert aggregate.indeterminacy == 0.5
     assert aggregate.falsity == 0.0
     assert aggregate.rationale == ("aggregate_count=2",)
+
+
+def test_aggregate_scores_empty_returns_fully_indeterminate() -> None:
+    # An empty batch has no evidence: indeterminacy=1.0 is the conservative default.
+    aggregate = aggregate_scores([])
+
+    assert aggregate.truth == 0.0
+    assert aggregate.indeterminacy == 1.0
+    assert aggregate.falsity == 0.0
+    assert aggregate.rationale == ("no_scores",)
+    assert aggregate.decision == NeutrosophicDecision.CLARIFY
+
+
+def test_high_indeterminacy_takes_priority_over_high_falsity() -> None:
+    # RFC specifies: I >= 0.65 → CLARIFY before F >= 0.65 → ESCALATE.
+    # A score that crosses both thresholds should yield CLARIFY, not ESCALATE.
+    score = NeutrosophicScore(truth=0.1, indeterminacy=0.8, falsity=0.7)
+
+    assert score.decision == NeutrosophicDecision.CLARIFY
+
+
+def test_to_dict_contract() -> None:
+    score = NeutrosophicScore(0.9, 0.05, 0.05, ("status=success",))
+    result = score.to_dict()
+
+    assert set(result.keys()) == {"truth", "indeterminacy", "falsity", "decision", "rationale"}
+    assert isinstance(result["truth"], float)
+    assert isinstance(result["rationale"], list)
+    assert result["decision"] == "accept"
+
+
+def test_unknown_status_scores_conservatively() -> None:
+    score = score_worker_report(status="pending")
+
+    assert "status=unknown" in score.rationale
+    # Unknown status should not yield ACCEPT — too little evidence.
+    assert score.decision != NeutrosophicDecision.ACCEPT
