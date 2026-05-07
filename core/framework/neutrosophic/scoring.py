@@ -21,6 +21,29 @@ _I_ACCEPT_MAX: Final = 0.35  # indeterminacy must stay below this for ACCEPT
 _F_ACCEPT_MAX: Final = 0.35  # falsity must stay below this for ACCEPT
 _F_RETRY_MIN: Final = 0.45  # moderate falsity (below escalate) → RETRY
 
+_SUCCESS_BASE: Final = (0.78, 0.12, 0.08)
+_PARTIAL_BASE: Final = (0.38, 0.55, 0.18)
+_TERMINAL_FAILURE_BASE: Final = (0.12, 0.35, 0.68)
+_UNKNOWN_STATUS_BASE: Final = (0.25, 0.62, 0.25)
+
+_SUMMARY_TRUTH_INC: Final = 0.07
+_SUMMARY_INDETERMINACY_DEC: Final = 0.05
+_SUMMARY_MISSING_INDETERMINACY_INC: Final = 0.18
+
+_DATA_TRUTH_INC: Final = 0.08
+_DATA_INDETERMINACY_DEC: Final = 0.04
+_DATA_MISSING_INDETERMINACY_INC: Final = 0.05
+
+_ERROR_TRUTH_DEC: Final = 0.12
+_ERROR_FALSITY_INC: Final = 0.38
+
+_STALL_INDETERMINACY_INC: Final = 0.2
+_STALL_FALSITY_INC: Final = 0.12
+_DOOM_LOOP_INDETERMINACY_INC: Final = 0.15
+_DOOM_LOOP_FALSITY_INC: Final = 0.22
+_CONTRADICTION_FALSITY_INC: Final = 0.25
+_CONTRADICTION_INDETERMINACY_INC: Final = 0.1
+
 
 class NeutrosophicDecision(StrEnum):
     """Default action suggested by a neutrosophic score."""
@@ -95,52 +118,52 @@ def score_worker_report(
     rationale: list[str] = []
 
     if normalized_status == "success":
-        truth, indeterminacy, falsity = 0.78, 0.12, 0.08
+        truth, indeterminacy, falsity = _SUCCESS_BASE
         rationale.append("status=success")
     elif normalized_status == "partial":
-        truth, indeterminacy, falsity = 0.38, 0.55, 0.18
+        truth, indeterminacy, falsity = _PARTIAL_BASE
         rationale.append("status=partial")
     elif normalized_status in {"failed", "timeout", "stopped"}:
-        truth, indeterminacy, falsity = 0.12, 0.35, 0.68
+        truth, indeterminacy, falsity = _TERMINAL_FAILURE_BASE
         rationale.append(f"status={normalized_status}")
     else:
-        truth, indeterminacy, falsity = 0.25, 0.62, 0.25
+        truth, indeterminacy, falsity = _UNKNOWN_STATUS_BASE
         rationale.append("status=unknown")
 
     if normalized_summary:
-        truth += 0.07
-        indeterminacy -= 0.05
+        truth += _SUMMARY_TRUTH_INC
+        indeterminacy -= _SUMMARY_INDETERMINACY_DEC
         rationale.append("summary_present")
     else:
-        indeterminacy += 0.18
+        indeterminacy += _SUMMARY_MISSING_INDETERMINACY_INC
         rationale.append("summary_missing")
 
     if payload:
-        truth += 0.08
-        indeterminacy -= 0.04
+        truth += _DATA_TRUTH_INC
+        indeterminacy -= _DATA_INDETERMINACY_DEC
         rationale.append("data_present")
     else:
-        indeterminacy += 0.05
+        indeterminacy += _DATA_MISSING_INDETERMINACY_INC
         rationale.append("data_missing")
 
     if error:
-        truth -= 0.12
-        falsity += 0.2
+        truth -= _ERROR_TRUTH_DEC
+        falsity += _ERROR_FALSITY_INC
         rationale.append("error_present")
 
     if evidence.get("stalled"):
-        indeterminacy += 0.2
-        falsity += 0.12
+        indeterminacy += _STALL_INDETERMINACY_INC
+        falsity += _STALL_FALSITY_INC
         rationale.append("stall_signal")
 
     if evidence.get("doom_loop"):
-        indeterminacy += 0.15
-        falsity += 0.22
+        indeterminacy += _DOOM_LOOP_INDETERMINACY_INC
+        falsity += _DOOM_LOOP_FALSITY_INC
         rationale.append("doom_loop_signal")
 
     if evidence.get("contradiction"):
-        falsity += 0.25
-        indeterminacy += 0.1
+        falsity += _CONTRADICTION_FALSITY_INC
+        indeterminacy += _CONTRADICTION_INDETERMINACY_INC
         rationale.append("contradiction_signal")
 
     return NeutrosophicScore(truth, indeterminacy, falsity, tuple(rationale))

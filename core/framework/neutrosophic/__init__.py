@@ -1,6 +1,6 @@
 """Neutrosophic scoring helpers for swarm decision quality."""
 
-from framework.neutrosophic.scoring import (
+from .scoring import (
     NeutrosophicDecision,
     NeutrosophicScore,
     aggregate_scores,

@@ -93,3 +93,15 @@ def test_unknown_status_scores_conservatively() -> None:
     assert "status=unknown" in score.rationale
     # Unknown status should not yield ACCEPT — too little evidence.
     assert score.decision != NeutrosophicDecision.ACCEPT
+
+
+def test_success_report_with_error_does_not_clean_accept() -> None:
+    score = score_worker_report(
+        status="success",
+        summary="Completed with warning",
+        data={"rows": 3},
+        error="post-processing failed",
+    )
+
+    assert "error_present" in score.rationale
+    assert score.decision != NeutrosophicDecision.ACCEPT
