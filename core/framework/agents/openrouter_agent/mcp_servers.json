@@ -1,0 +1,9 @@
+{
+  "hive-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "mcp_server.py", "--stdio"],
+    "cwd": "../../../../tools",
+    "description": "Hive built-in tools — web_search, read_file, write_file"
+  }
+}

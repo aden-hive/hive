@@ -34,6 +34,7 @@ API_KEY_PROVIDERS = [
     ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek-chat"),
     ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.5"),
     ("HIVE_API_KEY", "Hive LLM", "hive/queen"),
+    ("OPENROUTER_API_KEY", "OpenRouter (free OSS models)", "openrouter/openai/gpt-oss-120b:free"),
 ]
 
 
