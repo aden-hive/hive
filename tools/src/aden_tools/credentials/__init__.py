@@ -101,6 +101,7 @@ from .n8n import N8N_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .notion import NOTION_CREDENTIALS
 from .obsidian import OBSIDIAN_CREDENTIALS
+from .openrouter import OPENROUTER_CREDENTIALS
 from .pagerduty import PAGERDUTY_CREDENTIALS
 from .pinecone import PINECONE_CREDENTIALS
 from .pipedrive import PIPEDRIVE_CREDENTIALS
@@ -217,6 +218,7 @@ CREDENTIAL_SPECS = {
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
     **ZOOM_CREDENTIALS,
+    **OPENROUTER_CREDENTIALS,
 }
 
 __all__ = [
@@ -309,4 +311,5 @@ __all__ = [
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
     "ZOOM_CREDENTIALS",
+    "OPENROUTER_CREDENTIALS",
 ]

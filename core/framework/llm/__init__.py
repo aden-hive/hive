@@ -47,3 +47,10 @@ try:
     __all__.append("MockLLMProvider")
 except ImportError:
     pass
+
+try:
+    from framework.llm.openrouter import OpenRouterProvider  # noqa: F401
+
+    __all__.append("OpenRouterProvider")
+except ImportError:
+    pass
