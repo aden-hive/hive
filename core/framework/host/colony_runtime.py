@@ -863,9 +863,7 @@ class ColonyRuntime:
         # back to default (the legacy single-template behavior). The
         # resolved integrations map is threaded into Worker(...) so
         # account_overrides() can pin its MCP tool calls.
-        _resolved_profile = (
-            get_worker_profile(self._colony_id, profile_name) if profile_name else None
-        )
+        _resolved_profile = get_worker_profile(self._colony_id, profile_name) if profile_name else None
         _profile_name_resolved = _resolved_profile.name if _resolved_profile else (profile_name or "")
         _profile_integrations = dict(_resolved_profile.integrations) if _resolved_profile else {}
 
@@ -892,9 +890,7 @@ class ColonyRuntime:
         try:
             from framework.credentials.validation import compute_unavailable_mcp_tools
 
-            candidate_names = {
-                getattr(t, "name", None) for t in spawn_tools if getattr(t, "name", None)
-            }
+            candidate_names = {getattr(t, "name", None) for t in spawn_tools if getattr(t, "name", None)}
             mcp_drop, mcp_messages = compute_unavailable_mcp_tools(candidate_names)
             if mcp_drop:
                 spawn_tools = [t for t in spawn_tools if getattr(t, "name", None) not in mcp_drop]
@@ -1156,6 +1152,7 @@ class ColonyRuntime:
                     "error": "no_such_worker",
                     "duration_seconds": 0.0,
                     "tokens_used": 0,
+                    "neutrosophic_score": {},
                 }
                 continue
             if not worker.is_active and worker._result is not None:
@@ -1169,6 +1166,7 @@ class ColonyRuntime:
                     "error": r.error,
                     "duration_seconds": r.duration_seconds,
                     "tokens_used": r.tokens_used,
+                    "neutrosophic_score": r.neutrosophic_score,
                 }
                 continue
             pending_ids.add(wid)
@@ -1229,6 +1227,7 @@ class ColonyRuntime:
                 "error": "timeout",
                 "duration_seconds": duration,
                 "tokens_used": tokens,
+                "neutrosophic_score": {},
             }
             pending_ids.discard(wid)
 
