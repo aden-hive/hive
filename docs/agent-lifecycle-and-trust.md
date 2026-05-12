@@ -70,7 +70,7 @@ flowchart TB
 | ----- | ------------ | -------------- |
 | **1. Define Goal** | A `Goal` is declared with weighted `success_criteria` and hard/soft `constraints`. | [`docs/key_concepts/goals_outcome.md`](key_concepts/goals_outcome.md); `core/framework/orchestrator/goal.py` |
 | **2. Generate Graph** | A coding agent (or the Queen) produces an `agent.json` describing nodes, edges, and entry/terminal points. | [`docs/key_concepts/graph.md`](key_concepts/graph.md); `core/framework/orchestrator/node.py`, `edge.py` |
-| **3. Validate** | `hive validate <path>` checks structural integrity before execution. | `core/framework/loader/agent_loader.py`; `hive validate` in `core/framework/cli.py` |
+| **3. Validate** | The agent definition is structurally validated when the loader hydrates it; some templates also expose a `validate` subcommand on their own CLI (e.g., `python -m deep_research_agent validate`). | `core/framework/loader/agent_loader.py`; `examples/templates/deep_research_agent/__main__.py` |
 | **4. Initialize Session** | The runtime loads the agent, hydrates input, and (if resuming) restores from a checkpoint. | `core/framework/host/colony_runtime.py`; `core/framework/storage/checkpoint_store.py` |
 | **5. Plan / Reason** | The active `event_loop` node calls the LLM with the three-layer prompt onion (identity / narrative / focus). | `core/framework/agent_loop/agent_loop.py`; prompt composer in `core/framework/orchestrator/prompt_composer.py` |
 | **6. Execute Tools** | Tool calls run in parallel via FastMCP. Large results spill to disk and become pointers in the conversation (see [Tool Result Truncation](architecture/README.md#tool-result-truncation--pointer-pattern)). | `tools/src/aden_tools/`; `core/framework/loader/tool_registry.py` |
@@ -89,8 +89,8 @@ flowchart TB
 | Conversation history (messages, tool calls, tool results, judge feedback) | `~/.hive/` session storage; spillover files alongside | Process crash, deploy, resume |
 | `DataBuffer` outputs (everything written via `set_output`) | `ConversationStore` cursor (write-through) | Process crash, resume |
 | Spillover tool results (`web_search_1.txt`, etc.) | Session spillover directory | Process crash, resume — counter restored from existing files |
-| Decision log (intent / options / choice / outcome) | `core/framework/tracker/runtime_log_store.py` JSONL | Forever, until pruned — used by evolution |
-| LLM debug logs (raw prompt + response) | `~/.hive/llm_logs/*.jsonl` | Forever, until pruned — used by `hive debugger` |
+| Decision log (intent / options / choice / outcome) | `<storage_path>/runs/<run_id>.json` written via `framework.storage.concurrent.ConcurrentStorage` | Forever, until pruned — used by evolution |
+| LLM debug logs (raw prompt + response) | `~/.hive/llm_logs/*.jsonl` | Forever, until pruned — viewable with `scripts/llm_timeline_viewer.py` |
 | Encrypted credentials | `~/.hive/credentials`, unlocked by `HIVE_CREDENTIAL_KEY` | Process lifetime — never logged |
 | Agent code itself | `exports/<agent_name>/` | Until evolution regenerates it |
 
@@ -102,36 +102,38 @@ Hive emits four kinds of signal during a session. They are designed to be combin
 
 ### 2.1 Structured logs (trace IDs)
 
-Logging is configured automatically by `AgentRunner`. Every log line carries `trace_id`, `execution_id`, `agent_id`, `goal_id`, and (when set) `node_id`, propagated via `ContextVar` so they survive async hops.
+Logging is configured via `framework.observability.configure_logging` — `hive serve` calls it during startup, and `framework.tracker.DecisionTracker.start_run` sets the per-run trace context. Every log line carries `trace_id`, `execution_id`, `agent_id`, `goal_id`, and (when set) `node_id`, propagated via `ContextVar` so they survive async hops.
+
+Switch formats with environment variables — they apply whether you start the runtime via `hive serve` / `hive open` or directly via an agent's own `python -m <agent>` entry point:
 
 ```bash
-# Development — human-readable, colour-coded
-hive run exports/my_agent -v -i '{...}'
+# Default — human-readable, colour-coded
+hive open
 
 # Production — JSON, one line per log entry, OTel-aligned IDs
-LOG_FORMAT=json hive run exports/my_agent -i '{...}'
+LOG_FORMAT=json hive serve
 # or
-ENV=production hive run exports/my_agent -i '{...}'
+ENV=production hive serve
 
 # Maximum verbosity (internal subsystems: memory reflection, recall)
-hive run exports/my_agent --debug -i '{...}'
+hive open --debug
 ```
 
 See [`core/framework/observability/README.md`](../core/framework/observability/README.md) for the full schema and custom-field guidance.
 
-### 2.2 The `hive debugger` — LLM debug log viewer
+### 2.2 LLM debug log viewer
 
-Every LLM call is recorded as a JSONL entry under `~/.hive/llm_logs/`. The bundled visualizer renders sessions as a browsable timeline.
+Every LLM call is recorded as a JSONL entry under `~/.hive/llm_logs/`. The bundled timeline viewer renders sessions as a chronological event timeline and lets you click any event to inspect the raw request payload (system prompt, tool schemas, full messages array).
 
 ```bash
 # Launch the viewer (picks a free port, opens browser)
-hive debugger
+uv run --no-project scripts/llm_timeline_viewer.py
 
 # Jump straight to a specific execution
-hive debugger --session <execution_id>
+uv run --no-project scripts/llm_timeline_viewer.py --session <execution_id>
 
-# Generate a static HTML report instead of starting a server
-hive debugger --output trace.html
+# Custom port
+uv run --no-project scripts/llm_timeline_viewer.py --port 8080
 ```
 
 Use this when:
@@ -173,10 +175,10 @@ runtime.record_outcome(
 runtime.end_run(success=True, narrative="Qualified the lead successfully")
 ```
 
-Decisions and run records are persisted as JSONL under the tracker's storage path. Two ways to consume them:
+Decisions and run records are persisted via `ConcurrentStorage` as `<storage_path>/runs/<run_id>.json` (and an optional summary at `<storage_path>/summaries/<run_id>.json`). Two ways to consume them:
 
-- **Interactively** — open the run with `hive debugger --session <execution_id>` (§2.2) to walk every LLM turn and the surrounding decisions.
-- **Programmatically** — read the JSONL stream directly through the runtime log store (`framework.tracker.runtime_log_store`) when you want to mine patterns across many runs (e.g., success rate per goal, failure clustering by node, regression diff between generations). The log schema lives in `framework.tracker.runtime_log_schemas`.
+- **Interactively** — pair the run files with `scripts/llm_timeline_viewer.py --session <execution_id>` (§2.2) so you can walk every LLM turn alongside the decisions it produced.
+- **Programmatically** — load the JSON run records with `ConcurrentStorage(...).list_all_runs()` and `load_run(run_id)` when you want to mine patterns across many runs (e.g., success rate per goal, failure clustering by node, regression diff between generations). The schemas live in `framework.schemas.run` and `framework.schemas.decision`.
 
 The architecture doc's "Online Learning" roadmap (Phases 2–3, see [`docs/architecture/README.md`](architecture/README.md)) describes how aggregate queries over this log are intended to drive automatic calibration and rule generation in future versions.
 
@@ -186,24 +188,28 @@ The HTTP server emits Server-Sent Events for every node lifecycle event (start, 
 
 ```bash
 hive serve --port 8787
-# then subscribe to: GET http://127.0.0.1:8787/sessions/<id>/events
+# then subscribe to: GET http://127.0.0.1:8787/api/sessions/<session_id>/events
+# (filter by event type with ?types=CLIENT_OUTPUT_DELTA,EXECUTION_COMPLETED)
 ```
 
-Routes are defined in `core/framework/server/routes_events.py` and `sse.py`.
+Routes are registered in `core/framework/server/routes_events.py`; see also `core/framework/server/README.md` for the full event-type list and a persisted-history replay endpoint at `/api/sessions/<session_id>/events/history`.
 
 ### 2.5 Resume from a checkpoint
 
-When something goes wrong, you do not have to restart from scratch:
+When something goes wrong you do not have to restart from scratch — paused sessions are resumed through the HTTP API exposed by `hive serve`:
 
 ```bash
-# Resume from the last checkpoint of a session
-hive run exports/my_agent --resume-session <session_id>
+# Resume the most recent checkpoint of a paused session
+curl -X POST http://127.0.0.1:8787/api/sessions/<session_id>/resume \
+  -H 'Content-Type: application/json' -d '{}'
 
-# Resume from a specific checkpoint within that session
-hive run exports/my_agent --resume-session <session_id> --checkpoint <checkpoint_id>
+# Resume from a specific checkpoint
+curl -X POST http://127.0.0.1:8787/api/sessions/<session_id>/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"checkpoint_id": "cp_..."}'
 ```
 
-Resuming preserves the `DataBuffer`, conversation history, spillover files, and the spill counter — so the agent never duplicates work or filename-clashes with a prior run.
+The dashboard exposes the same resume action via the session view. Resuming preserves the `DataBuffer`, conversation history, spillover files, and the spill counter — so the agent never duplicates work or filename-clashes with a prior run. Implementation: `core/framework/server/routes_execution.py`.
 
 ---
 
@@ -213,11 +219,11 @@ When a session fails, work outward from the smallest signal:
 
 | Symptom | First place to look | Then |
 | ------- | ------------------- | ---- |
-| Wrong final output but no error | `success_criteria` weights + LLM judge feedback in `hive debugger` | Decision log for the accepting iteration |
+| Wrong final output but no error | `success_criteria` weights + LLM judge feedback in `scripts/llm_timeline_viewer.py` | Decision log for the accepting iteration (`<storage>/runs/<run_id>.json`) |
 | Loop / never terminates | Iteration count vs node `max_iterations`; Level 0 judge (missing output keys) | Inspect Layer 3 system prompt — is the goal expressible? |
-| Tool failure | Tool result `is_error=true` in `hive debugger` | Spillover file for the full payload |
-| Crashed mid-run | Last checkpoint ID in session storage | `--resume-session <id> --checkpoint <id>` |
-| HITL never resumed | Session status in `hive session list` | `routes_messages.py` for the pending escalation |
+| Tool failure | Tool result `is_error=true` in `scripts/llm_timeline_viewer.py` | Spillover file for the full payload |
+| Crashed mid-run | Last checkpoint ID in session storage | `POST /api/sessions/<id>/resume` with the checkpoint id (§2.5) |
+| HITL never resumed | Session status in `hive session list` | `core/framework/server/routes_messages.py` for the pending escalation |
 | Cost overrun | Per-LLM-call entries in JSON logs (`tokens_used`, `latency_ms`) | Decision log: which options the agent considered |
 
 ---
@@ -230,7 +236,7 @@ Hive evaluates agents at three levels: **per-iteration** (does this turn meet th
 
 Improvement is measured against a `Goal`, not against tests. A goal has:
 
-- **`success_criteria`** — weighted, multi-dimensional. `metric` can be `llm_judge`, `output_contains`, `custom`, etc. Weights sum to 1.0.
+- **`success_criteria`** — weighted, multi-dimensional. `metric` can be `llm_judge`, `output_contains`, `custom`, etc. Individual weights are clamped to `[0, 1]`; the goal is considered met when the sum of met-criterion weights reaches 90% of the total weight (see `Goal.is_success` in `core/framework/orchestrator/goal.py`). Normalising weights to sum to 1.0 is a useful convention but not enforced.
 - **`constraints`** — hard or soft. Hard constraint violations trigger ESCALATE (never silently accepted).
 - Optional **principles** that align the Queen Bee's oversight.
 
@@ -252,25 +258,18 @@ The full theory and roadmap are in [`docs/architecture/README.md`](architecture/
 
 ### 4.3 Built-in agent tests
 
-Each exported agent ships with a test harness. Tests are generated via MCP tools (`generate_constraint_tests`, `generate_success_tests`) and run with the agent on `PYTHONPATH`.
+Test scaffolding is generated per-agent — there is no universal `agent test` subcommand. Two layers exist today:
 
-> The `exports/` directory is gitignored — it is where your locally-built agents live (e.g. `exports/my_agent/`). The same convention is used throughout [`docs/developer-guide.md`](developer-guide.md). For a concrete, runnable example against an agent that *is* in the repo, see §6.6 below (which uses `PYTHONPATH=core:examples/templates`).
+- **Framework + tool tests** run via `make test` (excludes the `live`-marked suite). These verify the runtime itself, not your goal satisfaction.
+- **Per-agent validation.** Each exported template's own CLI is the source of truth. For instance the bundled `deep_research_agent` exposes `validate`, which calls `default_agent.validate()` and reports structural errors and warnings (see `examples/templates/deep_research_agent/__main__.py`):
 
 ```bash
-# Run all tests for an exported agent
-PYTHONPATH=exports uv run python -m my_agent test
-
-# Just success-criteria tests
-PYTHONPATH=exports uv run python -m my_agent test --type success
-
-# Just constraint tests (what must not happen)
-PYTHONPATH=exports uv run python -m my_agent test --type constraint
-
-# Parallel + fail-fast
-PYTHONPATH=exports uv run python -m my_agent test --parallel 4 --fail-fast
+PYTHONPATH=core:examples/templates uv run python -m deep_research_agent validate
 ```
 
-Test failures, like session failures, feed the evolution loop — they are the most common "diagnosis" signal because they are reproducible.
+Goal-satisfaction testing today is a manual workflow: drive the agent with a fixed input set (via the dashboard or the template's `run` subcommand), then read the resulting run records (`<storage>/runs/<run_id>.json`) to inspect which `success_criteria` were met. The architecture doc's roadmap (`docs/architecture/README.md` §"Online Learning") describes the planned move toward generated constraint/success tests that close this gap.
+
+Run failures, like framework test failures, feed the evolution loop — they are the most common "diagnosis" signal because they are reproducible.
 
 ### 4.4 Regression detection
 
@@ -311,7 +310,7 @@ Two practical patterns:
 ### 5.3 Fallback and rollback
 
 - **Rollback to a prior generation.** Generations are just `exports/<agent>` directories. Keep the previous one and re-deploy it with one CLI flag.
-- **Rollback to a prior checkpoint.** A bad iteration is recoverable: `hive run --resume-session <id> --checkpoint <pre-bad-iteration-id>`.
+- **Rollback to a prior checkpoint.** A bad iteration is recoverable via the resume API: `POST /api/sessions/<id>/resume` with `{"checkpoint_id": "<pre-bad-iteration-id>"}` (see §2.5).
 - **Failure edges in the graph.** Edges with `on_failure` conditions wire deterministic fallback paths — e.g., if `draft_message` fails three times, route to `escalate_to_human` rather than retrying indefinitely. See [`docs/key_concepts/graph.md`](key_concepts/graph.md).
 
 ### 5.4 Best practices
@@ -350,20 +349,28 @@ $env:PYTHONPATH = "core;examples\templates"; uv run python -m deep_research_agen
 
 Look at `examples/templates/deep_research_agent/agent.json` to see the graph: an entry node, a research node, a synthesis node, and a terminal node, with explicit `success_criteria` for comprehensiveness and citation backing.
 
-### 6.3 Execute — without spending API credits
+### 6.3 Validate the agent definition
+
+The template's CLI exposes a `validate` subcommand that runs structural checks and reports warnings:
+
+```bash
+PYTHONPATH=core:examples/templates uv run python -m deep_research_agent validate
+```
+
+### 6.4 Execute — via the CLI
 
 ```bash
 PYTHONPATH=core:examples/templates uv run python -m deep_research_agent run \
-  --mock --topic "Artificial Intelligence"
+  --topic "Artificial Intelligence" --verbose
 ```
 
-`--mock` runs the graph with a simulated LLM, so you can watch every lifecycle stage without paying for tokens.
+`run` requires an LLM API key (set up by `quickstart.sh`/`quickstart.ps1`). Logs print to stderr; the result JSON is written to stdout. Add `--debug` for the deepest trace.
 
-### 6.4 Execute — with the dashboard
+### 6.5 Execute — via the dashboard
 
 ```bash
 hive open                              # starts the server, opens the dashboard
-# In the dashboard, point at examples/templates/deep_research_agent and click Run.
+# Load the colony / agent from the dashboard and click Run.
 ```
 
 The dashboard surfaces, in real time:
@@ -373,35 +380,26 @@ The dashboard surfaces, in real time:
 - Judge verdicts per iteration (stage 8).
 - Checkpoints as they are written (stage 9).
 
-### 6.5 Inspect the trace
+### 6.6 Inspect the trace
 
 ```bash
-# Find the execution_id from the dashboard or session list
+# Find the session/execution from the dashboard or session list
 hive session list --cold
 
-# Open the LLM debug viewer scoped to that execution
-hive debugger --session <execution_id>
+# Open the LLM timeline viewer scoped to that execution
+uv run --no-project scripts/llm_timeline_viewer.py --session <execution_id>
 ```
 
-You can step through every LLM turn — system prompt, message history, tool call, tool result, judge feedback — exactly as the model saw it.
-
-### 6.6 Evaluate
-
-```bash
-PYTHONPATH=core:examples/templates uv run python -m deep_research_agent test \
-  --type success --parallel 4
-```
-
-This runs the agent against generated success-criteria tests and reports weighted satisfaction per criterion — the same numbers a coding agent would use to diagnose a regression and propose an improved generation.
+You can step through every LLM turn — system prompt, message history, tool call, tool result, judge feedback — exactly as the model saw it. Pair the timeline with the run record at `<storage>/runs/<run_id>.json` for the corresponding decision log.
 
 ### 6.7 Iterate
 
 If a criterion regresses, the workflow is:
 
-1. Open the failing session in `hive debugger` and the matching entries in `BuilderQuery.analyze_failure(...)`.
+1. Open the failing session in `scripts/llm_timeline_viewer.py --session <execution_id>` and pair it with the corresponding `<storage>/runs/<run_id>.json` decision log.
 2. Decide whether the fix belongs in the prompt (most common), the graph shape, the tool selection, or the criteria themselves.
 3. Have a coding agent (or yourself) edit `agent.json` and the relevant prompts in `nodes/`.
-4. Re-run the test suite. Promote the new generation only when it matches or beats the old one across the criterion mix.
+4. Re-run the fixed input set. Promote the new generation only when it matches or beats the old one across the criterion mix.
 
 ---
 
