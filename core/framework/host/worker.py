@@ -232,14 +232,18 @@ class Worker:
                 status = explicit["status"]
                 summary = explicit["summary"]
                 data = explicit["data"]
-                error = "Worker stopped by queen after reporting"
+                # The explicit report was submitted before cancellation, so
+                # score it on its own merits — the synthetic stop message
+                # would otherwise inflate falsity for a clean success report.
+                # The WorkerResult.error still carries the stop reason for
+                # the event payload; only the score sees the report as-is.
                 self._result = WorkerResult(
-                    error=error,
+                    error="Worker stopped by queen after reporting",
                     duration_seconds=duration,
                     status=status,
                     summary=summary,
                     data=data,
-                    neutrosophic_score=self._score_report(status, summary, data, error),
+                    neutrosophic_score=self._score_report(status, summary, data, None),
                 )
                 await self._emit_terminal_events(None, force_status=status)
             else:
@@ -304,7 +308,12 @@ class Worker:
         data: dict[str, Any],
         error: str | None,
     ) -> dict[str, Any]:
-        """Compute a neutrosophic decision-quality score for a terminal report."""
+        """Compute a neutrosophic decision-quality score for a terminal report.
+
+        Returns an empty dict (and logs at debug level) if scoring fails for
+        any reason — the score is additive metadata; failing to compute it
+        must never break the worker's terminal path.
+        """
         try:
             from framework.neutrosophic import score_worker_report
 
@@ -315,6 +324,7 @@ class Worker:
                 error=error,
             ).to_dict()
         except Exception:
+            logger.debug("Failed to compute neutrosophic score for terminal report", exc_info=True)
             return {}
 
     def record_explicit_report(

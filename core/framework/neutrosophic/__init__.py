@@ -1,4 +1,10 @@
-from .judge import JudgeVerdict, NeutrosophicJudge, score_judge_context
+"""Neutrosophic scoring layer for swarm decision quality.
+
+Adds an optional T/I/F (truth / indeterminacy / falsity) signal alongside
+existing worker reports. See RFC aden-hive/hive#7179 for motivation.
+"""
+
+from .judge import NeutrosophicJudge, score_judge_context
 from .scoring import (
     NeutrosophicDecision,
     NeutrosophicScore,
@@ -8,7 +14,6 @@ from .scoring import (
 )
 
 __all__ = [
-    "JudgeVerdict",
     "NeutrosophicDecision",
     "NeutrosophicJudge",
     "NeutrosophicScore",

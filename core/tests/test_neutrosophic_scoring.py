@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+from framework.agent_loop.internals.types import JudgeVerdict
 from framework.neutrosophic import (
     NeutrosophicDecision,
     NeutrosophicJudge,
@@ -205,6 +206,68 @@ def test_aggregate_worker_reports_mixed_results_not_accept() -> None:
     score = aggregate_worker_reports(reports)
     assert isinstance(score, NeutrosophicScore)
     assert score.decision != NeutrosophicDecision.ACCEPT
+
+
+@pytest.mark.asyncio
+async def test_neutrosophic_judge_caveat_accept_carries_feedback() -> None:
+    """CAVEAT decisions must surface in feedback rather than silently ACCEPTing."""
+    judge = NeutrosophicJudge("borderline task", max_iterations=10)
+    # Borderline context: text present, no missing keys, no tool calls, mid-run.
+    # Truth bumps up from 0.38 + 0.15 = 0.53 (below _T_ACCEPT_MIN=0.72),
+    # I drops from 0.55 - 0.15 = 0.40 (below _I_CLARIFY_MIN=0.65),
+    # F stays at 0.18 (below _F_RETRY_MIN=0.45) → CAVEAT.
+    verdict = await judge.evaluate(
+        {
+            "assistant_text": "Working on it.",
+            "missing_keys": [],
+            "tool_calls": [],
+            "iteration": 3,
+        }
+    )
+    assert verdict.action == "ACCEPT"
+    assert verdict.feedback  # not empty — CAVEAT must surface the score
+    assert "caveat" in verdict.feedback.lower()
+
+
+@pytest.mark.asyncio
+async def test_neutrosophic_judge_returns_framework_judge_verdict() -> None:
+    """Verdict must be the framework's JudgeVerdict type, not a private duplicate."""
+    judge = NeutrosophicJudge("any task", max_iterations=10)
+    verdict = await judge.evaluate(
+        {
+            "assistant_text": "Done.",
+            "missing_keys": [],
+            "tool_calls": [],
+            "iteration": 1,
+        }
+    )
+    assert isinstance(verdict, JudgeVerdict)
+
+
+@pytest.mark.asyncio
+async def test_neutrosophic_judge_iteration_aligns_with_subagent_judge() -> None:
+    """``remaining = max_iter - iteration - 1`` matches SubagentJudge semantics."""
+    judge = NeutrosophicJudge("alignment check", max_iterations=10)
+    # iteration=9, max=10 → remaining=0 → escalation with missing keys.
+    verdict_late = await judge.evaluate(
+        {
+            "assistant_text": "",
+            "missing_keys": ["needed"],
+            "tool_calls": [],
+            "iteration": 9,
+        }
+    )
+    assert verdict_late.action == "ESCALATE"
+    # iteration=0, max=10 → remaining=9 → no escalation pressure.
+    verdict_early = await judge.evaluate(
+        {
+            "assistant_text": "Starting.",
+            "missing_keys": ["needed"],
+            "tool_calls": [],
+            "iteration": 0,
+        }
+    )
+    assert verdict_early.action == "RETRY"
 
 
 def test_neutrosophic_judge_not_instantiated_at_module_level() -> None:

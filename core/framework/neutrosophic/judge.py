@@ -2,13 +2,14 @@
 
 Strictly opt-in: no instance is created by the core runtime. Callers that
 want neutrosophic-quality gating can instantiate NeutrosophicJudge and pass
-it where Hive expects a judge.
+it where Hive expects a judge (anywhere JudgeProtocol is accepted).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from framework.agent_loop.internals.types import JudgeVerdict
 
 from .scoring import NeutrosophicDecision, NeutrosophicScore
 
@@ -26,10 +27,21 @@ _TOOL_CALLS_INDET_INC = 0.08
 _LATE_INCOMPLETE_FALSITY_INC = 0.60
 
 
-@dataclass
-class JudgeVerdict:
-    action: str  # "ACCEPT" | "RETRY" | "ESCALATE"
-    feedback: str
+def _remaining(max_iterations: int, iteration: int) -> int:
+    """Iterations left after the current one finishes.
+
+    Aligns with ``SubagentJudge`` in ``framework.agent_loop.internals.judge_pipeline``
+    which uses ``max_iterations - iteration - 1`` (iteration is 0-based and the
+    current turn is already consumed).
+    """
+    return max(0, max(1, max_iterations) - iteration - 1)
+
+
+def _normalize_missing_keys(raw: Any) -> list[str]:
+    """Coerce missing_keys into a list of non-None strings, defensively."""
+    if not isinstance(raw, list):
+        return []
+    return [str(k) for k in raw if k is not None]
 
 
 def score_judge_context(
@@ -39,7 +51,10 @@ def score_judge_context(
     """Derive a NeutrosophicScore from a judge evaluation context dict.
 
     Defensively normalises non-list/non-int fields so a malformed context
-    does not raise.
+    does not raise. The late-incomplete escalation threshold is derived from
+    the configured ``max_iterations`` rather than a hard-coded iteration
+    number, so a judge with ``max_iterations=3`` and ``max_iterations=50``
+    both escalate at a proportional point in the run.
     """
     rationale: list[str] = []
     truth = _JUDGE_BASE_T
@@ -52,9 +67,7 @@ def score_judge_context(
         indeterminacy -= _HAS_TEXT_INDET_DEC
         rationale.append("has_assistant_text")
 
-    raw_missing = context.get("missing_keys")
-    missing_keys = raw_missing if isinstance(raw_missing, list) else []
-    missing_keys = [str(k) for k in missing_keys if k is not None]
+    missing_keys = _normalize_missing_keys(context.get("missing_keys"))
     capped = min(len(missing_keys), _MISSING_KEY_CAP)
     if capped:
         indeterminacy += _MISSING_KEY_INDET_INC * capped
@@ -73,7 +86,7 @@ def score_judge_context(
         iteration = 0
 
     max_iter = max(1, max_iterations)
-    remaining = max(0, max_iter - iteration)
+    remaining = _remaining(max_iter, iteration)
     late_threshold = max(2, int(max_iter * 0.3))
     if remaining <= late_threshold and missing_keys:
         falsity += _LATE_INCOMPLETE_FALSITY_INC
@@ -88,10 +101,13 @@ def score_judge_context(
 
 
 class NeutrosophicJudge:
-    """Opt-in judge adapter that maps T/I/F pressure to ACCEPT/RETRY/ESCALATE.
+    """Opt-in judge adapter mapping T/I/F pressure to ACCEPT / RETRY / ESCALATE.
 
     NOT instantiated anywhere in the core runtime — supply it explicitly to
     AgentLoop or LoopConfig when neutrosophic quality gating is desired.
+
+    Iteration semantics match ``SubagentJudge``: ``iteration`` is 0-based and
+    ``remaining = max_iterations - iteration - 1``.
     """
 
     def __init__(self, task: str, max_iterations: int = 10) -> None:
@@ -100,19 +116,30 @@ class NeutrosophicJudge:
 
     def _remaining_iterations(self, context: dict[str, Any]) -> int:
         try:
-            return max(0, self._max_iterations - int(context.get("iteration", 0)))
+            return _remaining(self._max_iterations, int(context.get("iteration", 0)))
         except (TypeError, ValueError):
-            return self._max_iterations
+            return max(0, self._max_iterations - 1)
 
     def _feedback(self, message: str, score: NeutrosophicScore) -> str:
-        return f"{message} (T={score.truth:.3f}, I={score.indeterminacy:.3f}, F={score.falsity:.3f})"
+        prefix = f"Task: {self._task} — " if self._task else ""
+        return f"{prefix}{message} (T={score.truth:.3f}, I={score.indeterminacy:.3f}, F={score.falsity:.3f})"
 
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
-        """Map judge context to ACCEPT, RETRY, or ESCALATE using T/I/F scores."""
-        score = score_judge_context(context, max_iterations=self._max_iterations)
+        """Map judge context to ACCEPT, RETRY, or ESCALATE using T/I/F scores.
 
-        raw_missing = context.get("missing_keys")
-        missing_keys = raw_missing if isinstance(raw_missing, list) else []
+        All :class:`NeutrosophicDecision` states are handled explicitly:
+
+        - ACCEPT    → ACCEPT (clean pass)
+        - ESCALATE  → ESCALATE (high falsity / late incomplete)
+        - missing_keys present → RETRY (regardless of CLARIFY/RETRY/CAVEAT)
+        - CLARIFY   → RETRY (high indeterminacy — add evidence)
+        - RETRY     → RETRY (contradictions / failure pressure)
+        - CAVEAT    → ACCEPT, with the score embedded in feedback so the
+                       caller can see this was a borderline accept rather
+                       than a clean one.
+        """
+        score = score_judge_context(context, max_iterations=self._max_iterations)
+        missing_keys = _normalize_missing_keys(context.get("missing_keys"))
         remaining = self._remaining_iterations(context)
 
         if score.decision == NeutrosophicDecision.ACCEPT:
@@ -154,4 +181,12 @@ class NeutrosophicJudge:
                 ),
             )
 
-        return JudgeVerdict(action="ACCEPT", feedback="")
+        # NeutrosophicDecision.CAVEAT — borderline accept. Surface the score
+        # in feedback so callers see this was not a clean pass.
+        return JudgeVerdict(
+            action="ACCEPT",
+            feedback=self._feedback(
+                "Accepted with caveat: signal is weak but not contradictory.",
+                score,
+            ),
+        )

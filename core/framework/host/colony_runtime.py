@@ -1130,6 +1130,13 @@ class ColonyRuntime:
                     "error": "..." | None,
                     "duration_seconds": 12.3,
                     "tokens_used": 4567,
+                    "neutrosophic_score": {  # additive — {} when unavailable
+                        "truth": 0.78,
+                        "indeterminacy": 0.12,
+                        "falsity": 0.08,
+                        "decision": "accept",
+                        "rationale": ["status=success", ...],
+                    },
                 },
                 ...
             ]
