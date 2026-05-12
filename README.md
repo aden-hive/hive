@@ -206,6 +206,7 @@ flowchart LR
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
+- [Agent Lifecycle & Trust Guide](docs/agent-lifecycle-and-trust.md) - Lifecycle stages, observability, evaluation, and production-readiness in one place
 
 ## Contributing
 We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework ([check #2805](https://github.com/aden-hive/hive/issues/2805)). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
