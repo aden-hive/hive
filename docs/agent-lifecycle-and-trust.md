@@ -142,21 +142,43 @@ Use this when:
 
 ### 2.3 Decision logs
 
-`DecisionTracker` records the **intent → options → choice → outcome** tuple for every meaningful agent decision. This is the raw material for both human review and the evolution loop (see [§4](#4-evaluation-framework)). It is queryable via `BuilderQuery`:
+`DecisionTracker` records the **intent → options → choice → outcome** tuple for every meaningful agent decision. This is the raw material for both human review and the evolution loop (see [§4](#4-evaluation-framework)).
+
+Agents (or framework code) record decisions through the tracker's recording API:
 
 ```python
-from framework import BuilderQuery
+from framework import DecisionTracker
 
-query = BuilderQuery("/path/to/storage")
+runtime = DecisionTracker("/path/to/storage")
+run_id = runtime.start_run("qualify_lead", "Qualify inbound lead")
 
-patterns = query.find_patterns("my_goal")
-print(f"Success rate: {patterns.success_rate:.1%}")
+decision_id = runtime.decide(
+    node_id="lead-qualifier",
+    intent="Determine if the lead has budget",
+    options=[
+        {"id": "ask",   "description": "Ask the lead directly"},
+        {"id": "infer", "description": "Infer from company size"},
+    ],
+    chosen="infer",
+    reasoning="Company data is already available; asking would be slower",
+)
 
-analysis = query.analyze_failure("run_123")
-print(f"Root cause: {analysis.root_cause}")
-for s in query.suggest_improvements("my_goal"):
-    print(f"[{s['priority']}] {s['recommendation']}")
+runtime.record_outcome(
+    decision_id=decision_id,
+    success=True,
+    result={"has_budget": True, "estimated": "$50k"},
+    summary="Inferred budget of $50k from company revenue",
+)
+
+runtime.end_run(success=True, narrative="Qualified the lead successfully")
 ```
+
+Decisions and run records are persisted as JSONL under the tracker's storage path. Two ways to consume them:
+
+- **Interactively** — open the run with `hive debugger --session <execution_id>` (§2.2) to walk every LLM turn and the surrounding decisions.
+- **Programmatically** — read the JSONL stream directly through the runtime log store (`framework.tracker.runtime_log_store`) when you want to mine patterns across many runs (e.g., success rate per goal, failure clustering by node, regression diff between generations). The log schema lives in `framework.tracker.runtime_log_schemas`.
+
+The architecture doc's "Online Learning" roadmap (Phases 2–3, see [`docs/architecture/README.md`](architecture/README.md)) describes how aggregate queries over this log are intended to drive automatic calibration and rule generation in future versions.
 
 ### 2.4 Event stream / SSE
 
@@ -230,7 +252,9 @@ The full theory and roadmap are in [`docs/architecture/README.md`](architecture/
 
 ### 4.3 Built-in agent tests
 
-Each exported agent ships with a test harness. Tests are generated via MCP tools (`generate_constraint_tests`, `generate_success_tests`) and run via:
+Each exported agent ships with a test harness. Tests are generated via MCP tools (`generate_constraint_tests`, `generate_success_tests`) and run with the agent on `PYTHONPATH`.
+
+> The `exports/` directory is gitignored — it is where your locally-built agents live (e.g. `exports/my_agent/`). The same convention is used throughout [`docs/developer-guide.md`](developer-guide.md). For a concrete, runnable example against an agent that *is* in the repo, see §6.6 below (which uses `PYTHONPATH=core:examples/templates`).
 
 ```bash
 # Run all tests for an exported agent
