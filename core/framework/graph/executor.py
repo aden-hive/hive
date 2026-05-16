@@ -2135,7 +2135,8 @@ class GraphExecutor:
 
         # Track which branch wrote which key for memory conflict detection
         fanout_written_keys: dict[str, str] = {}  # key -> branch_id that wrote it
-        fanout_keys_lock = asyncio.Lock()
+        fanout_key_locks: dict[str, asyncio.Lock] = {}
+        fanout_dict_lock = asyncio.Lock()
 
         self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
         for branch in branches.values():
@@ -2230,30 +2231,45 @@ class GraphExecutor:
                     if result.success:
                         # Write outputs to shared memory with conflict detection
                         conflict_strategy = self._parallel_config.memory_conflict_strategy
-                        for key, value in result.output.items():
-                            async with fanout_keys_lock:
-                                prior_branch = fanout_written_keys.get(key)
+                        
+                        # Buffer writes to execute them concurrently per-key
+                        write_tasks = []
+                        
+                        async def _buffered_write(k: str, v: Any) -> None:
+                            async with fanout_dict_lock:
+                                if k not in fanout_key_locks:
+                                    fanout_key_locks[k] = asyncio.Lock()
+                                key_lock = fanout_key_locks[k]
+                            
+                            async with key_lock:
+                                prior_branch = fanout_written_keys.get(k)
                                 if prior_branch and prior_branch != branch.branch_id:
                                     if conflict_strategy == "error":
                                         raise RuntimeError(
-                                            f"Memory conflict: key '{key}' already written "
+                                            f"Memory conflict: key '{k}' already written "
                                             f"by branch '{prior_branch}', "
                                             f"conflicting write from '{branch.branch_id}'"
                                         )
                                     elif conflict_strategy == "first_wins":
                                         self.logger.debug(
-                                            f"      ⚠ Skipping write to '{key}' "
+                                            f"      ⚠ Skipping write to '{k}' "
                                             f"(first_wins: already set by {prior_branch})"
                                         )
-                                        continue
+                                        return
                                     else:
                                         # last_wins (default): write and log
                                         self.logger.debug(
-                                            f"      ⚠ Key '{key}' overwritten "
+                                            f"      ⚠ Key '{k}' overwritten "
                                             f"(last_wins: {prior_branch} -> {branch.branch_id})"
                                         )
-                                fanout_written_keys[key] = branch.branch_id
-                            await memory.write_async(key, value)
+                                fanout_written_keys[k] = branch.branch_id
+                                await memory.write_async(k, v)
+
+                        for key, value in result.output.items():
+                            write_tasks.append(_buffered_write(key, value))
+                        
+                        if write_tasks:
+                            await asyncio.gather(*write_tasks)
 
                         branch.result = result
                         branch.status = "completed"

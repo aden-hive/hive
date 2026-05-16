@@ -689,3 +689,41 @@ async def test_memory_conflict_error_raises(runtime, goal):
     # The conflict RuntimeError is caught inside execute_single_branch,
     # which causes the branch to fail. fail_all then raises its own error.
     assert "failed" in result.error.lower()
+
+
+# === 18. Concurrent TOCTOU regression ===
+
+
+@pytest.mark.asyncio
+async def test_fanout_concurrent_write_toctou_regression(runtime, goal):
+    """Regression test for TOCTOU race condition in fan-out output writes (Issue #7178)."""
+    b1 = NodeSpec(id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"])
+    b2 = NodeSpec(id="b2", name="B2", description="b2", node_type="event_loop", output_keys=["b2_out"])
+    graph = _make_fanout_graph([b1, b2])
+
+    class RaceNode(NodeProtocol):
+        def __init__(self, key: str, value: str):
+            self.key = key
+            self.value = value
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            # Force concurrency overlap
+            await asyncio.sleep(0.05)
+            return NodeResult(success=True, output={self.key: self.value, f"{self.value}_out": "ok"})
+
+    # Use 'error' strategy to ensure the conflict is deterministically caught
+    config = ParallelExecutionConfig(memory_conflict_strategy="error")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", RaceNode("shared_race_key", "b1"))
+    executor.register_node("b2", RaceNode("shared_race_key", "b2"))
+
+    result = await executor.execute(graph, goal, {})
+
+    # The executor should catch the conflict predictably and fail the branch,
+    # raising the error strategy exception, rather than silently overwriting due to TOCTOU.
+    assert not result.success
+    assert "failed" in result.error.lower()
+
