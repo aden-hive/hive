@@ -202,7 +202,7 @@ def _check_dnssec(domain: str) -> dict:
     """Check if DNSSEC is enabled and validated."""
     try:
         # Create an isolated resolver to avoid polluting the default one
-        sec_resolver = dns.resolver.Resolver()
+        sec_resolver = dns.resolver.Resolver(configure=False)
         
         # Use known validating nameservers (Google, Cloudflare)
         sec_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
