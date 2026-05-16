@@ -39,7 +39,7 @@ def register_tools(
             return credentials.get("exa_search")
         return os.getenv("EXA_API_KEY")
 
-    def _make_request(
+    async def _make_request(
         endpoint: str,
         payload: dict,
         api_key: str,
@@ -54,35 +54,37 @@ def register_tools(
         Returns:
             Parsed JSON response dict, or error dict on failure
         """
+        import asyncio
         max_retries = 3
-        for attempt in range(max_retries + 1):
-            response = httpx.post(
-                f"{EXA_API_BASE}{endpoint}",
-                json=payload,
-                headers={
-                    "x-api-key": api_key,
-                    "Content-Type": "application/json",
-                },
-                timeout=30.0,
-            )
+        async with httpx.AsyncClient() as client:
+            for attempt in range(max_retries + 1):
+                response = await client.post(
+                    f"{EXA_API_BASE}{endpoint}",
+                    json=payload,
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
 
-            if response.status_code == 429 and attempt < max_retries:
-                time.sleep(2**attempt)
-                continue
+                if response.status_code == 429 and attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                    continue
 
-            if response.status_code == 401:
-                return {"error": "Invalid Exa API key"}
-            elif response.status_code == 429:
-                return {"error": "Exa rate limit exceeded. Try again later."}
-            elif response.status_code != 200:
-                return {"error": f"Exa API request failed: HTTP {response.status_code}"}
+                if response.status_code == 401:
+                    return {"error": "Invalid Exa API key"}
+                elif response.status_code == 429:
+                    return {"error": "Exa rate limit exceeded. Try again later."}
+                elif response.status_code != 200:
+                    return {"error": f"Exa API request failed: HTTP {response.status_code}"}
 
-            break
+                break
 
-        return response.json()
+            return response.json()
 
     @mcp.tool()
-    def exa_search(
+    async def exa_search(
         query: str,
         num_results: int = 10,
         search_type: Literal["auto", "neural", "keyword"] = "auto",
@@ -152,7 +154,7 @@ def register_tools(
             payload["contents"]["highlights"] = True
 
         try:
-            data = _make_request("/search", payload, api_key)
+            data = await _make_request("/search", payload, api_key)
 
             if "error" in data:
                 return data
@@ -186,7 +188,7 @@ def register_tools(
             return {"error": f"Exa search failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_find_similar(
+    async def exa_find_similar(
         url: str,
         num_results: int = 10,
         include_domains: list[str] | None = None,
@@ -235,7 +237,7 @@ def register_tools(
             payload["contents"]["text"] = True
 
         try:
-            data = _make_request("/findSimilar", payload, api_key)
+            data = await _make_request("/findSimilar", payload, api_key)
 
             if "error" in data:
                 return data
@@ -266,7 +268,7 @@ def register_tools(
             return {"error": f"Exa find similar failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_get_contents(
+    async def exa_get_contents(
         urls: list[str],
         include_text: bool = True,
         include_highlights: bool = False,
@@ -307,7 +309,7 @@ def register_tools(
             payload["contents"] = contents
 
         try:
-            data = _make_request("/contents", payload, api_key)
+            data = await _make_request("/contents", payload, api_key)
 
             if "error" in data:
                 return data
@@ -338,7 +340,7 @@ def register_tools(
             return {"error": f"Exa content extraction failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_answer(
+    async def exa_answer(
         query: str,
         include_citations: bool = True,
     ) -> dict:
@@ -369,7 +371,7 @@ def register_tools(
         }
 
         try:
-            data = _make_request("/answer", payload, api_key)
+            data = await _make_request("/answer", payload, api_key)
 
             if "error" in data:
                 return data
@@ -402,7 +404,7 @@ def register_tools(
             return {"error": f"Exa answer failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_search_news(
+    async def exa_search_news(
         query: str,
         num_results: int = 10,
         days_back: int = 7,
@@ -451,7 +453,7 @@ def register_tools(
         payload["contents"]["highlights"] = True
 
         try:
-            data = _make_request("/search", payload, api_key)
+            data = await _make_request("/search", payload, api_key)
             if "error" in data:
                 return data
 
@@ -485,7 +487,7 @@ def register_tools(
             return {"error": f"Exa news search failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_search_papers(
+    async def exa_search_papers(
         query: str,
         num_results: int = 10,
         year_start: int | None = None,
@@ -528,7 +530,7 @@ def register_tools(
             payload["startPublishedDate"] = f"{year_start}-01-01T00:00:00.000Z"
 
         try:
-            data = _make_request("/search", payload, api_key)
+            data = await _make_request("/search", payload, api_key)
             if "error" in data:
                 return data
 
@@ -561,7 +563,7 @@ def register_tools(
             return {"error": f"Exa paper search failed: {str(e)}"}
 
     @mcp.tool()
-    def exa_search_companies(
+    async def exa_search_companies(
         query: str,
         num_results: int = 10,
         include_text: bool = True,
@@ -600,7 +602,7 @@ def register_tools(
             payload["contents"]["text"] = True
 
         try:
-            data = _make_request("/search", payload, api_key)
+            data = await _make_request("/search", payload, api_key)
             if "error" in data:
                 return data
 
