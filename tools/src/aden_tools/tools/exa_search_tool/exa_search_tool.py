@@ -13,7 +13,7 @@ All tools use the EXA_API_KEY credential for authentication.
 from __future__ import annotations
 
 import os
-import time
+
 from datetime import UTC
 from typing import TYPE_CHECKING, Literal
 
@@ -69,7 +69,15 @@ def register_tools(
                 )
 
                 if response.status_code == 429 and attempt < max_retries:
-                    await asyncio.sleep(2**attempt)
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = float(retry_after)
+                        except ValueError:
+                            delay = 2 ** attempt
+                    else:
+                        delay = 2 ** attempt
+                    await asyncio.sleep(delay)
                     continue
 
                 if response.status_code == 401:
