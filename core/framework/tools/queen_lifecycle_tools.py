@@ -1642,6 +1642,7 @@ def register_queen_lifecycle_tools(
         tasks: list[dict] | None = None,
         concurrency_hint: int | None = None,
         triggers: list[dict] | None = None,
+        worker_profiles: list[dict] | None = None,
     ) -> str:
         """Create a colony and materialize its skill folder in one atomic call.
 
@@ -1822,6 +1823,7 @@ def register_queen_lifecycle_tools(
                 concurrency_hint=(
                     concurrency_hint if isinstance(concurrency_hint, int) and concurrency_hint > 0 else None
                 ),
+                worker_profiles=worker_profiles if isinstance(worker_profiles, list) else None,
             )
         except Exception as e:
             logger.exception("create_colony: fork failed after installing skill")
@@ -2184,6 +2186,46 @@ def register_queen_lifecycle_tools(
                         "required": ["id", "trigger_type", "trigger_config", "task"],
                     },
                 },
+                "worker_profiles": {
+                    "type": "array",
+                    "description": (
+                        "Optional roster of worker profiles. Use this "
+                        "when the colony needs to operate multiple "
+                        "authorized accounts of the same vendor (two "
+                        "Slack workspaces, two Gmail accounts) — each "
+                        "profile pins its own credential alias so workers "
+                        "spawned under that profile call Slack/Gmail/etc. "
+                        "as the right account by default. If omitted, the "
+                        "colony has a single implicit 'default' profile "
+                        "that uses each provider's primary account. Each "
+                        "entry: name (lowercase id, unique within the "
+                        "colony), integrations (provider id → account "
+                        "alias, e.g. {'slack': 'work'}), optional task "
+                        "(per-profile task override), optional skill_name "
+                        "(if the profile uses a different skill than the "
+                        "colony default), optional concurrency_hint, "
+                        "prompt_override, tool_filter."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "task": {"type": "string"},
+                            "skill_name": {"type": "string"},
+                            "integrations": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            "concurrency_hint": {"type": "integer", "minimum": 1},
+                            "prompt_override": {"type": "string"},
+                            "tool_filter": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["name"],
+                    },
+                },
             },
             "required": [
                 "colony_name",
@@ -2198,6 +2240,114 @@ def register_queen_lifecycle_tools(
         "create_colony",
         _create_colony_tool,
         lambda inputs: create_colony(**inputs),
+    )
+    tools_registered += 1
+
+    # --- update_worker_profile ---------------------------------------------------
+
+    async def update_worker_profile(
+        *,
+        colony_name: str,
+        profile_name: str,
+        integrations: dict[str, str] | None = None,
+        task: str | None = None,
+        skill_name: str | None = None,
+        concurrency_hint: int | None = None,
+        prompt_override: str | None = None,
+        tool_filter: list[str] | None = None,
+    ) -> str:
+        """Insert or update a single worker profile on an existing colony.
+
+        Use this to adjust an account binding ("switch the slack-work
+        profile from alias 'work' to alias 'work-2'") or to add a new
+        profile after the colony was already created. Existing siblings
+        are preserved. Pass only the fields you want to change; ``None``
+        means "don't touch", and an empty dict/list means "clear".
+        """
+        from framework.host.worker_profiles import (
+            WorkerProfile,
+            get_worker_profile,
+            upsert_worker_profile,
+            validate_profile_name,
+        )
+
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps({"error": "colony_name must be lowercase alphanumeric with underscores."})
+        err = validate_profile_name(profile_name)
+        if err is not None:
+            return json.dumps({"error": err})
+
+        existing = get_worker_profile(cn, profile_name)
+        merged = WorkerProfile(
+            name=profile_name,
+            task=existing.task if existing else "",
+            skill_name=existing.skill_name if existing else "",
+            integrations=dict(existing.integrations) if existing else {},
+            concurrency_hint=existing.concurrency_hint if existing else None,
+            prompt_override=existing.prompt_override if existing else None,
+            tool_filter=list(existing.tool_filter) if (existing and existing.tool_filter) else None,
+        )
+        if integrations is not None:
+            merged.integrations = {str(k): str(v) for k, v in integrations.items() if str(k) and str(v)}
+        if task is not None:
+            merged.task = task
+        if skill_name is not None:
+            merged.skill_name = skill_name
+        if concurrency_hint is not None:
+            merged.concurrency_hint = (
+                concurrency_hint if isinstance(concurrency_hint, int) and concurrency_hint > 0 else None
+            )
+        if prompt_override is not None:
+            merged.prompt_override = prompt_override or None
+        if tool_filter is not None:
+            merged.tool_filter = list(tool_filter) if tool_filter else None
+
+        try:
+            saved = upsert_worker_profile(cn, merged)
+        except (FileNotFoundError, ValueError) as exc:
+            return json.dumps({"error": str(exc)})
+
+        return json.dumps(
+            {
+                "ok": True,
+                "colony_name": cn,
+                "profile_name": profile_name,
+                "worker_profiles": [p.to_dict() for p in saved],
+            }
+        )
+
+    _update_worker_profile_tool = Tool(
+        name="update_worker_profile",
+        description=(
+            "Insert or update one worker profile on an existing colony. "
+            "Use this to swap a profile's account alias (e.g. 'switch "
+            "slack-work to use alias work-2') or to add a profile after "
+            "create_colony. Existing siblings are preserved. Pass only "
+            "the fields you want to change."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {"type": "string"},
+                "profile_name": {"type": "string"},
+                "integrations": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                "task": {"type": "string"},
+                "skill_name": {"type": "string"},
+                "concurrency_hint": {"type": "integer", "minimum": 1},
+                "prompt_override": {"type": "string"},
+                "tool_filter": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["colony_name", "profile_name"],
+        },
+    )
+    registry.register(
+        "update_worker_profile",
+        _update_worker_profile_tool,
+        lambda inputs: update_worker_profile(**inputs),
     )
     tools_registered += 1
 

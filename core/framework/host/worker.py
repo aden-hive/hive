@@ -54,6 +54,11 @@ class WorkerInfo:
     status: WorkerStatus
     started_at: float = 0.0
     result: WorkerResult | None = None
+    # Name of the colony's worker profile this worker was spawned from.
+    # Empty for legacy / single-template colonies. Surfaced in the UI so
+    # the user can see "Worker w_42 in colony X is using profile slack-work"
+    # and reason about which authorized account this run is touching.
+    profile_name: str = ""
 
 
 class Worker:
@@ -79,6 +84,8 @@ class Worker:
         colony_id: str = "",
         persistent: bool = False,
         storage_path: Path | None = None,
+        profile_name: str = "",
+        integrations: dict[str, str] | None = None,
     ):
         self.id = worker_id
         self.task = task
@@ -88,6 +95,12 @@ class Worker:
         self._event_bus = event_bus
         self._colony_id = colony_id
         self._persistent = persistent
+        # Worker profile binding. ``integrations`` is a {provider_id: alias}
+        # map applied as default account overrides for every MCP tool call
+        # this worker makes (see CredentialStoreAdapter.account_overrides).
+        # An explicit ``account="..."`` arg on a tool call still wins.
+        self._profile_name = profile_name
+        self._integrations: dict[str, str] = dict(integrations or {})
         # Canonical on-disk home for this worker (conversations, events,
         # result.json, data). Required when seed_conversation() is used —
         # we deliberately do NOT fall back to CWD, which previously caused
@@ -114,6 +127,7 @@ class Worker:
             status=self.status,
             started_at=self._started_at,
             result=self._result,
+            profile_name=self._profile_name,
         )
 
     @property
@@ -173,8 +187,16 @@ class Worker:
                 exc_info=True,
             )
 
+        # Pin MCP tool calls to this worker's profile-bound aliases. Empty
+        # mapping is a no-op so ephemeral workers and legacy single-profile
+        # colonies are unaffected. The contextvar is propagated to all
+        # awaited child coroutines, so every tool invocation downstream of
+        # ``execute`` sees the binding without further plumbing.
+        from aden_tools.credentials.store_adapter import account_overrides
+
         try:
-            result = await self._agent_loop.execute(self._context)
+            with account_overrides(self._integrations):
+                result = await self._agent_loop.execute(self._context)
             duration = time.monotonic() - self._started_at
 
             if result.success:

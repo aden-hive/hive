@@ -94,7 +94,7 @@ def _list_aden_accounts() -> list[dict]:
 
         client = AdenCredentialClient(
             AdenClientConfig(
-                base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                base_url=os.environ.get("ADEN_API_URL", "https://app.open-hive.com"),
             )
         )
         try:

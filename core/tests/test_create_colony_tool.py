@@ -88,6 +88,7 @@ def patched_fork(monkeypatch):
         task: str,
         tasks: list[dict] | None = None,
         concurrency_hint: int | None = None,
+        worker_profiles: list[dict] | None = None,
     ) -> dict:
         calls.append(
             {
@@ -96,6 +97,7 @@ def patched_fork(monkeypatch):
                 "task": task,
                 "tasks": tasks,
                 "concurrency_hint": concurrency_hint,
+                "worker_profiles": worker_profiles,
             }
         )
         return {

@@ -14,6 +14,11 @@ export interface WorkerSummary {
   status: string;
   started_at: number;
   result: WorkerResult | null;
+  /** Name of the colony's worker profile this worker was spawned from.
+   *  Empty for legacy / single-template colonies. Surfaced as a small
+   *  badge in the Sessions tab so the user can see which authorized
+   *  account the worker is calling MCP tools as. */
+  profile_name?: string;
 }
 
 export interface ColonySkill {

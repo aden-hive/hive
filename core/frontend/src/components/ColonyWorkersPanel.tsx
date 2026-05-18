@@ -15,6 +15,11 @@ import {
   Zap,
   Activity,
   Loader2,
+  Plus,
+  Trash2,
+  Pencil,
+  Check,
+  Link2,
 } from "lucide-react";
 import {
   colonyWorkersApi,
@@ -24,6 +29,8 @@ import {
   type ProgressStep,
   type WorkerSummary,
 } from "@/api/colonyWorkers";
+import { coloniesApi, type WorkerProfile } from "@/api/colonies";
+import { credentialsApi } from "@/api/credentials";
 import {
   colonyDataApi,
   type CellValue,
@@ -51,7 +58,7 @@ interface ColonyWorkersPanelProps {
   onClose: () => void;
 }
 
-type TabKey = "skills" | "tools" | "sessions" | "triggers" | "data";
+type TabKey = "skills" | "tools" | "sessions" | "triggers" | "data" | "profiles";
 
 function statusClasses(status: string): string {
   const s = status.toLowerCase();
@@ -165,6 +172,7 @@ export default function ColonyWorkersPanel({
       {/* Tab bar */}
       <div className="flex border-b border-border/60 flex-shrink-0">
         <TabButton active={tab === "sessions"} onClick={() => setTab("sessions")} label="Sessions" />
+        <TabButton active={tab === "profiles"} onClick={() => setTab("profiles")} label="Profiles" />
         <TabButton active={tab === "triggers"} onClick={() => setTab("triggers")} label="Triggers" />
         <TabButton active={tab === "skills"} onClick={() => setTab("skills")} label="Skills" />
         <TabButton active={tab === "tools"} onClick={() => setTab("tools")} label="Tools" />
@@ -175,6 +183,7 @@ export default function ColonyWorkersPanel({
         {tab === "sessions" && (
           <SessionsTab sessionId={sessionId} colonyName={colonyName} />
         )}
+        {tab === "profiles" && <ProfilesTab colonyName={colonyName} />}
         {tab === "triggers" && <TriggersTab sessionId={sessionId} />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
         {tab === "tools" && <ToolsTab sessionId={sessionId} />}
@@ -630,11 +639,21 @@ function SessionsTab({
           className="w-full text-left px-3 py-2.5"
         >
           <div className="flex items-center justify-between mb-1 gap-2">
-            <code
-              className={`text-xs font-mono ${active ? "text-foreground" : "text-foreground/70"}`}
-            >
-              {shortId(w.worker_id)}
-            </code>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <code
+                className={`text-xs font-mono ${active ? "text-foreground" : "text-foreground/70"}`}
+              >
+                {shortId(w.worker_id)}
+              </code>
+              {w.profile_name && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium truncate"
+                  title={`Worker profile: ${w.profile_name}`}
+                >
+                  {w.profile_name}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1">
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusClasses(w.status)}`}
@@ -1919,6 +1938,470 @@ function TabShell({
       ) : (
         children
       )}
+    </div>
+  );
+}
+
+// ── Profiles tab ───────────────────────────────────────────────────────
+//
+// Lists the colony's worker profiles. Each profile pins a default
+// account alias per provider so workers spawned under it call MCP
+// tools as the right Slack workspace / Gmail account / etc. The alias
+// dropdown only shows aliases the user has already authorized through
+// the integrations page — typo-prone free-form entry was rejected as a
+// foothold for misdirected tool calls.
+//
+// Delete is refused while a worker is still bound to the profile; the
+// 409 surfaces as an inline notice listing the worker IDs the user
+// needs to stop first.
+
+function ProfilesTab({ colonyName }: { colonyName: string | null }) {
+  const [profiles, setProfiles] = useState<WorkerProfile[]>([]);
+  const [accounts, setAccounts] = useState<Record<string, string[]>>({});
+  const [accountIdentities, setAccountIdentities] = useState<
+    Record<string, Record<string, Record<string, string>>>
+  >({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [boundWarning, setBoundWarning] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    if (!colonyName) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      coloniesApi.listWorkerProfiles(colonyName),
+      credentialsApi.listSpecs(),
+    ])
+      .then(([profileResp, specsResp]) => {
+        setProfiles(profileResp.worker_profiles ?? []);
+        const aliasMap: Record<string, string[]> = {};
+        const idMap: Record<string, Record<string, Record<string, string>>> = {};
+        for (const spec of specsResp.specs ?? []) {
+          if (!spec.aden_supported) continue;
+          const provider = spec.credential_id;
+          const aliases: string[] = [];
+          const idsForProvider: Record<string, Record<string, string>> = {};
+          for (const acct of spec.accounts ?? []) {
+            if (!acct.alias) continue;
+            aliases.push(acct.alias);
+            idsForProvider[acct.alias] = acct.identity ?? {};
+          }
+          if (aliases.length > 0) {
+            aliasMap[provider] = aliases;
+            idMap[provider] = idsForProvider;
+          }
+        }
+        setAccounts(aliasMap);
+        setAccountIdentities(idMap);
+      })
+      .catch((e) =>
+        setError(
+          e?.message ?? "Failed to load worker profiles",
+        ),
+      )
+      .finally(() => setLoading(false));
+  }, [colonyName]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const handleSave = useCallback(
+    async (profile: WorkerProfile) => {
+      if (!colonyName) return;
+      setBusy(true);
+      setError(null);
+      setBoundWarning(null);
+      try {
+        const resp = await coloniesApi.upsertWorkerProfile(colonyName, profile);
+        setProfiles(resp.worker_profiles ?? []);
+        setEditingName(null);
+        setCreating(false);
+      } catch (e: unknown) {
+        setError((e as Error)?.message ?? "Save failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [colonyName],
+  );
+
+  const handleDelete = useCallback(
+    async (profileName: string) => {
+      if (!colonyName) return;
+      setBusy(true);
+      setError(null);
+      setBoundWarning(null);
+      try {
+        await coloniesApi.deleteWorkerProfile(colonyName, profileName);
+        refresh();
+      } catch (e: unknown) {
+        // Surface 409 bound_workers payloads as an inline notice with the
+        // worker IDs so the user knows exactly what to stop. The api
+        // client throws on non-2xx; the response body is on `cause`.
+        const err = e as Error & { body?: { bound_workers?: string[]; error?: string } };
+        const bound = err.body?.bound_workers;
+        if (Array.isArray(bound) && bound.length > 0) {
+          setBoundWarning(
+            `Profile "${profileName}" is bound to running worker${
+              bound.length === 1 ? "" : "s"
+            } ${bound.map(shortId).join(", ")}. Stop them first.`,
+          );
+        } else {
+          setError(err.message ?? "Delete failed");
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [colonyName, refresh],
+  );
+
+  if (!colonyName) {
+    return (
+      <TabShell loading={false} error={null} onRefresh={() => {}} empty="No colony loaded.">
+        {null}
+      </TabShell>
+    );
+  }
+
+  return (
+    <TabShell
+      loading={loading}
+      error={error}
+      onRefresh={refresh}
+      empty={null}
+      headerRight={
+        !creating && editingName === null ? (
+          <button
+            onClick={() => setCreating(true)}
+            className="text-[10px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/10 transition-colors inline-flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> Add profile
+          </button>
+        ) : null
+      }
+    >
+      <div className="flex flex-col gap-3">
+        {boundWarning && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {boundWarning}
+          </div>
+        )}
+
+        <ConnectedAccountsSummary accounts={accounts} identities={accountIdentities} />
+
+        {creating && (
+          <ProfileEditor
+            mode="create"
+            existing={null}
+            availableAliases={accounts}
+            existingNames={profiles.map((p) => p.name)}
+            busy={busy}
+            onCancel={() => setCreating(false)}
+            onSave={handleSave}
+          />
+        )}
+
+        {profiles.length === 0 && !creating ? (
+          <p className="text-xs text-muted-foreground text-center py-6">
+            No profiles yet. The colony spawns one default worker.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {profiles.map((p) =>
+              editingName === p.name ? (
+                <li key={p.name}>
+                  <ProfileEditor
+                    mode="edit"
+                    existing={p}
+                    availableAliases={accounts}
+                    existingNames={profiles.map((x) => x.name)}
+                    busy={busy}
+                    onCancel={() => setEditingName(null)}
+                    onSave={handleSave}
+                  />
+                </li>
+              ) : (
+                <li key={p.name}>
+                  <ProfileRow
+                    profile={p}
+                    onEdit={() => {
+                      setEditingName(p.name);
+                      setBoundWarning(null);
+                    }}
+                    onDelete={() => handleDelete(p.name)}
+                    isDefault={p.name === "default"}
+                    busy={busy}
+                  />
+                </li>
+              ),
+            )}
+          </ul>
+        )}
+      </div>
+    </TabShell>
+  );
+}
+
+function ConnectedAccountsSummary({
+  accounts,
+  identities,
+}: {
+  accounts: Record<string, string[]>;
+  identities: Record<string, Record<string, Record<string, string>>>;
+}) {
+  const providers = Object.keys(accounts).sort();
+  if (providers.length === 0) {
+    return (
+      <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        No connected accounts yet — connect providers in the integrations page
+        before binding profiles.
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-border/50 bg-muted/10 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
+        <Link2 className="w-3 h-3" /> Connected accounts
+      </div>
+      <ul className="flex flex-wrap gap-1.5">
+        {providers.flatMap((provider) =>
+          accounts[provider].map((alias) => {
+            const ident = identities[provider]?.[alias];
+            const detail = ident?.email || ident?.name || "";
+            return (
+              <li
+                key={`${provider}:${alias}`}
+                className="text-[10px] px-1.5 py-0.5 rounded-full bg-background border border-border/60 text-foreground/80"
+                title={detail || `${provider}:${alias}`}
+              >
+                <span className="font-medium">{provider}</span>:{alias}
+              </li>
+            );
+          }),
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function ProfileRow({
+  profile,
+  onEdit,
+  onDelete,
+  isDefault,
+  busy,
+}: {
+  profile: WorkerProfile;
+  onEdit: () => void;
+  onDelete: () => void;
+  isDefault: boolean;
+  busy: boolean;
+}) {
+  const integrations = profile.integrations ?? {};
+  const entries = Object.entries(integrations);
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/30 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-foreground truncate">
+              {profile.name}
+            </span>
+            {isDefault && (
+              <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide">
+                default
+              </span>
+            )}
+          </div>
+          {profile.task && (
+            <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
+              {profile.task}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={onEdit}
+            disabled={busy}
+            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 disabled:opacity-50 transition-colors"
+            title="Edit profile"
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+          {!isDefault && (
+            <button
+              onClick={onDelete}
+              disabled={busy}
+              className="p-1 rounded text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+              title="Delete profile"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {entries.length > 0 ? (
+        <ul className="flex flex-wrap gap-1">
+          {entries.map(([provider, alias]) => (
+            <li
+              key={provider}
+              className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20"
+            >
+              <span className="font-medium">{provider}</span>:{alias}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[10px] text-muted-foreground italic">
+          No integrations bound — uses each provider's primary account.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ProfileEditor({
+  mode,
+  existing,
+  availableAliases,
+  existingNames,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  mode: "create" | "edit";
+  existing: WorkerProfile | null;
+  availableAliases: Record<string, string[]>;
+  existingNames: string[];
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (profile: WorkerProfile) => void;
+}) {
+  const [name, setName] = useState(existing?.name ?? "");
+  const [task, setTask] = useState(existing?.task ?? "");
+  const [bindings, setBindings] = useState<Record<string, string>>(
+    () => ({ ...(existing?.integrations ?? {}) }),
+  );
+
+  const providers = useMemo(() => Object.keys(availableAliases).sort(), [availableAliases]);
+
+  const nameError = useMemo(() => {
+    if (!name) return "Name is required";
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+      return "lowercase, numbers, _ or - (must start alphanumeric, ≤64)";
+    }
+    if (mode === "create" && existingNames.includes(name)) {
+      return "Name already used";
+    }
+    return null;
+  }, [name, mode, existingNames]);
+
+  const setAlias = (provider: string, alias: string) => {
+    setBindings((prev) => {
+      const next = { ...prev };
+      if (alias) next[provider] = alias;
+      else delete next[provider];
+      return next;
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-primary/40 bg-primary/[0.04] px-3 py-3 flex flex-col gap-2.5">
+      <div>
+        <label className="text-[10px] uppercase tracking-wide text-muted-foreground block mb-1">
+          Profile name
+        </label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={mode === "edit"}
+          className="w-full text-xs px-2 py-1 rounded border border-border/60 bg-background disabled:opacity-60"
+          placeholder="slack-work"
+        />
+        {nameError && (
+          <p className="text-[10px] text-destructive mt-0.5">{nameError}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="text-[10px] uppercase tracking-wide text-muted-foreground block mb-1">
+          Task override (optional)
+        </label>
+        <textarea
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          rows={2}
+          className="w-full text-xs px-2 py-1 rounded border border-border/60 bg-background resize-none"
+          placeholder="What this profile's worker should do (overrides the colony task)"
+        />
+      </div>
+
+      <div>
+        <label className="text-[10px] uppercase tracking-wide text-muted-foreground block mb-1">
+          Account bindings
+        </label>
+        {providers.length === 0 ? (
+          <p className="text-[10px] text-muted-foreground italic">
+            No connected accounts yet. Authorize providers in the integrations
+            page first.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {providers.map((provider) => (
+              <li key={provider} className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-foreground/80 w-20 truncate">
+                  {provider}
+                </span>
+                <select
+                  value={bindings[provider] ?? ""}
+                  onChange={(e) => setAlias(provider, e.target.value)}
+                  className="flex-1 text-xs px-1.5 py-0.5 rounded border border-border/60 bg-background"
+                >
+                  <option value="">— primary —</option>
+                  {availableAliases[provider].map((alias) => (
+                    <option key={alias} value={alias}>
+                      {alias}
+                    </option>
+                  ))}
+                </select>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="text-[11px] px-2.5 py-1 rounded border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/30 disabled:opacity-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() =>
+            onSave({
+              name,
+              task: task || undefined,
+              integrations: bindings,
+            })
+          }
+          disabled={busy || nameError !== null}
+          className="text-[11px] px-2.5 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors inline-flex items-center gap-1"
+        >
+          <Check className="w-3 h-3" /> Save
+        </button>
+      </div>
     </div>
   );
 }

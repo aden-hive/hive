@@ -61,10 +61,12 @@ _IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
 
 _BASE_HEADERS: dict[str, str] = {
     # Mimic the Antigravity Electron app so the API accepts the request.
+    # Google deprecates older client versions over time, so this needs periodic
+    # bumping to match whatever the current Antigravity desktop release advertises.
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Antigravity/1.18.3 Chrome/138.0.7204.235 "
-        "Electron/37.3.1 Safari/537.36"
+        "(KHTML, like Gecko) Antigravity/1.23.2 Chrome/138.0.7204.235 "
+        "Electron/39.2.3 Safari/537.36"
     ),
     "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     "Client-Metadata": '{"ideType":"ANTIGRAVITY","platform":"MACOS","pluginType":"GEMINI"}',
@@ -252,6 +254,56 @@ def _clean_tool_name(name: str) -> str:
     if name and not (name[0].isalpha() or name[0] == "_"):
         name = "_" + name
     return name[:64]
+
+
+def _sanitize_schema_for_gemini(schema: Any) -> Any:
+    """Convert JSON Schema 2020-12 features to the OpenAPI 3.0 dialect Gemini accepts.
+
+    Gemini's function_declarations parser rejects union ``"type": ["string", "null"]``.
+    Translate any such union to a single type plus ``"nullable": true``. Recurse into
+    ``properties``, ``items``, and the ``anyOf``/``oneOf``/``allOf`` combinators.
+    """
+    if isinstance(schema, list):
+        return [_sanitize_schema_for_gemini(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    t = out.get("type")
+    if isinstance(t, list):
+        non_null = [x for x in t if x != "null"]
+        has_null = "null" in t
+        if len(non_null) == 1:
+            out["type"] = non_null[0]
+            if has_null:
+                out["nullable"] = True
+        elif not non_null and has_null:
+            # Pure null type: fall back to string-nullable.
+            out["type"] = "string"
+            out["nullable"] = True
+        else:
+            # Multi-type non-null unions (e.g. ["string", "integer", "null"])
+            # have no faithful Gemini equivalent. Silently picking one type
+            # changes the contract for callers who rely on the others, so
+            # fail loud and let the schema author rewrite it as anyOf or
+            # narrow to a single type.
+            raise ValueError(
+                f"Unsupported Gemini schema union: {t!r}. "
+                "Gemini accepts a single primitive type plus optional 'nullable: true'. "
+                "Rewrite as anyOf or pick a single type."
+            )
+
+    if "properties" in out and isinstance(out["properties"], dict):
+        out["properties"] = {k: _sanitize_schema_for_gemini(v) for k, v in out["properties"].items()}
+    if "items" in out:
+        out["items"] = _sanitize_schema_for_gemini(out["items"])
+    if "additionalProperties" in out and isinstance(out["additionalProperties"], dict):
+        out["additionalProperties"] = _sanitize_schema_for_gemini(out["additionalProperties"])
+    for combinator in ("anyOf", "oneOf", "allOf"):
+        if combinator in out:
+            out[combinator] = _sanitize_schema_for_gemini(out[combinator])
+
+    return out
 
 
 def _to_gemini_contents(
@@ -555,11 +607,13 @@ class AntigravityProvider(LLMProvider):
                         {
                             "name": _clean_tool_name(t.name),
                             "description": t.description,
-                            "parameters": t.parameters
-                            or {
-                                "type": "object",
-                                "properties": {},
-                            },
+                            "parameters": _sanitize_schema_for_gemini(
+                                t.parameters
+                                or {
+                                    "type": "object",
+                                    "properties": {},
+                                }
+                            ),
                         }
                         for t in tools
                     ]

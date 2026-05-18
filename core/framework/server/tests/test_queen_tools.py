@@ -146,22 +146,34 @@ async def _make_app(*, manager: _FakeManager) -> web.Application:
 
 
 @pytest.mark.asyncio
-async def test_get_tools_default_allows_everything_for_unknown_queen(queen_dir, monkeypatch):
-    """Queens NOT in the role-default table fall back to allow-all."""
+async def test_get_tools_default_excludes_oauth_for_unknown_queen(queen_dir, monkeypatch):
+    """Queens NOT in the role-default table get every credential-less tool
+    by default — but OAuth-bound tools stay opt-in until the user enables
+    them via the Tool Library. Mirrors the contract enforced by
+    ``resolve_queen_default_tools``: with a catalog, the unknown-queen
+    fallback returns a concrete list rather than the legacy ``None``."""
     monkeypatch.setattr(routes_queen_tools, "ensure_default_queens", lambda: None)
 
     queens_dir, _ = queen_dir
-    # Use a queen id that isn't in QUEEN_DEFAULT_CATEGORIES so we exercise
-    # the fallback-to-allow-all path.
     custom_id = "queen_custom_unknown"
     (queens_dir / custom_id).mkdir()
     (queens_dir / custom_id / "profile.yaml").write_text(yaml.safe_dump({"name": "Custom", "title": "Custom Role"}))
 
     manager = _FakeManager()
+    # Mix a credential-less tool and a credentialed (gmail_*) tool in
+    # the catalog so the test exercises both branches of the filter.
     manager._mcp_tool_catalog = {
         "files-tools": [
             {"name": "read_file", "description": "read", "input_schema": {}},
             {"name": "write_file", "description": "write", "input_schema": {}},
+        ],
+        "hive_tools": [
+            {
+                "name": "gmail_list_messages",
+                "description": "list",
+                "input_schema": {},
+                "provider": "google",
+            },
         ],
     }
 
@@ -171,13 +183,17 @@ async def test_get_tools_default_allows_everything_for_unknown_queen(queen_dir, 
         assert resp.status == 200
         body = await resp.json()
 
-    assert body["enabled_mcp_tools"] is None
-    assert body["is_role_default"] is True  # no sidecar → default-allow
+    enabled = set(body["enabled_mcp_tools"] or [])
+    assert "read_file" in enabled and "write_file" in enabled
+    assert "gmail_list_messages" not in enabled  # OAuth → opt-in
+    assert body["is_role_default"] is True  # no sidecar → role default
     assert body["stale"] is False
+
     servers = {s["name"]: s for s in body["mcp_servers"]}
-    assert set(servers) == {"files-tools"}
-    for tool in servers["files-tools"]["tools"]:
-        assert tool["enabled"] is True
+    files_tools = {t["name"]: t for t in servers["files-tools"]["tools"]}
+    assert files_tools["read_file"]["enabled"] is True
+    hive = {t["name"]: t for t in servers["hive_tools"]["tools"]}
+    assert hive["gmail_list_messages"]["enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -269,10 +285,23 @@ def test_resolve_queen_default_tools_expands_server_shorthand():
     assert "write_file" in result
 
 
-def test_resolve_queen_default_tools_unknown_queen_returns_none():
+def test_resolve_queen_default_tools_unknown_queen():
+    """Unknown queens default to "every credential-less tool" when a
+    catalog is supplied, and to legacy ``None`` (allow-all) only when
+    no catalog is available — preserving the boot-path fallback used
+    by stripped-down environments that can't enumerate MCP servers."""
     from framework.agents.queen.queen_tools_defaults import resolve_queen_default_tools
 
-    assert resolve_queen_default_tools("queen_made_up", {}) is None
+    # No catalog: still allow-all (legacy boot-path semantic).
+    assert resolve_queen_default_tools("queen_made_up", None) is None
+
+    # Empty catalog: empty allowlist (no tools to grant).
+    assert resolve_queen_default_tools("queen_made_up", {}) == []
+
+    # Catalog with one credential-less tool: that tool is granted.
+    catalog = {"files-tools": [{"name": "read_file"}]}
+    out = resolve_queen_default_tools("queen_made_up", catalog)
+    assert out == ["read_file"]
 
 
 @pytest.mark.asyncio

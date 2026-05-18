@@ -2346,10 +2346,6 @@ class LiteLLMProvider(LLMProvider):
             kwargs["extra_body"]["store"] = False
 
         request_summary = _summarize_request_for_log(kwargs)
-        logger.debug(
-            "[stream] prepared request: %s",
-            json.dumps(request_summary, default=str),
-        )
         if request_summary["system_only"]:
             logger.warning(
                 "[stream] %s request has no non-system chat messages "

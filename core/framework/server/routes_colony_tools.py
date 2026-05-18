@@ -96,6 +96,16 @@ async def _render_catalog(manager: Any, colony_name: str) -> dict[str, list[dict
         mcp_names = set(getattr(rt, "_mcp_tool_names_all", set()) or set())
         if not mcp_names:
             continue
+        # Stamp provider on each entry so the UI can grey out rows whose
+        # credential isn't connected. Adapter is best-effort: when
+        # aden_tools isn't available we just emit provider=None.
+        tool_provider_map: dict[str, str] = {}
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            tool_provider_map = CredentialStoreAdapter.default().get_tool_provider_map()
+        except Exception:
+            logger.debug("Colony catalog: provider map unavailable", exc_info=True)
         catalog: dict[str, list[dict[str, Any]]] = {"(mcp)": []}
         for tool in tools:
             name = getattr(tool, "name", None)
@@ -105,6 +115,7 @@ async def _render_catalog(manager: Any, colony_name: str) -> dict[str, list[dict
                         "name": name,
                         "description": getattr(tool, "description", ""),
                         "input_schema": getattr(tool, "parameters", {}),
+                        "provider": tool_provider_map.get(name) or None,
                     }
                 )
         return catalog
@@ -176,6 +187,7 @@ def _lifecycle_entries_from_runtime(manager: Any, colony_name: str) -> list[dict
 def _render_servers(
     catalog: dict[str, list[dict[str, Any]]],
     enabled_mcp_tools: list[str] | None,
+    connected_providers: set[str],
 ) -> list[dict[str, Any]]:
     allowed: set[str] | None = None if enabled_mcp_tools is None else set(enabled_mcp_tools)
     servers: list[dict[str, Any]] = []
@@ -183,12 +195,15 @@ def _render_servers(
         tools = []
         for entry in catalog[name]:
             tool_name = entry.get("name")
+            provider = entry.get("provider") or None
             tools.append(
                 {
                     "name": tool_name,
                     "description": entry.get("description", ""),
                     "input_schema": entry.get("input_schema", {}),
                     "enabled": True if allowed is None else tool_name in allowed,
+                    "provider": provider,
+                    "provider_connected": (True if provider is None else provider in connected_providers),
                 }
             )
         servers.append({"name": name, "tools": tools})
@@ -209,6 +224,12 @@ async def handle_get_tools(request: web.Request) -> web.Response:
     catalog = await _render_catalog(manager, colony_name)
     stale = not catalog
 
+    # Snapshot live OAuth providers so disconnected credentialed tools
+    # can be greyed out + offer a Connect button. Mirrors routes_queen_tools.
+    from framework.server.routes_queen_tools import _connected_providers
+
+    connected_providers = _connected_providers()
+
     return web.json_response(
         {
             "colony_name": colony_name,
@@ -216,7 +237,8 @@ async def handle_get_tools(request: web.Request) -> web.Response:
             "stale": stale,
             "lifecycle": _lifecycle_entries_from_runtime(manager, colony_name),
             "synthetic": _synthetic_entries(),
-            "mcp_servers": _render_servers(catalog, enabled),
+            "mcp_servers": _render_servers(catalog, enabled, connected_providers),
+            "connected_providers": sorted(connected_providers),
         }
     )
 

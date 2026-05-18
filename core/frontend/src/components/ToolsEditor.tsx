@@ -80,7 +80,7 @@ function buildGroups(
         title = formatCategoryTitle(cat);
       } else if (srv.name && srv.name !== "(unknown)") {
         key = `srv:${srv.name}`;
-        title = srv.name;
+        title = formatCategoryTitle(srv.name);
       } else {
         key = "other";
         title = "Other tools";

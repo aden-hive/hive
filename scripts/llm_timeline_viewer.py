@@ -64,6 +64,54 @@ def _format_timestamp(raw: str) -> str:
         return raw
 
 
+def _reassemble_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert new-format (header + turn-delta) records into legacy-shape full turns.
+
+    Records lacking ``_kind`` are passed through unchanged. Inputs must be in
+    file order so headers precede the turns that reference them.
+    """
+    headers: dict[str, dict[str, Any]] = {}  # execution_id -> latest session_header
+    pools: dict[str, dict[str, dict[str, Any]]] = {}  # execution_id -> hash -> message body
+
+    out: list[dict[str, Any]] = []
+    for rec in records:
+        kind = rec.get("_kind")
+        if kind == "session_header":
+            eid = str(rec.get("execution_id") or "")
+            headers[eid] = rec
+            pools.setdefault(eid, {})
+            continue
+        if kind == "turn":
+            eid = str(rec.get("execution_id") or "")
+            pool = pools.setdefault(eid, {})
+            new_msgs = rec.get("new_messages") or {}
+            if isinstance(new_msgs, dict):
+                pool.update(new_msgs)
+            hashes = rec.get("message_hashes") or []
+            messages = [pool[h] for h in hashes if h in pool]
+            header = headers.get(eid, {})
+            out.append(
+                {
+                    "timestamp": rec.get("timestamp", ""),
+                    "execution_id": eid,
+                    "node_id": rec.get("node_id", ""),
+                    "stream_id": rec.get("stream_id", ""),
+                    "iteration": rec.get("iteration", 0),
+                    "system_prompt": header.get("system_prompt", ""),
+                    "tools": header.get("tools", []),
+                    "messages": messages,
+                    "assistant_text": rec.get("assistant_text", ""),
+                    "tool_calls": rec.get("tool_calls", []),
+                    "tool_results": rec.get("tool_results", []),
+                    "token_counts": rec.get("token_counts", {}),
+                    "_log_file": rec.get("_log_file", ""),
+                }
+            )
+            continue
+        out.append(rec)
+    return out
+
+
 def _is_test_session(execution_id: str, records: list[dict[str, Any]]) -> bool:
     if execution_id.startswith("<MagicMock"):
         return True
@@ -99,6 +147,9 @@ def _discover_session_summaries(logs_dir: Path, limit_files: int, include_tests:
                     try:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    # session_header is metadata, not a turn — don't count it.
+                    if payload.get("_kind") == "session_header":
                         continue
                     eid = str(payload.get("execution_id") or "").strip()
                     if not eid:
@@ -157,6 +208,10 @@ def _load_session_data(logs_dir: Path, session_id: str, limit_files: int) -> lis
 
     records: list[dict[str, Any]] = []
     for path in files:
+        # Reassemble per-file: each file is self-contained because the writer
+        # re-emits the session_header on every process start, so we never need
+        # cross-file state to fill in messages/system_prompt/tools.
+        file_records: list[dict[str, Any]] = []
         try:
             with path.open(encoding="utf-8") as handle:
                 for line_number, raw_line in enumerate(handle, start=1):
@@ -166,17 +221,23 @@ def _load_session_data(logs_dir: Path, session_id: str, limit_files: int) -> lis
                     try:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
-                        payload = {
-                            "timestamp": "",
-                            "execution_id": "",
-                            "_parse_error": f"{path.name}:{line_number}",
-                            "_raw_line": line,
-                        }
-                    if str(payload.get("execution_id") or "").strip() == session_id:
-                        payload["_log_file"] = str(path)
-                        records.append(payload)
+                        records.append(
+                            {
+                                "timestamp": "",
+                                "execution_id": "",
+                                "_parse_error": f"{path.name}:{line_number}",
+                                "_raw_line": line,
+                                "_log_file": str(path),
+                            }
+                        )
+                        continue
+                    if str(payload.get("execution_id") or "").strip() != session_id:
+                        continue
+                    payload["_log_file"] = str(path)
+                    file_records.append(payload)
         except OSError:
             continue
+        records.extend(_reassemble_records(file_records))
 
     if not records:
         return None

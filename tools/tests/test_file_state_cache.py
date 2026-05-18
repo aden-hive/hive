@@ -2,8 +2,8 @@
 
 These tests cover the stale-edit guard added for Gap 4:
 - read_file records a per-file hash snapshot
-- edit_file / write_file / hashline_edit refuse to run when the on-disk
-  file has diverged from the last recorded read
+- edit_file / write_file refuse to run when the on-disk file has
+  diverged from the last recorded read
 - write_file is allowed without a prior read when the target doesn't
   exist yet (brand-new file, nothing to clobber)
 - re-recording after a successful write keeps chained edits working
@@ -52,7 +52,6 @@ def tools(sandbox: Path):
         "read_file": _find_tool(mcp, "read_file"),
         "write_file": _find_tool(mcp, "write_file"),
         "edit_file": _find_tool(mcp, "edit_file"),
-        "hashline_edit": _find_tool(mcp, "hashline_edit"),
     }
 
 
@@ -129,7 +128,7 @@ def test_edit_file_refuses_without_prior_read(sandbox: Path, tools):
     # Clear the cache first so there's definitely no recorded read.
     file_state_cache.reset_all()
 
-    result = tools["edit_file"]("e.py", "hello", "world")
+    result = tools["edit_file"]("replace", "e.py", "hello", "world")
     assert "Refusing to edit" in result
     assert "read_file" in result
 
@@ -140,7 +139,7 @@ def test_edit_file_proceeds_after_read(sandbox: Path, tools):
     file_state_cache.reset_all()
 
     tools["read_file"]("f.py")
-    result = tools["edit_file"]("f.py", "hello", "world")
+    result = tools["edit_file"]("replace", "f.py", "hello", "world")
     assert "Replaced" in result
     assert target.read_text() == "print('world')\n"
 
@@ -157,7 +156,7 @@ def test_edit_file_refuses_when_file_changed_between_read_and_edit(sandbox: Path
     target.write_text("print('bye')\n")
     os.utime(str(target), None)
 
-    result = tools["edit_file"]("g.py", "hello", "world")
+    result = tools["edit_file"]("replace", "g.py", "hello", "world")
     assert "Refusing to edit" in result
     assert "Re-read" in result
 
@@ -185,10 +184,10 @@ def test_chained_edits_in_same_turn_do_not_self_invalidate(sandbox: Path, tools)
     file_state_cache.reset_all()
 
     tools["read_file"]("chained.py")
-    r1 = tools["edit_file"]("chained.py", "a", "A")
+    r1 = tools["edit_file"]("replace", "chained.py", "a", "A")
     assert "Replaced" in r1
     # Immediate second edit must NOT trip the stale guard because
     # edit_file re-records the post-write state.
-    r2 = tools["edit_file"]("chained.py", "b", "B")
+    r2 = tools["edit_file"]("replace", "chained.py", "b", "B")
     assert "Replaced" in r2
     assert target.read_text() == "print('A')\nprint('B')\n"

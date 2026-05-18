@@ -501,5 +501,146 @@ async def _import_multi_root(
     )
 
 
+def _find_workers_bound_to_profile(request: web.Request, colony_name: str, profile_name: str) -> list[str]:
+    """Return live worker IDs bound to ``(colony_name, profile_name)``.
+
+    Walks every live session's ColonyRuntime workers map. Used to refuse
+    profile deletes / renames while workers are still using the binding —
+    the contextvar that pins a worker's MCP account lookups is set at
+    spawn time and a profile mutation underneath a running worker would
+    leave its tool calls pointing at a removed alias on the next turn.
+    """
+    manager = request.app.get("manager")
+    if manager is None:
+        return []
+    bound: list[str] = []
+    try:
+        sessions = manager.list_sessions()
+    except Exception:
+        return []
+    for s in sessions:
+        runtime = getattr(s, "colony", None) or getattr(s, "colony_runtime", None)
+        if runtime is None:
+            continue
+        if getattr(runtime, "_colony_id", None) != colony_name:
+            continue
+        try:
+            for info in runtime.list_workers():
+                if info.profile_name == profile_name and info.status in {
+                    "WorkerStatus.RUNNING",
+                    "WorkerStatus.PENDING",
+                    "running",
+                    "pending",
+                }:
+                    bound.append(info.id)
+        except Exception:
+            continue
+    return bound
+
+
+async def handle_list_worker_profiles(request: web.Request) -> web.Response:
+    """GET /api/colonies/{colony_name}/worker_profiles"""
+    colony_name = request.match_info["colony_name"]
+    err = _validate_colony_name(colony_name)
+    if err:
+        return web.json_response({"error": err}, status=400)
+    if not (COLONIES_DIR / colony_name).exists():
+        return web.json_response({"error": f"colony '{colony_name}' not found"}, status=404)
+
+    from framework.host.worker_profiles import list_worker_profiles
+
+    profiles = list_worker_profiles(colony_name)
+    return web.json_response({"worker_profiles": [p.to_dict() for p in profiles]})
+
+
+async def handle_upsert_worker_profile(request: web.Request) -> web.Response:
+    """POST /api/colonies/{colony_name}/worker_profiles — create or replace one profile.
+
+    Body: ``{name, integrations?, task?, skill_name?, concurrency_hint?,
+             prompt_override?, tool_filter?}``. Existing siblings are
+    preserved; an existing profile with the same ``name`` is replaced
+    (so the desktop can use this for both add and edit).
+    """
+    colony_name = request.match_info["colony_name"]
+    err = _validate_colony_name(colony_name)
+    if err:
+        return web.json_response({"error": err}, status=400)
+    if not (COLONIES_DIR / colony_name).exists():
+        return web.json_response({"error": f"colony '{colony_name}' not found"}, status=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "body must be a JSON object"}, status=400)
+
+    from framework.host.worker_profiles import (
+        WorkerProfile,
+        upsert_worker_profile,
+        validate_profile_name,
+    )
+
+    profile = WorkerProfile.from_dict(body)
+    name_err = validate_profile_name(profile.name)
+    if name_err:
+        return web.json_response({"error": name_err}, status=400)
+
+    try:
+        saved = upsert_worker_profile(colony_name, profile)
+    except (FileNotFoundError, ValueError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+    return web.json_response({"worker_profiles": [p.to_dict() for p in saved]}, status=201)
+
+
+async def handle_delete_worker_profile(request: web.Request) -> web.Response:
+    """DELETE /api/colonies/{colony_name}/worker_profiles/{profile_name}.
+
+    Refused with 409 + ``bound_workers`` listing if a live worker is
+    bound to the profile, so the user can stop those workers before
+    pruning the binding.
+    """
+    colony_name = request.match_info["colony_name"]
+    profile_name = request.match_info["profile_name"]
+    err = _validate_colony_name(colony_name)
+    if err:
+        return web.json_response({"error": err}, status=400)
+    if not (COLONIES_DIR / colony_name).exists():
+        return web.json_response({"error": f"colony '{colony_name}' not found"}, status=404)
+
+    bound = _find_workers_bound_to_profile(request, colony_name, profile_name)
+    if bound:
+        return web.json_response(
+            {
+                "error": "profile is bound to live workers; stop them first",
+                "bound_workers": bound,
+            },
+            status=409,
+        )
+
+    from framework.host.worker_profiles import delete_worker_profile
+
+    try:
+        removed = delete_worker_profile(colony_name, profile_name)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    if not removed:
+        return web.json_response({"error": f"profile '{profile_name}' not found"}, status=404)
+    return web.json_response({"deleted": True, "profile_name": profile_name})
+
+
 def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/colonies/import", handle_import_colony)
+    app.router.add_get(
+        "/api/colonies/{colony_name}/worker_profiles",
+        handle_list_worker_profiles,
+    )
+    app.router.add_post(
+        "/api/colonies/{colony_name}/worker_profiles",
+        handle_upsert_worker_profile,
+    )
+    app.router.add_delete(
+        "/api/colonies/{colony_name}/worker_profiles/{profile_name}",
+        handle_delete_worker_profile,
+    )

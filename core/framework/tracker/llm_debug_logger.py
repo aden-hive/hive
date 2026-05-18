@@ -1,11 +1,22 @@
 """Write every LLM turn to ~/.hive/llm_logs/<ts>.jsonl for replay/debugging.
 
-Each line is a JSON object with the full LLM turn: the request payload
-(system prompt + messages), assistant text, tool calls, tool results, and
-token counts. The file is opened lazily on first call and flushed after every
-write. Errors are silently swallowed — this must never break the agent.
+Two record kinds, distinguished by ``_kind``:
+
+* ``session_header`` — emitted on the first turn of an ``execution_id`` and
+  any time its ``system_prompt`` or ``tools`` change. Carries those large
+  fields once instead of per-turn.
+* ``turn`` — one per LLM call. Carries per-turn outputs plus a
+  content-addressed message delta: ``message_hashes`` is the full ordered
+  message sequence for this turn, ``new_messages`` is hash → body for
+  messages we haven't emitted before for this ``execution_id``. The reader
+  reassembles full ``messages`` by accumulating ``new_messages`` across
+  prior turn records. Content-addressed (not positional) because the agent
+  prunes messages mid-session — a tail-delta would be wrong.
+
+Errors are silently swallowed — this must never break the agent.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -27,6 +38,12 @@ def _llm_debug_dir() -> Path:
 
 _log_file: IO[str] | None = None
 _log_ready = False  # lazy init guard
+
+# Per-execution_id delta state. Reset implicitly on process restart — a fresh
+# log file has no prior context, so re-emitting the header on first turn is
+# correct.
+_session_header_hash: dict[str, str] = {}
+_session_seen_msgs: dict[str, set[str]] = {}
 
 
 def _open_log() -> IO[str] | None:
@@ -61,6 +78,17 @@ def _serialize_tools(tools: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _content_hash(payload: Any) -> str:
+    raw = json.dumps(payload, default=str, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _write_line(record: dict[str, Any]) -> None:
+    assert _log_file is not None
+    _log_file.write(json.dumps(record, default=str) + "\n")
+    _log_file.flush()
+
+
 def log_llm_turn(
     *,
     node_id: str,
@@ -75,7 +103,7 @@ def log_llm_turn(
     token_counts: dict[str, Any],
     tools: list[Any] | None = None,
 ) -> None:
-    """Write one JSONL line capturing a complete LLM turn.
+    """Write JSONL records capturing one LLM turn (header + turn delta).
 
     Never raises.
     """
@@ -89,23 +117,57 @@ def log_llm_turn(
             _log_ready = True
         if _log_file is None:
             return
-        record = {
-            # UTC + offset matches tool_call start_timestamp (agent_loop.py)
-            # so the viewer can render every event in one consistent local zone.
-            "timestamp": datetime.now(UTC).isoformat(),
-            "node_id": node_id,
-            "stream_id": stream_id,
-            "execution_id": execution_id,
-            "iteration": iteration,
-            "system_prompt": system_prompt,
-            "tools": _serialize_tools(tools),
-            "messages": messages,
-            "assistant_text": assistant_text,
-            "tool_calls": tool_calls,
-            "tool_results": tool_results,
-            "token_counts": token_counts,
-        }
-        _log_file.write(json.dumps(record, default=str) + "\n")
-        _log_file.flush()
+
+        # UTC + offset matches tool_call start_timestamp (agent_loop.py)
+        # so the viewer can render every event in one consistent local zone.
+        timestamp = datetime.now(UTC).isoformat()
+        serialized_tools = _serialize_tools(tools)
+
+        # Re-emit the header on first turn or whenever system/tools change.
+        # The Queen reflects different prompts across turns, so we can't
+        # assume strict immutability per execution_id.
+        header_hash = _content_hash({"system_prompt": system_prompt, "tools": serialized_tools})
+        if _session_header_hash.get(execution_id) != header_hash:
+            _write_line(
+                {
+                    "_kind": "session_header",
+                    "timestamp": timestamp,
+                    "execution_id": execution_id,
+                    "node_id": node_id,
+                    "stream_id": stream_id,
+                    "header_hash": header_hash,
+                    "system_prompt": system_prompt,
+                    "tools": serialized_tools,
+                }
+            )
+            _session_header_hash[execution_id] = header_hash
+
+        seen = _session_seen_msgs.setdefault(execution_id, set())
+        message_hashes: list[str] = []
+        new_messages: dict[str, dict[str, Any]] = {}
+        for msg in messages or []:
+            h = _content_hash(msg)
+            message_hashes.append(h)
+            if h not in seen:
+                seen.add(h)
+                new_messages[h] = msg
+
+        _write_line(
+            {
+                "_kind": "turn",
+                "timestamp": timestamp,
+                "execution_id": execution_id,
+                "node_id": node_id,
+                "stream_id": stream_id,
+                "iteration": iteration,
+                "header_hash": header_hash,
+                "message_hashes": message_hashes,
+                "new_messages": new_messages,
+                "assistant_text": assistant_text,
+                "tool_calls": tool_calls,
+                "tool_results": tool_results,
+                "token_counts": token_counts,
+            }
+        )
     except Exception:
         pass  # never break the agent

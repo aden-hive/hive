@@ -84,11 +84,23 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies and run tests
+      - name: Install dependencies
         working-directory: tools
-        run: |
-          uv sync --extra dev
-          uv run pytest tests/ -v
+        run: uv sync --extra dev
+
+      - name: Install Playwright Chromium (Linux)
+        if: runner.os == 'Linux'
+        working-directory: tools
+        run: uv run playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium (Windows)
+        if: runner.os == 'Windows'
+        working-directory: tools
+        run: uv run playwright install chromium
+
+      - name: Run tests
+        working-directory: tools
+        run: uv run pytest tests/ -v
 
   validate:
     name: Validate Agent Exports

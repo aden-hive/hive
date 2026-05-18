@@ -26,12 +26,44 @@ Usage:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
     from framework.credentials import CredentialStore
+
+
+# Worker profiles inject their per-provider account aliases into this
+# ContextVar before each tool turn. When a tool calls
+# ``credentials.get_by_alias(provider, "")`` (or ``credentials.get(name)``),
+# the adapter consults the map and, if the provider has a binding, uses
+# that alias for the lookup. An explicit non-empty alias on the call wins.
+# Keys are credential ids (matching ``CredentialSpec.credential_id``);
+# values are the account alias to route to.
+_active_account_overrides: ContextVar[dict[str, str] | None] = ContextVar(
+    "hive_credential_account_overrides", default=None
+)
+
+
+@contextmanager
+def account_overrides(overrides: dict[str, str] | None):
+    """Bind ``overrides`` for the duration of the ``with`` block.
+
+    Used by the colony runtime to pin a worker's MCP tool calls to its
+    profile's aliases. Empty / ``None`` is a no-op so callers can safely
+    pass through unbound profiles without conditional logic.
+    """
+    if not overrides:
+        yield
+        return
+    token = _active_account_overrides.set(dict(overrides))
+    try:
+        yield
+    finally:
+        _active_account_overrides.reset(token)
 
 
 # Process-wide memoization for CredentialStoreAdapter.default().
@@ -126,6 +158,19 @@ class CredentialStoreAdapter:
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
+
+        if account is None:
+            # No explicit caller-supplied alias — check whether the active
+            # worker profile has pinned this credential to a specific
+            # account. Falls through to the unaliased default lookup when
+            # no profile binding exists.
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(name)
+                if bound_alias:
+                    aliased = self.get_by_alias(name, bound_alias)
+                    if aliased is not None:
+                        return aliased
 
         if account is not None:
             try:
@@ -364,10 +409,23 @@ class CredentialStoreAdapter:
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
         """Resolve a specific account's token by alias.
 
+        When ``alias`` is empty, falls back to the active worker profile's
+        binding (if any). MCP tools default ``account=""`` so this lets a
+        worker profile pin a default account without requiring the agent
+        to supply it on every call.
+
         Raises:
             CredentialExpiredError: If the matched credential is expired and
                 refresh failed.
         """
+        if not alias:
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(provider_name)
+                if bound_alias:
+                    alias = bound_alias
+        if not alias:
+            return None
         cred = self._store.get_credential_by_alias(provider_name, alias)
         if cred is None:
             return None
@@ -584,7 +642,7 @@ class CredentialStoreAdapter:
                 # Use 5-second timeout to avoid blocking on slow/failed requests
                 client = AdenCredentialClient(
                     AdenClientConfig(
-                        base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                        base_url=os.environ.get("ADEN_API_URL", "https://app.open-hive.com"),
                         timeout=5.0,
                     )
                 )

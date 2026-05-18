@@ -825,6 +825,7 @@ class ColonyRuntime:
         tools: list[Any] | None = None,
         tool_executor: Callable | None = None,
         stream_id: str | None = None,
+        profile_name: str | None = None,
     ) -> list[str]:
         """Spawn worker clones and start them in the background.
 
@@ -854,7 +855,17 @@ class ColonyRuntime:
             raise RuntimeError("ColonyRuntime is not running")
 
         from framework.agent_loop.agent_loop import AgentLoop
+        from framework.host.worker_profiles import get_worker_profile
         from framework.storage.conversation_store import FileConversationStore
+
+        # Resolve the profile binding for this spawn. ``profile_name=None``
+        # means "use the default profile"; an unknown name silently falls
+        # back to default (the legacy single-template behavior). The
+        # resolved integrations map is threaded into Worker(...) so
+        # account_overrides() can pin its MCP tool calls.
+        _resolved_profile = get_worker_profile(self._colony_id, profile_name) if profile_name else None
+        _profile_name_resolved = _resolved_profile.name if _resolved_profile else (profile_name or "")
+        _profile_integrations = dict(_resolved_profile.integrations) if _resolved_profile else {}
 
         # Resolve per-spawn vs colony-default code identity
         spawn_spec = agent_spec or self._agent_spec
@@ -868,6 +879,28 @@ class ColonyRuntime:
         # ``_enabled_mcp_tools`` is a no-op so the default path is
         # unchanged.
         spawn_tools = self._apply_tool_allowlist(spawn_tools)
+
+        # Per-spawn MCP credential filter. The Tool Library always
+        # surfaces every credentialed MCP tool so users can pre-enable
+        # them, but a worker that can't actually call a tool because
+        # the provider has no live OAuth account shouldn't see it in
+        # the prompt at all. Drop those names here — the filter is
+        # spawn-time, so the moment the user authorises a provider
+        # the very next worker spawn picks up the new tools.
+        try:
+            from framework.credentials.validation import compute_unavailable_mcp_tools
+
+            candidate_names = {getattr(t, "name", None) for t in spawn_tools if getattr(t, "name", None)}
+            mcp_drop, mcp_messages = compute_unavailable_mcp_tools(candidate_names)
+            if mcp_drop:
+                spawn_tools = [t for t in spawn_tools if getattr(t, "name", None) not in mcp_drop]
+                logger.info(
+                    "Spawn-time MCP filter: dropped %d tool(s) without live credentials [%s]",
+                    len(mcp_drop),
+                    "; ".join(mcp_messages),
+                )
+        except Exception:
+            logger.debug("Spawn-time MCP credential filter failed", exc_info=True)
 
         # Colony progress tracker: when the caller supplied a db_path
         # in input_data, this worker is part of a SQLite task queue
@@ -1008,6 +1041,8 @@ class ColonyRuntime:
                 event_bus=self._scoped_event_bus,
                 colony_id=self._colony_id,
                 storage_path=worker_storage,
+                profile_name=_profile_name_resolved,
+                integrations=_profile_integrations,
             )
 
             self._workers[worker_id] = worker
@@ -1030,6 +1065,7 @@ class ColonyRuntime:
         tasks: list[dict[str, Any]],
         *,
         tools_override: list[Any] | None = None,
+        profile_name: str | None = None,
     ) -> list[str]:
         """Spawn a batch of parallel workers, one per task spec.
 
@@ -1055,11 +1091,15 @@ class ColonyRuntime:
             task_data = spec.get("data")
             if task_data is not None and not isinstance(task_data, dict):
                 task_data = {"value": task_data}
+            # Per-task profile_name override beats the batch-level default,
+            # so a fan-out can mix profiles (e.g. half tasks routed to
+            # Slack:work and half to Slack:personal).
             ids = await self.spawn(
                 task=task_text,
                 count=1,
                 input_data=task_data or {"task": task_text},
                 tools=tools_override,
+                profile_name=spec.get("profile_name") or profile_name,
             )
             worker_ids.extend(ids)
         return worker_ids

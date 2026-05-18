@@ -317,24 +317,18 @@ def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]
     except Exception:
         logger.warning("build_queen_tool_registry_bare: MCP registry load failed", exc_info=True)
 
-    # Build the catalog.
-    tools_by_name = queen_registry.get_tools()
-    server_map = dict(getattr(queen_registry, "_mcp_server_tools", {}) or {})
+    # Build the catalog from the registry's pre-credential-gate snapshot
+    # so the Tool Library can list every credentialed tool — including
+    # those whose provider isn't authorized yet — and the UI can show a
+    # greyed-out row + Connect button. The strict admission gate still
+    # governs what the queen actually sees in her prompt.
+    full_catalog = queen_registry.get_full_mcp_catalog()
     catalog: dict[str, list[dict[str, Any]]] = {}
-    for server_name in sorted(server_map):
-        entries: list[dict[str, Any]] = []
-        for tool_name in sorted(server_map[server_name]):
-            tool = tools_by_name.get(tool_name)
-            if tool is None:
-                continue
-            entries.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters,
-                }
-            )
-        catalog[server_name] = entries
+    for server_name in sorted(full_catalog):
+        catalog[server_name] = sorted(
+            (dict(entry) for entry in full_catalog[server_name]),
+            key=lambda e: e.get("name", ""),
+        )
 
     return queen_registry, catalog
 
@@ -359,7 +353,6 @@ async def create_queen(
         queen_goal,
         queen_loop_config as _base_loop_config,
     )
-    from framework.config import get_max_tokens as _get_max_tokens
     from framework.agents.queen.nodes import (
         _QUEEN_INCUBATING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
@@ -378,6 +371,7 @@ async def create_queen(
         _queen_tools_working,
         finalize_queen_prompt,
     )
+    from framework.config import get_max_tokens as _get_max_tokens
     from framework.host.event_bus import AgentEvent, EventType
     from framework.llm.capabilities import supports_image_tool_results
     from framework.loader.mcp_registry import MCPRegistry
@@ -395,6 +389,12 @@ async def create_queen(
     else:
         # Build fresh (slow path - for backwards compatibility)
         queen_registry = ToolRegistry()
+        # Inject the queen's identity into every MCP subprocess this
+        # registry spawns. The memory-tools server reads HIVE_QUEEN_ID
+        # to scope `search_messages` to this queen's own history (the
+        # model never picks the scope itself). Set BEFORE MCP servers
+        # are registered, since env is captured at MCPClient construction.
+        queen_registry.set_mcp_extra_env({"HIVE_QUEEN_ID": session.queen_name or "default"})
         import framework.agents.queen as _queen_pkg
 
         queen_pkg_dir = Path(_queen_pkg.__file__).parent
@@ -597,22 +597,19 @@ async def create_queen(
     # name so the UI can group tools by origin. Updated every time a
     # queen boots, so installing a new server and starting a new queen
     # session refreshes the catalog.
+    #
+    # We source from the registry's full pre-credential-gate catalog so
+    # the Library shows credentialed tools whose provider isn't yet
+    # authorized — they appear greyed-out with a Connect button rather
+    # than vanishing entirely. The strict admission gate still controls
+    # what the queen sees in her prompt.
+    full_catalog = queen_registry.get_full_mcp_catalog()
     mcp_tool_catalog: dict[str, list[dict[str, Any]]] = {}
-    tools_by_name = {t.name: t for t in queen_tools}
-    for server_name, tool_names in mcp_server_tools_map.items():
-        server_entries: list[dict[str, Any]] = []
-        for tool_name in sorted(tool_names):
-            tool = tools_by_name.get(tool_name)
-            if tool is None:
-                continue
-            server_entries.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters,
-                }
-            )
-        mcp_tool_catalog[server_name] = server_entries
+    for server_name, entries in full_catalog.items():
+        mcp_tool_catalog[server_name] = sorted(
+            (dict(e) for e in entries),
+            key=lambda e: e.get("name", ""),
+        )
     # All queens share one MCP registry, so the catalog is a manager-level
     # fact; stash it on the SessionManager so the Queen Tools route can
     # render the tool list even when no queen session is currently live.
@@ -928,11 +925,19 @@ async def create_queen(
             colony_id = getattr(session, "colony_id", None) or getattr(
                 getattr(session, "colony_runtime", None), "_colony_id", None
             )
+            # usage_agent_id is the cloud-side identity stamped on Hive
+            # LLM proxy calls (X-Hive-Agent) for per-agent usage attribution.
+            # Distinct from agent_id, which is locked to the literal
+            # "queen" slug for local task-list path scoping. Falls back to
+            # the local agent_id when queen_name is unset (e.g. legacy
+            # sessions resumed before queen identity selection).
+            usage_agent_id = getattr(session, "queen_name", None) or queen_agent_id
             ToolRegistry.set_execution_context(
                 profile=session.id,
                 agent_id=queen_agent_id,
                 task_list_id=queen_list_id,
                 colony_id=colony_id,
+                usage_agent_id=usage_agent_id,
             )
         except Exception:
             logger.debug("Queen: failed to set execution context for session %s", session.id, exc_info=True)

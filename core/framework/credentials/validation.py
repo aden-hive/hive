@@ -230,6 +230,62 @@ def _presync_aden_tokens(credential_specs: dict, *, force: bool = False) -> None
             )
 
 
+def compute_unavailable_mcp_tools(
+    candidate_tool_names: set[str] | list[str] | None = None,
+) -> tuple[set[str], list[str]]:
+    """Return (mcp_tool_names_to_drop, human_messages).
+
+    Walks every MCP tool's provider via ``CredentialStoreAdapter`` and
+    collects the names whose provider has no live OAuth account. Used by
+    the worker-spawn preflight to filter out tools the worker would
+    otherwise see in its prompt but couldn't actually call.
+
+    Companion to ``compute_unavailable_tools`` which only handles
+    non-MCP tools (its docstring even says so). Splitting the two keeps
+    each path simple: this one talks to the credential store directly,
+    the other goes through ``CREDENTIAL_SPECS`` + node validation.
+
+    Args:
+        candidate_tool_names: Optional set of MCP tool names to consider;
+            tools outside this set are ignored. When None, every tool in
+            the provider map is checked.
+
+    Returns:
+        ``(drop_names, messages)``. ``messages`` is a per-provider
+        summary suitable for INFO logging at spawn time.
+    """
+    try:
+        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+        adapter = CredentialStoreAdapter.default()
+        tool_provider_map = adapter.get_tool_provider_map()
+        live_providers = {(a.get("provider") or "") for a in adapter.get_all_account_info() if a.get("provider")}
+    except Exception as exc:
+        logger.debug("compute_unavailable_mcp_tools: adapter unavailable: %s", exc)
+        return set(), []
+
+    candidate: set[str] | None = set(candidate_tool_names) if candidate_tool_names is not None else None
+
+    drop: set[str] = set()
+    by_provider: dict[str, list[str]] = {}
+    for tool_name, provider in tool_provider_map.items():
+        if not provider or provider in live_providers:
+            continue
+        if candidate is not None and tool_name not in candidate:
+            continue
+        drop.add(tool_name)
+        by_provider.setdefault(provider, []).append(tool_name)
+
+    messages: list[str] = []
+    for provider, names in sorted(by_provider.items()):
+        names.sort()
+        sample = ", ".join(names[:6])
+        suffix = f" +{len(names) - 6} more" if len(names) > 6 else ""
+        messages.append(f"{provider} (no live account) → drops {len(names)} tool(s): {sample}{suffix}")
+
+    return drop, messages
+
+
 def compute_unavailable_tools(nodes: list) -> tuple[set[str], list[str]]:
     """Return (tool_names_to_drop, human_messages).
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="terminal_tools is POSIX-only (uses resource module)")
 
 
 @pytest.fixture

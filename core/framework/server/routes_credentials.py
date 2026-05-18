@@ -43,6 +43,21 @@ def _get_store(request: web.Request) -> CredentialStore:
     return request.app["credential_store"]
 
 
+def _reset_credential_adapter_cache() -> None:
+    """Clear the memoized CredentialStoreAdapter so the next call re-syncs.
+
+    The adapter cache is keyed on ``(id(specs), ADEN_API_KEY)``; without
+    this reset, a key save/delete done after process startup is invisible
+    to in-process MCP tool calls until restart.
+    """
+    try:
+        from aden_tools.credentials.store_adapter import _reset_default_adapter_cache
+
+        _reset_default_adapter_cache()
+    except Exception:
+        logger.warning("Failed to reset credential adapter cache", exc_info=True)
+
+
 def _invalidate_queen_credentials_cache(request: web.Request) -> None:
     """Force every live Queen session to rebuild its ambient credentials block.
 
@@ -158,6 +173,12 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 
         save_aden_api_key(key)
 
+        # Make the new key visible to the in-process AdenSyncProvider on
+        # the very next CredentialStoreAdapter.default() call. The adapter
+        # cache is keyed on this env var.
+        os.environ["ADEN_API_KEY"] = key
+        _reset_credential_adapter_cache()
+
         # Immediately sync OAuth tokens from Aden (runs in executor because
         # _presync_aden_tokens makes blocking HTTP calls to the Aden server).
         try:
@@ -193,6 +214,11 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
         deleted = delete_aden_api_key()
         if not deleted:
             return web.json_response({"error": "Credential 'aden_api_key' not found"}, status=404)
+        # Drop the env var so the next adapter rebuild lands in the
+        # non-Aden branch instead of trying to reuse the stale key.
+        os.environ.pop("ADEN_API_KEY", None)
+        _reset_credential_adapter_cache()
+        _invalidate_queen_credentials_cache(request)
         return web.json_response({"deleted": True})
 
     store = _get_store(request)
@@ -358,6 +384,9 @@ async def handle_resync_credentials(request: web.Request) -> web.Response:
         # _presync_aden_tokens makes blocking HTTP calls to the Aden server.
         await loop.run_in_executor(None, lambda: _presync_aden_tokens(CREDENTIAL_SPECS, force=True))
 
+        # Drop the cached adapter so newly-fetched accounts are visible
+        # to the next MCP tool call without waiting for a process restart.
+        _reset_credential_adapter_cache()
         _invalidate_queen_credentials_cache(request)
 
         accounts_by_provider = _collect_accounts_by_provider()

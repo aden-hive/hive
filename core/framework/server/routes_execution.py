@@ -1151,6 +1151,7 @@ async def fork_session_into_colony(
     task: str,
     tasks: list[dict] | None = None,
     concurrency_hint: int | None = None,
+    worker_profiles: list[dict] | None = None,
 ) -> dict:
     """Fork a queen session into a colony directory.
 
@@ -1398,6 +1399,54 @@ async def fork_session_into_colony(
         worker_meta["concurrency_hint"] = concurrency_hint
     worker_config_path.write_text(json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    # ── 2a. Materialize named worker profiles ────────────────────
+    # Each named profile gets its own ``profiles/<name>/worker.json``
+    # cloned from the base worker_meta with profile-specific overrides
+    # (task, system_prompt, tool_filter, concurrency_hint). The base
+    # ``worker.json`` above acts as the implicit "default" profile.
+    persisted_profiles: list[dict] = []
+    if worker_profiles:
+        from framework.host.worker_profiles import (
+            DEFAULT_PROFILE_NAME,
+            WorkerProfile,
+            validate_profile_name,
+            worker_spec_path,
+        )
+
+        for raw in worker_profiles:
+            if not isinstance(raw, dict):
+                continue
+            profile = WorkerProfile.from_dict(raw)
+            err = validate_profile_name(profile.name)
+            if err is not None:
+                logger.warning("create_colony: invalid profile name %r: %s", profile.name, err)
+                continue
+            profile_meta = dict(worker_meta)
+            profile_meta["profile_name"] = profile.name
+            if profile.task:
+                profile_meta["goal"] = {
+                    **profile_meta.get("goal", {}),
+                    "description": profile.task,
+                }
+            if profile.prompt_override:
+                profile_meta["system_prompt"] = f"{worker_meta['system_prompt']}\n\n{profile.prompt_override}"
+            if profile.tool_filter:
+                profile_meta["tools"] = [t for t in worker_meta["tools"] if t in set(profile.tool_filter)]
+            if isinstance(profile.concurrency_hint, int) and profile.concurrency_hint > 0:
+                profile_meta["concurrency_hint"] = profile.concurrency_hint
+            if profile.integrations:
+                profile_meta["integrations"] = dict(profile.integrations)
+
+            target = worker_spec_path(colony_name, profile.name)
+            if profile.name == DEFAULT_PROFILE_NAME:
+                # Skip — the legacy file already written above is the
+                # canonical default.
+                persisted_profiles.append(profile.to_dict())
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(profile_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            persisted_profiles.append(profile.to_dict())
+
     # ── 3. Duplicate queen session into colony ───────────────────
     # Copy the queen's full session directory (conversations, events,
     # meta) into a new queen-session dir assigned to this colony.
@@ -1577,6 +1626,19 @@ async def fork_session_into_colony(
         "task": worker_task[:100],
         "spawned_at": datetime.now(UTC).isoformat(),
     }
+    if persisted_profiles:
+        # Persist the canonical profile roster so dispatch + UI can read
+        # back what the queen declared at create_colony time. Merge with
+        # any existing list so a later update_worker_profile call doesn't
+        # erase profiles created in an earlier fork.
+        existing_profiles = metadata.get("worker_profiles") or []
+        if not isinstance(existing_profiles, list):
+            existing_profiles = []
+        seen = {p["name"] for p in persisted_profiles if isinstance(p, dict) and p.get("name")}
+        merged = list(persisted_profiles) + [
+            p for p in existing_profiles if isinstance(p, dict) and p.get("name") and p["name"] not in seen
+        ]
+        metadata["worker_profiles"] = merged
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ── 4a. Inherit the queen's tool allowlist into the colony ───
