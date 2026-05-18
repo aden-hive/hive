@@ -123,3 +123,27 @@ def test_success_report_with_error_does_not_clean_accept() -> None:
 
     assert "error_present" in score.rationale
     assert score.decision != NeutrosophicDecision.ACCEPT
+
+
+def test_blank_error_is_ignored() -> None:
+    baseline = score_worker_report(status="success", summary="Completed task", data={"rows": 3})
+    blank_error = score_worker_report(status="success", summary="Completed task", data={"rows": 3}, error="   ")
+
+    assert "error_present" not in blank_error.rationale
+    assert blank_error.truth == baseline.truth
+    assert blank_error.falsity == baseline.falsity
+
+
+def test_non_boolean_signals_do_not_trigger_risk_adjustments() -> None:
+    baseline = score_worker_report(status="partial", summary="Still trying")
+    noisy = score_worker_report(
+        status="partial",
+        summary="Still trying",
+        signals={"stalled": "true", "doom_loop": 1, "contradiction": "yes"},
+    )
+
+    assert "stall_signal" not in noisy.rationale
+    assert "doom_loop_signal" not in noisy.rationale
+    assert "contradiction_signal" not in noisy.rationale
+    assert noisy.indeterminacy == baseline.indeterminacy
+    assert noisy.falsity == baseline.falsity

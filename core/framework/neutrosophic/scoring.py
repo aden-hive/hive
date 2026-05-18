@@ -117,6 +117,7 @@ def score_worker_report(
     """Score a Hive worker report without changing runtime behavior."""
     normalized_status = str(status or "").strip().lower()
     normalized_summary = str(summary or "").strip()
+    normalized_error = str(error or "").strip()
     payload = data if isinstance(data, dict) else {}
     evidence = signals if isinstance(signals, dict) else {}
     rationale: list[str] = []
@@ -150,22 +151,22 @@ def score_worker_report(
         indeterminacy += _DATA_MISSING_INDETERMINACY_INC
         rationale.append("data_missing")
 
-    if error:
+    if normalized_error:
         truth -= _ERROR_TRUTH_DEC
         falsity += _ERROR_FALSITY_INC
         rationale.append("error_present")
 
-    if evidence.get("stalled"):
+    if evidence.get("stalled") is True:
         indeterminacy += _STALL_INDETERMINACY_INC
         falsity += _STALL_FALSITY_INC
         rationale.append("stall_signal")
 
-    if evidence.get("doom_loop"):
+    if evidence.get("doom_loop") is True:
         indeterminacy += _DOOM_LOOP_INDETERMINACY_INC
         falsity += _DOOM_LOOP_FALSITY_INC
         rationale.append("doom_loop_signal")
 
-    if evidence.get("contradiction"):
+    if evidence.get("contradiction") is True:
         falsity += _CONTRADICTION_FALSITY_INC
         indeterminacy += _CONTRADICTION_INDETERMINACY_INC
         rationale.append("contradiction_signal")
