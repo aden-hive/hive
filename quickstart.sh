@@ -168,7 +168,9 @@ echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
 echo ""
 
 # Keep uv on the interpreter we just validated (3.11+).
-export UV_PYTHON="$PYTHON_CMD"
+# Resolve to absolute path so it stays deterministic even if PATH mutates later.
+PYTHON_CMD_ABS="$(command -v "$PYTHON_CMD")"
+export UV_PYTHON="$PYTHON_CMD_ABS"
 
 # Check for uv (install automatically if missing)
 if ! command -v uv &> /dev/null; then
@@ -267,8 +269,8 @@ if [ -f "pyproject.toml" ]; then
         echo -e "${GREEN}  ✓ workspace packages installed${NC}"
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
-        echo -e "${DIM}    quickstart selected: $PYTHON_CMD (Python $PYTHON_VERSION)${NC}"
-        echo -e "${DIM}    If this machine also has a pinned Python version file, ensure that interpreter exists.${NC}"
+        echo -e "${DIM}    uv used: $UV_PYTHON${NC}"
+        echo -e "${DIM}    See log: $QUICKSTART_LOG_FILE${NC}"
         exit 1
     fi
 else
