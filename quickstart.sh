@@ -270,7 +270,6 @@ if [ -f "pyproject.toml" ]; then
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
         echo -e "${DIM}    uv used: $UV_PYTHON${NC}"
-        echo -e "${DIM}    See log: $QUICKSTART_LOG_FILE${NC}"
         exit 1
     fi
 else
