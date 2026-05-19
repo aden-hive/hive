@@ -100,5 +100,6 @@ def _ensure_builtins_registered() -> None:
         import framework.pipeline.stages.mcp_registry  # noqa: F401
         import framework.pipeline.stages.rate_limit  # noqa: F401
         import framework.pipeline.stages.skill_registry  # noqa: F401
+        import framework.pipeline.stages.token_budget  # noqa: F401
     except ImportError:
         pass

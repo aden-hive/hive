@@ -7,6 +7,7 @@ from framework.pipeline.stages.llm_provider import LlmProviderStage
 from framework.pipeline.stages.mcp_registry import McpRegistryStage
 from framework.pipeline.stages.rate_limit import RateLimitStage
 from framework.pipeline.stages.skill_registry import SkillRegistryStage
+from framework.pipeline.stages.token_budget import TokenBudgetStage
 
 __all__ = [
     "CostGuardStage",
@@ -16,4 +17,5 @@ __all__ = [
     "McpRegistryStage",
     "RateLimitStage",
     "SkillRegistryStage",
+    "TokenBudgetStage",
 ]
