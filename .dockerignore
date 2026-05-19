@@ -1,0 +1,35 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+LICENSE
+
+# IDE
+.idea/
+.vscode/
+
+# Dependencies (rebuilt in container)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+coverage/
+
+# Environment files
+.env*
+config.yaml
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GitHub
+.github/

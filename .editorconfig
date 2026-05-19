@@ -22,6 +22,3 @@ indent_size = 2
 
 [Makefile]
 indent_style = tab
-
-[*.{sh,ps1}]
-end_of_line = lf

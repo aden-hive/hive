@@ -83,7 +83,9 @@ class TestCloudinaryListResources:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["cloudinary_list_resources"]()
 
@@ -114,7 +116,9 @@ class TestCloudinaryGetResource:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["cloudinary_get_resource"](public_id="sample1")
 

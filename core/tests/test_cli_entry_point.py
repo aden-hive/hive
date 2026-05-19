@@ -1,6 +1,5 @@
 """Tests for the hive CLI entry point and path auto-configuration."""
 
-import platform
 import shutil
 import subprocess
 import sys
@@ -10,8 +9,6 @@ import pytest
 
 from framework.cli import _configure_paths
 
-_IS_WINDOWS = platform.system() == "Windows"
-
 
 @pytest.fixture
 def project_root():
@@ -20,7 +17,23 @@ def project_root():
 
 
 class TestConfigurePaths:
-    """Test _configure_paths auto-discovers core/."""
+    """Test _configure_paths auto-discovers exports/ and core/."""
+
+    def test_adds_exports_to_sys_path(self, project_root):
+        exports_dir = project_root / "exports"
+        if not exports_dir.is_dir():
+            pytest.skip("exports/ directory does not exist in this environment")
+
+        exports_str = str(exports_dir)
+        # Remove if already present to test fresh addition
+        original_path = sys.path.copy()
+        sys.path = [p for p in sys.path if p != exports_str]
+
+        try:
+            _configure_paths()
+            assert exports_str in sys.path
+        finally:
+            sys.path = original_path
 
     def test_adds_core_to_sys_path(self, project_root):
         core_dir = project_root / "core"
@@ -36,16 +49,21 @@ class TestConfigurePaths:
 
     def test_does_not_duplicate_paths(self):
         _configure_paths()
+        # Call twice — should not create duplicates
         before = sys.path.copy()
         _configure_paths()
         assert sys.path == before
 
+    def test_handles_missing_exports_gracefully(self):
+        """If exports/ doesn't exist, _configure_paths should not crash."""
+        _configure_paths()
+
 
 class TestFrameworkModule:
-    """Test ``python -m framework`` invocation."""
+    """Test ``python -m framework`` invocation (the underlying module)."""
 
-    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
     def test_module_help(self, project_root):
+        """Verify ``python -m framework --help`` prints usage."""
         result = subprocess.run(
             [sys.executable, "-m", "framework", "--help"],
             capture_output=True,
@@ -54,33 +72,36 @@ class TestFrameworkModule:
             cwd=str(project_root / "core"),
         )
         assert result.returncode == 0
-        assert "hive" in result.stdout.lower()
+        assert "hive" in result.stdout.lower() or "goal" in result.stdout.lower()
 
-    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
-    def test_module_serve_subcommand(self, project_root):
-        """Verify ``python -m framework serve --help`` prints usage."""
+    def test_module_list_subcommand(self, project_root):
+        """Verify ``python -m framework list --help`` registers the subcommand."""
         result = subprocess.run(
-            [sys.executable, "-m", "framework", "serve", "--help"],
+            [sys.executable, "-m", "framework", "list", "--help"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             cwd=str(project_root / "core"),
         )
         assert result.returncode == 0
-        assert "host" in result.stdout.lower() or "port" in result.stdout.lower()
+        assert "agents" in result.stdout.lower() or "directory" in result.stdout.lower()
 
 
 class TestHiveEntryPoint:
-    """Test the ``hive`` console_scripts entry point."""
+    """Test the ``hive`` console_scripts entry point.
+
+    These tests verify the actual ``hive`` command installed by
+    ``pip install -e core/``. If the entry point is not installed,
+    the tests are skipped gracefully.
+    """
 
     @pytest.fixture(autouse=True)
     def _require_hive(self):
         if shutil.which("hive") is None:
             pytest.skip("'hive' entry point not installed (run: pip install -e core/)")
 
-    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
     def test_hive_help(self):
-        """Verify ``hive --help`` exits 0 and lists the new commands."""
+        """Verify ``hive --help`` exits 0 and prints usage."""
         result = subprocess.run(
             ["hive", "--help"],
             capture_output=True,
@@ -88,38 +109,23 @@ class TestHiveEntryPoint:
             encoding="utf-8",
         )
         assert result.returncode == 0
-        out = result.stdout.lower()
-        # New CLI surface (post-cleanup)
-        assert "serve" in out
-        assert "queen" in out
-        assert "colony" in out
-        assert "session" in out
-        assert "chat" in out
+        assert "run" in result.stdout.lower()
+        assert "validate" in result.stdout.lower()
 
-    def test_hive_queen_list_help(self):
-        """``hive queen list --help`` is one of the new core commands."""
+    def test_hive_list_help(self):
+        """Verify ``hive list --help`` exits 0."""
         result = subprocess.run(
-            ["hive", "queen", "list", "--help"],
+            ["hive", "list", "--help"],
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
         assert result.returncode == 0
 
-    def test_hive_colony_list_help(self):
-        """``hive colony list --help`` is one of the new core commands."""
+    def test_hive_run_missing_agent(self):
+        """Verify ``hive run`` with a non-existent agent prints an error."""
         result = subprocess.run(
-            ["hive", "colony", "list", "--help"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        assert result.returncode == 0
-
-    def test_hive_unknown_command_exits_nonzero(self):
-        """An unknown subcommand must error out."""
-        result = subprocess.run(
-            ["hive", "definitely-not-a-command"],
+            ["hive", "run", "nonexistent_agent_xyz"],
             capture_output=True,
             text=True,
             encoding="utf-8",

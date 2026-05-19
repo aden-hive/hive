@@ -202,7 +202,9 @@ class TestHuggingFaceWhoami:
 class TestHuggingFaceRunInference:
     def test_missing_token(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["huggingface_run_inference"](model_id="facebook/bart-large-cnn", inputs="Hello world")
+            result = tool_fns["huggingface_run_inference"](
+                model_id="facebook/bart-large-cnn", inputs="Hello world"
+            )
         assert "error" in result
 
     def test_missing_model_id(self, tool_fns):
@@ -213,7 +215,9 @@ class TestHuggingFaceRunInference:
 
     def test_missing_inputs(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["huggingface_run_inference"](model_id="facebook/bart-large-cnn", inputs="")
+            result = tool_fns["huggingface_run_inference"](
+                model_id="facebook/bart-large-cnn", inputs=""
+            )
         assert "error" in result
         assert "inputs" in result["error"]
 
@@ -281,7 +285,9 @@ class TestHuggingFaceRunInference:
                 return_value=mock_resp,
             ),
         ):
-            result = tool_fns["huggingface_run_inference"](model_id="bigscience/bloom", inputs="Hello")
+            result = tool_fns["huggingface_run_inference"](
+                model_id="bigscience/bloom", inputs="Hello"
+            )
 
         assert result["error"] == "Model is loading"
         assert result["estimated_time"] == 30.5
@@ -302,7 +308,9 @@ class TestHuggingFaceRunEmbedding:
 
     def test_missing_inputs(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["huggingface_run_embedding"](model_id="sentence-transformers/all-MiniLM-L6-v2", inputs="")
+            result = tool_fns["huggingface_run_embedding"](
+                model_id="sentence-transformers/all-MiniLM-L6-v2", inputs=""
+            )
         assert "error" in result
 
     def test_successful_embedding(self, tool_fns):

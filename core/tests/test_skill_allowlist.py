@@ -17,11 +17,11 @@ def _make_tool_call_event(tool_name: str, path: str):
 
 
 def _make_node(skill_dirs: list[str]):
-    """Build a minimal AgentLoop with skill_dirs set."""
-    from framework.agent_loop.agent_loop import AgentLoop
+    """Build a minimal EventLoopNode with skill_dirs set."""
+    from framework.graph.event_loop_node import EventLoopNode
 
     mock_result = ToolResult(tool_use_id="tc-1", content="from-executor")
-    node = AgentLoop(tool_executor=MagicMock(return_value=mock_result))
+    node = EventLoopNode(tool_executor=MagicMock(return_value=mock_result))
     node._skill_dirs = skill_dirs
     return node
 

@@ -971,7 +971,9 @@ class TestNotionUpdateBlock:
 
     def test_missing_credentials(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["notion_update_block"](block_id="block-1", content="text", block_type="paragraph")
+            result = tool_fns["notion_update_block"](
+                block_id="block-1", content="text", block_type="paragraph"
+            )
         assert "error" in result
 
     def test_no_updates_provided(self, tool_fns):
@@ -992,7 +994,9 @@ class TestNotionUpdateBlock:
             patch.dict("os.environ", ENV),
             patch(f"{PATCH_BASE}.httpx.patch", return_value=_mock_resp(data)) as mock_patch,
         ):
-            result = tool_fns["notion_update_block"](block_id="block-1", content="Updated text", block_type="paragraph")
+            result = tool_fns["notion_update_block"](
+                block_id="block-1", content="Updated text", block_type="paragraph"
+            )
 
         assert result["status"] == "updated"
         body = mock_patch.call_args.kwargs["json"]
@@ -1000,7 +1004,9 @@ class TestNotionUpdateBlock:
 
     def test_invalid_block_type(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["notion_update_block"](block_id="block-1", content="text", block_type="invalid_type")
+            result = tool_fns["notion_update_block"](
+                block_id="block-1", content="text", block_type="invalid_type"
+            )
         assert "error" in result
         assert "Invalid block_type" in result["error"]
 

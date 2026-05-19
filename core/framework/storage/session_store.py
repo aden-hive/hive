@@ -62,14 +62,8 @@ class SessionStore:
 
         Returns:
             Path to session directory
-
-        Raises:
-            ValueError: If session_id resolves outside the sessions directory
         """
-        resolved = (self.sessions_dir / session_id).resolve()
-        if not resolved.is_relative_to(self.sessions_dir.resolve()):
-            raise ValueError(f"Invalid session ID: {session_id}")
-        return resolved
+        return self.sessions_dir / session_id
 
     def get_state_path(self, session_id: str) -> Path:
         """

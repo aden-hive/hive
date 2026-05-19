@@ -1,6 +1,6 @@
 """Node definitions for Twitter News Digest."""
 
-from framework.orchestrator import NodeSpec
+from framework.graph import NodeSpec
 
 # Node 1: Browser subagent (GCU) to fetch tweets
 fetch_node = NodeSpec(
@@ -24,12 +24,13 @@ Focus on:
 - Hardware/Silicon breakthroughs
 
 ## Instructions
-1. For each handle:
-   a. browser_open(url=f"https://x.com/{handle}")  # lazy-creates the context on first call
+1. browser_start
+2. For each handle:
+   a. browser_open(url=f"https://x.com/{handle}")
    b. browser_wait(seconds=5)
    c. browser_snapshot
    d. Parse relevant tech news text
-2. set_output("raw_tweets", consolidated_json)
+3. set_output("raw_tweets", consolidated_json)
 """,
 )
 

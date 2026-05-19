@@ -34,7 +34,9 @@ def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | 
     return url, token
 
 
-def _get(base_url: str, path: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _get(
+    base_url: str, path: str, token: str, params: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make an authenticated GET to the GitLab API."""
     try:
         resp = httpx.get(
@@ -60,7 +62,9 @@ def _get(base_url: str, path: str, token: str, params: dict[str, Any] | None = N
         return {"error": f"GitLab request failed: {e!s}"}
 
 
-def _post(base_url: str, path: str, token: str, json: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _post(
+    base_url: str, path: str, token: str, json: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make an authenticated POST to the GitLab API."""
     try:
         resp = httpx.post(
@@ -82,7 +86,9 @@ def _post(base_url: str, path: str, token: str, json: dict[str, Any] | None = No
         return {"error": f"GitLab request failed: {e!s}"}
 
 
-def _put(base_url: str, path: str, token: str, json: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _put(
+    base_url: str, path: str, token: str, json: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make an authenticated PUT to the GitLab API."""
     try:
         resp = httpx.put(

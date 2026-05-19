@@ -68,20 +68,12 @@ from gcu import register_gcu_tools  # noqa: E402
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP) -> AsyncIterator[dict]:
-    """FastMCP lifespan hook: start the Beeline bridge, clean up on shutdown."""
-    from gcu.browser.bridge import init_bridge
-
-    bridge = init_bridge()
-    bridge_port = int(os.getenv("HIVE_BRIDGE_PORT", "9229"))
-    await bridge.start(port=bridge_port)
-
+    """FastMCP lifespan hook: clean up all browsers on shutdown."""
     yield {}
-
     from gcu.browser.session import shutdown_all_browsers
 
     logger.info("Server shutting down, cleaning up browser sessions...")
     await shutdown_all_browsers()
-    await bridge.stop()
 
 
 def _sync_shutdown() -> None:
@@ -139,10 +131,7 @@ def main() -> None:
         mcp.run(transport="stdio")
     else:
         logger.info(f"Starting GCU server on {args.host}:{args.port}")
-        # FastMCP.run() forwards kwargs to anyio.run() instead of the
-        # transport, which breaks host/port for SSE. Invoke run_async
-        # directly so the kwargs land on run_sse_async.
-        asyncio.run(mcp.run_async(transport="sse", host=args.host, port=args.port))
+        mcp.run(transport="http", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

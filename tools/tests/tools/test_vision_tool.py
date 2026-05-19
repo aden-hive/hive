@@ -308,7 +308,9 @@ def test_image_properties_success(mcp: FastMCP):
                         ]
                     }
                 },
-                "cropHintsAnnotation": {"cropHints": [{"boundingPoly": {"vertices": []}, "confidence": 0.8}]},
+                "cropHintsAnnotation": {
+                    "cropHints": [{"boundingPoly": {"vertices": []}, "confidence": 0.8}]
+                },
             }
         ]
     }
@@ -335,7 +337,9 @@ def test_web_detection_success(mcp: FastMCP):
                 "webDetection": {
                     "webEntities": [{"description": "Sunset", "score": 0.9}],
                     "visuallySimilarImages": [{"url": "https://similar.com/1.jpg"}],
-                    "pagesWithMatchingImages": [{"url": "https://page.com", "pageTitle": "Sunset Photos"}],
+                    "pagesWithMatchingImages": [
+                        {"url": "https://page.com", "pageTitle": "Sunset Photos"}
+                    ],
                 }
             }
         ]

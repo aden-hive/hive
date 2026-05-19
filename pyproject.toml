@@ -1,5 +1,2 @@
 [tool.uv.workspace]
 members = ["core", "tools"]
-
-[tool.ruff]
-line-length = 120

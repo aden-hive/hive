@@ -34,7 +34,7 @@ RUN mkdir -p /app/workdir/workspaces && \
 USER appuser
 
 # Declare volume for workspace persistence across container runs
-VOLUME ["/app//workspaces"]
+VOLUME ["/app/workdir/workspaces"]
 
 # Expose MCP server port
 EXPOSE 4001

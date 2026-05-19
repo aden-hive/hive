@@ -26,10 +26,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Verified tools (stable, on main)
 # ---------------------------------------------------------------------------
-# File system: one canonical module for read/write/edit/search/patch.
-# Shell: still its own toolkit.
-from aden_tools.file_ops import register_file_tools
-
 from .account_info_tool import register_tools as register_account_info
 
 # ---------------------------------------------------------------------------
@@ -48,7 +44,6 @@ from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
-from .cloudflare_tool import register_tools as register_cloudflare
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
@@ -59,8 +54,22 @@ from .docker_hub_tool import register_tools as register_docker_hub
 from .duckduckgo_tool import register_tools as register_duckduckgo
 from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
+from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
-from .freshdesk_tool import register_tools as register_freshdesk
+
+# File system toolkits
+from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
+from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
+from .file_system_toolkits.data_tools import register_tools as register_data_tools
+from .file_system_toolkits.execute_command_tool import (
+    register_tools as register_execute_command,
+)
+from .file_system_toolkits.grep_search import register_tools as register_grep_search
+from .file_system_toolkits.hashline_edit import register_tools as register_hashline_edit
+from .file_system_toolkits.list_dir import register_tools as register_list_dir
+from .file_system_toolkits.replace_file_content import (
+    register_tools as register_replace_file_content,
+)
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -79,7 +88,6 @@ from .kafka_tool import register_tools as register_kafka
 from .langfuse_tool import register_tools as register_langfuse
 from .linear_tool import register_tools as register_linear
 from .lusha_tool import register_tools as register_lusha
-from .mattermost_tool import register_tools as register_mattermost
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .mongodb_tool import register_tools as register_mongodb
 from .n8n_tool import register_tools as register_n8n
@@ -94,7 +102,6 @@ from .plaid_tool import register_tools as register_plaid
 from .port_scanner import register_tools as register_port_scanner
 from .postgres_tool import register_tools as register_postgres
 from .powerbi_tool import register_tools as register_powerbi
-from .prometheus_tool import register_tools as register_prometheus
 from .pushover_tool import register_tools as register_pushover
 from .quickbooks_tool import register_tools as register_quickbooks
 from .razorpay_tool import register_tools as register_razorpay
@@ -102,11 +109,11 @@ from .reddit_tool import register_tools as register_reddit
 from .redis_tool import register_tools as register_redis
 from .redshift_tool import register_tools as register_redshift
 from .risk_scorer import register_tools as register_risk_scorer
+from .runtime_logs_tool import register_tools as register_runtime_logs
 from .salesforce_tool import register_tools as register_salesforce
 from .sap_tool import register_tools as register_sap
 from .serpapi_tool import register_tools as register_serpapi
 from .shopify_tool import register_tools as register_shopify
-from .similarweb_tool import register_tools as register_similarweb
 from .slack_tool import register_tools as register_slack
 from .snowflake_tool import register_tools as register_snowflake
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
@@ -123,13 +130,7 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
-from .wandb_tool import register_tools as register_wandb
-
-try:
-    from .web_scrape_tool import register_tools as register_web_scrape
-except ImportError:
-    # playwright not installed - web_scrape_tool unavailable
-    register_web_scrape = None  # type: ignore
+from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
@@ -139,24 +140,18 @@ from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .zoom_tool import register_tools as register_zoom
 
-# Tool names registered by `_register_verified()`. Populated on first call.
-# Consumed by the `__aden_verified_manifest` sentinel tool so downstream
-# registries (e.g. the queen's MCP loader) can gate free/credential-less tools
-# on whether they have been promoted to verified status.
-_VERIFIED_TOOL_NAMES: set[str] = set()
-
 
 def _register_verified(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register verified (stable) tools."""
-    _verified_before = set(mcp._tool_manager._tools.keys())
     # --- No credentials ---
-    if register_web_scrape:
-        register_web_scrape(mcp)
+    register_example(mcp)
+    register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
+    register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
 
@@ -188,12 +183,16 @@ def _register_verified(
     register_google_sheets(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
-    # --- File system + shell ---
-    # File tools (read_file, write_file, edit_file, hashline_edit,
-    # search_files, apply_patch) all share one path policy. ``home``
-    # defaults to CWD here; framework callers that own a session-specific
-    # workspace should call register_file_tools directly with home set.
-    register_file_tools(mcp)
+    # --- File system toolkits ---
+    register_list_dir(mcp)
+    register_replace_file_content(mcp)
+    register_apply_diff(mcp)
+    register_apply_patch(mcp)
+    register_grep_search(mcp)
+    # hashline_edit: anchor-based editing, pairs with read_file/grep_search hashline mode
+    register_hashline_edit(mcp)
+    register_execute_command(mcp)
+    register_data_tools(mcp)
     register_csv(mcp)
     register_excel(mcp)
 
@@ -222,22 +221,6 @@ def _register_verified(
     register_google_maps(mcp, credentials=credentials)
     register_notion(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
-
-    _VERIFIED_TOOL_NAMES.update(set(mcp._tool_manager._tools.keys()) - _verified_before)
-
-
-def _register_manifest(mcp: FastMCP) -> None:
-    """Expose the verified-tool manifest as a sentinel MCP tool.
-
-    Registered after both verified and unverified passes so the manifest tool
-    itself never appears in `_VERIFIED_TOOL_NAMES`. Downstream registries call
-    this to decide whether a credential-less tool is safe to admit.
-    """
-
-    @mcp.tool(name="__aden_verified_manifest")
-    def aden_verified_manifest() -> list[str]:
-        """Return tool names registered by `_register_verified()`."""
-        return sorted(_VERIFIED_TOOL_NAMES)
 
 
 def _register_unverified(
@@ -268,7 +251,6 @@ def _register_unverified(
     register_stripe(mcp, credentials=credentials)
     register_postgres(mcp, credentials=credentials)
     register_calendly(mcp, credentials=credentials)
-    register_cloudflare(mcp, credentials=credentials)
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
     register_databricks(mcp, credentials=credentials)
@@ -284,7 +266,6 @@ def _register_unverified(
     register_langfuse(mcp, credentials=credentials)
     register_linear(mcp, credentials=credentials)
     register_lusha(mcp, credentials=credentials)
-    register_mattermost(mcp, credentials=credentials)
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
@@ -294,7 +275,6 @@ def _register_unverified(
     register_pipedrive(mcp, credentials=credentials)
     register_plaid(mcp, credentials=credentials)
     register_powerbi(mcp, credentials=credentials)
-    register_prometheus(mcp, credentials=credentials)
     register_pushover(mcp, credentials=credentials)
     register_quickbooks(mcp, credentials=credentials)
     register_reddit(mcp, credentials=credentials)
@@ -303,7 +283,6 @@ def _register_unverified(
     register_salesforce(mcp, credentials=credentials)
     register_sap(mcp, credentials=credentials)
     register_shopify(mcp, credentials=credentials)
-    register_similarweb(mcp, credentials=credentials)
     register_snowflake(mcp, credentials=credentials)
     register_supabase(mcp, credentials=credentials)
     register_terraform(mcp, credentials=credentials)
@@ -316,8 +295,6 @@ def _register_unverified(
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
-    register_wandb(mcp, credentials=credentials)
-    register_freshdesk(mcp, credentials=credentials)
 
 
 def register_all_tools(
@@ -342,8 +319,6 @@ def register_all_tools(
 
     if include_unverified:
         _register_unverified(mcp, credentials=credentials)
-
-    _register_manifest(mcp)
 
     return list(mcp._tool_manager._tools.keys())
 

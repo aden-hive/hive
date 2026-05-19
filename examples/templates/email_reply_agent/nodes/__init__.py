@@ -1,6 +1,6 @@
 """Node definitions for Email Reply Agent."""
 
-from framework.orchestrator import NodeSpec
+from framework.graph import NodeSpec
 
 # Node 1: Intake (client-facing)
 intake_node = NodeSpec(

@@ -43,7 +43,9 @@ def _get(endpoint: str, token: str, params: dict[str, Any] | None = None) -> dic
         if resp.status_code == 401:
             return {"error": "Unauthorized. Access token may be expired or invalid."}
         if resp.status_code == 403:
-            return {"error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"}
+            return {
+                "error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"
+            }
         if resp.status_code != 200:
             return {"error": f"Microsoft Graph API error {resp.status_code}: {resp.text[:500]}"}
         return resp.json()
@@ -61,7 +63,9 @@ def _post(endpoint: str, token: str, json_body: dict[str, Any]) -> dict[str, Any
         if resp.status_code == 401:
             return {"error": "Unauthorized. Access token may be expired or invalid."}
         if resp.status_code == 403:
-            return {"error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"}
+            return {
+                "error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"
+            }
         if resp.status_code not in (200, 201, 202):
             return {"error": f"Microsoft Graph API error {resp.status_code}: {resp.text[:500]}"}
         if resp.status_code == 202:
@@ -222,7 +226,9 @@ def register_tools(
         if not to or not subject:
             return {"error": "to and subject are required"}
 
-        to_recipients = [{"emailAddress": {"address": addr.strip()}} for addr in to.split(",") if addr.strip()]
+        to_recipients = [
+            {"emailAddress": {"address": addr.strip()}} for addr in to.split(",") if addr.strip()
+        ]
         message: dict[str, Any] = {
             "subject": subject,
             "body": {"contentType": body_type, "content": body},
@@ -230,7 +236,9 @@ def register_tools(
         }
         if cc:
             message["ccRecipients"] = [
-                {"emailAddress": {"address": addr.strip()}} for addr in cc.split(",") if addr.strip()
+                {"emailAddress": {"address": addr.strip()}}
+                for addr in cc.split(",")
+                if addr.strip()
             ]
 
         payload = {"message": message, "saveToSentItems": save_to_sent}

@@ -72,16 +72,17 @@ Register an MCP server as a tool source for your agent.
     "cwd": "../tools",
     "description": "Aden tools..."
   },
-  "tools_discovered": 5,
+  "tools_discovered": 6,
   "tools": [
     "web_search",
     "web_scrape",
     "file_read",
     "file_write",
-    "pdf_read"
+    "pdf_read",
+    "example_tool"
   ],
   "total_mcp_servers": 1,
-  "note": "MCP server 'tools' registered with 5 tools. These tools can now be used in event_loop nodes."
+  "note": "MCP server 'tools' registered with 6 tools. These tools can now be used in event_loop nodes."
 }
 ```
 

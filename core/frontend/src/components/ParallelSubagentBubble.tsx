@@ -2,68 +2,12 @@ import { memo, useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronUp, Cpu } from "lucide-react";
 import type { ChatMessage, ContextUsageEntry } from "@/components/ChatPanel";
 import MarkdownContent from "@/components/MarkdownContent";
-import { cssVar } from "@/lib/graphUtils";
-import { useColonyWorkers } from "@/context/ColonyWorkersContext";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 const workerColor = "hsl(220,60%,55%)";
-
-interface MuxColors {
-  titleBg: string;
-  titleBorder: string;
-  bodyBg: string;
-  gridBg: string;
-  frameBorder: string;
-  frameBg: string;
-  dimText: string;
-  contentText: string;
-  waitingText: string;
-  overlayBg: string;
-  finishedCheck: string;
-}
-
-function buildMuxColors(): MuxColors {
-  const titleBg = cssVar("--mux-title-bg") || "220 10% 95%";
-  const titleBorder = cssVar("--mux-title-border") || "220 10% 88%";
-  const bodyBg = cssVar("--mux-body-bg") || "0 0% 98%";
-  const gridBg = cssVar("--mux-grid-bg") || "0 0% 93%";
-  const frameBorder = cssVar("--mux-frame-border") || "220 10% 85%";
-  const frameBg = cssVar("--mux-frame-bg") || "0 0% 97%";
-  const dimText = cssVar("--mux-dim-text") || "0 0% 45%";
-  const contentText = cssVar("--mux-content-text") || "0 0% 15%";
-  const waitingText = cssVar("--mux-waiting-text") || "0 0% 70%";
-  const overlayBg = cssVar("--mux-overlay-bg") || "0 0% 100% / 0.82";
-  const finishedCheck = cssVar("--mux-finished-check") || "142 50% 40%";
-  return {
-    titleBg: `hsl(${titleBg})`,
-    titleBorder: `hsl(${titleBorder})`,
-    bodyBg: `hsl(${bodyBg})`,
-    gridBg: `hsl(${gridBg})`,
-    frameBorder: `hsl(${frameBorder})`,
-    frameBg: `hsl(${frameBg})`,
-    dimText: `hsl(${dimText})`,
-    contentText: `hsl(${contentText})`,
-    waitingText: `hsl(${waitingText})`,
-    overlayBg: `hsl(${overlayBg})`,
-    finishedCheck: `hsl(${finishedCheck})`,
-  };
-}
-
-function useMuxColors(): MuxColors {
-  const [colors, setColors] = useState<MuxColors>(buildMuxColors);
-
-  useEffect(() => {
-    const rebuild = () => setColors(buildMuxColors());
-    const obs = new MutationObserver(rebuild);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
-    return () => obs.disconnect();
-  }, []);
-
-  return colors;
-}
 
 const SUBAGENT_COLORS = [
   "hsl(220,60%,55%)",
@@ -117,18 +61,16 @@ function ToolOverlay({
   toolName,
   color,
   visible,
-  overlayBg,
 }: {
   toolName: string;
   color: string;
   visible: boolean;
-  overlayBg: string;
 }) {
   return (
     <div
       className="absolute inset-0 top-[22px] flex items-center justify-center transition-opacity duration-200 z-10"
       style={{
-        background: overlayBg,
+        background: "rgba(8,8,14,0.82)",
         opacity: visible ? 1 : 0,
         pointerEvents: visible ? "auto" : "none",
       }}
@@ -156,7 +98,6 @@ function MuxPane({
   isFocused,
   isZoomed,
   onClickTitle,
-  mux,
 }: {
   group: SubagentGroup;
   index: number;
@@ -164,7 +105,6 @@ function MuxPane({
   isFocused: boolean;
   isZoomed: boolean;
   onClickTitle: () => void;
-  mux: MuxColors;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -236,27 +176,27 @@ function MuxPane({
       {/* Title bar */}
       <div
         className="flex items-center gap-1.5 px-2 py-[3px] flex-shrink-0 cursor-pointer select-none"
-        style={{ background: mux.titleBg, borderBottom: `1px solid ${mux.titleBorder}` }}
+        style={{ background: "#0e0e16", borderBottom: "1px solid #1a1a2a" }}
         onClick={onClickTitle}
       >
         {isFinished ? (
-          <span className="text-[8px] flex-shrink-0 leading-none" style={{ color: mux.finishedCheck }}>&#10003;</span>
+          <span className="text-[8px] flex-shrink-0 leading-none" style={{ color: "#4a4" }}>&#10003;</span>
         ) : (
           <div
             className="w-[6px] h-[6px] rounded-full flex-shrink-0"
             style={{ background: color }}
           />
         )}
-        <span className="text-[9px] flex-shrink-0" style={{ color: isFinished ? mux.dimText : color }}>
+        <span className="text-[9px] flex-shrink-0" style={{ color: isFinished ? "#555" : color }}>
           {label}
         </span>
         <span className="flex-1" />
-        <span className="text-[8px] tabular-nums flex-shrink-0" style={{ color: mux.dimText }}>
+        <span className="text-[8px] tabular-nums flex-shrink-0" style={{ color: "#555" }}>
           {msgCount}
         </span>
         <div
           className="w-[36px] h-[3px] rounded-full overflow-hidden flex-shrink-0"
-          style={{ background: mux.titleBorder }}
+          style={{ background: "#1a1a2a" }}
         >
           <div
             className="h-full rounded-full transition-all duration-500"
@@ -267,7 +207,7 @@ function MuxPane({
             }}
           />
         </div>
-        <span className="text-[8px] tabular-nums flex-shrink-0" style={{ color: mux.dimText }}>
+        <span className="text-[8px] tabular-nums flex-shrink-0" style={{ color: "#555" }}>
           {pct}%
         </span>
       </div>
@@ -277,14 +217,14 @@ function MuxPane({
         ref={bodyRef}
         onScroll={handleScroll}
         className="flex-1 min-h-0 overflow-y-auto px-2 py-1 text-[10px] leading-[1.7]"
-        style={{ background: mux.bodyBg, color: mux.dimText, fontFamily: "monospace" }}
+        style={{ background: "#08080e", color: "#555", fontFamily: "monospace" }}
       >
         {latestContent ? (
-          <div style={{ color: mux.contentText }}>
+          <div style={{ color: "#ccc" }}>
             <MarkdownContent content={latestContent} />
           </div>
         ) : (
-          <span style={{ color: mux.waitingText }}>waiting...</span>
+          <span style={{ color: "#333" }}>waiting...</span>
         )}
         {/* Blinking cursor — hidden when finished */}
         {!isFinished && (
@@ -303,7 +243,6 @@ function MuxPane({
         toolName={activeToolName}
         color={color}
         visible={toolRunning}
-        overlayBg={mux.overlayBg}
       />
     </div>
   );
@@ -317,8 +256,6 @@ const ParallelSubagentBubble = memo(
   function ParallelSubagentBubble({ groups }: ParallelSubagentBubbleProps) {
     const [expanded, setExpanded] = useState(false);
     const [zoomedIdx, setZoomedIdx] = useState<number | null>(null);
-    const mux = useMuxColors();
-    const { openColonyWorkers } = useColonyWorkers();
 
     // Labels with instance numbers for duplicates
     const labels: string[] = (() => {
@@ -373,21 +310,16 @@ const ParallelSubagentBubble = memo(
 
     return (
       <div className="flex gap-3">
-        {/* Left icon — subagents aren't top-level colony workers, so the
-            click opens the sidebar without pre-selection. */}
-        <button
-          type="button"
-          onClick={() => openColonyWorkers()}
-          aria-label="Open colony workers sidebar"
-          title="Open colony workers sidebar"
-          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1 transition-opacity hover:opacity-80 cursor-pointer"
+        {/* Left icon */}
+        <div
+          className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center mt-1"
           style={{
             backgroundColor: `${workerColor}18`,
             border: `1.5px solid ${workerColor}35`,
           }}
         >
           <Cpu className="w-3.5 h-3.5" style={{ color: workerColor }} />
-        </button>
+        </div>
 
         <div className="flex-1 min-w-0 max-w-[90%]">
           {/* Header */}
@@ -418,8 +350,8 @@ const ParallelSubagentBubble = memo(
           <div
             className="rounded-lg overflow-hidden"
             style={{
-              border: `2px solid ${mux.frameBorder}`,
-              background: mux.frameBg,
+              border: "2px solid #1a1a2a",
+              background: "#08080e",
             }}
           >
             {/* Grid */}
@@ -430,7 +362,7 @@ const ParallelSubagentBubble = memo(
                   groups.length === 1 ? "1fr" : "1fr 1fr",
                 gridTemplateRows: `repeat(${rows}, 1fr)`,
                 height: gridHeight,
-                background: mux.gridBg,
+                background: "#111",
               }}
             >
               {groups.map((group, i) => (
@@ -444,7 +376,6 @@ const ParallelSubagentBubble = memo(
                   onClickTitle={() =>
                     setZoomedIdx(zoomedIdx === i ? null : i)
                   }
-                  mux={mux}
                 />
               ))}
             </div>

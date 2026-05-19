@@ -2,8 +2,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
-import { parseThinkingTags } from "@/lib/thinking-tags";
-import ThinkingBlock from "./ThinkingBlock";
 
 const components: Components = {
   // Headers: same size as body text, just bold — keeps chat bubbles compact
@@ -89,30 +87,11 @@ interface MarkdownContentProps {
 }
 
 export default function MarkdownContent({ content, className }: MarkdownContentProps) {
-  const segments = parseThinkingTags(content);
-
-  // Fast path: no thinking tags — render as before
-  if (segments.length === 1 && segments[0].type === "text") {
-    return (
-      <div className={cn("break-words text-foreground", className)}>
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-          {content}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-
   return (
     <div className={cn("break-words text-foreground", className)}>
-      {segments.map((seg, i) =>
-        seg.type === "thinking" ? (
-          <ThinkingBlock key={i} content={seg.content} />
-        ) : (
-          <ReactMarkdown key={i} remarkPlugins={remarkPlugins} components={components}>
-            {seg.content}
-          </ReactMarkdown>
-        ),
-      )}
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

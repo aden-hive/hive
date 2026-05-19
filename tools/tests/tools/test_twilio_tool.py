@@ -54,9 +54,13 @@ class TestTwilioSendSms:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)
+            ),
         ):
-            result = tool_fns["twilio_send_sms"](to="+14155552671", from_number="+15017122661", body="Hello!")
+            result = tool_fns["twilio_send_sms"](
+                to="+14155552671", from_number="+15017122661", body="Hello!"
+            )
 
         assert result["sid"] == "SM123"
         assert result["status"] == "queued"
@@ -78,7 +82,9 @@ class TestTwilioSendWhatsapp:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)
+            ),
         ):
             result = tool_fns["twilio_send_whatsapp"](
                 to="+14155552671", from_number="+14155238886", body="WhatsApp msg"

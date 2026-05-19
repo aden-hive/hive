@@ -1,9 +1,9 @@
 {
-  "hive_tools": {
+  "hive-tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],
     "cwd": ".",
-    "description": "hive_tools MCP server providing web_search, web_scrape, send_email, and data tools"
+    "description": "Hive tools MCP server providing web_search, web_scrape, send_email, and data tools"
   }
 }

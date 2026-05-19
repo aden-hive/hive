@@ -1,0 +1,18 @@
+This project uses ruff for Python linting and formatting.
+
+Rules:
+- Line length: 100 characters
+- Python target: 3.11+
+- Use double quotes for strings
+- Sort imports with isort (ruff I rules): stdlib, third-party, first-party (framework), local
+- Combine as-imports
+- Use type hints on all function signatures
+- Use `from __future__ import annotations` for modern type syntax
+- Raise exceptions with `from` in except blocks (B904)
+- No unused imports (F401), no unused variables (F841)
+- Prefer list/dict/set comprehensions over map/filter (C4)
+
+Run `make lint` to auto-fix, `make check` to verify without modifying files.
+Run `make format` to apply ruff formatting.
+
+The ruff config lives in core/pyproject.toml under [tool.ruff].

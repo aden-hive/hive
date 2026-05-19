@@ -85,7 +85,7 @@ intake → job-search → job-review → customize
 
 ## MCP Tool Sources
 
-### hive_tools (stdio)
+### hive-tools (stdio)
 Hive tools MCP server
 
 **Configuration:**

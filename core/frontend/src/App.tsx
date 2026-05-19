@@ -1,31 +1,14 @@
 import { Routes, Route } from "react-router-dom";
-import AppLayout from "./layouts/AppLayout";
 import Home from "./pages/home";
-import ColonyChat from "./pages/colony-chat";
-import QueenDM from "./pages/queen-dm";
-import QueenRouting from "./pages/queen-routing";
-import OrgChart from "./pages/org-chart";
-import PromptLibrary from "./pages/prompt-library";
-import SkillsLibrary from "./pages/skills-library";
-import ToolLibrary from "./pages/tool-library";
-import CredentialsPage from "./pages/credentials";
-import NotFound from "./pages/not-found";
+import MyAgents from "./pages/my-agents";
+import Workspace from "./pages/workspace";
 
 function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<Home />} />
-        <Route path="/colony/:colonyId" element={<ColonyChat />} />
-        <Route path="/queen-routing" element={<QueenRouting />} />
-        <Route path="/queen/:queenId" element={<QueenDM />} />
-        <Route path="/org-chart" element={<OrgChart />} />
-        <Route path="/skills-library" element={<SkillsLibrary />} />
-        <Route path="/prompt-library" element={<PromptLibrary />} />
-        <Route path="/tool-library" element={<ToolLibrary />} />
-        <Route path="/credentials" element={<CredentialsPage />} />
-        <Route path="*" element={<NotFound />} />
-      </Route>
+      <Route path="/" element={<Home />} />
+      <Route path="/my-agents" element={<MyAgents />} />
+      <Route path="/workspace" element={<Workspace />} />
     </Routes>
   );
 }

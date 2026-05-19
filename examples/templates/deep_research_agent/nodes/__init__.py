@@ -1,6 +1,6 @@
 """Node definitions for Deep Research Agent."""
 
-from framework.orchestrator import NodeSpec
+from framework.graph import NodeSpec
 
 # Node 1: Intake (client-facing)
 # Brief conversation to clarify what the user wants researched.

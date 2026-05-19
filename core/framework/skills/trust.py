@@ -20,7 +20,6 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
-from framework.config import HIVE_HOME
 from framework.skills.parser import ParsedSkill
 
 logger = logging.getLogger(__name__)
@@ -31,11 +30,8 @@ _ENV_TRUST_ALL = "HIVE_TRUST_PROJECT_SKILLS"
 # Env var for comma-separated own-remote glob patterns (e.g. "github.com/myorg/*").
 _ENV_OWN_REMOTES = "HIVE_OWN_REMOTES"
 
-# Persisted store of trusted git remotes (one-shot consent per repo).
-_TRUSTED_REPOS_PATH = HIVE_HOME / "trusted_repos.json"
-
-# Sentinel for the one-time security notice (NFR-5).
-_NOTICE_SENTINEL_PATH = HIVE_HOME / ".skill_trust_notice_shown"
+_TRUSTED_REPOS_PATH = Path.home() / ".hive" / "trusted_repos.json"
+_NOTICE_SENTINEL_PATH = Path.home() / ".hive" / ".skill_trust_notice_shown"
 
 
 # ---------------------------------------------------------------------------
@@ -228,9 +224,7 @@ class ProjectTrustDetector:
             patterns.extend(p.strip() for p in raw.split(",") if p.strip())
 
         # From ~/.hive/own_remotes file
-        from framework.config import HIVE_HOME
-
-        own_remotes_file = HIVE_HOME / "own_remotes"
+        own_remotes_file = Path.home() / ".hive" / "own_remotes"
         if own_remotes_file.is_file():
             try:
                 for line in own_remotes_file.read_text(encoding="utf-8").splitlines():
@@ -324,19 +318,13 @@ class TrustGate:
     ) -> list[ParsedSkill]:
         """Return the subset of skills that are trusted for loading.
 
-        - Framework, user, queen_ui, and colony_ui scopes: always included.
-          (UI-created skills are authenticated by the user creating them
-          through the authenticated UI — they do not go through the
-          trusted_repos.json flow.)
+        - Framework and user-scope skills: always included.
         - Project-scope skills: classified; consent prompt shown if untrusted.
         """
         import os
 
-        # UI-authored scopes bypass the trust gate — they're implicitly
-        # trusted because the user authored them through the UI. ``preset``
-        # ships with the framework distribution, so it's trusted too.
-        _bypass_scopes = {"framework", "preset", "user", "queen_ui", "colony_ui"}
-        always_trusted = [s for s in skills if s.source_scope in _bypass_scopes]
+        # Separate project skills from always-trusted scopes
+        always_trusted = [s for s in skills if s.source_scope != "project"]
         project_skills = [s for s in skills if s.source_scope == "project"]
 
         if not project_skills:
@@ -421,12 +409,12 @@ class TrustGate:
 
     def _maybe_show_security_notice(self, Colors) -> None:  # noqa: N803
         """Show the one-time security notice if not already shown (NFR-5)."""
-        sentinel = _NOTICE_SENTINEL_PATH
-        if sentinel.exists():
+        if _NOTICE_SENTINEL_PATH.exists():
             return
         self._print("")
         self._print(
-            f"{Colors.YELLOW}Security notice:{Colors.NC} Skills inject instructions into the agent's system prompt."
+            f"{Colors.YELLOW}Security notice:{Colors.NC} Skills inject instructions "
+            "into the agent's system prompt."
         )
         self._print(
             "  Only load skills from sources you trust. "
@@ -434,8 +422,8 @@ class TrustGate:
         )
         self._print("")
         try:
-            sentinel.parent.mkdir(parents=True, exist_ok=True)
-            sentinel.touch()
+            _NOTICE_SENTINEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _NOTICE_SENTINEL_PATH.touch()
         except OSError:
             pass
 
@@ -453,7 +441,10 @@ class TrustGate:
         p(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
         p("")
         proj_label = str(project_dir) if project_dir else "this project"
-        p(f"  The project at {Colors.CYAN}{proj_label}{Colors.NC} wants to load {len(project_skills)} skill(s)")
+        p(
+            f"  The project at {Colors.CYAN}{proj_label}{Colors.NC} wants to load "
+            f"{len(project_skills)} skill(s)"
+        )
         p("  that will inject instructions into the agent's system prompt.")
         if repo_key:
             p(f"  Source: {Colors.BOLD}{repo_key}{Colors.NC}")
@@ -467,7 +458,10 @@ class TrustGate:
         p("  Options:")
         p(f"    {Colors.CYAN}1){Colors.NC} Trust this session only")
         p(f"    {Colors.CYAN}2){Colors.NC} Trust permanently  — remember for future runs")
-        p(f"    {Colors.DIM}3) Deny              — skip all project-scope skills from this repo{Colors.NC}")
+        p(
+            f"    {Colors.DIM}3) Deny"
+            f"              — skip all project-scope skills from this repo{Colors.NC}"
+        )
         p(f"{Colors.YELLOW}{'─' * 60}{Colors.NC}")
 
     def _prompt_consent(self, Colors) -> str:  # noqa: N803

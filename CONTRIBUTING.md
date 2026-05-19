@@ -4,7 +4,7 @@
 
 Welcome to Aden Hive, an open-source AI agent framework built for developers who demand production-grade reliability, cross-platform support, and real-world performance. This guide will help you contribute effectively, whether you're fixing bugs, adding features, improving documentation, or building new tools.
 
-Thank you for your interest in contributing! We're especially looking for help building tools, integrations ([check #2805](https://github.com/aden-hive/hive/issues/2805)), and example agents for the framework.
+Thank you for your interest in contributing! We're especially looking for help building tools, integrations ([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework.
 
 ---
 
@@ -258,6 +258,28 @@ uv run pytest
 **ruff** — Fast Python linter and formatter (replaces black, isort, flake8)
 
 ```bash
+sudo apt install make
+```
+
+### `uv: command not found`
+Install uv using:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+```
+
+### `ruff: not found`
+If linting fails due to a missing ruff command, install it with:
+
+```bash
+uv tool install ruff
+```
+
+### WSL Path Recommendation
+When using WSL, it is recommended to clone the repository inside your Linux home directory (e.g., `~/hive`) instead of under `/mnt/c/...` to avoid potential performance and permission issues.
+
+
 # Format code
 uv run ruff format .
 
@@ -333,22 +355,6 @@ make test-live     # Run live API integration tests (requires credentials)
 - **WebSocket** for real-time updates
 - **Tailwind CSS** for styling
 
-### Frontend Dev Workflow
-
-> **Note:** `./quickstart.sh` handles the full setup including the web UI.
-> The commands below are for contributors iterating on the frontend code after
-> initial setup is complete.
-
-```bash
-# Start the backend server
-hive serve
-
-# In a separate terminal, run the frontend dev server with hot-reload
-cd core/frontend
-npm install   # only needed after dependency changes
-npm run dev
-```
-
 ### Useful Development Commands
 
 ```bash
@@ -406,8 +412,6 @@ Aden Hive supports **100+ LLM providers** via LiteLLM, giving users maximum flex
 |----------|--------|-------|
 | **Anthropic** | Claude 3.5 Sonnet, Haiku, Opus | Default provider, best for reasoning |
 | **OpenAI** | GPT-4, GPT-4 Turbo, GPT-4o | Function calling, vision |
-| **OpenRouter** | Any OpenRouter catalog model | Uses `OPENROUTER_API_KEY` and `https://openrouter.ai/api/v1` |
-| **Hive LLM** | `queen`, `kimi-k2.5`, `GLM-5` | Uses `HIVE_API_KEY` and the Hive-managed endpoint |
 | **Google** | Gemini 1.5 Pro, Flash | Long context windows |
 | **DeepSeek** | DeepSeek V3 | Cost-effective, strong reasoning |
 | **Mistral** | Mistral Large, Medium, Small | Open weights, EU hosting |
@@ -433,10 +437,6 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 - **Cost**: DeepSeek or Gemini Flash (budget-conscious)
 - **Privacy**: Ollama with local models (no data leaves server)
 
-**Provider-Specific Notes**
-- **OpenRouter**: store `provider` as `openrouter`, use the raw OpenRouter model ID in `model` (for example `x-ai/grok-4.20-beta`), and use `OPENROUTER_API_KEY`
-- **Hive LLM**: store `provider` as `hive`, use Hive model names such as `queen`, `kimi-k2.5`, or `GLM-5`, and use `HIVE_API_KEY`
-
 **For Development**
 - Use cheaper/faster models (Haiku, GPT-4o-mini)
 - Test with multiple providers to catch provider-specific issues
@@ -448,7 +448,7 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 2. **Add credential handling** in `core/framework/credentials/`
 3. **Add provider-specific configuration** in `core/framework/llm/`
 4. **Write tests** in `core/tests/test_llm_provider.py`
-5. **Update documentation** in `README.md`, `docs/configuration.md`, and any setup guides that mention provider configuration
+5. **Update documentation** in `docs/llm_providers.md`
 
 **Example: Testing LLM Integration**
 
@@ -618,6 +618,11 @@ class RuntimeLogger:
 from litellm import completion_cost
 cost = completion_cost(model="claude-3-5-sonnet-20241022", messages=[...])
 ```
+
+**Monitoring Dashboard** (`/core/framework/monitoring/`)
+- WebSocket-based real-time monitoring
+- Displays: active agents, tool calls, token usage, errors
+- Access at: `http://localhost:8000/monitor`
 
 ### How to Add Performance Metrics
 
@@ -959,7 +964,7 @@ uv run pytest -m "not live"
 **Unit Test**
 ```python
 import pytest
-from framework.orchestrator import NodeSpec as Node
+from framework.graph.node import Node
 
 def test_node_creation():
     node = Node(id="test", name="Test Node", node_type="event_loop")
@@ -977,8 +982,8 @@ async def test_node_execution():
 **Integration Test**
 ```python
 import pytest
-from framework.orchestrator.orchestrator import Orchestrator as GraphExecutor
-from framework.orchestrator import NodeSpec as Node
+from framework.graph.executor import GraphExecutor
+from framework.graph.node import Node
 
 @pytest.mark.asyncio
 async def test_graph_execution_with_multiple_nodes():
@@ -1187,5 +1192,7 @@ As Anders Hejlsberg (TypeScript) says: *"Make it work, make it right, make it fa
 ---
 
 **Thank you for contributing to Aden Hive.** Together, we're building the most reliable, performant, and developer-friendly AI agent framework in the world.
+
+Thank you for contributing!
 
 Now go build something amazing. 🚀

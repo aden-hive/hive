@@ -150,7 +150,9 @@ class TestGitlabGetIssue:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(issue)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(issue)
+            ),
         ):
             result = tool_fns["gitlab_get_issue"](project_id="1", issue_iid=1)
 
@@ -205,7 +207,9 @@ class TestGitlabListMergeRequests:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(mrs)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(mrs)
+            ),
         ):
             result = tool_fns["gitlab_list_merge_requests"](project_id="1")
 

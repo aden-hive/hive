@@ -119,11 +119,12 @@ def classify_flowchart_node(
         return FLOWCHART_REMAP[explicit]
 
     node_id = node["id"]
+    node_type = node.get("node_type", "event_loop")
     node_tools = set(node.get("tools") or [])
     desc = (node.get("description") or "").lower()
 
     # GCU / browser automation nodes → hexagon
-    if False:  # gcu removed
+    if node_type == "gcu":
         return "browser"
 
     # Entry node (first node or no incoming edges) → start terminator
@@ -152,6 +153,8 @@ def classify_flowchart_node(
         "sql_query",
         "read_table",
         "write_table",
+        "save_data",
+        "load_data",
     }
     db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
     if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
@@ -215,7 +218,9 @@ def synthesize_draft_from_runtime(
                 "id": f"edge-{i}",
                 "source": re.source,
                 "target": re.target,
-                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
+                "condition": str(re.condition.value)
+                if hasattr(re.condition, "value")
+                else str(re.condition),
                 "description": getattr(re, "description", "") or "",
                 "label": "",
             }
@@ -313,7 +318,8 @@ def synthesize_draft_from_runtime(
         "entry_node": nodes[0]["id"] if nodes else "",
         "terminal_nodes": sorted(terminal_ids),
         "flowchart_legend": {
-            fc_type: {"shape": meta["shape"], "color": meta["color"]} for fc_type, meta in FLOWCHART_TYPES.items()
+            fc_type: {"shape": meta["shape"], "color": meta["color"]}
+            for fc_type, meta in FLOWCHART_TYPES.items()
         },
     }
 

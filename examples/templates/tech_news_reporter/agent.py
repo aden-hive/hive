@@ -1,12 +1,12 @@
 """Agent graph construction for Tech & AI News Reporter."""
 
-from framework.orchestrator import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.orchestrator.edge import GraphSpec
-from framework.orchestrator.orchestrator import ExecutionResult, Orchestrator
-from framework.host.event_bus import EventBus
-from framework.tracker.decision_tracker import DecisionTracker as Runtime
+from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.graph.edge import GraphSpec
+from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.event_bus import EventBus
+from framework.runtime.core import Runtime
 from framework.llm import LiteLLMProvider
-from framework.loader.tool_registry import ToolRegistry
+from framework.runner.tool_registry import ToolRegistry
 
 from .config import default_config, metadata
 from .nodes import (
@@ -131,7 +131,7 @@ class TechNewsReporterAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: Orchestrator | None = None
+        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
         self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -157,7 +157,7 @@ class TechNewsReporterAgent:
             },
         )
 
-    def _setup(self) -> Orchestrator:
+    def _setup(self) -> GraphExecutor:
         """Set up the executor with all components."""
         from pathlib import Path
 
@@ -183,7 +183,7 @@ class TechNewsReporterAgent:
         self._graph = self._build_graph()
         runtime = Runtime(storage_path)
 
-        self._executor = Orchestrator(
+        self._executor = GraphExecutor(
             runtime=runtime,
             llm=llm,
             tools=tools,
@@ -229,7 +229,9 @@ class TechNewsReporterAgent:
         """Run the agent (convenience method for single execution)."""
         await self.start()
         try:
-            result = await self.trigger_and_wait("start", context, session_state=session_state)
+            result = await self.trigger_and_wait(
+                "start", context, session_state=session_state
+            )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -274,7 +276,9 @@ class TechNewsReporterAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
+                errors.append(
+                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
+                )
 
         return {
             "valid": len(errors) == 0,

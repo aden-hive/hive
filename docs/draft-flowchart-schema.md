@@ -127,12 +127,12 @@ decisions                 │                        │
     "input_keys": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Expected input buffer keys"
+      "description": "Expected input memory keys"
     },
     "output_keys": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Expected output buffer keys"
+      "description": "Expected output memory keys"
     },
     "success_criteria": {
       "type": "string",

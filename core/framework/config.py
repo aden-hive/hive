@@ -12,47 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MAX_TOKENS = 8192
-
-# ---------------------------------------------------------------------------
-# Hive home directory structure
-# ---------------------------------------------------------------------------
-
-HIVE_HOME = Path.home() / ".hive"
-QUEENS_DIR = HIVE_HOME / "agents" / "queens"
-COLONIES_DIR = HIVE_HOME / "colonies"
-MEMORIES_DIR = HIVE_HOME / "memories"
-
-
-def queen_dir(queen_name: str = "default") -> Path:
-    """Return the storage directory for a named queen agent."""
-    return QUEENS_DIR / queen_name
-
-
-def colony_dir(colony_name: str) -> Path:
-    """Return the directory for a named colony."""
-    return COLONIES_DIR / colony_name
-
-
-def memory_dir(scope: str, name: str | None = None) -> Path:
-    """Return memory dir for a scope.
-
-    Examples::
-
-        memory_dir("global")                  -> ~/.hive/memories/global
-        memory_dir("colonies", "my_agent")    -> ~/.hive/memories/colonies/my_agent
-        memory_dir("agents/queens", "default")-> ~/.hive/memories/agents/queens/default
-        memory_dir("agents", "worker_name")   -> ~/.hive/memories/agents/worker_name
-    """
-    base = MEMORIES_DIR / scope
-    return base / name if name else base
-
+from framework.graph.edge import DEFAULT_MAX_TOKENS
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
 # ---------------------------------------------------------------------------
 
-HIVE_CONFIG_FILE = HIVE_HOME / "configuration.json"
+HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 
 # Hive LLM router endpoint (Anthropic-compatible).
 # litellm's Anthropic handler appends /v1/messages, so this is just the base host.
@@ -74,48 +40,6 @@ def get_hive_config() -> dict[str, Any]:
             e,
         )
         return {}
-
-
-# ---------------------------------------------------------------------------
-# Credential store helpers (for BYOK keys)
-# ---------------------------------------------------------------------------
-
-# Provider name → credential store ID mapping
-_PROVIDER_CRED_MAP: dict[str, str] = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "gemini": "gemini",
-    "google": "gemini",
-    "minimax": "minimax",
-    "groq": "groq",
-    "cerebras": "cerebras",
-    "openrouter": "openrouter",
-    "mistral": "mistral",
-    "together": "together",
-    "together_ai": "together",
-    "deepseek": "deepseek",
-    "kimi": "kimi",
-    "hive": "hive",
-}
-
-
-def _get_api_key_from_credential_store(provider: str) -> str | None:
-    """Look up a BYOK API key from the encrypted credential store.
-
-    Returns None if no key is found or the credential store is unavailable.
-    """
-    if not os.environ.get("HIVE_CREDENTIAL_KEY"):
-        return None
-    cred_id = _PROVIDER_CRED_MAP.get(provider.lower())
-    if not cred_id:
-        return None
-    try:
-        from framework.credentials import CredentialStore
-
-        store = CredentialStore.with_encrypted_storage()
-        return store.get(cred_id)
-    except Exception:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -155,58 +79,6 @@ def get_preferred_worker_model() -> str | None:
     return None
 
 
-def get_vision_fallback_model() -> str | None:
-    """Return the configured vision-fallback model, or None if not configured.
-
-    Reads from the ``vision_fallback`` section of ~/.hive/configuration.json.
-    Used by the agent-loop hook that captions tool-result images when the
-    main agent's model cannot accept image content (text-only LLMs).
-
-    When this returns None the captioning chain's configured + retry
-    attempts both no-op (returning None), and only the final
-    ``gemini/gemini-3-flash-preview`` override has a chance to succeed
-    — and only if a ``GEMINI_API_KEY`` is set in the environment.
-    """
-    vision = get_hive_config().get("vision_fallback", {})
-    if vision.get("provider") and vision.get("model"):
-        provider = str(vision["provider"])
-        model = str(vision["model"]).strip()
-        if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
-            model = model[len("openrouter/") :]
-        if model:
-            return f"{provider}/{model}"
-    return None
-
-
-def get_vision_fallback_api_key() -> str | None:
-    """Return the API key for the vision-fallback model.
-
-    Resolution order: ``vision_fallback.api_key_env_var`` from the env,
-    then the default ``get_api_key()``. No subscription-token branches —
-    vision fallback is intended for hosted vision models (Anthropic,
-    OpenAI, Google), not for the subscription-bearer providers.
-    """
-    vision = get_hive_config().get("vision_fallback", {})
-    if not vision:
-        return get_api_key()
-    api_key_env_var = vision.get("api_key_env_var")
-    if api_key_env_var:
-        return os.environ.get(api_key_env_var)
-    return get_api_key()
-
-
-def get_vision_fallback_api_base() -> str | None:
-    """Return the api_base for the vision-fallback model, or None."""
-    vision = get_hive_config().get("vision_fallback", {})
-    if not vision:
-        return None
-    if vision.get("api_base"):
-        return vision["api_base"]
-    if str(vision.get("provider", "")).lower() == "openrouter":
-        return OPENROUTER_API_BASE
-    return None
-
-
 def get_worker_api_key() -> str | None:
     """Return the API key for the worker LLM, falling back to the default key."""
     worker_llm = get_hive_config().get("worker_llm", {})
@@ -216,7 +88,7 @@ def get_worker_api_key() -> str | None:
     # Worker-specific subscription / env var
     if worker_llm.get("use_claude_code_subscription"):
         try:
-            from framework.loader.agent_loader import get_claude_code_token
+            from framework.runner.runner import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -226,7 +98,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_codex_subscription"):
         try:
-            from framework.loader.agent_loader import get_codex_token
+            from framework.runner.runner import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -236,19 +108,9 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_kimi_code_subscription"):
         try:
-            from framework.loader.agent_loader import get_kimi_code_token
+            from framework.runner.runner import get_kimi_code_token
 
             token = get_kimi_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
-
-    if worker_llm.get("use_antigravity_subscription"):
-        try:
-            from framework.loader.agent_loader import get_antigravity_token
-
-            token = get_antigravity_token()
             if token:
                 return token
         except ImportError:
@@ -272,9 +134,6 @@ def get_worker_api_base() -> str | None:
         return "https://chatgpt.com/backend-api/codex"
     if worker_llm.get("use_kimi_code_subscription"):
         return "https://api.kimi.com/coding"
-    if worker_llm.get("use_antigravity_subscription"):
-        # Antigravity uses AntigravityProvider directly — no api_base needed.
-        return None
     if worker_llm.get("api_base"):
         return worker_llm["api_base"]
     if str(worker_llm.get("provider", "")).lower() == "openrouter":
@@ -302,7 +161,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.loader.agent_loader import get_codex_account_id
+                from framework.runner.runner import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:
@@ -314,8 +173,6 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
-    if worker_llm.get("provider") == "ollama":
-        return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
 
@@ -349,43 +206,22 @@ def get_max_context_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
 
 
-def get_api_keys() -> list[str] | None:
-    """Return a list of API keys if ``api_keys`` is configured, else ``None``.
-
-    This supports key-pool rotation: configure multiple keys in
-    ``~/.hive/configuration.json`` under ``llm.api_keys`` and the
-    :class:`~framework.llm.key_pool.KeyPool` will rotate through them.
-    """
-    llm = get_hive_config().get("llm", {})
-    keys = llm.get("api_keys")
-    if keys and isinstance(keys, list) and len(keys) > 0:
-        return [k for k in keys if k]  # filter empties
-    return None
-
-
 def get_api_key() -> str | None:
     """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
     Priority:
-    0. Explicit key pool (``api_keys`` list) -- returns first key for
-       single-key callers; full pool available via :func:`get_api_keys`.
     1. Claude Code subscription (``use_claude_code_subscription: true``)
        reads the OAuth token from ``~/.claude/.credentials.json``.
     2. Codex subscription (``use_codex_subscription: true``)
        reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
     3. Environment variable named in ``api_key_env_var``.
     """
-    # If an explicit key pool is configured, use the first key.
-    pool_keys = get_api_keys()
-    if pool_keys:
-        return pool_keys[0]
-
     llm = get_hive_config().get("llm", {})
 
     # Claude Code subscription: read OAuth token directly
     if llm.get("use_claude_code_subscription"):
         try:
-            from framework.loader.agent_loader import get_claude_code_token
+            from framework.runner.runner import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -396,7 +232,7 @@ def get_api_key() -> str | None:
     # Codex subscription: read OAuth token from Keychain / auth.json
     if llm.get("use_codex_subscription"):
         try:
-            from framework.loader.agent_loader import get_codex_token
+            from framework.runner.runner import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -407,20 +243,9 @@ def get_api_key() -> str | None:
     # Kimi Code subscription: read API key from ~/.kimi/config.toml
     if llm.get("use_kimi_code_subscription"):
         try:
-            from framework.loader.agent_loader import get_kimi_code_token
+            from framework.runner.runner import get_kimi_code_token
 
             token = get_kimi_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
-
-    # Antigravity subscription: read OAuth token from accounts JSON
-    if llm.get("use_antigravity_subscription"):
-        try:
-            from framework.loader.agent_loader import get_antigravity_token
-
-            token = get_antigravity_token()
             if token:
                 return token
         except ImportError:
@@ -429,90 +254,8 @@ def get_api_key() -> str | None:
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
-        key = os.environ.get(api_key_env_var)
-        if key:
-            return key
-
-    # Credential store fallback — BYOK keys stored via the UI
-    return _get_api_key_from_credential_store(llm.get("provider", ""))
-
-
-# OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
-# This project reverse-engineered and published the public OAuth credentials
-# for Google's Antigravity/Cloud Code Assist API.
-# Source: https://github.com/NoeFabris/opencode-antigravity-auth
-_ANTIGRAVITY_CREDENTIALS_URL = (
-    "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
-)
-_antigravity_credentials_cache: tuple[str | None, str | None] = (None, None)
-
-
-def _fetch_antigravity_credentials() -> tuple[str | None, str | None]:
-    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
-    global _antigravity_credentials_cache
-    if _antigravity_credentials_cache[0] and _antigravity_credentials_cache[1]:
-        return _antigravity_credentials_cache
-
-    import re
-    import urllib.request
-
-    try:
-        req = urllib.request.Request(_ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            content = resp.read().decode("utf-8")
-            id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
-            secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
-            client_id = id_match.group(1) if id_match else None
-            client_secret = secret_match.group(1) if secret_match else None
-            if client_id and client_secret:
-                _antigravity_credentials_cache = (client_id, client_secret)
-            return client_id, client_secret
-    except Exception as e:
-        logger.debug("Failed to fetch Antigravity credentials from public source: %s", e)
-    return None, None
-
-
-def get_antigravity_client_id() -> str:
-    """Return the Antigravity OAuth application client ID.
-
-    Checked in order:
-    1. ``ANTIGRAVITY_CLIENT_ID`` environment variable
-    2. ``llm.antigravity_client_id`` in ~/.hive/configuration.json
-    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
-    """
-    env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
-    if env:
-        return env
-    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_id")
-    if cfg_val:
-        return cfg_val
-    # Fetch from public source
-    client_id, _ = _fetch_antigravity_credentials()
-    if client_id:
-        return client_id
-    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
-
-
-def get_antigravity_client_secret() -> str | None:
-    """Return the Antigravity OAuth client secret.
-
-    Checked in order:
-    1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
-    2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
-    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
-
-    Returns None when not found — token refresh will be skipped and
-    the caller must use whatever access token is already available.
-    """
-    env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
-    if env:
-        return env
-    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
-    if cfg_val:
-        return cfg_val
-    # Fetch from public source
-    _, secret = _fetch_antigravity_credentials()
-    return secret
+        return os.environ.get(api_key_env_var)
+    return None
 
 
 def get_gcu_enabled() -> bool:
@@ -537,9 +280,6 @@ def get_api_base() -> str | None:
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
-    if llm.get("use_antigravity_subscription"):
-        # Antigravity uses AntigravityProvider directly — no api_base needed.
-        return None
     if llm.get("api_base"):
         return llm["api_base"]
     if str(llm.get("provider", "")).lower() == "openrouter":
@@ -573,7 +313,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.loader.agent_loader import get_codex_account_id
+                from framework.runner.runner import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:
@@ -585,11 +325,6 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
-    if llm.get("provider") == "ollama":
-        # Pass num_ctx to Ollama so it doesn't silently truncate the ~9.5k Queen prompt.
-        # Ollama's default num_ctx is only 2048. We set it to 16384 here so LiteLLM
-        # passes it through as a provider-specific option.
-        return {"num_ctx": llm.get("num_ctx", 16384)}
     return {}
 
 

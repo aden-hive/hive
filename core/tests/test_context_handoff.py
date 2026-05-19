@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-from framework.agent_loop.conversation import NodeConversation
+from framework.graph.context_handoff import ContextHandoff, HandoffContext
+from framework.graph.conversation import NodeConversation
 from framework.llm.mock import MockLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse
-from framework.orchestrator.context_handoff import ContextHandoff, HandoffContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,8 +32,6 @@ class SpyLLMProvider(MockLLMProvider):
 
 class FailingLLMProvider(LLMProvider):
     """LLM provider that always raises."""
-
-    model: str = "mock"
 
     def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         raise RuntimeError("LLM unavailable")

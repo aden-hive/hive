@@ -16,14 +16,9 @@ import os
 import stat
 from pathlib import Path
 
-# Resolved once at module import. ``framework.config.HIVE_HOME`` reads
-# the desktop's ``HIVE_HOME`` env var at its own import time, so the
-# runtime always sees the per-user root before this constant is computed.
-from framework.config import HIVE_HOME as _HIVE_HOME
-
 logger = logging.getLogger(__name__)
 
-CREDENTIAL_KEY_PATH = _HIVE_HOME / "secrets" / "credential_key"
+CREDENTIAL_KEY_PATH = Path.home() / ".hive" / "secrets" / "credential_key"
 CREDENTIAL_KEY_ENV_VAR = "HIVE_CREDENTIAL_KEY"
 ADEN_CREDENTIAL_ID = "aden_api_key"
 ADEN_ENV_VAR = "ADEN_API_KEY"

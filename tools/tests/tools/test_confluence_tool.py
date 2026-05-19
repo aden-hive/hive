@@ -44,7 +44,9 @@ class TestConfluenceListSpaces:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_list_spaces"]()
 
@@ -71,7 +73,9 @@ class TestConfluenceListPages:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_list_pages"](space_id="123")
 
@@ -100,7 +104,9 @@ class TestConfluenceGetPage:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_get_page"](page_id="page-1")
 
@@ -126,7 +132,9 @@ class TestConfluenceCreatePage:
                 return_value=mock_resp,
             ),
         ):
-            result = tool_fns["confluence_create_page"](space_id="123", title="New Page", body="<p>Content</p>")
+            result = tool_fns["confluence_create_page"](
+                space_id="123", title="New Page", body="<p>Content</p>"
+            )
 
         assert result["status"] == "created"
 
@@ -153,7 +161,9 @@ class TestConfluenceSearch:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_search"](query="deployment")
 

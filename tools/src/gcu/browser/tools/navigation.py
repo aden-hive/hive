@@ -1,23 +1,14 @@
 """
 Browser navigation tools - navigate, go_back, go_forward, reload.
-
-All operations go through the Beeline extension via CDP.
 """
 
-from __future__ import annotations
-
-import logging
-import time
-from typing import Literal
-
 from fastmcp import FastMCP
+from playwright.async_api import (
+    Error as PlaywrightError,
+    TimeoutError as PlaywrightTimeout,
+)
 
-from ..bridge import get_bridge
-from ..telemetry import log_tool_call
-from .lifecycle import _ensure_context
-from .tabs import _get_context
-
-logger = logging.getLogger(__name__)
+from ..session import DEFAULT_NAVIGATION_TIMEOUT_MS, get_session
 
 
 def register_navigation_tools(mcp: FastMCP) -> None:
@@ -26,234 +17,117 @@ def register_navigation_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_navigate(
         url: str,
-        tab_id: int | None = None,
-        profile: str | None = None,
-        wait_until: Literal["commit", "domcontentloaded", "load", "networkidle"] = "load",
+        target_id: str | None = None,
+        profile: str = "default",
+        wait_until: str = "domcontentloaded",
     ) -> dict:
         """
-        Navigate a tab to a URL.
+        Navigate the current tab to a URL.
 
-        Lazy-creates a browser context if none exists; when no ``tab_id``
-        is given and the context was just created, navigation lands on
-        the seed tab. Prefer ``browser_open`` when you specifically want
-        a new tab — ``browser_navigate`` is for redirecting an existing tab.
-
-        Waits for the page to reach the ``wait_until`` condition before
-        returning.
+        This tool already waits for the page to reach the ``wait_until``
+        condition (default: ``domcontentloaded``) before returning.
+        You do NOT need to call ``browser_wait`` afterward.
 
         Args:
             url: URL to navigate to
-            tab_id: Chrome tab ID (default: active tab)
+            target_id: Tab ID to navigate (default: active tab)
             profile: Browser profile name (default: "default")
-            wait_until: Wait condition - one of: commit, domcontentloaded,
-                load (default), networkidle
+            wait_until: Wait condition (domcontentloaded, load, networkidle)
 
         Returns:
             Dict with navigation result (url, title)
         """
-        start = time.perf_counter()
-        params = {"url": url, "tab_id": tab_id, "profile": profile, "wait_until": wait_until}
-
-        bridge = get_bridge()
-        if not bridge or not bridge.is_connected:
-            result = {"ok": False, "error": "Browser extension not connected"}
-            log_tool_call("browser_navigate", params, result=result)
-            return result
-
         try:
-            _, ctx, _ = await _ensure_context(bridge, profile)
-        except Exception as e:
-            result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_navigate",
-                params,
-                error=e,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return result
+            session = get_session(profile)
+            page = session.get_page(target_id)
+            if not page:
+                return {"ok": False, "error": "No active tab"}
 
-        target_tab = tab_id or ctx.get("activeTabId")
-        if target_tab is None:
-            result = {"ok": False, "error": "No active tab. Open a tab first with browser_open."}
-            log_tool_call("browser_navigate", params, result=result)
-            return result
-
-        try:
-            nav_result = await bridge.navigate(target_tab, url, wait_until=wait_until)
-            result = {
+            await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+            return {
                 "ok": True,
-                "tabId": target_tab,
-                "url": nav_result.get("url"),
-                "title": nav_result.get("title"),
+                "url": page.url,
+                "title": await page.title(),
             }
-            log_tool_call(
-                "browser_navigate",
-                params,
-                result=result,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return result
-        except Exception as e:
-            result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_navigate",
-                params,
-                error=e,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return result
+        except PlaywrightTimeout:
+            return {"ok": False, "error": "Navigation timed out"}
+        except PlaywrightError as e:
+            return {"ok": False, "error": f"Browser error: {e!s}"}
 
     @mcp.tool()
     async def browser_go_back(
-        tab_id: int | None = None,
-        profile: str | None = None,
+        target_id: str | None = None,
+        profile: str = "default",
     ) -> dict:
         """
         Navigate back in browser history.
 
         Args:
-            tab_id: Chrome tab ID (default: active tab)
+            target_id: Tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with navigation result
         """
-        start = time.perf_counter()
-        params = {"tab_id": tab_id, "profile": profile}
-
-        bridge = get_bridge()
-        if not bridge or not bridge.is_connected:
-            result = {"ok": False, "error": "Browser extension not connected"}
-            log_tool_call("browser_go_back", params, result=result)
-            return result
-
-        ctx = _get_context(profile)
-        if not ctx:
-            result = {"ok": False, "error": "Browser not started. Call browser_open(url) first to open a tab."}
-            log_tool_call("browser_go_back", params, result=result)
-            return result
-
-        target_tab = tab_id or ctx.get("activeTabId")
-        if target_tab is None:
-            result = {"ok": False, "error": "No active tab"}
-            log_tool_call("browser_go_back", params, result=result)
-            return result
-
         try:
-            nav_result = await bridge.go_back(target_tab)
-            log_tool_call(
-                "browser_go_back",
-                params,
-                result=nav_result,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return nav_result
-        except Exception as e:
-            result = {"ok": False, "error": str(e)}
-            log_tool_call("browser_go_back", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
-            return result
+            session = get_session(profile)
+            page = session.get_page(target_id)
+            if not page:
+                return {"ok": False, "error": "No active tab"}
+
+            await page.go_back()
+            return {"ok": True, "action": "back", "url": page.url}
+        except PlaywrightError as e:
+            return {"ok": False, "error": f"Go back failed: {e!s}"}
 
     @mcp.tool()
     async def browser_go_forward(
-        tab_id: int | None = None,
-        profile: str | None = None,
+        target_id: str | None = None,
+        profile: str = "default",
     ) -> dict:
         """
         Navigate forward in browser history.
 
         Args:
-            tab_id: Chrome tab ID (default: active tab)
+            target_id: Tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with navigation result
         """
-        start = time.perf_counter()
-        params = {"tab_id": tab_id, "profile": profile}
-
-        bridge = get_bridge()
-        if not bridge or not bridge.is_connected:
-            result = {"ok": False, "error": "Browser extension not connected"}
-            log_tool_call("browser_go_forward", params, result=result)
-            return result
-
-        ctx = _get_context(profile)
-        if not ctx:
-            result = {"ok": False, "error": "Browser not started. Call browser_open(url) first to open a tab."}
-            log_tool_call("browser_go_forward", params, result=result)
-            return result
-
-        target_tab = tab_id or ctx.get("activeTabId")
-        if target_tab is None:
-            result = {"ok": False, "error": "No active tab"}
-            log_tool_call("browser_go_forward", params, result=result)
-            return result
-
         try:
-            nav_result = await bridge.go_forward(target_tab)
-            log_tool_call(
-                "browser_go_forward",
-                params,
-                result=nav_result,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return nav_result
-        except Exception as e:
-            result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_go_forward",
-                params,
-                error=e,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return result
+            session = get_session(profile)
+            page = session.get_page(target_id)
+            if not page:
+                return {"ok": False, "error": "No active tab"}
+
+            await page.go_forward()
+            return {"ok": True, "action": "forward", "url": page.url}
+        except PlaywrightError as e:
+            return {"ok": False, "error": f"Go forward failed: {e!s}"}
 
     @mcp.tool()
     async def browser_reload(
-        tab_id: int | None = None,
-        profile: str | None = None,
+        target_id: str | None = None,
+        profile: str = "default",
     ) -> dict:
         """
         Reload the current page.
 
         Args:
-            tab_id: Chrome tab ID (default: active tab)
+            target_id: Tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with reload result
         """
-        start = time.perf_counter()
-        params = {"tab_id": tab_id, "profile": profile}
-
-        bridge = get_bridge()
-        if not bridge or not bridge.is_connected:
-            result = {"ok": False, "error": "Browser extension not connected"}
-            log_tool_call("browser_reload", params, result=result)
-            return result
-
-        ctx = _get_context(profile)
-        if not ctx:
-            result = {"ok": False, "error": "Browser not started. Call browser_open(url) first to open a tab."}
-            log_tool_call("browser_reload", params, result=result)
-            return result
-
-        target_tab = tab_id or ctx.get("activeTabId")
-        if target_tab is None:
-            result = {"ok": False, "error": "No active tab"}
-            log_tool_call("browser_reload", params, result=result)
-            return result
-
         try:
-            nav_result = await bridge.reload(target_tab)
-            log_tool_call(
-                "browser_reload",
-                params,
-                result=nav_result,
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-            return nav_result
-        except Exception as e:
-            result = {"ok": False, "error": str(e)}
-            log_tool_call("browser_reload", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
-            return result
+            session = get_session(profile)
+            page = session.get_page(target_id)
+            if not page:
+                return {"ok": False, "error": "No active tab"}
+
+            await page.reload()
+            return {"ok": True, "action": "reload", "url": page.url}
+        except PlaywrightError as e:
+            return {"ok": False, "error": f"Reload failed: {e!s}"}

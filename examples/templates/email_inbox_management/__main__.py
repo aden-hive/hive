@@ -77,16 +77,18 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
+        click.echo(
+            "TUI requires the 'textual' package. Install with: pip install textual"
+        )
         sys.exit(1)
 
     from pathlib import Path
 
     from framework.llm import LiteLLMProvider
-    from framework.loader.tool_registry import ToolRegistry
-    from framework.host.agent_host import AgentHost
-    from framework.host.event_bus import EventBus
-    from framework.host.execution_manager import EntryPointSpec
+    from framework.runner.tool_registry import ToolRegistry
+    from framework.runtime.agent_runtime import create_agent_runtime
+    from framework.runtime.event_bus import EventBus
+    from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
         agent = InboxManagementAgent()
@@ -118,7 +120,7 @@ def tui(mock, verbose, debug):
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
-        runtime = AgentHost(
+        runtime = create_agent_runtime(
             graph=graph,
             goal=agent.goal,
             storage_path=storage_path,
@@ -200,7 +202,9 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                rules = await asyncio.get_event_loop().run_in_executor(None, input, "Rules> ")
+                rules = await asyncio.get_event_loop().run_in_executor(
+                    None, input, "Rules> "
+                )
                 if rules.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break
@@ -215,7 +219,9 @@ async def _interactive_shell(verbose=False):
 
                 click.echo("\nProcessing inbox...\n")
 
-                result = await agent.trigger_and_wait("start", {"rules": rules, "max_emails": max_emails})
+                result = await agent.trigger_and_wait(
+                    "start", {"rules": rules, "max_emails": max_emails}
+                )
 
                 if result is None:
                     click.echo("\n[Execution timed out]\n")

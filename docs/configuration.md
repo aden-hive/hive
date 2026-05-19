@@ -28,7 +28,7 @@ The `quickstart.sh` script creates this file during setup. It stores the default
 }
 ```
 
-The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.orchestrator.edge` and re-exported from `framework.orchestrator`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.graph.edge` and re-exported from `framework.graph`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
 
 ## Environment Variables
 
@@ -41,12 +41,6 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI (optional, for GPT models via LiteLLM)
 export OPENAI_API_KEY="sk-..."
 
-# OpenRouter (optional, for OpenRouter-hosted models)
-export OPENROUTER_API_KEY="..."
-
-# Hive LLM (optional, for Hive-managed models)
-export HIVE_API_KEY="..."
-
 # Cerebras (optional, used by output cleaner and some nodes)
 export CEREBRAS_API_KEY="..."
 
@@ -55,68 +49,6 @@ export GROQ_API_KEY="..."
 ```
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
-
-### Provider Examples
-
-Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
-
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "model": "deepseek-chat",
-    "max_tokens": 8192,
-    "api_key_env_var": "DEEPSEEK_API_KEY"
-  }
-}
-```
-
-Notes:
-
-- Set `provider` to `deepseek` (or `mistral`, `together`, `xai`, `perplexity`)
-- Use the standard model name in `model`, for example `deepseek-chat`
-- **No `api_base` is required** for these natively supported providers
-
-OpenRouter:
-
-```json
-{
-  "llm": {
-    "provider": "openrouter",
-    "model": "x-ai/grok-4.20-beta",
-    "max_tokens": 8192,
-    "api_key_env_var": "OPENROUTER_API_KEY",
-    "api_base": "https://openrouter.ai/api/v1"
-  }
-}
-```
-
-Notes:
-
-- Set `provider` to `openrouter`
-- Use the raw OpenRouter model ID in `model`, for example `x-ai/grok-4.20-beta`
-- `api_base` should be `https://openrouter.ai/api/v1`
-- If you paste a model that already starts with `openrouter/`, Hive tolerates and normalizes it
-
-Hive LLM:
-
-```json
-{
-  "llm": {
-    "provider": "hive",
-    "model": "queen",
-    "max_tokens": 32768,
-    "api_key_env_var": "HIVE_API_KEY",
-    "api_base": "https://api.adenhq.com"
-  }
-}
-```
-
-Notes:
-
-- Set `provider` to `hive`
-- Common Hive model values are `queen`, `kimi-k2.5`, and `GLM-5`
-- Hive LLM requests use the Hive endpoint at `https://api.adenhq.com`
 
 ### Search & Tools (optional)
 
@@ -137,7 +69,7 @@ export MOCK_MODE=1
 # Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
-# Custom agent storage path (default: ~/.hive/agents/{agent_name}/)
+# Custom agent storage path (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
 
@@ -149,10 +81,10 @@ Each agent package in `exports/` contains its own `config.py`:
 # exports/my_agent/config.py
 CONFIG = {
     "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
-    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.orchestrator
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
-    "storage_path": "~/.hive/agents/my_agent/",  # Runtime data location (default)
+    "storage_path": "/tmp/my_agent",       # Runtime data location
 }
 ```
 
@@ -184,9 +116,9 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 ```json
 {
   "mcpServers": {
-    "files-tools": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "files_server.py", "--stdio"],
+      "args": ["run", "coder_tools_server.py", "--stdio"],
       "cwd": "tools"
     },
     "tools": {
@@ -198,7 +130,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The `files-tools` server exposes file I/O (`read_file`, `write_file`, `edit_file`, `hashline_edit`, `search_files`). The `tools` MCP server exposes integration tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_and_build_agent` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 
@@ -259,16 +191,13 @@ cd core && uv pip install -e .
 Ensure the environment variable is set in your current shell session:
 
 ```bash
-echo $ANTHROPIC_API_KEY  # Or echo $OPENROUTER_API_KEY / echo $HIVE_API_KEY
+echo $ANTHROPIC_API_KEY  # Should print your key
 ```
 
 On Windows PowerShell:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
-# Or:
-$env:OPENROUTER_API_KEY = "your-openrouter-key"
-$env:HIVE_API_KEY = "your-hive-key"
 ```
 
 ### Agent not found

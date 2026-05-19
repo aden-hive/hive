@@ -114,9 +114,15 @@ class TestMissingCredentialsError:
 
         result = fn(**args)
 
-        assert isinstance(result, dict), f"Tool '{tool_name}' should return a dict, got {type(result)}"
-        assert "error" in result, f"Tool '{tool_name}' missing credentials should return {{'error': ...}}, got {result}"
-        assert "help" in result, f"Tool '{tool_name}' missing credentials should return {{'help': ...}}, got {result}"
+        assert isinstance(result, dict), (
+            f"Tool '{tool_name}' should return a dict, got {type(result)}"
+        )
+        assert "error" in result, (
+            f"Tool '{tool_name}' missing credentials should return {{'error': ...}}, got {result}"
+        )
+        assert "help" in result, (
+            f"Tool '{tool_name}' missing credentials should return {{'help': ...}}, got {result}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +149,11 @@ class TestMissingRequiredParams:
         fn = _register_and_get_fn(tool_name)
 
         sig = inspect.signature(fn)
-        required_params = [name for name, param in sig.parameters.items() if param.default is inspect.Parameter.empty]
+        required_params = [
+            name
+            for name, param in sig.parameters.items()
+            if param.default is inspect.Parameter.empty
+        ]
 
         if not required_params:
             pytest.skip(f"Tool '{tool_name}' has no required params")
@@ -153,7 +163,9 @@ class TestMissingRequiredParams:
             result = fn()
             # If it returns (doesn't raise), it should be an error dict
             if isinstance(result, dict):
-                assert "error" in result, f"Tool '{tool_name}' called with no args returned success: {result}"
+                assert "error" in result, (
+                    f"Tool '{tool_name}' called with no args returned success: {result}"
+                )
         except TypeError:
             # TypeError from missing positional args is acceptable
             pass

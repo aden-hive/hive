@@ -4,6 +4,8 @@ import type {
   InjectResult,
   ChatResult,
   StopResult,
+  ResumeResult,
+  ReplayResult,
   GoalProgress,
 } from "./types";
 
@@ -24,29 +26,23 @@ export const executionApi = {
     sessionId: string,
     nodeId: string,
     content: string,
-    colonyId?: string,
+    graphId?: string,
   ) =>
     api.post<InjectResult>(`/sessions/${sessionId}/inject`, {
       node_id: nodeId,
       content,
-      colony_id: colonyId,
+      graph_id: graphId,
     }),
 
-  chat: (
-    sessionId: string,
-    message: string,
-    images?: { type: string; image_url: { url: string } }[],
-    displayMessage?: string,
-  ) =>
-    api.post<ChatResult>(`/sessions/${sessionId}/chat`, {
-      message,
-      ...(images?.length ? { images } : {}),
-      ...(displayMessage !== undefined ? { display_message: displayMessage } : {}),
-    }),
+  chat: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
 
   /** Queue context for the queen without triggering an LLM response. */
   queenContext: (sessionId: string, message: string) =>
     api.post<ChatResult>(`/sessions/${sessionId}/queen-context`, { message }),
+
+  workerInput: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/worker-input`, { message }),
 
   stop: (sessionId: string, executionId: string) =>
     api.post<StopResult>(`/sessions/${sessionId}/stop`, {
@@ -61,41 +57,18 @@ export const executionApi = {
   cancelQueen: (sessionId: string) =>
     api.post<{ cancelled: boolean }>(`/sessions/${sessionId}/cancel-queen`),
 
-  goalProgress: (sessionId: string) =>
-    api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
-
-  colonySpawn: (sessionId: string, colonyName: string, task?: string) =>
-    api.post<{
-      colony_path: string;
-      colony_name: string;
-      queen_session_id: string;
-      is_new: boolean;
-    }>(
-      `/sessions/${sessionId}/colony-spawn`,
-      { colony_name: colonyName, task },
-    ),
-
-  /** Lock a queen DM session because the user opened a spawned colony.
-   *  After this call /chat returns 409 until compactAndFork creates a new session.
-   */
-  markColonySpawned: (sessionId: string, colonyName: string) =>
-    api.post<{
-      session_id: string;
-      colony_spawned: boolean;
-      spawned_colony_name: string;
-    }>(`/sessions/${sessionId}/mark-colony-spawned`, {
-      colony_name: colonyName,
+  resume: (sessionId: string, workerSessionId: string, checkpointId?: string) =>
+    api.post<ResumeResult>(`/sessions/${sessionId}/resume`, {
+      session_id: workerSessionId,
+      checkpoint_id: checkpointId,
     }),
 
-  /** Compact the locked session and fork into a fresh session under the same queen.
-   *  Returns the new session ID; the frontend should navigate the user to it.
-   */
-  compactAndFork: (sessionId: string) =>
-    api.post<{
-      new_session_id: string;
-      queen_id: string;
-      compacted_from: string;
-      summary_chars: number;
-      messages_compacted: number;
-    }>(`/sessions/${sessionId}/compact-and-fork`),
+  replay: (sessionId: string, workerSessionId: string, checkpointId: string) =>
+    api.post<ReplayResult>(`/sessions/${sessionId}/replay`, {
+      session_id: workerSessionId,
+      checkpoint_id: checkpointId,
+    }),
+
+  goalProgress: (sessionId: string) =>
+    api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
 };

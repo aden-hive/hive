@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from framework.skills.skill_errors import SkillErrorCode, log_skill_error
-
 logger = logging.getLogger(__name__)
 
 # Maximum name length before a warning is logged
@@ -37,10 +35,6 @@ class ParsedSkill:
     compatibility: list[str] | None = None
     metadata: dict[str, Any] | None = None
     allowed_tools: list[str] | None = None
-    # List of queen phases in which this skill appears in the catalog.
-    # None = visible in all phases. Example: ["planning", "building"]
-    # hides a framework-authoring skill from the INDEPENDENT/DM prompt.
-    visibility: list[str] | None = None
 
 
 def _try_fix_yaml(raw: str) -> str:
@@ -80,38 +74,17 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_ACTIVATION_FAILED,
-            what=f"Failed to read '{path}'",
-            why=str(exc),
-            fix="Check the file exists and has read permissions.",
-        )
+        logger.error("Failed to read %s: %s", path, exc)
         return None
 
     if not content.strip():
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_PARSE_ERROR,
-            what=f"Invalid SKILL.md at '{path}'",
-            why="The file exists but contains no content.",
-            fix="Add valid YAML frontmatter and a markdown body to the SKILL.md.",
-        )
+        logger.error("Empty SKILL.md: %s", path)
         return None
 
     # Split on --- delimiters (first two occurrences)
     parts = content.split("---", 2)
     if len(parts) < 3:
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_PARSE_ERROR,
-            what=f"Invalid SKILL.md at '{path}'",
-            why="Missing YAML frontmatter (---).",
-            fix="Wrap the frontmatter with --- on its own line at the top and bottom.",
-        )
+        logger.error("SKILL.md missing YAML frontmatter delimiters (---): %s", path)
         return None
 
     # parts[0] is content before first --- (should be empty or whitespace)
@@ -121,14 +94,7 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     body = parts[2].strip()
 
     if not raw_yaml:
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_PARSE_ERROR,
-            what=f"Invalid SKILL.md at '{path}'",
-            why="The --- delimiters are present but the YAML block is empty.",
-            fix="Add at least 'name' and 'description' fields to the frontmatter.",
-        )
+        logger.error("Empty YAML frontmatter in %s", path)
         return None
 
     # Parse YAML
@@ -142,47 +108,19 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         try:
             fixed = _try_fix_yaml(raw_yaml)
             frontmatter = yaml.safe_load(fixed)
-            log_skill_error(
-                logger,
-                "warning",
-                SkillErrorCode.SKILL_YAML_FIXUP,
-                what=f"Auto-fixed YAML in '{path}'",
-                why="Unquoted colon values detected in frontmatter.",
-                fix='Wrap values containing colons in quotes e.g. description: "Use for: research"',
-            )
+            logger.warning("Fixed YAML parse issues in %s (unquoted colons)", path)
         except yaml.YAMLError as exc:
-            log_skill_error(
-                logger,
-                "error",
-                SkillErrorCode.SKILL_PARSE_ERROR,
-                what=f"Invalid SKILL.md at '{path}'",
-                why=str(exc),
-                fix="Validate the YAML frontmatter at https://yaml-online-parser.appspot.com/",
-            )
+            logger.error("Unparseable YAML in %s: %s", path, exc)
             return None
 
     if not isinstance(frontmatter, dict):
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_PARSE_ERROR,
-            what=f"Invalid SKILL.md at '{path}'",
-            why="YAML frontmatter is not a key-value mapping.",
-            fix="Ensure the frontmatter is valid YAML with key: value pairs.",
-        )
+        logger.error("YAML frontmatter is not a mapping in %s", path)
         return None
 
     # Required: description
     description = frontmatter.get("description")
     if not description or not str(description).strip():
-        log_skill_error(
-            logger,
-            "error",
-            SkillErrorCode.SKILL_MISSING_DESCRIPTION,
-            what=f"Missing 'description' in '{path}'",
-            why="The 'description' field is required but is absent or empty.",
-            fix="Add a non-empty 'description' field to the YAML frontmatter.",
-        )
+        logger.error("Missing or empty 'description' in %s — skipping skill", path)
         return None
 
     # Required: name (fallback to parent directory name)
@@ -190,14 +128,7 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     parent_dir_name = path.parent.name
     if not name or not str(name).strip():
         name = parent_dir_name
-        log_skill_error(
-            logger,
-            "warning",
-            SkillErrorCode.SKILL_NAME_MISMATCH,
-            what=f"Missing 'name' in '{path}' — using directory name '{name}'",
-            why="The 'name' field is absent from the YAML frontmatter.",
-            fix=f"Add 'name: {name}' to the frontmatter to make this explicit.",
-        )
+        logger.warning("Missing 'name' in %s — using directory name '%s'", path, name)
     else:
         name = str(name).strip()
 
@@ -206,36 +137,12 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         logger.warning("Skill name exceeds %d chars in %s: '%s'", _MAX_NAME_LENGTH, path, name)
 
     if name != parent_dir_name and not name.endswith(f".{parent_dir_name}"):
-        log_skill_error(
-            logger,
-            "warning",
-            SkillErrorCode.SKILL_NAME_MISMATCH,
-            what=f"Name mismatch in '{path}'",
-            why=f"Skill name '{name}' doesn't match directory '{parent_dir_name}'.",
-            fix=f"Rename the directory to '{name}' or set name to '{parent_dir_name}'.",
+        logger.warning(
+            "Skill name '%s' doesn't match parent directory '%s' in %s",
+            name,
+            parent_dir_name,
+            path,
         )
-
-    # Coerce compatibility / allowed-tools to list[str] — many SKILL.md files
-    # in the wild use a plain string instead of a YAML list.
-    raw_compat = frontmatter.get("compatibility")
-    if isinstance(raw_compat, str):
-        raw_compat = [raw_compat]
-    raw_tools = frontmatter.get("allowed-tools")
-    if isinstance(raw_tools, str):
-        raw_tools = [raw_tools]
-    # `visibility` lives under `metadata.visibility` so it stays inside
-    # the open `metadata` map (the skill-file schema used by the IDE
-    # and other tooling only allows a fixed set of top-level keys).
-    raw_metadata = frontmatter.get("metadata")
-    raw_visibility: Any = None
-    if isinstance(raw_metadata, dict):
-        raw_visibility = raw_metadata.get("visibility")
-    if isinstance(raw_visibility, str):
-        raw_visibility = [raw_visibility]
-    if isinstance(raw_visibility, list):
-        raw_visibility = [str(v).strip() for v in raw_visibility if str(v).strip()] or None
-    else:
-        raw_visibility = None
 
     return ParsedSkill(
         name=name,
@@ -245,8 +152,7 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         source_scope=source_scope,
         body=body,
         license=frontmatter.get("license"),
-        compatibility=raw_compat,
+        compatibility=frontmatter.get("compatibility"),
         metadata=frontmatter.get("metadata"),
-        allowed_tools=raw_tools,
-        visibility=raw_visibility,
+        allowed_tools=frontmatter.get("allowed-tools"),
     )

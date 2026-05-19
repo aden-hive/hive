@@ -15,23 +15,6 @@ import type { AgentEvent } from "@/api/types";
  *   "inbox-management"              → "Inbox Management"
  *   "job_hunter"                    → "Job Hunter"
  */
-/**
- * Extract the colony worker uuid from a parallel-worker ``streamId``.
- *
- * Worker messages tag their ``streamId`` as either ``"worker"`` (single-worker
- * legacy case) or ``"worker:{uuid}"`` (parallel fan-out). The uuid half is
- * the colony worker id — the same identifier the Colony Workers sidebar uses
- * to key its Sessions cards. Returns null for the legacy single-worker case
- * or any other stream kind.
- */
-export function workerIdFromStreamId(
-  streamId: string | null | undefined,
-): string | null {
-  if (!streamId) return null;
-  const m = /^worker:(.+)$/.exec(streamId);
-  return m ? m[1] : null;
-}
-
 export function formatAgentDisplayName(raw: string): string {
   // Take the last path segment (in case it's a path like "examples/templates/foo")
   const base = raw.split("/").pop() || raw;
@@ -42,51 +25,6 @@ export function formatAgentDisplayName(raw: string): string {
     .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
-}
-
-/**
- * Format a message timestamp Slack-style: time-of-day for messages from today,
- * date + time for older messages.
- */
-export function formatMessageTime(createdAt: number): string {
-  const d = new Date(createdAt);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  if (sameDay) return time;
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const date = d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-  return `${date}, ${time}`;
-}
-
-/**
- * Format the label shown on a day-separator divider. Always absolute date + time
- * (no "Today" / "Yesterday") so the user can see exactly when activity resumed.
- */
-export function formatDayDividerLabel(createdAt: number): string {
-  const d = new Date(createdAt);
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const date = d.toLocaleDateString(undefined, {
-    month: "long",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `${date}, ${time}`;
 }
 
 /**
@@ -136,51 +74,13 @@ export function sseEventToChatMessage(
         createdAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
-        streamId: event.stream_id || undefined,
       };
     }
 
-    case "client_input_requested": {
-      // Surface the question(s) as a queen bubble in the chat history so the
-      // transcript records what was asked alongside the user's answer. The
-      // input widget at the bottom of the panel still drives the actual
-      // answer flow — this bubble is read-only context.
-      const rawQuestions = event.data?.questions;
-      if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return null;
-      const prompts: string[] = [];
-      for (const q of rawQuestions) {
-        if (!q || typeof q !== "object") continue;
-        const qo = q as Record<string, unknown>;
-        const prompt =
-          typeof qo.prompt === "string"
-            ? qo.prompt
-            : typeof qo.question === "string"
-              ? (qo.question as string)
-              : null;
-        if (prompt) prompts.push(prompt);
-      }
-      if (prompts.length === 0) return null;
-      const content =
-        prompts.length === 1
-          ? prompts[0]
-          : prompts.map((p, i) => `${i + 1}. ${p}`).join("\n");
-      return {
-        // Stable per-request id so live + replay paths upsert the same row.
-        id: `ask-user-${event.execution_id ?? ""}-${event.timestamp ?? createdAt}`,
-        agent: agentDisplayName || event.node_id || "Agent",
-        agentColor: "",
-        content,
-        timestamp: "",
-        // Default to worker; the replayEvent wrapper upgrades to "queen"
-        // when stream_id === "queen". Mirrors llm_text_delta's pattern.
-        role: "worker",
-        thread,
-        createdAt,
-        nodeId: event.node_id || undefined,
-        executionId: event.execution_id || undefined,
-        streamId: event.stream_id || undefined,
-      };
-    }
+    case "client_input_requested":
+      // Handled explicitly in handleSSEEvent (workspace.tsx) so it can
+      // create a worker_input_request message and set awaitingInput state.
+      return null;
 
     case "client_input_received": {
       const userContent = (event.data?.content as string) || "";
@@ -194,10 +94,6 @@ export function sseEventToChatMessage(
         type: "user",
         thread,
         createdAt,
-        // Carrying execution_id here lets the optimistic-message reconciler
-        // distinguish server-echoed user bubbles from still-unflushed ones.
-        executionId: event.execution_id || undefined,
-        streamId: event.stream_id || undefined,
       };
     }
 
@@ -218,7 +114,6 @@ export function sseEventToChatMessage(
         createdAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
-        streamId: event.stream_id || undefined,
       };
     }
 
@@ -233,7 +128,6 @@ export function sseEventToChatMessage(
         type: "system",
         thread,
         createdAt,
-        streamId: event.stream_id || undefined,
       };
     }
 
@@ -248,35 +142,6 @@ export function sseEventToChatMessage(
         type: "system",
         thread,
         createdAt,
-        streamId: event.stream_id || undefined,
-      };
-    }
-
-    case "trigger_fired": {
-      // Surface each scheduler/webhook fire as a banner in the chat, so the
-      // user can see exactly when the queen was invoked by a trigger vs. by
-      // a typed message. The banner sits at the start of the turn the queen
-      // is about to run in response.
-      const triggerId = event.data?.trigger_id as string | undefined;
-      if (!triggerId) return null;
-      const payload = {
-        trigger_id: triggerId,
-        trigger_type: event.data?.trigger_type as string | undefined,
-        name: event.data?.name as string | undefined,
-        task: event.data?.task as string | undefined,
-        fire_count: event.data?.fire_count as number | undefined,
-        last_fired_at: event.data?.last_fired_at as number | undefined,
-      };
-      return {
-        id: `trigger-${triggerId}-${payload.last_fired_at ?? event.timestamp}`,
-        agent: "Trigger",
-        agentColor: "",
-        content: JSON.stringify(payload),
-        timestamp: "",
-        type: "trigger",
-        thread,
-        createdAt,
-        streamId: event.stream_id || undefined,
       };
     }
 
@@ -285,418 +150,8 @@ export function sseEventToChatMessage(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Stateful event replay — produces tool_status pills + regular messages
-// ---------------------------------------------------------------------------
-
-/**
- * State maintained while replaying an event stream. Tracks per-stream turn
- * counters, materialized tool rows, and a pending tool_use_id → row map so
- * deferred `tool_call_completed` events can find the exact pill they belong
- * to after the turn counter moves on.
- */
-/**
- * For chart_* tools we retain the args (from tool_call_started) and
- * result envelope (from tool_call_completed) so the chat panel can
- * render the live chart inline from the same spec the runtime
- * rasterized to PNG. Other tools omit these fields to keep the
- * tool_status content payload small (catalogs are pill-only).
- */
-type ToolEntry = {
-  name: string;
-  done: boolean;
-  /** opaque per-call id surfaced to the UI; used to key React rows */
-  callKey?: string;
-  /** present only for tools whose name matches shouldRetainDetail */
-  args?: unknown;
-  result?: unknown;
-  isError?: boolean;
-};
-
-type ToolRowState = {
-  streamId: string;
-  executionId: string;
-  tools: Record<string, ToolEntry>;
-};
-
-/**
- * Names whose detail (args + result envelope) we surface in the chat.
- * Other tools stay pill-only — keeping their args/results out of the
- * message content avoids ballooning the chat history with tool
- * catalogs, file blobs, etc.
- */
-function shouldRetainDetail(toolName: string): boolean {
-  return toolName.startsWith("chart_");
-}
-
-export interface ReplayState {
-  turnCounters: Record<string, number>;
-  toolRows: Record<string, ToolRowState>;
-  toolUseToPill: Record<
-    string,
-    { msgId: string; toolKey: string; name: string }
-  >;
-  queenIterText: Record<string, Record<number, string>>;
-}
-
-export function newReplayState(): ReplayState {
-  return {
-    turnCounters: {},
-    toolRows: {},
-    toolUseToPill: {},
-    queenIterText: {},
-  };
-}
-
-/**
- * Token / cost accumulator for cold-restore.
- *
- * Folded into ``replayEventsToMessages`` so callers don't need a second
- * pass over the event array just to sum ``llm_turn_complete`` payloads.
- * The accumulator object is mutated in place — pass a fresh one in,
- * read its fields out after the call.
- */
-export interface TokenAccumulator {
-  input: number;
-  output: number;
-  cached: number;
-  cacheCreated: number;
-  costUsd: number;
-}
-
-export function newTokenAccumulator(): TokenAccumulator {
-  return { input: 0, output: 0, cached: 0, cacheCreated: 0, costUsd: 0 };
-}
-
-function toolLookupKey(
-  streamId: string,
-  executionId: string | null | undefined,
-  toolUseId: string,
-): string {
-  return `${streamId}:${executionId || "exec"}:${toolUseId}`;
-}
-
-function toolRowContent(row: ToolRowState): string {
-  const tools = Object.values(row.tools).map((t) => {
-    const out: ToolEntry = { name: t.name, done: t.done };
-    // Carry callKey + retained fields only for tools whose detail the
-    // UI mounts (chart_*). Pill-only tools stay terse so the
-    // tool_status payload doesn't grow with every catalog/file_ops
-    // call and existing snapshot tests stay valid.
-    if (shouldRetainDetail(t.name)) {
-      if (t.callKey !== undefined) out.callKey = t.callKey;
-      if (t.args !== undefined) out.args = t.args;
-      if (t.result !== undefined) out.result = t.result;
-      if (t.isError !== undefined) out.isError = t.isError;
-    }
-    return out;
-  });
-  const allDone = tools.length > 0 && tools.every((t) => t.done);
-  return JSON.stringify({ tools, allDone });
-}
-
-/**
- * Process a single event and emit zero or more ChatMessage upserts.
- *
- * Why this exists: `sseEventToChatMessage` is stateless — one event in, at
- * most one message out. But the chat's tool_status pill is a SYNTHESIZED
- * message: each tool_call_started adds to an accumulating pill, and each
- * tool_call_completed flips one of its tools from running to done. Live
- * SSE handlers in colony-chat and queen-dm already do this synthesis
- * against React refs. Cold-restore from events.jsonl used to skip
- * tool_call_* events entirely, so refreshed sessions looked completely
- * different from live ones — no tool activity visible, just prose.
- *
- * This function centralizes the synthesis so cold-restore and live paths
- * can use the exact same state machine. The caller treats the returned
- * messages as upserts (by id) — a later event in the same replay may
- * emit the same pill id with updated content, which should REPLACE the
- * earlier row in the caller's message list.
- */
-export function replayEvent(
-  state: ReplayState,
-  event: AgentEvent,
-  thread: string,
-  agentDisplayName: string | undefined,
-  queenDisplayName?: string,
-): ChatMessage[] {
-  const streamId = event.stream_id;
-  const isQueen = streamId === "queen";
-  const effectiveName = isQueen ? (queenDisplayName || agentDisplayName) : agentDisplayName;
-  const role: "queen" | "worker" = isQueen ? "queen" : "worker";
-  const turnKey = streamId;
-  const currentTurn = state.turnCounters[turnKey] ?? 0;
-  const eventCreatedAt = event.timestamp
-    ? new Date(event.timestamp).getTime()
-    : Date.now();
-
-  const out: ChatMessage[] = [];
-
-  // Update state machine BEFORE the generic converter runs so regular
-  // messages and synthesized tool pills use the same turn counters in
-  // both live SSE handling and cold replay.
-  switch (event.type) {
-    case "execution_started":
-      state.turnCounters[turnKey] = currentTurn + 1;
-      break;
-    case "llm_turn_complete":
-      state.turnCounters[turnKey] = currentTurn + 1;
-      break;
-    case "tool_call_started": {
-      if (!event.node_id) break;
-      const toolName = (event.data?.tool_name as string) || "unknown";
-      const toolUseId = (event.data?.tool_use_id as string) || "";
-      const pillId = `tool-pill-${streamId}-${event.execution_id || "exec"}-${currentTurn}`;
-      const row =
-        state.toolRows[pillId] ||
-        (state.toolRows[pillId] = {
-          streamId,
-          executionId: event.execution_id || "exec",
-          tools: {},
-        });
-      const toolKey = toolUseId || `anonymous-${Object.keys(row.tools).length}`;
-      const entry: ToolEntry = {
-        name: toolName,
-        done: false,
-        callKey: toolKey,
-      };
-      // Capture args at start for retained-detail tools so the chat
-      // can show what the agent rendered. Other tools' arguments are
-      // intentionally dropped to keep the tool_status JSON small.
-      if (shouldRetainDetail(toolName)) {
-        const toolInput = event.data?.tool_input;
-        if (toolInput !== undefined) entry.args = toolInput;
-      }
-      row.tools[toolKey] = entry;
-      if (toolUseId) {
-        state.toolUseToPill[toolLookupKey(streamId, event.execution_id, toolUseId)] = {
-          msgId: pillId,
-          toolKey,
-          name: toolName,
-        };
-      }
-      out.push({
-        id: pillId,
-        agent: effectiveName || event.node_id || "Agent",
-        agentColor: "",
-        content: toolRowContent(row),
-        timestamp: "",
-        type: "tool_status",
-        role,
-        thread,
-        createdAt: eventCreatedAt,
-        nodeId: event.node_id || undefined,
-        executionId: event.execution_id || undefined,
-        streamId: streamId || undefined,
-      });
-      break;
-    }
-    case "tool_call_completed": {
-      if (!event.node_id) break;
-      const toolUseId = (event.data?.tool_use_id as string) || "";
-      const lookupKey = toolLookupKey(streamId, event.execution_id, toolUseId);
-      const tracked = state.toolUseToPill[lookupKey];
-      if (toolUseId) delete state.toolUseToPill[lookupKey];
-      if (!tracked) break;
-      const row = state.toolRows[tracked.msgId];
-      if (!row) break;
-      const prior = row.tools[tracked.toolKey];
-      const completedName = prior?.name || tracked.name;
-      const completed: ToolEntry = {
-        name: completedName,
-        done: true,
-        callKey: tracked.toolKey,
-      };
-      // Preserve any args captured at start; capture the result
-      // envelope for retained-detail tools (chart_* needs spec/file_url
-      // to mount the live chart).
-      if (shouldRetainDetail(completedName)) {
-        if (prior?.args !== undefined) completed.args = prior.args;
-        const rawResult = event.data?.result;
-        if (rawResult !== undefined) {
-          // The framework serializes envelopes as JSON strings. Try to
-          // parse so the renderer can pick fields cheaply; fall back to
-          // the raw value when parsing fails (already-an-object or
-          // non-JSON string).
-          if (typeof rawResult === "string") {
-            try {
-              completed.result = JSON.parse(rawResult);
-            } catch {
-              completed.result = rawResult;
-            }
-          } else {
-            completed.result = rawResult;
-          }
-        }
-        const isErr = event.data?.is_error;
-        if (typeof isErr === "boolean") completed.isError = isErr;
-      }
-      row.tools[tracked.toolKey] = completed;
-      out.push({
-        id: tracked.msgId,
-        agent: effectiveName || event.node_id || "Agent",
-        agentColor: "",
-        content: toolRowContent(row),
-        timestamp: "",
-        type: "tool_status",
-        role,
-        thread,
-        createdAt: eventCreatedAt,
-        nodeId: event.node_id || undefined,
-        executionId: event.execution_id || undefined,
-        streamId: streamId || undefined,
-      });
-      break;
-    }
-  }
-
-  // Regular stateless conversion (prose, user input, system notes).
-  const msg = sseEventToChatMessage(
-    event,
-    thread,
-    effectiveName,
-    state.turnCounters[turnKey] ?? 0,
-  );
-  if (msg) {
-    if (isQueen) {
-      msg.role = "queen";
-      if (
-        event.execution_id &&
-        (event.type === "client_output_delta" || event.type === "llm_text_delta")
-      ) {
-        const iter = (event.data?.iteration as number | undefined) ?? 0;
-        const inner = (event.data?.inner_turn as number | undefined) ?? 0;
-        const iterKey = `${event.execution_id}:${iter}`;
-        if (!state.queenIterText[iterKey]) {
-          state.queenIterText[iterKey] = {};
-        }
-        state.queenIterText[iterKey][inner] = msg.content;
-        const parts = state.queenIterText[iterKey];
-        const sorted = Object.keys(parts)
-          .map(Number)
-          .sort((a, b) => a - b);
-        msg.content = sorted.map((k) => parts[k]).join("\n");
-        msg.id = `queen-stream-${event.execution_id}-${iter}`;
-      }
-    }
-    out.push(msg);
-  }
-
-  return out;
-}
-
-/**
- * Replay an entire event array and return a deduplicated, chronologically
- * sorted ChatMessage list. Used by cold-restore paths so refreshed
- * sessions match the live stream exactly.
- *
- * If the events stream contains a ``colony_fork_marker`` event (emitted
- * by ``fork_session_into_colony`` after compacting the parent transcript),
- * every message produced from events PRECEDING the marker is folded into
- * a single ``inherited_block`` ChatMessage. The colony page renders that
- * block as a collapsible widget so the inherited DM history is one click
- * away without dominating the colony's own chat.
- */
-export function replayEventsToMessages(
-  events: AgentEvent[],
-  thread: string,
-  agentDisplayName: string | undefined,
-  queenDisplayName?: string,
-  state: ReplayState = newReplayState(),
-  tokenAccumulator?: TokenAccumulator,
-): ChatMessage[] {
-  // Upsert by id — later emissions for the same pill replace earlier ones.
-  const byId = new Map<string, ChatMessage>();
-
-  // Track the marker (if any) and which message ids belong to the
-  // inherited prefix. A single fork can only happen once per session so
-  // we only need to remember the first marker we encounter.
-  let markerEvent: AgentEvent | null = null;
-  let markerCreatedAt: number | null = null;
-  const inheritedIds = new Set<string>();
-
-  for (const evt of events) {
-    // Fold the token-usage sum into this same loop so cold-restore
-    // doesn't need a second pass over the event array. SSE does not
-    // replay llm_turn_complete (see routes_events.py _REPLAY_TYPES) so
-    // there's no double-count risk against later live updates.
-    if (tokenAccumulator && evt.type === "llm_turn_complete" && evt.data) {
-      const d = evt.data as Record<string, unknown>;
-      tokenAccumulator.input += (d.input_tokens as number) || 0;
-      tokenAccumulator.output += (d.output_tokens as number) || 0;
-      tokenAccumulator.cached += (d.cached_tokens as number) || 0;
-      tokenAccumulator.cacheCreated += (d.cache_creation_tokens as number) || 0;
-      tokenAccumulator.costUsd += (d.cost_usd as number) || 0;
-    }
-    if (evt.type === "colony_fork_marker") {
-      if (markerEvent === null) {
-        markerEvent = evt;
-        markerCreatedAt = evt.timestamp
-          ? new Date(evt.timestamp).getTime()
-          : Date.now();
-        // Snapshot every id seen so far — those are the ones to fold
-        // into the inherited block.
-        for (const id of byId.keys()) inheritedIds.add(id);
-      }
-      continue;
-    }
-    for (const m of replayEvent(state, evt, thread, agentDisplayName, queenDisplayName)) {
-      const previous = byId.get(m.id);
-      byId.set(
-        m.id,
-        previous ? { ...m, createdAt: previous.createdAt ?? m.createdAt } : m,
-      );
-    }
-  }
-
-  const all = Array.from(byId.values()).sort(
-    (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
-  );
-
-  if (markerEvent === null || inheritedIds.size === 0) return all;
-
-  const inherited: ChatMessage[] = [];
-  const native: ChatMessage[] = [];
-  for (const msg of all) {
-    if (inheritedIds.has(msg.id)) inherited.push(msg);
-    else native.push(msg);
-  }
-  if (inherited.length === 0) return all;
-
-  const markerData = markerEvent.data || {};
-  const block: ChatMessage = {
-    id: `inherited-block-${markerEvent.timestamp || "fork"}`,
-    agent: "System",
-    agentColor: "",
-    type: "inherited_block",
-    content: JSON.stringify({
-      parent_session_id: markerData.parent_session_id ?? null,
-      fork_time: markerData.fork_time ?? markerEvent.timestamp ?? null,
-      summary_preview: markerData.summary_preview ?? "",
-      inherited_message_count:
-        typeof markerData.inherited_message_count === "number"
-          ? markerData.inherited_message_count
-          : inherited.length,
-      messages: inherited,
-    }),
-    timestamp: markerEvent.timestamp || "",
-    thread,
-    // Place the block at the marker's timestamp so it sorts immediately
-    // before the first native message (the marker is always written
-    // AFTER the inherited content).
-    createdAt: markerCreatedAt ?? inherited[inherited.length - 1].createdAt ?? 0,
-  };
-
-  return [block, ...native];
-}
-
-type QueenPhase = "independent" | "incubating" | "working" | "reviewing";
-const VALID_PHASES = new Set<string>([
-  "independent",
-  "incubating",
-  "working",
-  "reviewing",
-]);
+type QueenPhase = "planning" | "building" | "staging" | "running";
+const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running"]);
 
 /**
  * Scan an array of persisted events and return the last queen phase seen,

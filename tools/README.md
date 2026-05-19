@@ -63,16 +63,17 @@ python mcp_server.py
 
 ### File System
 
-All file tools live in `aden_tools.file_ops` and share one path policy
-(relative paths anchor to a registered `home`; absolute paths are honored
-verbatim; system + credential paths are on a deny list).
-
 | Tool | Description |
 | ---- | ----------- |
-| `read_file` | Read file contents (with optional hashline anchors) |
-| `write_file` | Create or overwrite a file |
-| `edit_file` | Find/replace with fuzzy fallback |
-| `search_files` | Grep file contents (`target='content'`) or list/find files (`target='files'`) — replaces grep, find, and ls |
+| `view_file` | Read contents of local files |
+| `write_to_file` | Write content to local files |
+| `list_dir` | List directory contents |
+| `replace_file_content` | Replace content in files |
+| `apply_diff` | Apply diff patches to files |
+| `apply_patch` | Apply unified patches to files |
+| `grep_search` | Search file contents with regex |
+| `hashline_edit` | Anchor-based file editing with hash-validated line references |
+| `execute_command_tool` | Execute shell commands |
 | `save_data` / `load_data` | Persist and retrieve structured data across steps |
 | `serve_file_to_user` | Serve a file for the user to download |
 | `list_data_files` | List persisted data files in the session |
@@ -163,6 +164,7 @@ verbatim; system + credential paths are on a deny list).
 | Tool | Description |
 | ---- | ----------- |
 | `get_current_time` | Get current date/time with timezone support |
+| `query_runtime_logs`, `query_runtime_log_details`, `query_runtime_log_raw` | Access agent runtime logs for the current session |
 
 ## Project Structure
 
@@ -170,11 +172,21 @@ verbatim; system + credential paths are on a deny list).
 tools/
 ├── src/aden_tools/
 │   ├── __init__.py          # Main exports
-│   ├── file_ops.py          # ALL file tools (read, write, edit, hashline_edit, search_files, apply_patch)
 │   ├── credentials/         # Credential management
 │   └── tools/               # Tool implementations
-│       ├── file_system_toolkits/  # Sandbox path helpers (security.py)
-│       │   └── security.py
+│       ├── example_tool/
+│       ├── file_system_toolkits/  # File operation tools
+│       │   ├── security.py
+│       │   ├── hashline.py
+│       │   ├── view_file/
+│       │   ├── write_to_file/
+│       │   ├── list_dir/
+│       │   ├── replace_file_content/
+│       │   ├── apply_diff/
+│       │   ├── apply_patch/
+│       │   ├── grep_search/
+│       │   ├── hashline_edit/
+│       │   └── execute_command_tool/
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
 │       ├── pdf_read_tool/

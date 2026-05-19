@@ -56,12 +56,10 @@ async def reproduce_agent_session(session: BrowserSession):
     print("=" * 100)
     total_start = time.time()
 
-    # ── Turn 1 (seq 1-2): session start ──────────────────────────────────
-    # Original 2026-02 transcript called the now-deleted browser_start MCP
-    # tool here; cold-start is now folded into browser_open via lazy-start.
+    # ── Turn 1 (seq 1-2): browser_start ──────────────────────────────────
     t0 = time.time()
     result = await session.start(headless=False, persistent=True)
-    log(1, "session.start()", f"ok={result['ok']}, status={result.get('status')}", time.time() - t0)
+    log(1, "browser_start()", f"ok={result['ok']}, status={result.get('status')}", time.time() - t0)
 
     # ── Turn 2 (seq 3-4): browser_open ───────────────────────────────────
     t0 = time.time()
@@ -237,10 +235,10 @@ async def demonstrate_correct_approach(session: BrowserSession):
     print("=" * 100)
     total_start = time.time()
 
-    # ── Turn 1: session start ────────────────────────────────────────────
+    # ── Turn 1: browser_start ────────────────────────────────────────────
     t0 = time.time()
     result = await session.start(headless=False, persistent=True)
-    log(1, "session.start()", f"ok={result['ok']}", time.time() - t0)
+    log(1, "browser_start()", f"ok={result['ok']}", time.time() - t0)
 
     # ── Turn 2: browser_open + browser_wait for SPA ──────────────────────
     t0 = time.time()
@@ -276,7 +274,9 @@ async def demonstrate_correct_approach(session: BrowserSession):
     for _i in range(5):
         await page.mouse.wheel(0, 800)
         await page.wait_for_timeout(1000)  # let lazy-loaded replies appear
-    log(4, "browser_scroll x5 (with 1s waits)", "scrolled 5 times to load replies", time.time() - t0)
+    log(
+        4, "browser_scroll x5 (with 1s waits)", "scrolled 5 times to load replies", time.time() - t0
+    )
 
     # ── Turn 5: Extract all commentator links via JS ─────────────────────
     t0 = time.time()

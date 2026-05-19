@@ -1,16 +1,10 @@
 """
 Shared file operation tools for MCP servers.
 
-Provides 4 tools (read_file, write_file, search_files, edit_file)
-plus supporting helpers. ``search_files`` is unified — it covers both
-content grep (``target='content'``) and file listing
-(``target='files'``), replacing the older ``list_directory`` tool and
-the LLM's choice between grep/find/ls. ``edit_file`` is unified — it
-covers single-file fuzzy find/replace (``mode='replace'``) and
-multi-file structured edits with two-phase apply (``mode='patch'``).
-
-Used by files_server.py (the MCP entry point that exposes these tools
-to the queen and any other agent loading the files-tools server).
+Provides 7 tools (read_file, write_file, edit_file, hashline_edit,
+list_directory, search_files, run_command) plus supporting helpers.
+Used by both files_server.py (unsandboxed) and coder_tools_server.py
+(project-root sandboxed with git snapshots).
 
 Usage:
     from aden_tools.file_ops import register_file_tools
@@ -22,22 +16,31 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fnmatch
+import json
 import os
 import re
 import subprocess
-import threading as _threading
+import sys
+import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
 
 from fastmcp import FastMCP
-from pydantic import Field
 
-from aden_tools.file_state_cache import Freshness, check_fresh, record_read
-from aden_tools.hashline import compute_line_hash
+from aden_tools.hashline import (
+    HASHLINE_MAX_FILE_BYTES,
+    compute_line_hash,
+    format_hashlines,
+    maybe_strip,
+    parse_anchor,
+    strip_boundary_echo,
+    strip_content_prefixes,
+    strip_insert_echo,
+    validate_anchor,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
@@ -103,447 +106,12 @@ BINARY_EXTENSIONS = frozenset(
     }
 )
 
-# ── search_files anti-loop tracker ────────────────────────────────────────
-#
-# Process-level memory of the most recent search_files call per task. When
-# the same query (target+pattern+path+glob+pagination+output) is repeated
-# back-to-back, we warn the model on the 3rd hit and block on the 4th.
-# Catches LLM loops where the same search is fired without acting on the
-# previous result.
-
-_SEARCH_TRACKER_LOCK = _threading.Lock()
-_SEARCH_TRACKER: dict[str, dict] = {}
-
-# Skip set shared by both search targets — common build/cache dirs that are
-# almost never what the model wants to walk.
-_SEARCH_SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", ".tox", ".mypy_cache", ".ruff_cache"})
+# ── Private helpers ───────────────────────────────────────────────────────
 
 
-def _relativize(path: str, root: str | None) -> str:
-    """Best-effort relative path; falls back to the original on cross-volume."""
-    if not root:
-        return path
-    try:
-        norm_path = os.path.normpath(path.replace("/", os.sep))
-        norm_root = os.path.normpath(root.replace("/", os.sep))
-        return os.path.relpath(norm_path, norm_root)
-    except ValueError:
-        return path
-
-
-def _do_search_files_target(
-    pattern: str,
-    resolved: str,
-    display_root: str,
-    limit: int,
-    offset: int,
-) -> str:
-    """target='files': enumerate files matching a glob, mtime-sorted (newest first)."""
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {resolved}"
-
-    glob = pattern or "*"
-    files: list[tuple[float, str]] = []
-
-    # Try ripgrep --files first; it respects .gitignore which is what we want.
-    try:
-        cmd = [
-            "rg",
-            "--files",
-            "--no-messages",
-            "--hidden",
-            "--glob=!.git/*",
-        ]
-        if glob and glob != "*":
-            cmd.extend(["--glob", glob])
-        cmd.append(resolved)
-        rg = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            encoding="utf-8",
-            stdin=subprocess.DEVNULL,
-        )
-        if rg.returncode <= 1:
-            for raw in rg.stdout.splitlines():
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    files.append((os.path.getmtime(raw), raw))
-                except OSError:
-                    continue
-        else:
-            files = []
-    except FileNotFoundError:
-        # ripgrep absent — fall through to os.walk
-        files = []
-    except subprocess.TimeoutExpired:
-        return "Error: file listing timed out after 30 seconds"
-
-    # Python fallback (also runs when rg returned nothing on platforms where
-    # rg.returncode reports >1 for "no files in glob").
-    if not files:
-        for root, dirs, fnames in os.walk(resolved):
-            dirs[:] = [d for d in dirs if d not in _SEARCH_SKIP_DIRS and not d.startswith(".")]
-            for fname in fnames:
-                if fname.startswith("."):
-                    continue
-                if glob and glob != "*" and not fnmatch.fnmatch(fname, glob):
-                    continue
-                full = os.path.join(root, fname)
-                try:
-                    files.append((os.path.getmtime(full), full))
-                except OSError:
-                    continue
-
-    files.sort(reverse=True)
-    total = len(files)
-    page = files[offset : offset + max(0, int(limit))]
-    if not page:
-        return "No files found." if total == 0 else f"No files at offset {offset} (total: {total})."
-
-    lines = [_relativize(p, display_root) for _, p in page]
-    out = "\n".join(lines)
-    next_offset = offset + len(page)
-    if total > next_offset:
-        out += (
-            f"\n\n[Hint: showing {len(page)} of {total} files. "
-            f"Use offset={next_offset} for more, or narrow with a more specific glob.]"
-        )
-    return out
-
-
-def _do_search_content_target(
-    pattern: str,
-    resolved: str,
-    project_root: str | None,
-    file_glob: str,
-    limit: int,
-    offset: int,
-    output_mode: str,
-    context: int,
-    hashline: bool,
-) -> str:
-    """target='content': regex search across file contents (ripgrep + Python fallback)."""
-    display_root = project_root or (resolved if os.path.isdir(resolved) else os.path.dirname(resolved))
-    cap = max(1, int(limit))
-
-    # Try ripgrep first.
-    try:
-        cmd = ["rg", "-nH", "--no-messages", "--hidden", "--glob=!.git/*"]
-        if context and output_mode == "content":
-            cmd.extend(["-C", str(int(context))])
-        if file_glob:
-            cmd.extend(["--glob", file_glob])
-        if output_mode == "files_only":
-            cmd.append("-l")
-        elif output_mode == "count":
-            cmd.append("-c")
-        cmd.append(pattern)
-        cmd.append(resolved)
-
-        rg = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            encoding="utf-8",
-            stdin=subprocess.DEVNULL,
-        )
-        if rg.returncode <= 1:
-            raw_lines = [ln for ln in rg.stdout.splitlines() if ln]
-            total = len(raw_lines)
-            page = raw_lines[offset : offset + cap]
-            if not page:
-                return "No matches found." if total == 0 else f"No matches at offset {offset} (total: {total})."
-
-            formatted: list[str] = []
-            for line in page:
-                # Relativize path prefix on every line.
-                m = re.match(r"^(.+?):(\d+):(.*)$", line) if output_mode == "content" else None
-                if m:
-                    fpath, lineno, rest = m.group(1), m.group(2), m.group(3)
-                    rel = _relativize(fpath, display_root)
-                    if hashline:
-                        h = compute_line_hash(rest)
-                        line = f"{rel}:{lineno}:{h}|{rest}"
-                    else:
-                        line = f"{rel}:{lineno}:{rest}"
-                else:
-                    # files_only/count: single path (or path:count) per line
-                    head, sep, tail = line.partition(":")
-                    if sep and tail.isdigit():
-                        line = f"{_relativize(head, display_root)}:{tail}"
-                    else:
-                        line = _relativize(line, display_root)
-                if len(line) > MAX_LINE_LENGTH:
-                    line = line[:MAX_LINE_LENGTH] + "..."
-                formatted.append(line)
-
-            out = "\n".join(formatted)
-            next_offset = offset + len(page)
-            if total > next_offset:
-                out += (
-                    f"\n\n[Hint: showing {len(page)} of {total} matches. "
-                    f"Use offset={next_offset} for more, or narrow with file_glob/pattern.]"
-                )
-            return out
-    except FileNotFoundError:
-        pass  # ripgrep missing — Python fallback below
-    except subprocess.TimeoutExpired:
-        return "Error: search timed out after 30 seconds"
-
-    # Python fallback (no ripgrep): regex over file contents.
-    try:
-        compiled = re.compile(pattern)
-    except re.error as e:
-        return f"Error: invalid regex: {e}"
-
-    if os.path.isfile(resolved):
-        candidates = [resolved]
-    else:
-        candidates = []
-        for root, dirs, fnames in os.walk(resolved):
-            dirs[:] = [d for d in dirs if d not in _SEARCH_SKIP_DIRS and not d.startswith(".")]
-            for fname in fnames:
-                if file_glob and not fnmatch.fnmatch(fname, file_glob):
-                    continue
-                candidates.append(os.path.join(root, fname))
-
-    # files_only / count modes need per-file aggregation.
-    if output_mode in ("files_only", "count"):
-        items: list[tuple[str, int]] = []
-        for fpath in candidates:
-            try:
-                with open(fpath, encoding="utf-8", errors="ignore") as f:
-                    n = sum(1 for line in f if compiled.search(line.rstrip()))
-            except OSError:
-                continue
-            if n:
-                items.append((fpath, n))
-        total = len(items)
-        page = items[offset : offset + cap]
-        if not page:
-            return "No matches found." if total == 0 else f"No matches at offset {offset} (total: {total})."
-        if output_mode == "files_only":
-            lines = [_relativize(p, display_root) for p, _ in page]
-        else:
-            lines = [f"{_relativize(p, display_root)}:{n}" for p, n in page]
-        out = "\n".join(lines)
-        next_offset = offset + len(page)
-        if total > next_offset:
-            out += f"\n\n[Hint: showing {len(page)} of {total}. Use offset={next_offset} for more.]"
-        return out
-
-    # output_mode == "content"
-    matches: list[str] = []
-    for fpath in candidates:
-        rel = _relativize(fpath, display_root)
-        try:
-            with open(fpath, encoding="utf-8", errors="ignore") as f:
-                buf = f.readlines()
-        except OSError:
-            continue
-        for i, raw in enumerate(buf, 1):
-            stripped = raw.rstrip()
-            if not compiled.search(stripped):
-                continue
-            if context > 0:
-                lo = max(0, i - 1 - context)
-                hi = min(len(buf), i + context)
-                ctx = []
-                for j in range(lo, hi):
-                    marker = ":" if (j + 1) == i else "-"
-                    ln = buf[j].rstrip()
-                    ctx.append(f"{rel}:{j + 1}{marker}{ln[:MAX_LINE_LENGTH]}")
-                matches.append("\n".join(ctx))
-            elif hashline:
-                h = compute_line_hash(stripped)
-                matches.append(f"{rel}:{i}:{h}|{stripped}")
-            else:
-                matches.append(f"{rel}:{i}:{stripped[:MAX_LINE_LENGTH]}")
-
-    total = len(matches)
-    page = matches[offset : offset + cap]
-    if not page:
-        return "No matches found." if total == 0 else f"No matches at offset {offset} (total: {total})."
-    out = "\n\n".join(page) if context > 0 else "\n".join(page)
-    next_offset = offset + len(page)
-    if total > next_offset:
-        out += (
-            f"\n\n[Hint: showing {len(page)} of {total} matches. "
-            f"Use offset={next_offset} for more, or narrow with file_glob/pattern.]"
-        )
-    return out
-
-
-# ── Path policy ──────────────────────────────────────────────────────────
-#
-# One model for every file tool:
-#
-#   - Relative path  → resolved under the agent's home directory.
-#   - Absolute path  → used as-is, no silent rebasing.
-#   - Tilde (~)      → expanded to the OS user home.
-#
-# Two deny lists. Reads ⊂ writes:
-#
-#   - Reads are blocked only for credential FILES (SSH keys, AWS creds,
-#     /etc/shadow, etc.). System config like /etc/nginx/nginx.conf is
-#     readable on purpose — agents need to inspect configs.
-#   - Writes are blocked for system directories AND credential paths.
-#
-# An optional ``write_safe_root`` is a hard ceiling on writes for hosted
-# deployments. Reads are not affected by it.
-
-_HOME = os.path.expanduser("~")
-
-
-def _norm(p: str) -> str:
-    """Resolve ``~`` and symlinks; return canonical absolute path."""
-    return os.path.realpath(os.path.expanduser(p))
-
-
-# Anything under one of these prefixes is denied for writes.
-#
-# Notes on what's intentionally NOT here:
-#   - /var, /private/var: macOS user tmpdirs live under /private/var/folders/,
-#     so denying that prefix breaks every test using tmp_path. Sensitive
-#     items under /var (sudoers.d, etc.) are listed individually below.
-#   - /var/run: docker.sock is in the exact-files list, which is enough.
-_WRITE_DENY_PREFIXES: tuple[str, ...] = tuple(
-    _norm(p)
-    for p in (
-        "/etc",
-        "/boot",
-        "/usr/lib/systemd",
-        "/private/etc",
-        "/etc/sudoers.d",
-        "/etc/systemd",
-        "~/.ssh",
-        "~/.aws",
-        "~/.gnupg",
-        "~/.kube",
-        "~/.docker",
-        "~/.azure",
-        "~/.config/gh",
-    )
-)
-
-# Exact files denied for writes (in addition to the prefix list).
-_WRITE_DENY_FILES: frozenset[str] = frozenset(
-    _norm(p)
-    for p in (
-        "/etc/sudoers",
-        "/etc/passwd",
-        "/etc/shadow",
-        "/var/run/docker.sock",
-        "/run/docker.sock",
-        "~/.netrc",
-        "~/.pypirc",
-    )
-)
-
-# Reads are denied only for credential FILES — system dirs stay readable.
-_READ_DENY_PREFIXES: tuple[str, ...] = tuple(
-    _norm(p)
-    for p in (
-        "~/.ssh",
-        "~/.aws",
-        "~/.gnupg",
-    )
-)
-_READ_DENY_FILES: frozenset[str] = frozenset(
-    _norm(p)
-    for p in (
-        "/etc/shadow",
-        "/etc/sudoers",
-        "~/.netrc",
-        "~/.pypirc",
-    )
-)
-
-
-def _path_is_under(path: str, root: str) -> bool:
-    """True iff ``path`` equals or sits under ``root`` (both absolute)."""
-    if not root:
-        return False
-    try:
-        return os.path.commonpath([path, root]) == root
-    except ValueError:
-        return False  # different drives on Windows
-
-
-class _FilePolicy:
-    """Path resolver and deny-list checker bound to an agent's home dir.
-
-    One instance per ``register_file_tools`` call. All file tools route
-    their path arg through ``read_path`` or ``write_path`` so the same
-    rules apply across read_file/write_file/edit_file/search_files/etc.
-    """
-
-    def __init__(
-        self,
-        home: str | None = None,
-        write_safe_root: str | list[str] | None = None,
-    ) -> None:
-        # ``home`` is the anchor for relative paths. Default to CWD so the
-        # unsandboxed local server keeps working without explicit config.
-        self.home = _norm(home) if home else os.path.abspath(os.getcwd())
-        # ``write_safe_root`` is normalized to a list. None means "no ceiling
-        # — only the deny list applies". A non-empty list means writes must
-        # land under at least one of the listed roots.
-        if write_safe_root is None:
-            self.write_safe_roots: list[str] = []
-        elif isinstance(write_safe_root, str):
-            self.write_safe_roots = [_norm(write_safe_root)]
-        else:
-            self.write_safe_roots = [_norm(r) for r in write_safe_root if r]
-
-    # ── public ─────────────────────────────────────────────────────────
-
-    def read_path(self, path: str) -> str:
-        """Resolve a read path; raise ValueError if denied."""
-        resolved = self._resolve(path)
-        self._check_read(resolved, path)
-        return resolved
-
-    def write_path(self, path: str) -> str:
-        """Resolve a write path; raise ValueError if denied."""
-        resolved = self._resolve(path)
-        self._check_write(resolved, path)
-        return resolved
-
-    # ── internals ──────────────────────────────────────────────────────
-
-    def _resolve(self, path: str) -> str:
-        if not path:
-            raise ValueError("path cannot be empty")
-        # Normalize slashes for cross-platform robustness.
-        p = path.replace("/", os.sep) if os.sep != "/" else path
-        if p.startswith("~"):
-            p = os.path.expanduser(p)
-        if os.path.isabs(p):
-            return os.path.realpath(p)
-        return os.path.realpath(os.path.join(self.home, p))
-
-    def _check_read(self, resolved: str, original: str) -> None:
-        if resolved in _READ_DENY_FILES:
-            raise ValueError(f"read denied: '{original}' is on the credential deny list")
-        for prefix in _READ_DENY_PREFIXES:
-            if _path_is_under(resolved, prefix):
-                raise ValueError(f"read denied: '{original}' is under {prefix} (credential directory)")
-
-    def _check_write(self, resolved: str, original: str) -> None:
-        if resolved in _WRITE_DENY_FILES:
-            raise ValueError(f"write denied: '{original}' is on the system/credential deny list")
-        for prefix in _WRITE_DENY_PREFIXES:
-            if _path_is_under(resolved, prefix):
-                raise ValueError(f"write denied: '{original}' is under {prefix} (system or credential directory)")
-        if self.write_safe_roots and not any(_path_is_under(resolved, r) for r in self.write_safe_roots):
-            roots = ", ".join(self.write_safe_roots)
-            raise ValueError(f"write denied: '{original}' is outside the configured write_safe_root(s) ({roots})")
+def _default_resolve_path(p: str) -> str:
+    """Default path resolver — just resolves to absolute."""
+    return str(Path(p).resolve())
 
 
 def _is_binary(filepath: str) -> bool:
@@ -590,40 +158,11 @@ def _similarity(a: str, b: str) -> float:
     return 1.0 - _levenshtein(a, b) / maxlen
 
 
-# Unicode normalization map for fuzzy matching. LLMs frequently emit
-# typographic variants (smart quotes, em-dashes, ellipsis, NBSP) when
-# the source file uses ASCII — or vice versa.
-_UNICODE_NORMALIZATIONS = (
-    ("‘", "'"),  # left single quote
-    ("’", "'"),  # right single quote
-    ("“", '"'),  # left double quote
-    ("”", '"'),  # right double quote
-    ("—", "--"),  # em-dash
-    ("–", "-"),  # en-dash
-    ("…", "..."),  # ellipsis
-    (" ", " "),  # NBSP
-)
-
-
-def _unicode_normalize(s: str) -> str:
-    for src, dst in _UNICODE_NORMALIZATIONS:
-        s = s.replace(src, dst)
-    return s
-
-
 def _fuzzy_find_candidates(content: str, old_text: str):
-    """Yield candidate substrings from content that match old_text.
-
-    Strategies are ordered as a safety gradient: strict and zero-false-
-    positive first, similarity-based last. Callers stop at the first
-    yielded candidate that they can act on, so an exact match never
-    falls through to a heuristic match.
-
-    Order: exact → line-trimmed → whitespace-normalized →
-    indentation-flexible → escape-normalized → trimmed-boundary →
-    unicode-normalized → block-anchor → context-aware.
+    """Yield candidate substrings from content that match old_text,
+    using a cascade of increasingly fuzzy strategies.
     """
-    # 1. Exact match
+    # Strategy 1: Exact match
     if old_text in content:
         yield old_text
 
@@ -637,76 +176,13 @@ def _fuzzy_find_candidates(content: str, old_text: str):
 
     n_search = len(search_lines)
 
-    # 2. Line-trimmed match
+    # Strategy 2: Line-trimmed match
     for i in range(len(content_lines) - n_search + 1):
         window = content_lines[i : i + n_search]
         if all(cl.strip() == sl.strip() for cl, sl in zip(window, search_lines, strict=True)):
             yield "\n".join(window)
 
-    # 3. Whitespace-normalized match (collapse runs of whitespace)
-    normalized_search = re.sub(r"\s+", " ", old_text).strip()
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        normalized_block = re.sub(r"\s+", " ", "\n".join(window)).strip()
-        if normalized_block == normalized_search:
-            yield "\n".join(window)
-
-    # 4. Indentation-flexible match (strip common leading indent)
-    def _strip_indent(lines):
-        non_empty = [ln for ln in lines if ln.strip()]
-        if not non_empty:
-            return "\n".join(lines)
-        min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
-        return "\n".join(ln[min_indent:] for ln in lines)
-
-    stripped_search = _strip_indent(search_lines)
-    for i in range(len(content_lines) - n_search + 1):
-        block = content_lines[i : i + n_search]
-        if _strip_indent(block) == stripped_search:
-            yield "\n".join(block)
-
-    # 5. Escape-normalized match — agents sometimes paste literal "\n",
-    # "\t", "\r" sequences instead of actual control chars.
-    if "\\n" in old_text or "\\t" in old_text or "\\r" in old_text:
-        unescaped = old_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
-        if unescaped != old_text and unescaped in content:
-            yield unescaped
-
-    # 6. Trimmed-boundary match (only outer whitespace differs)
-    trimmed = old_text.strip()
-    if trimmed != old_text and trimmed in content:
-        yield trimmed
-
-    # 7. Unicode-normalized match (smart quotes, em/en-dashes, ellipsis,
-    # NBSP). Walk the original content recovering the substring whose
-    # normalization equals the normalized search term — replacement
-    # happens in original space so length deltas don't corrupt the file.
-    norm_search = _unicode_normalize(old_text)
-    if norm_search != old_text:
-        norm_content = _unicode_normalize(content)
-        if norm_search in norm_content:
-            # Build a per-original-char index → normalized-position map.
-            pos_map = []
-            np = 0
-            for ch in content:
-                pos_map.append(np)
-                np += len(_unicode_normalize(ch))
-            pos_map.append(np)
-            target = norm_content.find(norm_search)
-            if target >= 0:
-                target_end = target + len(norm_search)
-                # Locate boundaries in original space.
-                try:
-                    orig_start = pos_map.index(target)
-                    orig_end = pos_map.index(target_end, orig_start)
-                    yield content[orig_start:orig_end]
-                except ValueError:
-                    pass
-
-    # 8. Block-anchor match — first and last lines match exactly (after
-    # trim), middle is allowed to drift if similarity is high enough.
-    # Thresholds (0.50 / 0.70) are deliberately tight; older 0.10/0.30
-    # values silently matched unrelated blocks.
+    # Strategy 3: Block-anchor match (first/last line as anchors, fuzzy middle)
     if n_search >= 3:
         first_trimmed = search_lines[0].strip()
         last_trimmed = search_lines[-1].strip()
@@ -722,19 +198,35 @@ def _fuzzy_find_candidates(content: str, old_text: str):
                     candidates.append((sim, "\n".join(block)))
         if candidates:
             candidates.sort(key=lambda x: x[0], reverse=True)
-            threshold = 0.50 if len(candidates) == 1 else 0.70
-            if candidates[0][0] >= threshold:
+            if candidates[0][0] > 0.3:
                 yield candidates[0][1]
 
-    # 9. Context-aware match — last resort. Per-line similarity with
-    # 50% threshold per line for heavily mangled but recognizable blocks.
-    if n_search >= 2:
-        for i in range(len(content_lines) - n_search + 1):
-            window = content_lines[i : i + n_search]
-            sims = [_similarity(cl.strip(), sl.strip()) for cl, sl in zip(window, search_lines, strict=True)]
-            if sims and min(sims) >= 0.50 and (sum(sims) / len(sims)) >= 0.65:
-                yield "\n".join(window)
-                break
+    # Strategy 4: Whitespace-normalized match
+    normalized_search = re.sub(r"\s+", " ", old_text).strip()
+    for i in range(len(content_lines) - n_search + 1):
+        window = content_lines[i : i + n_search]
+        normalized_block = re.sub(r"\s+", " ", "\n".join(window)).strip()
+        if normalized_block == normalized_search:
+            yield "\n".join(window)
+
+    # Strategy 5: Indentation-flexible match
+    def _strip_indent(lines):
+        non_empty = [ln for ln in lines if ln.strip()]
+        if not non_empty:
+            return "\n".join(lines)
+        min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
+        return "\n".join(ln[min_indent:] for ln in lines)
+
+    stripped_search = _strip_indent(search_lines)
+    for i in range(len(content_lines) - n_search + 1):
+        block = content_lines[i : i + n_search]
+        if _strip_indent(block) == stripped_search:
+            yield "\n".join(block)
+
+    # Strategy 6: Trimmed-boundary match
+    trimmed = old_text.strip()
+    if trimmed != old_text and trimmed in content:
+        yield trimmed
 
 
 def _compute_diff(old: str, new: str, path: str) -> str:
@@ -748,711 +240,45 @@ def _compute_diff(old: str, new: str, path: str) -> str:
     return result
 
 
-# ── Multi-file structured patch (V4A) ─────────────────────────────────────
-#
-# A small, lenient parser for the structured patch format. The grammar:
-#
-#     *** Begin Patch          (optional)
-#     *** Update File: path
-#     @@ optional context @@   (optional, per hunk)
-#      context line             ← space prefix
-#     -removed line
-#     +added line
-#     *** Add File: path
-#     +line
-#     +line
-#     *** Delete File: path
-#     *** Move File: src -> dst
-#     *** End Patch            (optional)
-#
-# Two-phase apply: every operation is simulated against an in-memory
-# copy of the touched files first; only when every op validates do we
-# actually write to disk. This gives multi-file edits all-or-nothing
-# semantics without needing a copy-aside / journal.
-
-_BEGIN_RE = re.compile(r"^\*\*\*\s*Begin\s+Patch\s*$")
-_END_RE = re.compile(r"^\*\*\*\s*End\s+Patch\s*$")
-_OP_RE = re.compile(r"^\*\*\*\s+(Update|Add|Delete|Move)\s+File:\s*(.+)$")
-_HUNK_HINT_RE = re.compile(r"^@@\s*(.*?)\s*@@\s*$")
-
-
-@dataclass
-class _Hunk:
-    context_hint: str | None
-    lines: list[tuple[str, str]]  # (prefix, content), prefix in {' ', '-', '+'}
-
-
-@dataclass
-class _PatchOp:
-    kind: str  # "add" | "update" | "delete" | "move"
-    path: str
-    dest: str | None = None  # only for "move"
-    hunks: list[_Hunk] = field(default_factory=list)  # only for "update"
-    add_content: str = ""  # only for "add"
-
-
-def _is_op_marker(line: str) -> bool:
-    return bool(_OP_RE.match(line))
-
-
-def _parse_v4a(text: str) -> tuple[list[_PatchOp], str | None]:
-    """Parse V4A patch text into a list of operations.
-
-    Returns ``(operations, error)``. On failure ``operations`` is empty
-    and ``error`` describes why parsing stopped. Lenient about markers:
-    ``Begin``/``End`` are optional, lines starting with ``\\`` (e.g. the
-    ``\\ No newline at end of file`` git artifact) are skipped, and a
-    line inside a hunk that lacks a ``+``/``-``/space prefix is treated
-    as an implicit context line (a common LLM mistake).
-    """
-    lines = text.splitlines()
-    i = 0
-    # Skip until Begin marker or first op marker.
-    while i < len(lines):
-        if _BEGIN_RE.match(lines[i].strip()):
-            i += 1
-            break
-        if _is_op_marker(lines[i]):
-            break
-        i += 1
-
-    ops: list[_PatchOp] = []
-    while i < len(lines):
-        raw = lines[i]
-        stripped = raw.strip()
-        if _END_RE.match(stripped):
-            break
-        m = _OP_RE.match(raw)
-        if not m:
-            i += 1
-            continue
-        kind_word, rest = m.group(1), m.group(2).strip()
-        i += 1
-        if kind_word == "Update":
-            hunks: list[_Hunk] = []
-            while i < len(lines):
-                if _is_op_marker(lines[i]) or _END_RE.match(lines[i].strip()):
-                    break
-                hunk, i = _parse_hunk(lines, i)
-                if hunk is None:
-                    break
-                hunks.append(hunk)
-            if not hunks:
-                return [], f"Update {rest}: no hunks parsed"
-            ops.append(_PatchOp(kind="update", path=rest, hunks=hunks))
-        elif kind_word == "Add":
-            content_lines: list[str] = []
-            while i < len(lines):
-                if _is_op_marker(lines[i]) or _END_RE.match(lines[i].strip()):
-                    break
-                if lines[i].startswith("+"):
-                    content_lines.append(lines[i][1:])
-                i += 1
-            ops.append(_PatchOp(kind="add", path=rest, add_content="\n".join(content_lines)))
-        elif kind_word == "Delete":
-            ops.append(_PatchOp(kind="delete", path=rest))
-        elif kind_word == "Move":
-            mv = re.match(r"^(.+?)\s*->\s*(.+)$", rest)
-            if not mv:
-                return [], f"Move requires 'src -> dst', got: {rest}"
-            ops.append(_PatchOp(kind="move", path=mv.group(1).strip(), dest=mv.group(2).strip()))
-
-    if not ops:
-        return [], "patch text contained no operations"
-
-    errors: list[str] = []
-    for op in ops:
-        if not op.path:
-            errors.append(f"{op.kind}: empty path")
-        if op.kind == "move" and not op.dest:
-            errors.append(f"move {op.path}: missing destination")
-    if errors:
-        return [], "; ".join(errors)
-    return ops, None
-
-
-def _parse_hunk(lines: list[str], start_idx: int) -> tuple[_Hunk | None, int]:
-    """Parse one hunk. Returns ``(hunk_or_none, next_idx)``."""
-    i = start_idx
-    if i >= len(lines):
-        return None, i
-    context_hint: str | None = None
-    m = _HUNK_HINT_RE.match(lines[i])
-    if m:
-        context_hint = m.group(1).strip() or None
-        i += 1
-    hunk_lines: list[tuple[str, str]] = []
-    started = False
-    while i < len(lines):
-        line = lines[i]
-        if _is_op_marker(line) or _END_RE.match(line.strip()) or _HUNK_HINT_RE.match(line):
-            break
-        if line.startswith("\\"):
-            # Git-diff artifact like "\ No newline at end of file" — skip
-            i += 1
-            continue
-        if line.startswith((" ", "-", "+")):
-            hunk_lines.append((line[0], line[1:]))
-            started = True
-            i += 1
-            continue
-        if started:
-            # Implicit context line — common LLM mistake of forgetting
-            # the leading space. Treat it as context, not hunk-end.
-            hunk_lines.append((" ", line))
-            i += 1
-            continue
-        # Blank prelude before hunk content — stop trying.
-        break
-    if not hunk_lines:
-        return None, i
-    return _Hunk(context_hint=context_hint, lines=hunk_lines), i
-
-
-def _apply_hunk(content: str, hunk: _Hunk) -> tuple[str, str | None]:
-    """Apply one hunk to ``content``. Returns ``(new_content, error)``."""
-    search_lines = [c for p, c in hunk.lines if p in (" ", "-")]
-    replace_lines = [c for p, c in hunk.lines if p in (" ", "+")]
-
-    # Pure addition (no - or context lines, only +). Insert at hint or
-    # append to EOF if the hint is missing or unique.
-    if not search_lines and replace_lines:
-        addition = "\n".join(replace_lines)
-        if hunk.context_hint:
-            count = content.count(hunk.context_hint)
-            if count > 1:
-                return content, (
-                    f"addition-only hunk: context hint '{hunk.context_hint}' is ambiguous ({count} occurrences)"
-                )
-            if count == 1:
-                idx = content.find(hunk.context_hint)
-                line_end = content.find("\n", idx)
-                if line_end < 0:
-                    new = content + "\n" + addition
-                else:
-                    new = content[: line_end + 1] + addition + "\n" + content[line_end + 1 :]
-                return new, None
-        # No hint, or hint not found: append to EOF.
-        if content and not content.endswith("\n"):
-            content += "\n"
-        return content + addition + "\n", None
-
-    search = "\n".join(search_lines)
-    replace = "\n".join(replace_lines)
-    if not search:
-        return content, "hunk has neither context nor removed lines"
-
-    # Try fuzzy match in the full content first.
-    matched: str | None = None
-    for candidate in _fuzzy_find_candidates(content, search):
-        first = content.find(candidate)
-        if first < 0:
-            continue
-        last = content.rfind(candidate)
-        if first == last:
-            matched = candidate
-            break
-
-    if matched is None and hunk.context_hint:
-        # Asymmetric window around the hint. Hunks usually appear after
-        # their identifying function/class signature, so we look further
-        # forward than backward.
-        hint_pos = content.find(hunk.context_hint)
-        if hint_pos >= 0:
-            wstart = max(0, hint_pos - 500)
-            wend = min(len(content), hint_pos + 2000)
-            window = content[wstart:wend]
-            for candidate in _fuzzy_find_candidates(window, search):
-                first = window.find(candidate)
-                if first < 0:
-                    continue
-                last = window.rfind(candidate)
-                if first == last:
-                    new_window = window.replace(candidate, replace, 1)
-                    return content[:wstart] + new_window + content[wend:], None
-
-    if matched is None:
-        return content, "could not find a unique match for hunk"
-
-    return content.replace(matched, replace, 1), None
-
-
-def _apply_v4a(
-    ops: list[_PatchOp],
-    policy,
-    before_write: Callable[[], None] | None,
-) -> tuple[str | None, str | None]:
-    """Two-phase apply for a V4A operation list.
-
-    Phase 1 simulates every op against an in-memory copy of the touched
-    files. If anything fails, returns an error and writes nothing.
-    Phase 2 commits the simulated state to disk; a failure there is
-    annotated as potentially-partial and points the agent at git diff.
-    """
-    fs_state: dict[str, str] = {}
-    fs_exists: dict[str, bool] = {}  # True = should exist post-apply, False = deleted
-    original_existed: dict[str, bool] = {}
-
-    def _ensure_loaded(resolved: str) -> str | None:
-        if resolved in fs_state:
-            return None
-        if not os.path.isfile(resolved):
-            return f"file not found: {resolved}"
-        try:
-            with open(resolved, encoding="utf-8") as f:
-                fs_state[resolved] = f.read()
-            fs_exists[resolved] = True
-            original_existed[resolved] = True
-        except Exception as e:
-            return f"failed to read: {e}"
-        return None
-
-    errors: list[str] = []
-    for op_idx, op in enumerate(ops):
-        try:
-            resolved = policy.write_path(op.path)
-        except ValueError as e:
-            errors.append(f"Op #{op_idx + 1} {op.kind} {op.path}: {e}")
-            continue
-
-        if op.kind == "add":
-            if os.path.exists(resolved) and fs_exists.get(resolved, True):
-                errors.append(f"Op #{op_idx + 1} add {op.path}: file already exists")
-                continue
-            content = op.add_content
-            if content and not content.endswith("\n"):
-                content += "\n"
-            fs_state[resolved] = content
-            fs_exists[resolved] = True
-            original_existed.setdefault(resolved, os.path.exists(resolved))
-
-        elif op.kind == "delete":
-            err = _ensure_loaded(resolved)
-            if err:
-                errors.append(f"Op #{op_idx + 1} delete {op.path}: {err}")
-                continue
-            fs_exists[resolved] = False
-
-        elif op.kind == "update":
-            err = _ensure_loaded(resolved)
-            if err:
-                errors.append(f"Op #{op_idx + 1} update {op.path}: {err}")
-                continue
-            content = fs_state[resolved]
-            for hunk_idx, hunk in enumerate(op.hunks):
-                new_content, herr = _apply_hunk(content, hunk)
-                if herr:
-                    errors.append(f"Op #{op_idx + 1} update {op.path} hunk #{hunk_idx + 1}: {herr}")
-                    break
-                content = new_content
-            fs_state[resolved] = content
-
-        elif op.kind == "move":
-            try:
-                dst_resolved = policy.write_path(op.dest or "")
-            except ValueError as e:
-                errors.append(f"Op #{op_idx + 1} move {op.path}: {e}")
-                continue
-            err = _ensure_loaded(resolved)
-            if err:
-                errors.append(f"Op #{op_idx + 1} move {op.path}: {err}")
-                continue
-            if os.path.exists(dst_resolved) and fs_exists.get(dst_resolved, True):
-                errors.append(f"Op #{op_idx + 1} move {op.path}: destination already exists")
-                continue
-            fs_state[dst_resolved] = fs_state[resolved]
-            fs_exists[dst_resolved] = True
-            fs_exists[resolved] = False
-            original_existed.setdefault(dst_resolved, os.path.exists(dst_resolved))
-
-    if errors:
-        return None, "Patch validation failed (no files were modified):\n  " + "\n  ".join(errors)
-
-    # Phase 2: commit
-    files_modified: list[str] = []
-    files_created: list[str] = []
-    files_deleted: list[str] = []
-    diffs: list[str] = []
-    apply_errors: list[str] = []
-
-    for resolved, will_exist in fs_exists.items():
-        try:
-            existed = original_existed.get(resolved, os.path.isfile(resolved))
-            if will_exist:
-                new_content = fs_state[resolved]
-                old_content = ""
-                if existed:
-                    try:
-                        with open(resolved, encoding="utf-8") as f:
-                            old_content = f.read()
-                    except Exception:
-                        old_content = ""
-                if before_write:
-                    before_write()
-                Path(resolved).parent.mkdir(parents=True, exist_ok=True)
-                with open(resolved, "w", encoding="utf-8") as f:
-                    f.write(new_content)
-                try:
-                    record_read(None, resolved, content_bytes=new_content.encode("utf-8"))
-                except Exception:
-                    pass
-                if existed:
-                    files_modified.append(resolved)
-                    diff = _compute_diff(old_content, new_content, resolved)
-                    if diff:
-                        diffs.append(diff)
-                else:
-                    files_created.append(resolved)
-            else:
-                if before_write:
-                    before_write()
-                if os.path.isfile(resolved):
-                    os.unlink(resolved)
-                files_deleted.append(resolved)
-        except Exception as e:
-            apply_errors.append(f"{resolved}: {e}")
-
-    if apply_errors:
-        return None, (
-            "Apply phase failed (state may be inconsistent — run `git diff` to assess):\n  " + "\n  ".join(apply_errors)
-        )
-
-    summary_parts: list[str] = []
-    if files_modified:
-        summary_parts.append(f"Modified {len(files_modified)} file(s): {', '.join(files_modified)}")
-    if files_created:
-        summary_parts.append(f"Created {len(files_created)} file(s): {', '.join(files_created)}")
-    if files_deleted:
-        summary_parts.append(f"Deleted {len(files_deleted)} file(s): {', '.join(files_deleted)}")
-    summary = "\n".join(summary_parts) or "Patch applied (no files changed)"
-    if diffs:
-        summary += "\n\n" + "\n\n".join(diffs)
-    return summary, None
-
-
-# ── Patch tool implementations ────────────────────────────────────────────
-#
-# The two modes of the unified ``patch`` tool live as module-level
-# functions so they're easy to test in isolation. Both honor the same
-# ``policy`` (path resolution + deny lists) and ``before_write`` hook.
-
-
-def _patch_replace(
-    policy,
-    before_write: Callable[[], None] | None,
-    path: str,
-    old_string: str,
-    new_string: str,
-    replace_all: bool,
-) -> str:
-    """Single-file fuzzy find-and-replace (the ``mode='replace'`` path)."""
-    if not path:
-        return "Error: replace mode requires a non-empty 'path'"
-    if not old_string:
-        return "Error: 'old_string' must not be empty"
-    if old_string == new_string:
-        return "Error: 'old_string' and 'new_string' are identical — nothing to do"
-    try:
-        resolved = policy.write_path(path)
-    except ValueError as e:
-        return f"Error: {e}"
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    # Stale-edit guard: refuse unless a recent read is on record and the
-    # file on disk still matches it. Prevents the model from overwriting
-    # changes the user made between calling read_file and patch.
-    _fresh = check_fresh(None, resolved)
-    if _fresh.status is Freshness.UNREAD:
-        return (
-            f"Refusing to edit '{path}': call read_file('{path}') first so the "
-            f"harness can track its state before you edit it."
-        )
-    if _fresh.status is Freshness.STALE:
-        return f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with read_file before editing."
-
-    try:
-        with open(resolved, encoding="utf-8") as f:
-            content = f.read()
-
-        if before_write:
-            before_write()
-
-        strategies = [
-            "exact",
-            "line-trimmed",
-            "whitespace-normalized",
-            "indentation-flexible",
-            "escape-normalized",
-            "trimmed-boundary",
-            "unicode-normalized",
-            "block-anchor",
-            "context-aware",
-        ]
-        matched: str | None = None
-        strategy_used: str | None = None
-        for i, candidate in enumerate(_fuzzy_find_candidates(content, old_string)):
-            idx = content.find(candidate)
-            if idx < 0:
-                continue
-            if replace_all:
-                matched = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-            last_idx = content.rfind(candidate)
-            if idx == last_idx:
-                matched = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-
-        if matched is None:
-            close = difflib.get_close_matches(old_string[:200], content.split("\n"), n=3, cutoff=0.4)
-            msg = (
-                f"Error: Could not find a unique match for old_string in {path}. "
-                f"Use read_file to verify the current content, or search_files "
-                f"to locate the text."
-            )
-            if close:
-                suggestions = "\n".join(f"  {line}" for line in close)
-                msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
-            return msg
-
-        if replace_all:
-            count = content.count(matched)
-            new_content = content.replace(matched, new_string)
-        else:
-            count = 1
-            new_content = content.replace(matched, new_string, 1)
-
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        try:
-            record_read(None, resolved, content_bytes=new_content.encode("utf-8"))
-        except Exception:
-            pass
-
-        diff = _compute_diff(content, new_content, path)
-        match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
-        result = f"Replaced {count} occurrence(s) in {path}{match_info}"
-        if diff:
-            result += f"\n\n{diff}"
-        return result
-    except Exception as e:
-        return f"Error editing file: {e}"
-
-
-def _patch_apply(
-    policy,
-    before_write: Callable[[], None] | None,
-    patch_text: str,
-) -> str:
-    """Multi-file structured patch (the ``mode='patch'`` path)."""
-    if not patch_text:
-        return "Error: patch mode requires a non-empty 'patch_text'"
-
-    ops, parse_error = _parse_v4a(patch_text)
-    if parse_error:
-        return f"Error: {parse_error}"
-    if not ops:
-        return "Error: patch text contained no operations"
-
-    summary, apply_error = _apply_v4a(ops, policy, before_write)
-    if apply_error:
-        return f"Error: {apply_error}"
-    return summary or "Patch applied"
-
-
-# ── Tool prompts ──────────────────────────────────────────────────────────
-#
-# Each tool's top-level description and per-parameter descriptions live in a
-# co-located block here. The factory below references these constants from
-# its tool registrations — descriptions never live inline in the function
-# signatures. Module-level placement is required: ``from __future__ import
-# annotations`` makes ``Annotated[..., Field(description=...)]`` resolve
-# against module globals, not the factory's locals.
-
-# ── read_file prompts ────────────────────────────────────────────
-
-READ_FILE_DOC = (
-    "Read file contents with line numbers. Use this instead of `cat`. "
-    "Binary files are detected and rejected. Large files are auto-truncated "
-    "at 2000 lines or 50KB — use offset/limit to paginate. Reading a "
-    "directory returns its entries (use search_files for proper find/ls)."
-)
-READ_FILE_PARAMS = {
-    "path": (
-        "File path to read. Relative paths anchor to the agent's home; "
-        "absolute paths used verbatim. Credential paths (~/.ssh, ~/.aws, "
-        "etc.) are denied."
-    ),
-    "offset": "Starting line number, 1-indexed. Default 1.",
-    "limit": "Max lines to return. 0 means up to 2000. Default 0.",
-    "hashline": (
-        "If True, return lines in N:hhhh|content format with content-hash "
-        "anchors. Line truncation is disabled in this mode to preserve "
-        "hash integrity. Default False."
-    ),
-}
-
-# ── write_file prompts ───────────────────────────────────────────
-
-WRITE_FILE_DOC = (
-    "Create or overwrite a file with the given content. Parent directories "
-    "are created automatically. Use this instead of `cat > file` or shell "
-    "redirects. For targeted edits in an existing file, prefer edit_file "
-    "(this tool overwrites the whole file). Existing files require a recent "
-    "read_file call first; brand-new files don't."
-)
-WRITE_FILE_PARAMS = {
-    "path": (
-        "File path to write. Relative paths anchor to the agent's home; "
-        "absolute paths used verbatim. System and credential paths are denied."
-    ),
-    "content": "Complete file content to write.",
-}
-
-# ── edit_file prompts ────────────────────────────────────────────
-
-EDIT_FILE_DOC = (
-    "Edit files: one string in one file (replace mode), or many edits "
-    "across many files (patch mode). Use this instead of `sed`, `awk`, or "
-    "shell redirects. Returns a unified diff. If old_string doesn't match "
-    "in replace mode, re-read the file with read_file or use search_files "
-    "to locate the exact text — don't retry blindly."
-)
-EDIT_FILE_PARAMS = {
-    "mode": (
-        "Edit mode. 'replace' (default) for single-file find-and-replace. "
-        "'patch' for multi-file structured patches that can "
-        "Update/Add/Delete/Move files atomically."
-    ),
-    "path": (
-        "Replace mode only. File path to edit. Relative paths anchor to "
-        "the agent's home; absolute paths used verbatim. Ignored in patch "
-        "mode (paths live inside patch_text)."
-    ),
-    "old_string": (
-        "Replace mode only. Text to find. Must be unique in the file "
-        "unless replace_all=True; include surrounding context to "
-        "disambiguate. Fuzzy matching tolerates whitespace/indent drift, "
-        "tabs vs spaces, smart quotes vs ASCII, and literal \\n/\\t/\\r "
-        "vs real control chars."
-    ),
-    "new_string": ("Replace mode only. Replacement text. Pass an empty string to delete the matched text."),
-    "replace_all": ("Replace mode only. Replace every occurrence instead of requiring a unique match. Default False."),
-    "patch_text": (
-        "Patch mode only. Structured patch body. File paths are embedded "
-        "inside the body via '*** Update File: <path>' / "
-        "'*** Add File: <path>' / '*** Delete File: <path>' / "
-        "'*** Move File: <src> -> <dst>' markers, so one call can touch "
-        "many files. Hunks use unified-diff syntax: lines starting with "
-        "' ' (space) are context, '-' lines are removed, '+' lines are "
-        "added. Optional '@@ hint @@' before a hunk narrows fuzzy "
-        "matching to a window around the hint. If any operation fails "
-        "validation, no files are written. Example:\n"
-        "*** Begin Patch\n"
-        "*** Update File: a.py\n"
-        "@@ def hello @@\n"
-        " def hello():\n"
-        "-    return 1\n"
-        "+    return 42\n"
-        "*** Add File: new.py\n"
-        "+x = 1\n"
-        "*** Delete File: old.py\n"
-        "*** Move File: src.py -> dst.py\n"
-        "*** End Patch"
-    ),
-}
-
-# ── search_files prompts ─────────────────────────────────────────
-
-SEARCH_FILES_DOC = (
-    "Search file contents OR find files by name. Use this instead of "
-    "grep, find, or ls. target='content' (default) regex-greps inside "
-    "files; target='files' globs file names (mtime-sorted, newest first). "
-    "Pagination via limit/offset; truncated responses include a hint with "
-    "the next offset. Repeating the same exact query consecutively is "
-    "warned at 3 calls and blocked at 4 — use the results you already have."
-)
-SEARCH_FILES_PARAMS = {
-    "pattern": (
-        "Regex (content mode) or glob (files mode, e.g. '*.py'). For an 'ls'-style listing pass '*' or '*.<ext>'."
-    ),
-    "target": (
-        "'content' to grep inside files, 'files' to list/find files. "
-        "Legacy aliases: 'grep' -> 'content', 'find'/'ls' -> 'files'. "
-        "Default 'content'."
-    ),
-    "path": ("Directory (or, in content mode, a single file) to search. Default '.'."),
-    "file_glob": (
-        "Restrict content search to filenames matching this glob. "
-        "Ignored in files mode (use the 'pattern' argument instead)."
-    ),
-    "limit": "Max results to return. Default 50.",
-    "offset": "Skip first N results for pagination. Default 0.",
-    "output_mode": (
-        "Content-mode output shape: 'content' (lines + line numbers, "
-        "default), 'files_only' (paths only), 'count' (per-file match "
-        "counts)."
-    ),
-    "context": ("Lines of context before and after each match (content mode only). Default 0."),
-    "hashline": ("Content mode: include N:hhhh hash anchors in matched lines. Default False."),
-    "task_id": (
-        "Optional anti-loop scope key. Defaults to a shared bucket; pass "
-        "a per-task id when multiple agents share a process."
-    ),
-}
-
-
 # ── Factory ───────────────────────────────────────────────────────────────
 
 
 def register_file_tools(
     mcp: FastMCP,
     *,
-    home: str | None = None,
-    write_safe_root: str | list[str] | None = None,
+    resolve_path: Callable[[str], str] | None = None,
     before_write: Callable[[], None] | None = None,
+    project_root: str | None = None,
 ) -> None:
-    """Register the canonical file tools on an MCP server.
-
-    Path model (uniform across read_file, write_file, edit_file,
-    hashline_edit, search_files, apply_patch):
-
-      * Relative paths anchor to ``home``. ``home="my-folder"`` means
-        ``path="notes.md"`` resolves to ``<home>/notes.md``.
-      * Absolute paths are honored verbatim — no silent rebasing.
-      * ``~`` expands to the OS user home.
-      * A small deny list blocks writes to system + credential paths
-        and reads of credential files. System config (e.g. /etc/nginx/)
-        remains readable.
-      * If ``write_safe_root`` is set, writes outside that subtree are
-        denied. Reads are not restricted by it.
+    """Register the 5 shared file tools on an MCP server.
 
     Args:
         mcp: FastMCP instance to register tools on.
-        home: Anchor for relative paths. Defaults to the process CWD when
-            omitted, which is the right thing for the local unsandboxed
-            server. Hosted contexts should always pass this explicitly.
-        write_safe_root: Optional hard ceiling on writes. Either a single
-            path or a list of allowed write roots — a write must land
-            under at least one of them. Reads are unaffected.
-        before_write: Hook called before any write/edit (e.g. git snapshot).
+        resolve_path: Path resolver. Default: resolve to absolute path.
+            Raise ValueError to reject paths (e.g. outside sandbox).
+        before_write: Hook called before write/edit operations (e.g. git snapshot).
+        project_root: If set, search_files relativizes output paths to this root.
     """
-    policy = _FilePolicy(home=home, write_safe_root=write_safe_root)
+    _resolve = resolve_path or _default_resolve_path
 
-    @mcp.tool(description=READ_FILE_DOC)
-    def read_file(
-        path: Annotated[str, Field(description=READ_FILE_PARAMS["path"])],
-        offset: Annotated[int, Field(description=READ_FILE_PARAMS["offset"])] = 1,
-        limit: Annotated[int, Field(description=READ_FILE_PARAMS["limit"])] = 0,
-        hashline: Annotated[bool, Field(description=READ_FILE_PARAMS["hashline"])] = False,
-    ) -> str:
-        try:
-            resolved = policy.read_path(path)
-        except ValueError as e:
-            return f"Error: {e}"
+    @mcp.tool()
+    def read_file(path: str, offset: int = 1, limit: int = 0, hashline: bool = False) -> str:
+        """Read file contents with line numbers and byte-budget truncation.
+
+        Binary files are detected and rejected. Large files are automatically
+        truncated at 2000 lines or 50KB. Use offset and limit to paginate.
+
+        Set hashline=True to get N:hhhh|content format with content-hash
+        anchors for use with hashline_edit. Line truncation is disabled in
+        hashline mode to preserve hash integrity.
+
+        Args:
+            path: Absolute file path to read.
+            offset: Starting line number, 1-indexed (default: 1).
+            limit: Max lines to return, 0 = up to 2000 (default: 0).
+            hashline: If True, return N:hhhh|content anchors (default: False).
+        """
+        resolved = _resolve(path)
 
         if os.path.isdir(resolved):
             entries = []
@@ -1471,16 +297,8 @@ def register_file_tools(
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:
-            # Read raw bytes once; use them both for the line-formatted
-            # return value and to hash into the file-state cache so a
-            # later edit can detect external writes without a second
-            # open. Hash is computed even on partial/offset reads so the
-            # guard still fires when the model only read the start of a
-            # large file before editing deeper into it.
-            with open(resolved, "rb") as fb:
-                raw_bytes = fb.read()
-            content = raw_bytes.decode("utf-8", errors="replace")
-            record_read(None, resolved, content_bytes=raw_bytes)
+            with open(resolved, encoding="utf-8", errors="replace") as f:
+                content = f.read()
 
             # Use splitlines() for consistent line splitting with hashline module
             all_lines = content.splitlines()
@@ -1523,36 +341,18 @@ def register_file_tools(
         except Exception as e:
             return f"Error reading file: {e}"
 
-    @mcp.tool(description=WRITE_FILE_DOC)
-    def write_file(
-        path: Annotated[str, Field(description=WRITE_FILE_PARAMS["path"])],
-        content: Annotated[str, Field(description=WRITE_FILE_PARAMS["content"])],
-    ) -> str:
-        try:
-            resolved = policy.write_path(path)
-        except ValueError as e:
-            return f"Error: {e}"
-        resolved_path = Path(resolved)
+    @mcp.tool()
+    def write_file(path: str, content: str) -> str:
+        """Create or overwrite a file with the given content.
 
-        # Stale-edit guard: an existing file must have been read recently
-        # and still match the on-disk content. Writing over a file the
-        # model has never seen (or that changed since it last saw it)
-        # risks clobbering the user's work.  Brand-new files are allowed
-        # without a prior read - there's nothing to clobber.
-        if resolved_path.is_file():
-            _fresh = check_fresh(None, resolved)
-            if _fresh.status is Freshness.UNREAD:
-                return (
-                    f"Refusing to overwrite '{path}': call read_file('{path}') "
-                    f"first so the harness can track its state before you "
-                    f"replace it. If you intend to discard the current "
-                    f"contents, read it first to acknowledge what you are "
-                    f"overwriting."
-                )
-            if _fresh.status is Freshness.STALE:
-                return (
-                    f"Refusing to overwrite '{path}': {_fresh.detail}. Re-read the file with read_file before writing."
-                )
+        Automatically creates parent directories.
+
+        Args:
+            path: Absolute file path to write.
+            content: Complete file content to write.
+        """
+        resolved = _resolve(path)
+        resolved_path = Path(resolved)
 
         try:
             # Create parent dirs first (before git snapshot) so structure exists
@@ -1572,121 +372,649 @@ def register_file_tools(
                 f.flush()
                 os.fsync(f.fileno())
 
-            # Record the post-write state so a later edit in the same
-            # turn doesn't trip the stale-edit guard against the file
-            # this call just created or overwrote.
-            try:
-                record_read(None, resolved, content_bytes=content_str.encode("utf-8"))
-            except Exception:
-                pass
-
-            line_count = content_str.count("\n") + (1 if content_str and not content_str.endswith("\n") else 0)
+            line_count = content_str.count("\n") + (
+                1 if content_str and not content_str.endswith("\n") else 0
+            )
             action = "Updated" if existed else "Created"
             return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:
             return f"Error writing file: {e}"
 
-    @mcp.tool(description=EDIT_FILE_DOC)
-    def edit_file(
-        mode: Annotated[str, Field(description=EDIT_FILE_PARAMS["mode"])] = "replace",
-        path: Annotated[str, Field(description=EDIT_FILE_PARAMS["path"])] = "",
-        old_string: Annotated[str, Field(description=EDIT_FILE_PARAMS["old_string"])] = "",
-        new_string: Annotated[str, Field(description=EDIT_FILE_PARAMS["new_string"])] = "",
-        replace_all: Annotated[bool, Field(description=EDIT_FILE_PARAMS["replace_all"])] = False,
-        patch_text: Annotated[str, Field(description=EDIT_FILE_PARAMS["patch_text"])] = "",
-    ) -> str:
-        if mode == "replace":
-            return _patch_replace(
-                policy,
-                before_write,
-                path,
-                old_string,
-                new_string,
-                replace_all,
-            )
-        if mode == "patch":
-            return _patch_apply(policy, before_write, patch_text)
-        return f"Error: unknown mode '{mode}'. Use mode='replace' or mode='patch'."
+    @mcp.tool()
+    def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
+        """Replace text in a file using a fuzzy-match cascade.
 
-    @mcp.tool(description=SEARCH_FILES_DOC)
-    def search_files(
-        pattern: Annotated[str, Field(description=SEARCH_FILES_PARAMS["pattern"])],
-        target: Annotated[str, Field(description=SEARCH_FILES_PARAMS["target"])] = "content",
-        path: Annotated[str, Field(description=SEARCH_FILES_PARAMS["path"])] = ".",
-        file_glob: Annotated[str, Field(description=SEARCH_FILES_PARAMS["file_glob"])] = "",
-        limit: Annotated[int, Field(description=SEARCH_FILES_PARAMS["limit"])] = 50,
-        offset: Annotated[int, Field(description=SEARCH_FILES_PARAMS["offset"])] = 0,
-        output_mode: Annotated[str, Field(description=SEARCH_FILES_PARAMS["output_mode"])] = "content",
-        context: Annotated[int, Field(description=SEARCH_FILES_PARAMS["context"])] = 0,
-        hashline: Annotated[bool, Field(description=SEARCH_FILES_PARAMS["hashline"])] = False,
-        task_id: Annotated[str, Field(description=SEARCH_FILES_PARAMS["task_id"])] = "",
-    ) -> str:
-        # Legacy aliases — keep older prompts working.
-        if target in ("grep",):
-            target = "content"
-        elif target in ("find", "ls"):
-            target = "files"
+        Tries exact match first, then falls back through increasingly fuzzy
+        strategies: line-trimmed, block-anchor, whitespace-normalized,
+        indentation-flexible, and trimmed-boundary matching.
 
-        if target not in ("content", "files"):
-            return f"Error: invalid target '{target}'. Use 'content' or 'files'."
-        if output_mode not in ("content", "files_only", "count"):
-            return f"Error: invalid output_mode '{output_mode}'. Use 'content', 'files_only', or 'count'."
-
-        # Anti-loop guard. Key includes everything that would change results so
-        # paginating through the same query doesn't trip the alarm.
-        key = (target, pattern, str(path), file_glob, int(limit), int(offset), output_mode, int(context))
-        bucket = task_id or "_default"
-        with _SEARCH_TRACKER_LOCK:
-            td = _SEARCH_TRACKER.setdefault(bucket, {"last_key": None, "consecutive": 0})
-            if td["last_key"] == key:
-                td["consecutive"] += 1
-            else:
-                td["last_key"] = key
-                td["consecutive"] = 1
-            consecutive = td["consecutive"]
-
-        if consecutive >= 4:
-            return (
-                f"BLOCKED: this exact search has run {consecutive} times in a row. "
-                "Results have NOT changed. Use the information you already have and proceed."
-            )
+        Args:
+            path: Absolute file path to edit.
+            old_text: Text to find (fuzzy matching applied if exact fails).
+            new_text: Replacement text.
+            replace_all: Replace all occurrences (default: first only).
+        """
+        resolved = _resolve(path)
+        if not os.path.isfile(resolved):
+            return f"Error: File not found: {path}"
 
         try:
-            resolved = policy.read_path(path)
-        except ValueError as e:
-            return f"Error: {e}"
+            with open(resolved, encoding="utf-8") as f:
+                content = f.read()
 
-        # Output paths are relativized against home for readability —
-        # e.g. ``src/foo.py`` instead of ``/Users/aden/<home>/src/foo.py``.
-        display_root = policy.home
+            if before_write:
+                before_write()
 
-        if target == "files":
-            result = _do_search_files_target(
-                pattern=pattern,
-                resolved=resolved,
-                display_root=display_root,
-                limit=limit,
-                offset=offset,
-            )
-        else:
-            # content mode allows a single file as path; the target=files mode does not
-            if not os.path.isdir(resolved) and not os.path.isfile(resolved):
-                return f"Error: Path not found: {path}"
-            result = _do_search_content_target(
-                pattern=pattern,
-                resolved=resolved,
-                project_root=display_root,
-                file_glob=file_glob,
-                limit=limit,
-                offset=offset,
-                output_mode=output_mode,
-                context=context,
-                hashline=hashline,
-            )
+            matched_text = None
+            strategy_used = None
+            strategies = [
+                "exact",
+                "line-trimmed",
+                "block-anchor",
+                "whitespace-normalized",
+                "indentation-flexible",
+                "trimmed-boundary",
+            ]
 
-        if consecutive == 3:
-            result += (
-                f"\n\n[Warning: this exact search has run {consecutive} times consecutively. "
-                "Results have not changed — use what you have instead of re-searching.]"
+            for i, candidate in enumerate(_fuzzy_find_candidates(content, old_text)):
+                idx = content.find(candidate)
+                if idx == -1:
+                    continue
+
+                if replace_all:
+                    matched_text = candidate
+                    strategy_used = strategies[min(i, len(strategies) - 1)]
+                    break
+
+                last_idx = content.rfind(candidate)
+                if idx == last_idx:
+                    matched_text = candidate
+                    strategy_used = strategies[min(i, len(strategies) - 1)]
+                    break
+
+            if matched_text is None:
+                close = difflib.get_close_matches(
+                    old_text[:200], content.split("\n"), n=3, cutoff=0.4
+                )
+                msg = f"Error: Could not find a unique match for old_text in {path}."
+                if close:
+                    suggestions = "\n".join(f"  {line}" for line in close)
+                    msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
+                return msg
+
+            if replace_all:
+                count = content.count(matched_text)
+                new_content = content.replace(matched_text, new_text)
+            else:
+                count = 1
+                new_content = content.replace(matched_text, new_text, 1)
+
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+            diff = _compute_diff(content, new_content, path)
+            match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
+            result = f"Replaced {count} occurrence(s) in {path}{match_info}"
+            if diff:
+                result += f"\n\n{diff}"
+            return result
+        except Exception as e:
+            return f"Error editing file: {e}"
+
+    @mcp.tool()
+    def list_directory(path: str = ".", recursive: bool = False) -> str:
+        """List directory contents with type indicators.
+
+        Directories have a / suffix. Hidden files and common build directories
+        are skipped.
+
+        Args:
+            path: Absolute directory path (default: current directory).
+            recursive: List recursively (default: false). Truncates at 500 entries.
+        """
+        resolved = _resolve(path)
+        if not os.path.isdir(resolved):
+            return f"Error: Directory not found: {path}"
+
+        try:
+            skip = {
+                ".git",
+                "__pycache__",
+                "node_modules",
+                ".venv",
+                ".tox",
+                ".mypy_cache",
+                ".ruff_cache",
+            }
+            entries: list[str] = []
+            if recursive:
+                for root, dirs, files in os.walk(resolved):
+                    dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
+                    rel_root = os.path.relpath(root, resolved)
+                    if rel_root == ".":
+                        rel_root = ""
+                    for f in sorted(files):
+                        if f.startswith("."):
+                            continue
+                        entries.append(os.path.join(rel_root, f) if rel_root else f)
+                        if len(entries) >= 500:
+                            entries.append("... (truncated at 500 entries)")
+                            return "\n".join(entries)
+            else:
+                for entry in sorted(os.listdir(resolved)):
+                    if entry.startswith(".") or entry in skip:
+                        continue
+                    full = os.path.join(resolved, entry)
+                    suffix = "/" if os.path.isdir(full) else ""
+                    entries.append(f"{entry}{suffix}")
+
+            return "\n".join(entries) if entries else "(empty directory)"
+        except Exception as e:
+            return f"Error listing directory: {e}"
+
+    @mcp.tool()
+    def search_files(
+        pattern: str, path: str = ".", include: str = "", hashline: bool = False
+    ) -> str:
+        """Search file contents using regex. Uses ripgrep if available.
+
+        Results sorted by file with line numbers. Set hashline=True to include
+        content-hash anchors (N:hhhh) for use with hashline_edit.
+
+        Args:
+            pattern: Regex pattern to search for.
+            path: Absolute directory path to search (default: current directory).
+            include: File glob filter (e.g. '*.py').
+            hashline: If True, include hash anchors in results (default: False).
+        """
+        resolved = _resolve(path)
+        if not os.path.isdir(resolved):
+            return f"Error: Directory not found: {path}"
+
+        # Try ripgrep first
+        try:
+            cmd = [
+                "rg",
+                "-nH",
+                "--no-messages",
+                "--hidden",
+                "--max-count=20",
+                "--glob=!.git/*",
+                pattern,
+            ]
+            if include:
+                cmd.extend(["--glob", include])
+            cmd.append(resolved)
+
+            rg_result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                stdin=subprocess.DEVNULL,
             )
-        return result
+            if rg_result.returncode <= 1:
+                output = rg_result.stdout.strip()
+                if not output:
+                    return "No matches found."
+
+                lines = []
+                for line in output.split("\n")[:SEARCH_RESULT_LIMIT]:
+                    if project_root:
+                        line = line.replace(project_root + "/", "")
+                    if hashline:
+                        # Parse file:linenum:content and insert hash anchor
+                        parts = line.split(":", 2)
+                        if len(parts) >= 3:
+                            content = parts[2]
+                            h = compute_line_hash(content)
+                            line = f"{parts[0]}:{parts[1]}:{h}|{content}"
+                    else:
+                        # Platform-agnostic relativization: ripgrep may output
+                        # forward or backslash paths; normalize before relpath (Windows).
+                        match = re.match(r"^(.+):(\d+):", line)
+                        if match:
+                            path_part, line_num, rest = (
+                                match.group(1),
+                                match.group(2),
+                                line[match.end() :],
+                            )
+                            path_part = os.path.normpath(path_part.replace("/", os.sep))
+                            proj_norm = os.path.normpath(project_root.replace("/", os.sep))
+                            try:
+                                rel = os.path.relpath(path_part, proj_norm)
+                                line = f"{rel}:{line_num}:{rest}"
+                            except ValueError:
+                                pass
+                    if len(line) > MAX_LINE_LENGTH:
+                        line = line[:MAX_LINE_LENGTH] + "..."
+                    lines.append(line)
+                total = output.count("\n") + 1
+                result_str = "\n".join(lines)
+                if total > SEARCH_RESULT_LIMIT:
+                    result_str += (
+                        f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
+                    )
+                return result_str
+        except FileNotFoundError:
+            pass  # ripgrep not installed — fall through to Python
+        except subprocess.TimeoutExpired:
+            return "Error: Search timed out after 30 seconds"
+
+        # Fallback: Python regex
+        try:
+            compiled = re.compile(pattern)
+            matches: list[str] = []
+            skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
+
+            for root, dirs, files in os.walk(resolved):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    if include and not fnmatch.fnmatch(fname, include):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    if project_root:
+                        proj_norm = os.path.normpath(project_root.replace("/", os.sep))
+                        try:
+                            display_path = os.path.relpath(fpath, proj_norm)
+                        except ValueError:
+                            display_path = fpath
+                    else:
+                        display_path = fpath
+                    try:
+                        with open(fpath, encoding="utf-8", errors="ignore") as f:
+                            for i, line in enumerate(f, 1):
+                                stripped = line.rstrip()
+                                if compiled.search(stripped):
+                                    if hashline:
+                                        h = compute_line_hash(stripped)
+                                        matches.append(f"{display_path}:{i}:{h}|{stripped}")
+                                    else:
+                                        matches.append(
+                                            f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}"
+                                        )
+                                    if len(matches) >= SEARCH_RESULT_LIMIT:
+                                        return "\n".join(matches) + "\n... (truncated)"
+                    except (OSError, UnicodeDecodeError):
+                        continue
+
+            return "\n".join(matches) if matches else "No matches found."
+        except re.error as e:
+            return f"Error: Invalid regex: {e}"
+
+    @mcp.tool()
+    def hashline_edit(
+        path: str,
+        edits: str,
+        auto_cleanup: bool = True,
+        encoding: str = "utf-8",
+    ) -> str:
+        """Edit a file using anchor-based line references (N:hash) for precise edits.
+
+        After reading a file with read_file(hashline=True), use the anchors to make
+        targeted edits without reproducing exact file content.
+
+        Anchors must match current file content (hash validation). All edits in a
+        batch are validated before any are applied (atomic). Overlapping line ranges
+        within a single call are rejected.
+
+        Args:
+            path: Absolute file path to edit.
+            edits: JSON string containing a list of edit operations. Each op is a
+                dict with "op" key and operation-specific fields:
+                - set_line: anchor, content (single line replacement)
+                - replace_lines: start_anchor, end_anchor, content (multi-line)
+                - insert_after: anchor, content
+                - insert_before: anchor, content
+                - replace: old_content, new_content, allow_multiple
+                - append: content
+            auto_cleanup: Strip hashline prefixes and echoed context from edit
+                content (default: True).
+            encoding: File encoding (default: "utf-8").
+        """
+        # 1. Parse JSON
+        try:
+            edit_ops = json.loads(edits)
+        except (json.JSONDecodeError, TypeError) as e:
+            return f"Error: Invalid JSON in edits: {e}"
+
+        if not isinstance(edit_ops, list):
+            return "Error: edits must be a JSON array of operations"
+        if not edit_ops:
+            return "Error: edits array is empty"
+        if len(edit_ops) > 100:
+            return "Error: Too many edits in one call (max 100). Split into multiple calls."
+
+        # 2. Read file
+        resolved = _resolve(path)
+        if not os.path.isfile(resolved):
+            return f"Error: File not found: {path}"
+
+        try:
+            with open(resolved, "rb") as f:
+                raw_head = f.read(8192)
+            eol = "\r\n" if b"\r\n" in raw_head else "\n"
+
+            with open(resolved, encoding=encoding) as f:
+                content = f.read()
+        except Exception as e:
+            return f"Error: Failed to read file: {e}"
+
+        content_bytes = len(content.encode(encoding))
+        if content_bytes > HASHLINE_MAX_FILE_BYTES:
+            return f"Error: File too large for hashline_edit ({content_bytes} bytes, max 10MB)"
+
+        trailing_newline = content.endswith("\n")
+        lines = content.splitlines()
+
+        # 3. Categorize and validate ops
+        splices = []  # (start_0idx, end_0idx, new_lines, op_index)
+        replaces = []  # (old_content, new_content, op_index, allow_multiple)
+        cleanup_actions: list[str] = []
+
+        for i, op in enumerate(edit_ops):
+            if not isinstance(op, dict):
+                return f"Error: Edit #{i + 1}: operation must be a dict"
+
+            match op.get("op"):
+                case "set_line":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return f"Error: Edit #{i + 1} (set_line): {err}"
+                    if "content" not in op:
+                        return f"Error: Edit #{i + 1} (set_line): missing required field 'content'"
+                    if not isinstance(op["content"], str):
+                        return f"Error: Edit #{i + 1} (set_line): content must be a string"
+                    if "\n" in op["content"] or "\r" in op["content"]:
+                        return (
+                            f"Error: Edit #{i + 1} (set_line): content must be a single line. "
+                            f"Use replace_lines for multi-line replacement."
+                        )
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op["content"]
+                    new_lines = [new_content] if new_content else []
+                    new_lines = maybe_strip(
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx, idx, new_lines, i))
+
+                case "replace_lines":
+                    start_anchor = op.get("start_anchor", "")
+                    end_anchor = op.get("end_anchor", "")
+                    err = validate_anchor(start_anchor, lines)
+                    if err:
+                        return f"Error: Edit #{i + 1} (replace_lines start): {err}"
+                    err = validate_anchor(end_anchor, lines)
+                    if err:
+                        return f"Error: Edit #{i + 1} (replace_lines end): {err}"
+                    start_num, _ = parse_anchor(start_anchor)
+                    end_num, _ = parse_anchor(end_anchor)
+                    if start_num > end_num:
+                        return (
+                            f"Error: Edit #{i + 1} (replace_lines): "
+                            f"start line {start_num} > end line {end_num}"
+                        )
+                    if "content" not in op:
+                        return (
+                            f"Error: Edit #{i + 1} (replace_lines): "
+                            f"missing required field 'content'"
+                        )
+                    if not isinstance(op["content"], str):
+                        return f"Error: Edit #{i + 1} (replace_lines): content must be a string"
+                    new_content = op["content"]
+                    new_lines = new_content.splitlines() if new_content else []
+                    new_lines = maybe_strip(
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = maybe_strip(
+                        new_lines,
+                        lambda nl, s=start_num, e=end_num: strip_boundary_echo(lines, s, e, nl),
+                        "boundary_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((start_num - 1, end_num - 1, new_lines, i))
+
+                case "insert_after":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return f"Error: Edit #{i + 1} (insert_after): {err}"
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op.get("content", "")
+                    if not isinstance(new_content, str):
+                        return f"Error: Edit #{i + 1} (insert_after): content must be a string"
+                    if not new_content:
+                        return f"Error: Edit #{i + 1} (insert_after): content is empty"
+                    new_lines = new_content.splitlines()
+                    new_lines = maybe_strip(
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = maybe_strip(
+                        new_lines,
+                        lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl),
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx + 1, idx, new_lines, i))
+
+                case "insert_before":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return f"Error: Edit #{i + 1} (insert_before): {err}"
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op.get("content", "")
+                    if not isinstance(new_content, str):
+                        return f"Error: Edit #{i + 1} (insert_before): content must be a string"
+                    if not new_content:
+                        return f"Error: Edit #{i + 1} (insert_before): content is empty"
+                    new_lines = new_content.splitlines()
+                    new_lines = maybe_strip(
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = maybe_strip(
+                        new_lines,
+                        lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl, position="last"),
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx, idx - 1, new_lines, i))
+
+                case "replace":
+                    old_content = op.get("old_content")
+                    new_content = op.get("new_content")
+                    if old_content is None:
+                        return f"Error: Edit #{i + 1} (replace): missing old_content"
+                    if not isinstance(old_content, str):
+                        return f"Error: Edit #{i + 1} (replace): old_content must be a string"
+                    if not old_content:
+                        return f"Error: Edit #{i + 1} (replace): old_content must not be empty"
+                    if new_content is None:
+                        return f"Error: Edit #{i + 1} (replace): missing new_content"
+                    if not isinstance(new_content, str):
+                        return f"Error: Edit #{i + 1} (replace): new_content must be a string"
+                    allow_multiple = op.get("allow_multiple", False)
+                    if not isinstance(allow_multiple, bool):
+                        return f"Error: Edit #{i + 1} (replace): allow_multiple must be a boolean"
+                    replaces.append((old_content, new_content, i, allow_multiple))
+
+                case "append":
+                    new_content = op.get("content")
+                    if new_content is None:
+                        return f"Error: Edit #{i + 1} (append): missing content"
+                    if not isinstance(new_content, str):
+                        return f"Error: Edit #{i + 1} (append): content must be a string"
+                    if not new_content:
+                        return f"Error: Edit #{i + 1} (append): content must not be empty"
+                    new_lines = new_content.splitlines()
+                    new_lines = maybe_strip(
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    insert_point = len(lines)
+                    splices.append((insert_point, insert_point - 1, new_lines, i))
+
+                case unknown:
+                    return f"Error: Edit #{i + 1}: unknown op '{unknown}'"
+
+        # 4. Check for overlapping splice ranges
+        for j in range(len(splices)):
+            for k in range(j + 1, len(splices)):
+                s_a, e_a, _, idx_a = splices[j]
+                s_b, e_b, _, idx_b = splices[k]
+                is_insert_a = s_a > e_a
+                is_insert_b = s_b > e_b
+
+                if is_insert_a and is_insert_b:
+                    continue
+                if is_insert_a and not is_insert_b:
+                    if s_b <= s_a <= e_b + 1:
+                        return (
+                            f"Error: Overlapping edits: edit #{idx_a + 1} "
+                            f"and edit #{idx_b + 1} affect overlapping line ranges"
+                        )
+                    continue
+                if is_insert_b and not is_insert_a:
+                    if s_a <= s_b <= e_a + 1:
+                        return (
+                            f"Error: Overlapping edits: edit #{idx_a + 1} "
+                            f"and edit #{idx_b + 1} affect overlapping line ranges"
+                        )
+                    continue
+                if not (e_a < s_b or e_b < s_a):
+                    return (
+                        f"Error: Overlapping edits: edit #{idx_a + 1} "
+                        f"and edit #{idx_b + 1} affect overlapping line ranges"
+                    )
+
+        # 5. Apply splices bottom-up
+        changes_made = 0
+        working = list(lines)
+        for start, end, new_lines, _ in sorted(splices, key=lambda s: (s[0], s[3]), reverse=True):
+            if start > end:
+                changes_made += 1
+                for k, nl in enumerate(new_lines):
+                    working.insert(start + k, nl)
+            else:
+                old_slice = working[start : end + 1]
+                if old_slice != new_lines:
+                    changes_made += 1
+                working[start : end + 1] = new_lines
+
+        # 6. Apply str_replace ops
+        joined = "\n".join(working)
+        replace_counts = []
+        for old_content, new_content, op_idx, allow_multiple in replaces:
+            count = joined.count(old_content)
+            if count == 0:
+                return (
+                    f"Error: Edit #{op_idx + 1} (replace): "
+                    f"old_content not found "
+                    f"(note: anchor-based edits in this batch are applied first)"
+                )
+            if count > 1 and not allow_multiple:
+                return (
+                    f"Error: Edit #{op_idx + 1} (replace): "
+                    f"old_content found {count} times (must be unique). "
+                    f"Include more surrounding context to make it unique, "
+                    f"or use anchor-based ops instead."
+                )
+            if allow_multiple:
+                joined = joined.replace(old_content, new_content)
+                replace_counts.append((op_idx, count))
+            else:
+                joined = joined.replace(old_content, new_content, 1)
+            if count > 0 and old_content != new_content:
+                changes_made += 1
+
+        # 7. Restore trailing newline
+        if trailing_newline and joined and not joined.endswith("\n"):
+            joined += "\n"
+
+        # 8. Restore original EOL style (only convert bare \n, not existing \r\n)
+        if eol == "\r\n":
+            joined = re.sub(r"(?<!\r)\n", "\r\n", joined)
+
+        # 9. Snapshot + atomic write
+        try:
+            if before_write:
+                before_write()
+            fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(resolved))
+            fd_open = True
+            try:
+                match sys.platform:
+                    case "win32":
+                        pass  # ACL preservation handled by atomic_replace below
+                    case _:
+                        original_mode = os.stat(resolved).st_mode
+                        os.fchmod(fd, original_mode)
+                with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
+                    fd_open = False
+                    f.write(joined)
+                match sys.platform:
+                    case "win32":
+                        from aden_tools._win32_atomic import atomic_replace
+
+                        atomic_replace(resolved, tmp_path)
+                    case _:
+                        os.replace(tmp_path, resolved)
+            except BaseException:
+                if fd_open:
+                    os.close(fd)
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+        except Exception as e:
+            return f"Error: Failed to write file: {e}"
+
+        # 10. Build response
+        updated_lines = joined.splitlines()
+        total_lines = len(updated_lines)
+
+        # Limit returned content to first 200 lines
+        preview_limit = 200
+        hashline_content = format_hashlines(updated_lines, limit=preview_limit)
+
+        parts = [f"Applied {changes_made} edit(s) to {path}"]
+        if changes_made == 0:
+            parts.append("(content unchanged after applying edits)")
+        if cleanup_actions:
+            parts.append(f"Auto-cleanup: {', '.join(cleanup_actions)}")
+        if replace_counts:
+            for op_idx, count in replace_counts:
+                parts.append(f"Edit #{op_idx + 1} replaced {count} occurrence(s)")
+        parts.append("")
+        parts.append(hashline_content)
+        if total_lines > preview_limit:
+            parts.append(
+                f"\n(Showing first {preview_limit} of {total_lines} lines. "
+                f"Use read_file with offset to see more.)"
+            )
+        return "\n".join(parts)

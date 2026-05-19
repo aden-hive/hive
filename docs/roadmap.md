@@ -369,6 +369,7 @@ Port popular tools, and build out the Runtime Log, Audit Trail, Excel, and Email
     - [x] Subdomain Enumerator (tools/subdomain_enumerator/)
     - [x] Tech Stack Detector (tools/tech_stack_detector/)
 - [x] **Runtime & Logging**
+    - [x] Runtime Log Tool (tools/runtime_logs_tool/)
     - [x] Runtime Logger with L1/L2/L3 levels (runtime/runtime_logger.py)
 - [ ] **Audit Trail System**
     - [ ] Decision tracing beyond logs
@@ -775,7 +776,7 @@ Implement an interactive, drag-and-drop canvas (using libraries like React Flow)
 ### TUI to GUI Upgrade
 Port the existing Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface.
 
-> **Note:** The legacy TUI (`tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
+> **Note:** The TUI (`hive tui` / `tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
 
 - [x] ~~**TUI Foundation**~~ *(deprecated)*
     - [x] ~~Terminal chat interface (tui/app.py)~~
@@ -801,7 +802,8 @@ Port the existing Terminal User Interface (TUI) into a rich web application, all
 ### Memory & State Inspector
 Create a UI component to inspect the Shared Memory and Write-Through Conversation Memory, allowing developers to click on any node and see exactly what it is thinking.
 
-- [x] **Session State**
+- [x] **Runtime Logs Tool**
+    - [x] Inspect agent session logs (tools/runtime_logs_tool/)
     - [x] Session state retrieval (builder/package_generator.py)
 - [ ] **Memory Inspector UI**
     - [ ] Shared Memory visualization

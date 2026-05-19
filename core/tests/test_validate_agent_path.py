@@ -44,10 +44,9 @@ class TestGetAllowedAgentRoots:
         roots = _get_allowed_agent_roots()
         assert isinstance(roots, tuple), f"Expected tuple, got {type(roots).__name__}"
 
-    def test_contains_four_roots(self):
-        # 4 roots: ~/.hive/colonies, repo/exports (compat), repo/examples, ~/.hive/agents
+    def test_contains_three_roots(self):
         roots = _get_allowed_agent_roots()
-        assert len(roots) == 4
+        assert len(roots) == 3
 
     def test_cached_on_repeated_calls(self):
         first = _get_allowed_agent_roots()
@@ -66,9 +65,9 @@ class TestGetAllowedAgentRoots:
         from framework.server.app import _REPO_ROOT
 
         roots = _get_allowed_agent_roots()
-        # Order: ~/.hive/colonies, repo/exports, repo/examples, ~/.hive/agents
-        assert roots[1] == (_REPO_ROOT / "exports").resolve()
-        assert roots[2] == (_REPO_ROOT / "examples").resolve()
+        exports_root, examples_root = roots[0], roots[1]
+        assert exports_root == (_REPO_ROOT / "exports").resolve()
+        assert examples_root == (_REPO_ROOT / "examples").resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +296,7 @@ class TestHTTPEndpointsRejectMaliciousPaths:
             _reset_allowed_roots()
 
     @pytest.mark.asyncio
-    async def test_load_colony_rejects_outside_path(self, tmp_path):
+    async def test_load_worker_rejects_outside_path(self, tmp_path):
         import framework.server.app as app_module
 
         exports = tmp_path / "exports"
@@ -313,7 +312,7 @@ class TestHTTPEndpointsRejectMaliciousPaths:
                 session_id = (await create_resp.json())["session_id"]
 
                 resp = await client.post(
-                    f"/api/sessions/{session_id}/colony",
+                    f"/api/sessions/{session_id}/worker",
                     json={"agent_path": "/tmp/evil"},
                 )
                 assert resp.status == 400

@@ -19,7 +19,6 @@ from typing import Any, Literal
 
 import pytest
 
-from framework.host.event_bus import AgentEvent, EventBus, EventType, Subscription
 from framework.llm.stream_events import (
     FinishEvent,
     ReasoningDeltaEvent,
@@ -30,6 +29,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType, Subscription
 
 
 # ---------------------------------------------------------------------------
