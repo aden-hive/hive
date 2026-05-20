@@ -24,6 +24,8 @@ Manage contacts, companies, deals, and associations using the HubSpot CRM API v3
 
 ## Setup
 
+Get a token at: [HubSpot Developer Portal](https://developers.hubspot.com/docs/api/private-apps)
+
 ### Option A: Environment variable (quickest)
 
 ```bash
@@ -32,20 +34,20 @@ export HUBSPOT_ACCESS_TOKEN=your-hubspot-access-token
 
 ### Option B: Aden Platform (OAuth)
 
-If you prefer OAuth (auto-refresh + multi-account), set `ADEN_API_KEY` and connect HubSpot at https://hive.adenhq.com/connect/hubspot.
-Hive will sync the token into the credential store at runtime.
+If you prefer OAuth (auto-refresh + multi-account), set `ADEN_API_KEY`:
 
-| Variable | Description |
-|----------|-------------|
-| `HUBSPOT_ACCESS_TOKEN` | HubSpot private app access token |
+```bash
+export ADEN_API_KEY=your-aden-api-key
+```
+
+Then connect HubSpot at https://hive.adenhq.com/connect/hubspot.
+Hive will sync the token into the credential store at runtime.
 
 ### Option C: Credential store (local)
 
 Alternatively, configure credentials in the credential store (`CredentialStoreAdapter`):
 - credential id: `hubspot`
 - key: `access_token`
-
-Get a token at: [HubSpot Developer Portal](https://developers.hubspot.com/docs/api/private-apps)
 
 Supports multi-account via the `account` parameter when using the credential store (Aden OAuth or local aliases).
 
