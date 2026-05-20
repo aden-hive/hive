@@ -423,6 +423,11 @@ if [ $CHECK_EXIT -eq 0 ] || echo "$CHECK_RESULT" | grep -q "^{"; then
 import json, sys
 
 GREEN, RED, YELLOW, NC = '\033[0;32m', '\033[0;31m', '\033[1;33m', '\033[0m'
+import platform
+
+CHECK = '[OK]' if platform.system() == 'Windows' else '✓'
+CROSS = '[X]' if platform.system() == 'Windows' else '✗'
+WARN = '[!]' if platform.system() == 'Windows' else '⚠'
 
 try:
     data = json.loads(sys.stdin.read())
@@ -435,14 +440,14 @@ try:
     for mod, label, required in modules:
         status = data.get(mod, 'error: not checked')
         if status == 'ok':
-            print(f'{GREEN}  ✓ {label}{NC}')
+            print(f'{GREEN}  {CHECK} {label}{NC}')
         elif required:
-            print(f'{RED}  ✗ {label} failed{NC}')
+            print(f'{RED}  {CROSS} {label} failed{NC}')
             if status != 'error: not checked':
                 print(f'    {status}')
             import_errors += 1
         else:
-            print(f'{YELLOW}  ⚠ {label} (may be OK){NC}')
+            print(f'{YELLOW}  {WARN} {label} (may be OK){NC}')
     sys.exit(import_errors)
 except json.JSONDecodeError:
     print(f'{RED}Error: Could not parse import check results{NC}', file=sys.stderr)
