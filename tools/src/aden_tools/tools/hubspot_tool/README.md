@@ -42,6 +42,7 @@ export ADEN_API_KEY=your-aden-api-key
 
 Then connect HubSpot at https://hive.adenhq.com/connect/hubspot.
 Hive will sync the token into the credential store at runtime.
+This is the same credential store used in Option C below (so tools read credentials consistently).
 
 ### Option C: Credential store (local)
 
