@@ -11,6 +11,9 @@
 
 set -e
 
+# Ensure Python uses UTF-8 output encoding, especially on Windows Git Bash / cp1252 consoles.
+export PYTHONUTF8="${PYTHONUTF8:-1}"
+
 # Detect Bash version for compatibility
 BASH_MAJOR_VERSION="${BASH_VERSINFO[0]}"
 USE_ASSOC_ARRAYS=false
