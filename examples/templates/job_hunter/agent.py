@@ -193,8 +193,10 @@ class JobHunterAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = None
-        if not mock_mode:
+        if mock_mode:
+            from framework.llm.mock import MockLLMProvider
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=self.config.model,
                 api_key=self.config.api_key,
@@ -228,12 +230,13 @@ class JobHunterAgent:
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=entry_point_specs,
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=checkpoint_config,
+            checkpoint_config=checkpoint_config
         )
+        for spec in entry_point_specs:
+            self._agent_runtime.register_entry_point(spec)
 
     async def start(self, mock_mode=False) -> None:
         """Set up and start the agent runtime."""

@@ -73,19 +73,17 @@ def tui():
             graph=agent._build_graph(),
             goal=agent.goal,
             storage_path=storage,
-            entry_points=[
-                EntryPointSpec(
+            llm=llm,
+            tools=list(agent._tool_registry.get_tools().values()),
+            tool_executor=agent._tool_registry.get_executor()
+        )
+        runtime.register_entry_point(EntryPointSpec(
                     id="start",
                     name="Start",
                     entry_node="intake",
                     trigger_type="manual",
                     isolation_level="isolated",
-                )
-            ],
-            llm=llm,
-            tools=list(agent._tool_registry.get_tools().values()),
-            tool_executor=agent._tool_registry.get_executor(),
-        )
+                ))
         await runtime.start()
         try:
             app = AdenTUI(runtime)

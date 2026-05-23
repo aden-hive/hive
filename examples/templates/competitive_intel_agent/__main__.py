@@ -154,19 +154,17 @@ def tui(verbose: bool, debug: bool) -> None:
             graph=graph,
             goal=agent.goal,
             storage_path=storage_path,
-            entry_points=[
-                EntryPointSpec(
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor
+        )
+        runtime.register_entry_point(EntryPointSpec(
                     id="start",
                     name="Start Competitive Analysis",
                     entry_node="intake",
                     trigger_type="manual",
                     isolation_level="isolated",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
-        )
+                ))
 
         await runtime.start()
 

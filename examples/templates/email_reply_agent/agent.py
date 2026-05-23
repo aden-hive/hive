@@ -165,15 +165,6 @@ class EmailReplyAgent:
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="default",
-                    name="Default",
-                    entry_node=self.entry_node,
-                    trigger_type="manual",
-                    isolation_level="shared",
-                ),
-            ],
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
@@ -182,8 +173,15 @@ class EmailReplyAgent:
                 checkpoint_on_node_complete=True,
                 checkpoint_max_age_days=7,
                 async_checkpoint=True,
-            ),
+            )
         )
+        self._agent_runtime.register_entry_point(EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ))
 
     async def start(self):
         if self._agent_runtime is None:

@@ -129,20 +129,18 @@ class LocalBusinessExtractor:
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=[
-                EntryPointSpec(
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+            checkpoint_config=CheckpointConfig(enabled=True, checkpoint_on_node_complete=True)
+        )
+        self._agent_runtime.register_entry_point(EntryPointSpec(
                     id="default",
                     name="Default",
                     entry_node=self.entry_node,
                     trigger_type="manual",
                     isolation_level="shared",
-                )
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
-            checkpoint_config=CheckpointConfig(enabled=True, checkpoint_on_node_complete=True),
-        )
+                ))
 
     async def start(self):
         if self._agent_runtime is None:

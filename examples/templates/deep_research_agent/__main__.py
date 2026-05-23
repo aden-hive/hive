@@ -34,17 +34,18 @@ def cli():
 
 @cli.command()
 @click.option("--topic", "-t", type=str, required=True, help="Research topic")
+@click.option("--mock", is_flag=True, help="Run in mock mode without making LLM calls")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(topic, quiet, verbose, debug):
+def run(topic, mock, quiet, verbose, debug):
     """Execute research on a topic."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
     context = {"topic": topic}
 
-    result = asyncio.run(default_agent.run(context))
+    result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data = {
         "success": result.success,
@@ -107,19 +108,17 @@ def tui(verbose, debug):
             graph=graph,
             goal=agent.goal,
             storage_path=storage_path,
-            entry_points=[
-                EntryPointSpec(
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor
+        )
+        runtime.register_entry_point(EntryPointSpec(
                     id="start",
                     name="Start Research",
                     entry_node="intake",
                     trigger_type="manual",
                     isolation_level="isolated",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
-        )
+                ))
 
         await runtime.start()
 

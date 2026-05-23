@@ -266,12 +266,13 @@ class SDRAgent:
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=entry_point_specs,
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=checkpoint_config,
+            checkpoint_config=checkpoint_config
         )
+        for spec in entry_point_specs:
+            self._agent_runtime.register_entry_point(spec)
 
     async def start(self, mock_mode=False) -> None:
         """Set up and start the agent runtime."""
