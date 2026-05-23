@@ -106,8 +106,10 @@ def tui(mock, verbose, debug):
         if tools_path.exists():
             agent._tool_registry.discover_from_module(tools_path)
 
-        llm = None
-        if not mock:
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=agent.config.model,
                 api_key=agent.config.api_key,
