@@ -447,7 +447,7 @@ my_agent/
 | Functions/Variables | snake_case       | `process_ticket()`       |
 | Constants           | UPPER_SNAKE_CASE | `MAX_RETRIES = 3`        |
 | Test files          | `test_` prefix   | `test_ticket_handler.py` |
-| Agent packages      | snake_case       | `support_ticket_agent/`  |
+| Agent packages      | snake_case       | `your_agent_name/`  |
 
 ### Import Order
 
