@@ -29,11 +29,12 @@ def cli():
 
 @cli.command()
 @click.option("--filter", "-f", "filter_text", help="Email filter description")
+@click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--verbose", "-v", is_flag=True)
-def run(filter_text, verbose):
+def run(filter_text, mock, verbose):
     """Execute the agent."""
     setup_logging(verbose=verbose)
-    result = asyncio.run(default_agent.run({"filter": filter_text or ""}))
+    result = asyncio.run(default_agent.run({"filter": filter_text or ""}, mock_mode=mock))
     click.echo(
         json.dumps(
             {"success": result.success, "output": result.output},
@@ -45,7 +46,8 @@ def run(filter_text, verbose):
 
 
 @cli.command()
-def tui():
+@click.option("--mock", is_flag=True, help="Run in mock mode")
+def tui(mock=False):
     """Launch TUI dashboard."""
     from pathlib import Path
 
@@ -63,26 +65,33 @@ def tui():
         mcp_cfg = Path(__file__).parent / "mcp_servers.json"
         if mcp_cfg.exists():
             agent._tool_registry.load_mcp_config(mcp_cfg)
-        llm = LiteLLMProvider(
-            model=agent.config.model,
-            api_key=agent.config.api_key,
-            api_base=agent.config.api_base,
-        )
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=agent.config.model,
+                api_key=agent.config.api_key,
+                api_base=agent.config.api_base,
+            )
         runtime = AgentHost(
             graph=agent._build_graph(),
             goal=agent.goal,
             storage_path=storage,
             llm=llm,
             tools=list(agent._tool_registry.get_tools().values()),
-            tool_executor=agent._tool_registry.get_executor()
+            tool_executor=agent._tool_registry.get_executor(),
         )
-        runtime.register_entry_point(EntryPointSpec(
-                    id="start",
-                    name="Start",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ))
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
+        )
         await runtime.start()
         try:
             app = AdenTUI(runtime)

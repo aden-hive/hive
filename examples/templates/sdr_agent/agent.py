@@ -4,7 +4,7 @@ from pathlib import Path
 
 from framework.orchestrator import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.orchestrator.checkpoint_config import CheckpointConfig
-from framework.orchestrator.edge import AsyncEntryPointSpec, GraphSpec
+from framework.orchestrator.edge import GraphSpec
 from framework.orchestrator.orchestrator import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.loader.tool_registry import ToolRegistry
@@ -147,7 +147,7 @@ edges = [
 # Graph configuration
 entry_node = "intake"
 entry_points = {"start": "intake"}
-async_entry_points: list[AsyncEntryPointSpec] = []  # SDR Agent is manually triggered
+async_entry_points: list = []  # SDR Agent is manually triggered
 pause_nodes = []
 terminal_nodes = []
 loop_config = {
@@ -269,7 +269,7 @@ class SDRAgent:
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=checkpoint_config
+            checkpoint_config=checkpoint_config,
         )
         for spec in entry_point_specs:
             self._agent_runtime.register_entry_point(spec)

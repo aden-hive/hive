@@ -33,17 +33,18 @@ def cli():
 
 
 @cli.command()
+@click.option("--mock", is_flag=True, help="Run in mock mode without making LLM calls")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(quiet, verbose, debug):
+def run(mock, quiet, verbose, debug):
     """Execute the news reporter agent."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
     context = {}
 
-    result = asyncio.run(default_agent.run(context))
+    result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data = {
         "success": result.success,
@@ -58,9 +59,10 @@ def run(quiet, verbose, debug):
 
 
 @cli.command()
+@click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def tui(verbose, debug):
+def tui(mock, verbose, debug):
     """Launch the TUI dashboard for interactive news reporting."""
     setup_logging(verbose=verbose, debug=debug)
 
@@ -91,31 +93,33 @@ def tui(verbose, debug):
         if mcp_config_path.exists():
             agent._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = LiteLLMProvider(
-            model=agent.config.model,
-            api_key=agent.config.api_key,
-            api_base=agent.config.api_base,
-        )
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=agent.config.model,
+                api_key=agent.config.api_key,
+                api_base=agent.config.api_base,
+            )
 
         tools = list(agent._tool_registry.get_tools().values())
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
         runtime = AgentHost(
-            graph=graph,
-            goal=agent.goal,
-            storage_path=storage_path,
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor
+            graph=graph, goal=agent.goal, storage_path=storage_path, llm=llm, tools=tools, tool_executor=tool_executor
         )
-        runtime.register_entry_point(EntryPointSpec(
-                    id="start",
-                    name="Start News Report",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ))
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start News Report",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
+        )
 
         await runtime.start()
 
