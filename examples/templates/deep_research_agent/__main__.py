@@ -105,20 +105,17 @@ def tui(verbose, debug):
         graph = agent._build_graph()
 
         runtime = AgentHost(
-            graph=graph,
-            goal=agent.goal,
-            storage_path=storage_path,
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor
+            graph=graph, goal=agent.goal, storage_path=storage_path, llm=llm, tools=tools, tool_executor=tool_executor
         )
-        runtime.register_entry_point(EntryPointSpec(
-                    id="start",
-                    name="Start Research",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ))
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start Research",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
+        )
 
         await runtime.start()
 

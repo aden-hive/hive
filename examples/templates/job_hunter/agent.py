@@ -195,6 +195,7 @@ class JobHunterAgent:
 
         if mock_mode:
             from framework.llm.mock import MockLLMProvider
+
             llm = MockLLMProvider()
         else:
             llm = LiteLLMProvider(
@@ -233,7 +234,7 @@ class JobHunterAgent:
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=checkpoint_config
+            checkpoint_config=checkpoint_config,
         )
         for spec in entry_point_specs:
             self._agent_runtime.register_entry_point(spec)
