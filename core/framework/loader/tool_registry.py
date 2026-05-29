@@ -115,14 +115,6 @@ class ToolRegistry:
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
-        # Full MCP tool catalog (pre-credential-admission) used by the
-        # Tool Library so users can pre-enable credentialed tools whose
-        # provider hasn't been authorized yet. Filters out the verified-
-        # manifest sentinel and unverified tools from aden-flavoured
-        # servers, but does NOT require a live provider account.
-        # server name -> list of {"name", "description", "input_schema",
-        # "provider"}
-        self._mcp_full_catalog: dict[str, list[dict[str, Any]]] = {}
         # tool name -> owning MCPClient (for force-kill on timeout)
         self._mcp_tool_clients: dict[str, Any] = {}
         # Per-agent env injected into every MCP server config.env. Kept
@@ -412,18 +404,6 @@ class ToolRegistry:
     def get_server_tool_names(self, server_name: str) -> set[str]:
         """Return tool names registered from a specific MCP server."""
         return set(self._mcp_server_tools.get(server_name, set()))
-
-    def get_full_mcp_catalog(self) -> dict[str, list[dict[str, Any]]]:
-        """Return the full per-server MCP tool catalog (pre-credential gate).
-
-        Used by the Tool Library so users can see — and pre-enable —
-        credentialed tools whose provider has not been authorized yet.
-        Each entry is ``{"name", "description", "input_schema",
-        "provider"}``; ``provider`` is ``None`` for credential-less tools.
-        Returns a deep-ish copy so callers can mutate the structure
-        without affecting the registry's internal state.
-        """
-        return {server: [dict(entry) for entry in entries] for server, entries in self._mcp_full_catalog.items()}
 
     def set_session_context(self, **context) -> None:
         """
@@ -776,28 +756,11 @@ class ToolRegistry:
             # (b) credential-less *and* listed in the verified manifest.
             # Servers that don't expose `__aden_verified_manifest` (third-party
             # MCP servers) bypass the gate entirely — preserves prior behavior.
-            admit, library_admit, tool_provider_map = self._build_mcp_admission_gate(client)
-
-            # Reset the per-server library catalog before re-populating so
-            # a re-register (e.g. credential resync) starts clean.
-            self._mcp_full_catalog[server_name] = []
+            admit = self._build_mcp_admission_gate(client)
 
             count = 0
             admitted_names: list[str] = []
             for mcp_tool in client.list_tools():
-                # Populate the Tool Library catalog regardless of the
-                # strict credential gate so the UI can show greyed-out
-                # rows with a Connect button. The library_admit gate
-                # still drops the manifest sentinel and unverified tools.
-                if library_admit(mcp_tool.name):
-                    self._mcp_full_catalog[server_name].append(
-                        {
-                            "name": mcp_tool.name,
-                            "description": mcp_tool.description,
-                            "input_schema": mcp_tool.input_schema,
-                            "provider": tool_provider_map.get(mcp_tool.name),
-                        }
-                    )
                 if not admit(mcp_tool.name):
                     continue
                 if tool_cap is not None and count >= tool_cap:
@@ -944,29 +907,15 @@ class ToolRegistry:
 
     _MCP_VERIFIED_MANIFEST_TOOL = "__aden_verified_manifest"
 
-    def _build_mcp_admission_gate(
-        self, client: Any
-    ) -> tuple[Callable[[str], bool], Callable[[str], bool], dict[str, str]]:
-        """Build per-server predicates that filter MCP tools at registration.
-
-        Returns ``(admit, library_admit, tool_provider_map)``:
-          * ``admit`` — strict gate used for queen tool registration. Drops
-            credentialed tools whose provider has no live account, and
-            drops credential-less tools missing from the verified manifest.
-          * ``library_admit`` — looser gate used to populate the Tool
-            Library catalog. Same as ``admit`` but admits credentialed
-            tools regardless of whether the provider is authorized, so the
-            UI can show greyed-out rows with a Connect button.
-          * ``tool_provider_map`` — tool name → provider, snapshot taken
-            at registration time so callers can stamp catalog entries.
+    def _build_mcp_admission_gate(self, client: Any) -> Callable[[str], bool]:
+        """Build a per-server predicate that filters MCP tools at registration.
 
         Rules:
           * The sentinel manifest tool itself is never admitted.
           * Credential-backed tools (provider in `tool_provider_map`) are
-            admitted by ``admit`` only when at least one account exists
-            for that provider; ``library_admit`` admits unconditionally.
-          * Credential-less tools are admitted only when they appear in
-            the server's verified manifest.
+            admitted only when at least one account exists for that provider.
+          * Credential-less tools are admitted only when they appear in the
+            server's verified manifest.
           * Servers that don't expose a manifest bypass the verified gate
             entirely (third-party MCP servers behave as before).
         """
@@ -1032,20 +981,7 @@ class ToolRegistry:
                 return True
             return tool_name in verified_names
 
-        def library_admit(tool_name: str) -> bool:
-            # Looser variant used for the Tool Library catalog: admit
-            # credentialed tools regardless of provider connection. Still
-            # respects the manifest sentinel and verified set so we don't
-            # surface internal/dev tools to the UI.
-            if tool_name == self._MCP_VERIFIED_MANIFEST_TOOL:
-                return False
-            if tool_provider_map.get(tool_name):
-                return True
-            if not manifest_present:
-                return True
-            return tool_name in verified_names
-
-        return admit, library_admit, tool_provider_map
+        return admit
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
         """
@@ -1218,9 +1154,6 @@ class ToolRegistry:
             self._tools.pop(name, None)
         self._mcp_tool_names.clear()
         self._mcp_server_tools.clear()
-        # Library catalog is rebuilt by register_mcp_server; clear it so
-        # stale entries from servers that fail to re-register don't leak.
-        self._mcp_full_catalog.clear()
 
         # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
         self.load_mcp_config(self._mcp_config_path)

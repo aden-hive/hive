@@ -1403,7 +1403,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "lusha_api_key": LushaHealthChecker(),
     "microsoft_graph": MicrosoftGraphHealthChecker(),
     "newsdata": NewsdataHealthChecker(),
-    "notion": NotionHealthChecker(),
+    "notion_token": NotionHealthChecker(),
     "pinecone": PineconeHealthChecker(),
     "pipedrive": PipedriveHealthChecker(),
     "prometheus": PrometheusHealthChecker(),

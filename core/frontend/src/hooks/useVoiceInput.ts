@@ -35,9 +35,9 @@ declare global {
 }
 
 interface UseVoiceInputOptions {
-  onResult: (transcript: string, isFinal: boolean) => void;
+  onResult: (transcript: string) => void;
+  onInterim?: (transcript: string) => void;
   onError?: (error: string) => void;
-  lang?: string;
 }
 
 interface UseVoiceInputReturn {
@@ -48,7 +48,7 @@ interface UseVoiceInputReturn {
   error: string | null;
 }
 
-export function useVoiceInput({ onResult, onError, lang = "en-US" }: UseVoiceInputOptions): UseVoiceInputReturn {
+export function useVoiceInput({ onResult, onInterim, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,95 +56,112 @@ export function useVoiceInput({ onResult, onError, lang = "en-US" }: UseVoiceInp
   const hasReceivedSpeech = useRef(false);
   const isStartingRef = useRef(false);
   const hasStartedRef = useRef(false);
-
-  // Keep callbacks in refs so handlers always call the latest version,
-  // even after the component re-renders (e.g. activeThread changes).
   const onResultRef = useRef(onResult);
+  const onInterimRef = useRef(onInterim);
   const onErrorRef = useRef(onError);
-  useEffect(() => { onResultRef.current = onResult; }, [onResult]);
-  useEffect(() => { onErrorRef.current = onError; }, [onError]);
-
-  // Sync lang to the recognition instance whenever it changes.
-  // The instance is created once on mount; this keeps it up-to-date
-  // without tearing it down and recreating it.
-  useEffect(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.lang = lang;
-    }
-  }, [lang]);
 
   useEffect(() => {
-    const SpeechRecognitionConstructor =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    onResultRef.current = onResult;
+    onInterimRef.current = onInterim;
+    onErrorRef.current = onError;
+  }, [onResult, onInterim, onError]);
 
+  useEffect(() => {
+    // Check if SpeechRecognition is supported
+    const SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
     if (SpeechRecognitionConstructor) {
+      console.log("Speech recognition is supported");
       setIsSupported(true);
-
+      
+      // Only create recognition if it doesn't exist
       if (!recognitionRef.current) {
         recognitionRef.current = new SpeechRecognitionConstructor();
-
+        
         const recognition = recognitionRef.current;
-        recognition.continuous = false;
+        recognition.continuous = false; // Don't keep listening - stop after one result
         recognition.interimResults = true;
-        recognition.lang = lang;
+        recognition.lang = "en-US";
         recognition.maxAlternatives = 1;
 
         recognition.onresult = (event: SpeechRecognitionEvent) => {
+          console.log("Speech recognition result received");
           hasReceivedSpeech.current = true;
-
+          
+          // Get the latest result
           const result = event.results[event.results.length - 1];
           const transcript = result[0].transcript;
-
-          // Forward both interim and final results to the caller.
-          // Callers can use isFinal to decide whether to auto-submit.
-          if (transcript.trim()) {
-            onResultRef.current(transcript, result.isFinal);
-          }
-
-          if (result.isFinal && recognitionRef.current) {
-            recognitionRef.current.stop();
+          
+          console.log(`Transcript (${result.isFinal ? 'final' : 'interim'}):`, transcript);
+          
+          const trimmedTranscript = transcript.trim();
+          if (trimmedTranscript) {
+            if (result.isFinal) {
+              console.log("Final transcript:", trimmedTranscript);
+              onResultRef.current(trimmedTranscript);
+              if (recognitionRef.current) {
+                recognitionRef.current.stop();
+              }
+            } else {
+              onInterimRef.current?.(trimmedTranscript);
+            }
           }
         };
 
         recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error("Speech recognition error:", event.error, event);
+          
+          // Reset flags
           isStartingRef.current = false;
           hasStartedRef.current = false;
-
+          
+          // Ignore aborted errors if we manually stopped or if we haven't started yet
           if (event.error === "aborted") {
+            console.log("Recognition was aborted");
             setIsListening(false);
             return;
           }
-
+          
+          // Handle specific errors
           if (event.error === "not-allowed" || event.error === "permission-denied") {
-            const msg =
-              "Microphone permission denied. Please allow microphone access in your browser settings.";
-            setError(msg);
-            onErrorRef.current?.(msg);
+            const errorMessage = "Microphone permission denied. Please allow microphone access in your browser settings.";
+            setError(errorMessage);
+            onErrorRef.current?.(errorMessage);
+            alert(errorMessage);
           } else if (event.error === "no-speech") {
+            console.log("No speech detected");
             if (!hasReceivedSpeech.current) {
-              const msg = "No speech detected. Please try again and speak clearly.";
-              onErrorRef.current?.(msg);
+              const errorMessage = "No speech detected. Please try again and speak clearly.";
+              setError(errorMessage);
+              onErrorRef.current?.(errorMessage);
             }
           } else {
-            const msg = `Speech recognition error: ${event.error}`;
-            setError(msg);
-            onErrorRef.current?.(msg);
+            const errorMessage = `Speech recognition error: ${event.error}`;
+            setError(errorMessage);
+            onErrorRef.current?.(errorMessage);
           }
-
+          
           setIsListening(false);
         };
 
         recognition.onstart = () => {
+          console.log("Speech recognition started");
           hasReceivedSpeech.current = false;
           isStartingRef.current = false;
           hasStartedRef.current = true;
           setIsListening(true);
         };
 
-        recognition.onspeechstart = () => {};
-        recognition.onspeechend = () => {};
+        recognition.onspeechstart = () => {
+          console.log("User started speaking");
+        };
+
+        recognition.onspeechend = () => {
+          console.log("User stopped speaking");
+        };
 
         recognition.onend = () => {
+          console.log("Speech recognition ended");
           isStartingRef.current = false;
           hasStartedRef.current = false;
           setIsListening(false);
@@ -152,39 +169,53 @@ export function useVoiceInput({ onResult, onError, lang = "en-US" }: UseVoiceInp
       }
     } else {
       setIsSupported(false);
-      const msg =
-        "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.";
-      setError(msg);
-      onErrorRef.current?.(msg);
+      setError(null);
     }
 
+    // Don't cleanup on every render - only on unmount
     return () => {
+      // Only abort if component is actually unmounting
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
-        } catch {
-          // ignore cleanup errors
+        } catch (e) {
+          // Ignore errors on cleanup
         }
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run once on mount
 
   const startListening = useCallback(() => {
-    if (!isSupported || !recognitionRef.current) return;
-    if (isListening || isStartingRef.current) return;
+    if (!isSupported || !recognitionRef.current) {
+      const errorMessage = "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.";
+      setError(errorMessage);
+      onErrorRef.current?.(errorMessage);
+      return;
+    }
+
+    // Check if already listening or starting
+    if (isListening || isStartingRef.current) {
+      console.log("Already listening or starting, ignoring start request");
+      return;
+    }
 
     try {
       setError(null);
       hasReceivedSpeech.current = false;
       isStartingRef.current = true;
+      console.log("Starting speech recognition...");
       recognitionRef.current.start();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("already started")) {
+      // State will be set by onstart event
+    } catch (err: any) {
+      // Handle "already started" error
+      if (err.message && err.message.includes("already started")) {
+        console.log("Recognition already started");
         isStartingRef.current = false;
         return;
       }
-      const errorMessage = `Failed to start speech recognition: ${message}`;
+      
+      const errorMessage = `Failed to start speech recognition: ${err.message || err}`;
+      console.error(errorMessage, err);
       setError(errorMessage);
       onErrorRef.current?.(errorMessage);
       setIsListening(false);
@@ -192,17 +223,22 @@ export function useVoiceInput({ onResult, onError, lang = "en-US" }: UseVoiceInp
     }
   }, [isSupported, isListening]);
 
-  // Use hasStartedRef (synchronous) instead of isListening (state, may be
-  // slightly stale between onresult calling stop() and React flushing onend).
   const stopListening = useCallback(() => {
-    if (recognitionRef.current && hasStartedRef.current) {
+    if (recognitionRef.current && isListening) {
+      console.log("Manually stopping speech recognition");
       try {
         recognitionRef.current.stop();
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error("Error stopping recognition:", e);
       }
     }
-  }, []);
+  }, [isListening]);
 
-  return { isListening, isSupported, startListening, stopListening, error };
+  return {
+    isListening,
+    isSupported,
+    startListening,
+    stopListening,
+    error,
+  };
 }

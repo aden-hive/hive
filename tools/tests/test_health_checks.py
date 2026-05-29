@@ -85,7 +85,7 @@ class TestHealthCheckerRegistry:
             "lusha_api_key",
             "microsoft_graph",
             "newsdata",
-            "notion",
+            "notion_token",
             "pinecone",
             "pipedrive",
             "prometheus",

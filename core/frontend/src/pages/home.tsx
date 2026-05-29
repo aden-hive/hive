@@ -81,11 +81,15 @@ export default function Home() {
       });
   }, []);
 
-  // Clean up voice timeouts on unmount
+  // Clean up voice error timeout on unmount
   useEffect(() => {
     return () => {
-      if (voiceErrorTimeoutRef.current) clearTimeout(voiceErrorTimeoutRef.current);
-      if (voiceResultTimeoutRef.current) clearTimeout(voiceResultTimeoutRef.current);
+      if (voiceErrorTimeoutRef.current) {
+        clearTimeout(voiceErrorTimeoutRef.current);
+      }
+      if (voiceResultTimeoutRef.current) {
+        clearTimeout(voiceResultTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -104,23 +108,26 @@ export default function Home() {
     }
   };
 
-  // Voice input integration — only navigate on final transcript
-  const handleVoiceResult = useCallback((transcript: string, isFinal: boolean) => {
+  // Voice input integration
+  const handleVoiceResult = useCallback((transcript: string) => {
     setInputValue(transcript);
-    if (isFinal && transcript.trim()) {
-      // Clear any pending navigation timeout
-      if (voiceResultTimeoutRef.current) clearTimeout(voiceResultTimeoutRef.current);
-      // Brief delay to let UI reflect final transcript before navigating
-      voiceResultTimeoutRef.current = setTimeout(() => {
-        navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(transcript.trim())}`);
-      }, 100);
+    // Clear any pending navigation timeout
+    if (voiceResultTimeoutRef.current) {
+      clearTimeout(voiceResultTimeoutRef.current);
     }
+    // Brief delay to let UI reflect final transcript before navigating
+    voiceResultTimeoutRef.current = setTimeout(() => {
+      navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(transcript.trim())}`);
+    }, 100);
   }, [navigate]);
 
-  const handleVoiceError = useCallback((err: string) => {
-    setVoiceError(err);
+  const handleVoiceError = useCallback((error: string) => {
+    console.error("Voice input error:", error);
+    setVoiceError(error);
     // Clear any pending error timeout
-    if (voiceErrorTimeoutRef.current) clearTimeout(voiceErrorTimeoutRef.current);
+    if (voiceErrorTimeoutRef.current) {
+      clearTimeout(voiceErrorTimeoutRef.current);
+    }
     // Auto-clear after 4 seconds
     voiceErrorTimeoutRef.current = setTimeout(() => setVoiceError(null), 4000);
   }, []);
@@ -129,6 +136,11 @@ export default function Home() {
     onResult: handleVoiceResult,
     onError: handleVoiceError,
   });
+
+  // Debug: log when isListening changes
+  useEffect(() => {
+    console.log("Home page - isListening changed to:", isListening);
+  }, [isListening]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

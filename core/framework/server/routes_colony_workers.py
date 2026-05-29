@@ -62,7 +62,6 @@ def _worker_info_to_dict(info) -> dict:
         "status": str(info.status),
         "started_at": info.started_at,
         "result": result_dict,
-        "profile_name": getattr(info, "profile_name", "") or "",
     }
 
 

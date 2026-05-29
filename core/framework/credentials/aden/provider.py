@@ -289,22 +289,6 @@ class AdenSyncProvider(CredentialProvider):
         """
         synced = 0
 
-        # Echo where we're talking and which key prefix we're using so a
-        # 401 can be diagnosed without enabling httpx debug logs. The key
-        # prefix is the safest discriminator: if the desktop minted a key
-        # against backend X but the runtime is hitting backend Y, the
-        # prefix in the log won't match the one the user finds in their
-        # ``hive_auth.bin`` (or in the dashboard's Keys panel).
-        cfg = self._client.config
-        api_key = cfg.api_key or ""
-        key_summary = f"{api_key[:8]}…{api_key[-4:]}" if len(api_key) >= 12 else "<short>"
-        logger.info(
-            "AdenSync: GET %s/v1/credentials key=%s len=%d",
-            cfg.base_url.rstrip("/"),
-            key_summary,
-            len(api_key),
-        )
-
         try:
             integrations = self._client.list_integrations()
 
