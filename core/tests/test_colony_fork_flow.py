@@ -156,6 +156,8 @@ def _make_session_with_queen_state(
         queen_identity_prompt="You are Charlotte, head of finance.",
         _cached_global_recall_block="",
         get_current_prompt=lambda: "you are the queen",
+        global_memory_dir=None,
+        queen_memory_dir=None,
     )
 
     session = Session(
@@ -279,16 +281,11 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
         assert resp.status == 200, await resp.text()
         body = await resp.json()
 
-        # fork_session_into_colony schedules the compaction + worker-storage
-        # copy onto _BACKGROUND_FORK_TASKS and returns. In prod the colony-
-        # open path blocks on compaction_status.await_completion; the test
-        # skips that step, so drain the bg tasks here before asserting on
-        # the artifacts they produce (otherwise the worker-storage check is
-        # a race that flakes under CI load).
-        from framework.server.routes_execution import _BACKGROUND_FORK_TASKS
+    # Wait for background fork finalization (compaction + worker storage copy)
+    from framework.server import routes_execution
 
-        if _BACKGROUND_FORK_TASKS:
-            await asyncio.gather(*list(_BACKGROUND_FORK_TASKS), return_exceptions=True)
+    if routes_execution._BACKGROUND_FORK_TASKS:
+        await asyncio.gather(*routes_execution._BACKGROUND_FORK_TASKS)
 
     colony_session_id = body["queen_session_id"]
     assert body["colony_name"] == "honeycomb"
