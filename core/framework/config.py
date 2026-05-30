@@ -322,7 +322,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
 def get_worker_max_tokens() -> int:
     """Return max_tokens for the worker LLM, falling back to default."""
     worker_llm = get_hive_config().get("worker_llm", {})
-    if worker_llm and "max_tokens" in worker_llm:
+    if "max_tokens" in worker_llm and worker_llm["max_tokens"] is not None:
         return worker_llm["max_tokens"]
     return get_max_tokens()
 
@@ -330,15 +330,17 @@ def get_worker_max_tokens() -> int:
 def get_worker_max_context_tokens() -> int:
     """Return max_context_tokens for the worker LLM, falling back to default."""
     worker_llm = get_hive_config().get("worker_llm", {})
-    if worker_llm and "max_context_tokens" in worker_llm:
+    if "max_context_tokens" in worker_llm and worker_llm["max_context_tokens"] is not None:
         return worker_llm["max_context_tokens"]
     return get_max_context_tokens()
 
 
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
-    return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
-
+    llm = get_hive_config().get("llm", {})
+    if "max_tokens" in llm and llm["max_tokens"] is not None:
+        return llm["max_tokens"]
+    return DEFAULT_MAX_TOKENS
 
 DEFAULT_MAX_CONTEXT_TOKENS = 32_000
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
