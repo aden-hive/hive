@@ -45,6 +45,9 @@ class WorkerResult:
     status: str = "success"  # "success" | "partial" | "failed" | "timeout" | "stopped"
     summary: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+    # Additive decision-quality metadata (neutrosophic T/I/F triplet).
+    # Consumers that do not use neutrosophic scoring can safely ignore this field.
+    neutrosophic_score: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -226,35 +229,52 @@ class Worker:
             # to the canned "stopped" message when no explicit report exists.
             explicit = self._explicit_report
             if explicit is not None:
+                status = explicit["status"]
+                summary = explicit["summary"]
+                data = explicit["data"]
+                # The explicit report was submitted before cancellation, so
+                # score it on its own merits — the synthetic stop message
+                # would otherwise inflate falsity for a clean success report.
+                # The WorkerResult.error still carries the stop reason for
+                # the event payload; only the score sees the report as-is.
                 self._result = WorkerResult(
                     error="Worker stopped by queen after reporting",
                     duration_seconds=duration,
-                    status=explicit["status"],
-                    summary=explicit["summary"],
-                    data=explicit["data"],
+                    status=status,
+                    summary=summary,
+                    data=data,
+                    neutrosophic_score=self._score_report(status, summary, data, None),
                 )
-                await self._emit_terminal_events(None, force_status=explicit["status"])
+                await self._emit_terminal_events(None, force_status=status)
             else:
+                status = "stopped"
+                summary = "Worker was cancelled before completion."
+                error = "Worker stopped by queen"
                 self._result = WorkerResult(
-                    error="Worker stopped by queen",
+                    error=error,
                     duration_seconds=duration,
-                    status="stopped",
-                    summary="Worker was cancelled before completion.",
+                    status=status,
+                    summary=summary,
+                    neutrosophic_score=self._score_report(status, summary, {}, error),
                 )
-                await self._emit_terminal_events(None, force_status="stopped")
+                await self._emit_terminal_events(None, force_status=status)
             return self._result
 
         except Exception as exc:
             self.status = WorkerStatus.FAILED
             duration = time.monotonic() - self._started_at
+            status = "failed"
+            summary = f"Worker crashed: {exc}"
+            error = str(exc)
             self._result = WorkerResult(
-                error=str(exc),
+                error=error,
                 duration_seconds=duration,
-                status="failed",
-                summary=f"Worker crashed: {exc}",
+                status=status,
+                summary=summary,
+                neutrosophic_score=self._score_report(status, summary, {}, error),
             )
             logger.error("Worker %s failed: %s", self.id, exc, exc_info=True)
-            await self._emit_terminal_events(None, force_status="failed")
+            await self._emit_terminal_events(None, force_status=status)
             return self._result
 
     async def _persistent_input_loop(self) -> None:
@@ -280,6 +300,32 @@ class Worker:
     # ------------------------------------------------------------------
     # Reporting
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _score_report(
+        status: str,
+        summary: str,
+        data: dict[str, Any],
+        error: str | None,
+    ) -> dict[str, Any]:
+        """Compute a neutrosophic decision-quality score for a terminal report.
+
+        Returns an empty dict (and logs at debug level) if scoring fails for
+        any reason — the score is additive metadata; failing to compute it
+        must never break the worker's terminal path.
+        """
+        try:
+            from framework.neutrosophic import score_worker_report
+
+            return score_worker_report(
+                status=status,
+                summary=summary,
+                data=data,
+                error=error,
+            ).to_dict()
+        except Exception:
+            logger.debug("Failed to compute neutrosophic score for terminal report", exc_info=True)
+            return {}
 
     def record_explicit_report(
         self,
@@ -307,14 +353,19 @@ class Worker:
         """Construct a WorkerResult from AgentResult + optional explicit report."""
         explicit = self._explicit_report
         if explicit is not None:
+            status = explicit["status"]
+            summary = explicit["summary"]
+            data = explicit["data"]
+            error = agent_result.error
             return WorkerResult(
                 output=dict(agent_result.output or {}),
-                error=agent_result.error,
+                error=error,
                 tokens_used=getattr(agent_result, "tokens_used", 0),
                 duration_seconds=duration,
-                status=explicit["status"],
-                summary=explicit["summary"],
-                data=explicit["data"],
+                status=status,
+                summary=summary,
+                data=data,
+                neutrosophic_score=self._score_report(status, summary, data, error),
             )
         # Synthesise a minimal report from AgentResult
         if agent_result.success:
@@ -331,6 +382,7 @@ class Worker:
             status=default_status,
             summary=summary,
             data=data,
+            neutrosophic_score=self._score_report(default_status, summary, data, agent_result.error),
         )
 
     async def _emit_terminal_events(
@@ -389,6 +441,7 @@ class Worker:
                     "error": result.error,
                     "duration_seconds": result.duration_seconds,
                     "tokens_used": result.tokens_used,
+                    "neutrosophic_score": result.neutrosophic_score,
                 },
             )
         )
