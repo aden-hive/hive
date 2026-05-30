@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from framework.orchestrator import NodeSpec
+from framework.orchestrator.node import NodeSpec
 
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
@@ -292,7 +292,7 @@ When the stakeholder describes what they want, mentally construct:
 Reference tools from list_agent_tools() AND built-in capabilities:
 - **Browser automation provides full Playwright-based \
 browser control (navigation, clicking, typing, scrolling, JS-rendered pages, \
-multi-tab). Do NOT list browser automation as missing — use browser nodes with tools: {policy: "all"}.
+multi-tab). Do NOT list browser automation as missing — use browser nodes with tools: {{policy: "all"}}.
 
 Present a short **Framework Fit Assessment**:
 - **Works well**: 2-4 strengths for this use case
@@ -412,7 +412,7 @@ into the layout with edges like any other node:
 ```
 research → browser_scan → analyze_results
 ```
-Use `tools: {policy: "all"}` to give browser nodes access to all \
+Use `tools: {{policy: "all"}}` to give browser nodes access to all \
 browser tools, or list specific ones with `policy: "explicit"`.
 
 If the worker agent starts from some initial input it is okay. \
@@ -483,13 +483,13 @@ credentials="available" filters to configured tools. Call FIRST before designing
 
 ## Post-Build Validation
 After writing agent code, run a single comprehensive check:
-  validate_agent_package("{name}")
+  validate_agent_package("{{name}}")
 This runs class validation, runner load, tool validation, and tests \
 in one call. Do NOT run these steps individually.
 
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
-1. list_agent_sessions("{agent_name}") — find the session
+1. list_agent_sessions("{{agent_name}}") — find the session
 2. get_worker_status(focus="issues") — check for problems
 3. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
@@ -560,7 +560,7 @@ tools:
 
 ## 6. Verify and Load
 
-Call `validate_agent_package("{name}")` after initialization. \
+Call `validate_agent_package("{{name}}")` after initialization. \
 It runs structural checks (class validation, layout validation, tool \
 validation, tests) and returns a consolidated result. If anything \
 fails: read the error, fix with read_file+write_file, re-validate. Up to 3x.
@@ -709,8 +709,8 @@ phase. Only use this when the user explicitly asks to work with an existing agen
 wait for all reports. Use this when the user asks for batch / parallel work \
 RIGHT NOW that does NOT need a reusable agent (e.g. "fetch batches 1–5 from \
 this API", "summarise these 10 PDFs", "compare these candidates"). Each task \
-is a dict {"task": "...", "data"?: {...}}; the tool returns aggregated \
-{worker_id, status, summary, data, error} reports. Read the summaries and \
+is a dict {{"task": "...", "data"?: {{...}}}}; the tool returns aggregated \
+{{worker_id, status, summary, data, error}} reports. Read the summaries and \
 write a single user-facing synthesis on your next turn. Prefer this over \
 designing a draft when the work is one-shot and the user wants results, not \
 a saved agent.
@@ -774,7 +774,7 @@ to this chat**. Typical triggers:
      speculation. Include the EXACT selectors, tool call \
      sequences, and gotchas you hit in your own run. Use \
      write_file to create the skill folder (recommended \
-     location: `~/.hive/skills/{skill-name}/SKILL.md`). The \
+     location: `~/.hive/skills/{{skill-name}}/SKILL.md`). The \
      SKILL.md needs YAML frontmatter with `name` (matching the \
      directory name) and `description` (1-1024 chars including \
      trigger keywords), followed by a markdown body. Optional \
@@ -893,9 +893,9 @@ Follow the browser-automation skill protocol — activate it before using browse
 wait for all reports. Use when the user asks for batch / parallel work \
 RIGHT NOW that can be split into independent subtasks (e.g. "fetch batches \
 1–5 from this API", "summarise these 10 PDFs", "compare these candidates"). \
-Each task is a dict `{"task": "...", "data"?: {...}}`. Workers have zero \
+Each task is a dict `{{"task": "...", "data"?: {{...}}}}`. Workers have zero \
 context from your chat — each task string must be FULL and self-contained. \
-The tool returns aggregated `{worker_id, status, summary, data, error}` \
+The tool returns aggregated `{{worker_id, status, summary, data, error}}` \
 reports. Read them on your next turn and write a single user-facing \
 synthesis.
 
@@ -953,7 +953,7 @@ conversation ends. Typical triggers:
      earned doing the work inline, not from speculation. Include \
      the EXACT selectors, tool call sequences, and gotchas you \
      hit in your own run. Use write_file to create a skill folder \
-     somewhere temporary (e.g. `/tmp/{skill-name}/` or your \
+     somewhere temporary (e.g. `/tmp/{{skill-name}}/` or your \
      working directory). DO NOT author it under `~/.hive/skills/` \
      — that path is user-global and would leak the skill to every \
      other agent. The SKILL.md needs YAML frontmatter with `name` \
@@ -965,7 +965,7 @@ conversation ends. Typical triggers:
   2. create_colony(colony_name, task, skill_path) — Validates \
      the skill folder, forks this session into a new colony, and \
      installs the skill COLONY-SCOPED at \
-     `~/.hive/colonies/{colony_name}/skills/{skill_name}/`. Only \
+     `~/.hive/colonies/{{colony_name}}/skills/{{skill_name}}/`. Only \
      that colony's worker sees it, no other agent. The colony \
      worker inherits your full conversation at spawn time, so it \
      sees everything you already did and said — no repeated \
@@ -1499,12 +1499,17 @@ _queen_behavior = (
     + _queen_behavior_running
 )
 
+# ============================================================
+# FIX (lines 1524-1558): _queen_phase_7 uses a raw string (r""")
+# so the {name} placeholder is treated as literal text and not
+# as a Python format placeholder, eliminating the linter error.
+# ============================================================
 _queen_phase_7 = """
 ## Running the Agent
 
 After validation passes and load_built_agent succeeds (STAGING phase), \
 offer to run the agent. Call run_agent_with_input(task) to start it. \
-Do NOT tell the user to run `python -m {name} run` — run it here.
+Do NOT tell the user to run the agent manually — run it here via run_agent_with_input(task).
 """
 
 _queen_style = """
@@ -1530,10 +1535,15 @@ queen_node = NodeSpec(
         "worker agent lifecycle."
     ),
     node_type="event_loop",
+    client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
+    success_criteria=(
+        "User's intent is understood, coding tasks are completed correctly, "
+        "and the worker is managed effectively when delegated to."
+    ),
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
     tools=sorted(
         set(
