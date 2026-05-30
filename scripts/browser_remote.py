@@ -79,7 +79,16 @@ def get_mcp_client() -> MCPClient:
 async def handle_ui(request: web.Request) -> web.Response:
     """GET /ui — serve the web UI."""
     ui_path = Path(__file__).parent / "browser_remote_ui.html"
-    return web.FileResponse(ui_path)
+    html = ui_path.read_text(encoding="utf-8")
+
+    # Inject token if set so the UI can use it
+    token = os.environ.get("BROWSER_REMOTE_TOKEN", "")
+    html = html.replace(
+        "const API_BASE = window.location.origin;",
+        f"const API_BASE = window.location.origin;\\nconst API_TOKEN = {json.dumps(token)};",
+    )
+
+    return web.Response(text=html, content_type="text/html")
 
 
 async def handle_index(request: web.Request) -> web.Response:
@@ -209,13 +218,32 @@ def _format_mcp_result(result: Any) -> dict:
 
 @web.middleware
 async def cors_middleware(request: web.Request, handler):
+    origin = request.headers.get("Origin")
+
+    # Enforce local origin only
+    if origin and not (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
+        return web.json_response({"error": "Forbidden origin"}, status=403)
+
     if request.method == "OPTIONS":
         resp = web.Response()
     else:
+        # Auth check for POST
+        if request.method == "POST":
+            expected_token = os.environ.get("BROWSER_REMOTE_TOKEN")
+            if expected_token:
+                auth_header = request.headers.get("Authorization", "")
+                if not auth_header.startswith("Bearer ") or auth_header[7:].strip() != expected_token:
+                    return web.json_response({"error": "Unauthorized"}, status=401)
+
         resp = await handler(request)
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     return resp
 
 

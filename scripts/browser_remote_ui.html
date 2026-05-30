@@ -708,10 +708,15 @@ async function runTool(event, tool) {
 
   const startTime = Date.now();
   let result;
+  const headers = { 'Content-Type': 'application/json' };
+  if (typeof API_TOKEN !== 'undefined' && API_TOKEN) {
+    headers['Authorization'] = `Bearer ${API_TOKEN}`;
+  }
+
   try {
     const res = await fetch(`${API_BASE}/${tool}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(params),
     });
     result = await res.json();
