@@ -346,7 +346,7 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
 def get_max_context_tokens() -> int:
     """Return the configured max_context_tokens, falling back to DEFAULT_MAX_CONTEXT_TOKENS."""
-    return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
+    return get_hive_config().get("llm", {}).get("max_context_tokens") or DEFAULT_MAX_CONTEXT_TOKENS
 
 
 def get_api_keys() -> list[str] | None:
