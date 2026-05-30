@@ -2,6 +2,8 @@
 
 import logging
 
+from playwright.sync_api import expect
+
 from framework.config import get_api_base, get_hive_config, get_preferred_model, get_max_context_tokens, get_max_tokens, get_worker_max_tokens, get_worker_max_context_tokens
 
 
@@ -24,39 +26,59 @@ class TestGetHiveConfig:
 
     def test_get_max_context_tokens_handles_explicit_null(self, tmp_path, monkeypatch):
         """Test that explicit null max_context_tokens falls back to default."""
+        # baseline: absent key behaviour
+        baseline_path = tmp_path / "baseline_configuration.json"
+        baseline_path.write_text('{"llm": {}}')
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", baseline_path)
+        expected = get_max_context_tokens()
+
         config_file = tmp_path / "configuration.json"
         config_file.write_text('{"llm": {"max_context_tokens": null}}')
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
         result = get_max_context_tokens()
-        assert result is not None
-        assert isinstance(result, int)
+        assert expected == result
 
     def test_get_max_tokens_handles_explicit_null(self, tmp_path, monkeypatch):
         """Test that explicit null max_tokens falls back to default."""
+        # baseline: absent key behaviour
+        baseline_path = tmp_path / "baseline_configuration.json"
+        baseline_path.write_text('{"llm": {}}')
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", baseline_path)
+        expected = get_max_tokens()
+
         config_file = tmp_path / "configuration.json"
         config_file.write_text('{"llm": {"max_tokens": null}}')
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
         result = get_max_tokens()
-        assert result is not None
-        assert isinstance(result, int)
+        assert expected == result
 
     def test_get_worker_max_tokens_handles_explicit_null(self, tmp_path, monkeypatch):
         """Test that explicit null max_tokens for worker_llm falls back to default."""
+        # baseline: absent key behaviour
+        baseline_path = tmp_path / "baseline_configuration.json"
+        baseline_path.write_text('{"llm": {}}')
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", baseline_path)
+        expected = get_worker_max_tokens()
+
         config_file = tmp_path / "configuration.json"
         config_file.write_text('{"worker_llm": {"max_tokens": null}}')
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
         result = get_worker_max_tokens()
-        assert result is not None
-        assert isinstance(result, int)
+        assert expected == result
 
     def test_get_worker_max_context_tokens_handles_explicit_null(self, tmp_path, monkeypatch):
         """Test that explicit null max_context_tokens for worker_llm falls back to default."""
+        # baseline: absent key behaviour
+        baseline_path = tmp_path / "baseline_configuration.json"
+        baseline_path.write_text('{"llm": {}}')
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", baseline_path)
+        expected = get_worker_max_context_tokens()
+
         config_file = tmp_path / "configuration.json"
         config_file.write_text('{"worker_llm": {"max_context_tokens": null}}')
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
         result = get_worker_max_context_tokens()
-        assert result is not None
-        assert isinstance(result, int)
+        assert expected == result
 
 
 class TestOpenRouterConfig:
