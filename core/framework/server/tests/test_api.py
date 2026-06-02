@@ -608,6 +608,35 @@ class TestMessageBootstrap:
 
 class TestQueenSessionSelection:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method", "path", "kwargs"),
+        [
+            ("get", "/api/queen/..%2Ftmp/profile", {}),
+            ("patch", "/api/queen/..%2Ftmp/profile", {"json": {"title": "x"}}),
+            ("post", "/api/queen/..%2Ftmp/session", {"json": {}}),
+            ("post", "/api/queen/..%2Ftmp/session/new", {"json": {}}),
+            ("post", "/api/queen/..%2Ftmp/session/select", {"json": {"session_id": "session_ok"}}),
+            ("get", "/api/queen/..%2Ftmp/avatar", {}),
+            ("post", "/api/queen/..%2Ftmp/avatar", {"data": {}}),
+        ],
+    )
+    async def test_queen_routes_reject_unsafe_queen_id(self, method, path, kwargs):
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await getattr(client, method)(path, **kwargs)
+            assert resp.status == 400
+
+    @pytest.mark.asyncio
+    async def test_select_queen_session_rejects_unsafe_session_id(self):
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/queen/queen_technology/session/select",
+                json={"session_id": "../other_session"},
+            )
+            assert resp.status == 400
+
+    @pytest.mark.asyncio
     async def test_select_queen_session_rejects_foreign_session(self, monkeypatch, tmp_path):
         _patch_queen_storage(monkeypatch, tmp_path)
         _write_queen_session(tmp_path, "queen_growth", "other_session", {"queen_id": "queen_growth"})
