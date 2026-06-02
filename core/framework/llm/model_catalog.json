@@ -159,12 +159,25 @@
       ]
     },
     "minimax": {
-      "default_model": "MiniMax-M2.7",
+      "default_model": "MiniMax-M3",
       "models": [
         {
-          "id": "MiniMax-M2.7",
-          "label": "MiniMax M2.7 - Best coding quality",
+          "id": "MiniMax-M3",
+          "label": "MiniMax M3 - Best coding quality",
           "recommended": true,
+          "max_tokens": 128000,
+          "max_context_tokens": 512000,
+          "pricing_usd_per_mtok": {
+            "input": 0.60,
+            "output": 2.40,
+            "cache_read": 0.12
+          },
+          "supports_vision": true
+        },
+        {
+          "id": "MiniMax-M2.7",
+          "label": "MiniMax M2.7 - Previous generation",
+          "recommended": false,
           "max_tokens": 40960,
           "max_context_tokens": 180000,
           "pricing_usd_per_mtok": {
@@ -174,8 +187,8 @@
           "supports_vision": false
         },
         {
-          "id": "MiniMax-M2.5",
-          "label": "MiniMax M2.5 - Strong value",
+          "id": "MiniMax-M2.7-highspeed",
+          "label": "MiniMax M2.7 Highspeed - Low latency",
           "recommended": false,
           "max_tokens": 40960,
           "max_context_tokens": 180000,
@@ -462,9 +475,9 @@
     "minimax_code": {
       "provider": "minimax",
       "api_key_env_var": "MINIMAX_API_KEY",
-      "model": "MiniMax-M2.7",
-      "max_tokens": 40960,
-      "max_context_tokens": 180800,
+      "model": "MiniMax-M3",
+      "max_tokens": 128000,
+      "max_context_tokens": 512000,
       "api_base": "https://api.minimax.io/v1"
     },
     "kimi_code": {

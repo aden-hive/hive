@@ -22,6 +22,7 @@ class TestSupportsImageToolResults:
             "gpt-5.4-mini",
             "gemini-3-flash-preview",
             "kimi-k2.5",
+            "MiniMax-M3",
             # Provider-prefixed catalog entries
             "openrouter/openai/gpt-5.4",
             "openrouter/anthropic/claude-sonnet-4.6",
@@ -43,6 +44,7 @@ class TestSupportsImageToolResults:
             "glm-5.1",
             "queen",
             "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
             "codestral-2508",
             "llama-3.3-70b-versatile",
             # Provider-prefixed forms resolve to the same catalog entry

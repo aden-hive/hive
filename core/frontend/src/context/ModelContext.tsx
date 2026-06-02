@@ -24,7 +24,7 @@ export const LLM_PROVIDERS: ProviderInfo[] = [
   { id: "gemini", name: "Google Gemini", description: "Gemini 3 family - Fast and best quality", envVar: "GEMINI_API_KEY", initial: "G" },
   { id: "groq", name: "Groq", description: "Ultra-fast inference, GPT-OSS and Llama", envVar: "GROQ_API_KEY", initial: "G" },
   { id: "cerebras", name: "Cerebras", description: "Ultra-fast inference, GPT-OSS and Z.ai GLM", envVar: "CEREBRAS_API_KEY", initial: "C" },
-  { id: "minimax", name: "MiniMax", description: "MiniMax M2.7 and M2.5 - Best coding quality", envVar: "MINIMAX_API_KEY", initial: "M" },
+  { id: "minimax", name: "MiniMax", description: "MiniMax M3 - Best coding quality", envVar: "MINIMAX_API_KEY", initial: "M" },
   { id: "openrouter", name: "OpenRouter", description: "200+ models, any provider", envVar: "OPENROUTER_API_KEY", initial: "O" },
   { id: "mistral", name: "Mistral", description: "Mistral Large, Medium, Small, Codestral", envVar: "MISTRAL_API_KEY", initial: "M" },
   { id: "together", name: "Together AI", description: "DeepSeek, Qwen3, GPT-OSS, Llama", envVar: "TOGETHER_API_KEY", initial: "T" },

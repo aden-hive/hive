@@ -78,13 +78,15 @@ def test_minimax_catalog_tracks_current_non_legacy_text_models():
     minimax_default = model_catalog.get_default_models()["minimax"]
     minimax_models = model_catalog.get_models_catalogue()["minimax"]
 
-    assert minimax_default == "MiniMax-M2.7"
+    assert minimax_default == "MiniMax-M3"
     assert [model["id"] for model in minimax_models] == [
+        "MiniMax-M3",
         "MiniMax-M2.7",
-        "MiniMax-M2.5",
+        "MiniMax-M2.7-highspeed",
     ]
-    assert all(model["max_context_tokens"] == 180000 for model in minimax_models)
-    assert all(model["max_tokens"] == 40960 for model in minimax_models)
+    assert minimax_models[0]["max_context_tokens"] == 512000
+    assert minimax_models[0]["max_tokens"] == 128000
+    assert minimax_models[0]["supports_vision"] is True
 
 
 def test_mistral_catalog_tracks_current_curated_models():
@@ -189,9 +191,9 @@ def test_minimax_preset_uses_current_default_model():
     preset = model_catalog.get_preset("minimax_code")
 
     assert preset is not None
-    assert preset["model"] == "MiniMax-M2.7"
-    assert preset["max_tokens"] == 40960
-    assert preset["max_context_tokens"] == 180800
+    assert preset["model"] == "MiniMax-M3"
+    assert preset["max_tokens"] == 128000
+    assert preset["max_context_tokens"] == 512000
 
 
 def test_load_model_catalog_rejects_duplicate_model_ids(tmp_path, monkeypatch):
