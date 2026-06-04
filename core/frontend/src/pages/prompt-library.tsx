@@ -21,9 +21,13 @@ function PromptCard({
   const isCustom = "custom" in prompt && prompt.custom;
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(prompt.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(prompt.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API unavailable (insecure context); silently no-op.
+    }
   };
 
   return (
