@@ -918,4 +918,4 @@ def test_register_duplicate_tool_warns_and_skips(caplog):
 
     # Original tool should still be there, not overwritten
     assert registry._tools["search"].tool.description == "Provider A"  # noqa: SLF001
-    assert "already registered" in caplog.text 
+    assert "already registered" in caplog.text
