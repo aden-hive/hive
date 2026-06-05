@@ -903,3 +903,19 @@ def test_concurrency_safe_allowlist_is_conservative():
         "browser_navigate",
     ):
         assert forbidden not in allowlist, f"{forbidden} must not be concurrency-safe"
+
+
+def test_register_duplicate_tool_warns_and_skips(caplog):
+    """Registering a tool with an already-taken name should warn and keep the original."""
+    registry = ToolRegistry()
+    tool1 = Tool(name="search", description="Provider A", parameters={"type": "object", "properties": {}})
+    tool2 = Tool(name="search", description="Provider B", parameters={"type": "object", "properties": {}})
+
+    registry.register("search", tool1, lambda x: {"result": "from_A"})
+
+    with caplog.at_level(logging.WARNING):
+        registry.register("search", tool2, lambda x: {"result": "from_B"})
+
+    # Original tool should still be there, not overwritten
+    assert registry._tools["search"].tool.description == "Provider A"  # noqa: SLF001
+    assert "already registered" in caplog.text 
