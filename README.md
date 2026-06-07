@@ -44,23 +44,23 @@ OpenHive is a zero-setup, model-agnostic execution harness that dynamically gene
 
 ## Features
 
-- ✅ Multi-Agent Coordination for parallel task execution 
-- ✅ Graph-based execution for recurring and complex processes 
-- ✅ Role-based memory that evolves with your projects 
-- ✅ Zero Setup - No technical configuration required
-- ✅ General Compute Use and Browser Use with Native Extension 
+- ✅ Multi-Agent Coordination for parallel task execution
+- ✅ Graph-based execution for recurring and complex processes
+- ✅ Role-based memory that evolves with your projects
+- ✅ Zero setup - no technical configuration required
+- ✅ General Compute Use and Browser Use with Native Extension
 - ✅ Custom Model Support
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token)based on how much you think a job is going to be replaced by AI.
+Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can take long or short positions on jobs (with no real money, only compute tokens) based on how much you think a job is going to be replaced by AI.
 
 https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
 
 ## Who Is Hive For?
 
-Hive is the multi-agent harness layer for teams moving AI agents from prototype to production. Single agents like Openclaw and Cowork can finish personal jobs pretty well but lack the rigor to fulfil business processes. 
+Hive is the multi-agent harness layer for teams moving AI agents from prototype to production. Single agents like Openclaw and Cowork can finish personal jobs well but lack the rigor to fulfill business processes.
 
 Hive is a good fit if you:
 
@@ -128,7 +128,7 @@ This sets up:
 - **LLM provider** - Interactive default model configuration, including Hive LLM and OpenRouter
 - All required Python dependencies with `uv`
 
-- Finally, it will open the Hive interface in your browser
+Finally, it will open the Hive interface in your browser.
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
@@ -208,6 +208,7 @@ flowchart LR
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
 ## Contributing
+
 We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework ([check #2805](https://github.com/aden-hive/hive/issues/2805)). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work.
