@@ -1478,7 +1478,7 @@ if ($SubscriptionMode -eq "hive_llm") {
         } else {
             Write-Host ""
             Write-Host "  Get your API key from: " -NoNewline
-            Write-Color -Text "https://discord.com/invite/hQdU7QDkgR" -Color Cyan
+            Write-Color -Text "https://discord.com/invite/MXE49hrKDk" -Color Cyan
             Write-Host ""
             $apiKey = Read-Host "Paste your Hive API key (or press Enter to skip)"
         }

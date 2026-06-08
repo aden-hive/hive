@@ -173,6 +173,8 @@ Get your API keys:
 
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Hive LLM**: [Hive Discord](https://discord.com/invite/MXE49hrKDk)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
 ## Testing Your Agent
