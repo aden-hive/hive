@@ -161,9 +161,7 @@ def register_tools(mcp: FastMCP) -> None:
             and any(kw in i["subdomain"] for kw in ("staging", "dev", "test", "debug"))
             for i in interesting
         )
-        has_admin = any(
-            any(kw in i["subdomain"] for kw in ("admin", "backup")) for i in interesting
-        )
+        has_admin = any(any(kw in i["subdomain"] for kw in ("admin", "backup")) for i in interesting)
         # "reasonable" = fewer than 50 subdomains
         reasonable_surface = len(subdomains) < 50
 

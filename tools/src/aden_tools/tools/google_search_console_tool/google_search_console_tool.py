@@ -51,13 +51,9 @@ def _get(endpoint: str, token: str, base: str = GSC_API) -> dict[str, Any]:
         return {"error": f"Request failed: {e!s}"}
 
 
-def _post(
-    endpoint: str, token: str, body: dict | None = None, base: str = GSC_API
-) -> dict[str, Any]:
+def _post(endpoint: str, token: str, body: dict | None = None, base: str = GSC_API) -> dict[str, Any]:
     try:
-        resp = httpx.post(
-            f"{base}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0
-        )
+        resp = httpx.post(f"{base}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your GOOGLE_SEARCH_CONSOLE_TOKEN."}
         if resp.status_code == 403:

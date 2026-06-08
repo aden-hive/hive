@@ -61,9 +61,7 @@ class ApprovalResult(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
     @classmethod
-    def success_result(
-        cls, test_id: str, action: ApprovalAction, message: str | None = None
-    ) -> "ApprovalResult":
+    def success_result(cls, test_id: str, action: ApprovalAction, message: str | None = None) -> "ApprovalResult":
         """Create a successful result."""
         return cls(
             test_id=test_id,

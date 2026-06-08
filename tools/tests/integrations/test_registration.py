@@ -124,8 +124,7 @@ class TestExpectedToolsRegistered:
         registered = set(mcp._tool_manager._tools.keys())
         for tool_name in expected_tools:
             assert tool_name in registered, (
-                f"Tool '{tool_name}' expected from {short_name} "
-                f"but not found. Registered: {sorted(registered)}"
+                f"Tool '{tool_name}' expected from {short_name} but not found. Registered: {sorted(registered)}"
             )
 
     def test_register_all_tools_returns_complete_list(self):
@@ -138,12 +137,8 @@ class TestExpectedToolsRegistered:
 
         # Every returned name must actually be registered
         for name in returned_names:
-            assert name in registered, (
-                f"register_all_tools() lists '{name}' but it was not registered"
-            )
+            assert name in registered, f"register_all_tools() lists '{name}' but it was not registered"
 
         # Every registered tool must be in the return list
         for name in registered:
-            assert name in returned_names, (
-                f"Tool '{name}' is registered but not in register_all_tools() return list"
-            )
+            assert name in returned_names, f"Tool '{name}' is registered but not in register_all_tools() return list"

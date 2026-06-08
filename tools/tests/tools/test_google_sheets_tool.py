@@ -73,9 +73,7 @@ class TestSheetsGetSpreadsheet:
 class TestSheetsGetValues:
     def test_missing_credentials(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["google_sheets_get_values"](
-                spreadsheet_id="abc", range_name="Sheet1!A1:B2"
-            )
+            result = tool_fns["google_sheets_get_values"](spreadsheet_id="abc", range_name="Sheet1!A1:B2")
         assert "error" in result
 
     def test_missing_params(self, tool_fns):
@@ -104,9 +102,7 @@ class TestSheetsGetValues:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["google_sheets_get_values"](
-                spreadsheet_id="abc123", range_name="Sheet1!A1:B3"
-            )
+            result = tool_fns["google_sheets_get_values"](spreadsheet_id="abc123", range_name="Sheet1!A1:B3")
 
         assert len(result["values"]) == 3
         assert result["values"][0] == ["Name", "Score"]

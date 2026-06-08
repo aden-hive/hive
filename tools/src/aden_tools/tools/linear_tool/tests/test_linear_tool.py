@@ -78,9 +78,7 @@ class TestLinearClient:
     def test_execute_query(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {"viewer": {"id": "user-123", "name": "Test User"}}
-        }
+        mock_response.json.return_value = {"data": {"viewer": {"id": "user-123", "name": "Test User"}}}
         mock_post.return_value = mock_response
 
         result = self.client._execute_query("query Viewer { viewer { id name } }")
@@ -97,9 +95,7 @@ class TestLinearClient:
     def test_execute_query_with_variables(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {"issue": {"id": "issue-123", "title": "Test Issue"}}
-        }
+        mock_response.json.return_value = {"data": {"issue": {"id": "issue-123", "title": "Test Issue"}}}
         mock_post.return_value = mock_response
 
         _result = self.client._execute_query(
@@ -553,9 +549,7 @@ class TestIssueTools:
     def test_linear_issue_update(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"issueUpdate": {"success": True, "issue": {"id": "1"}}}}
-            ),
+            json=MagicMock(return_value={"data": {"issueUpdate": {"success": True, "issue": {"id": "1"}}}}),
         )
         result = self._fn("linear_issue_update")(issue_id="1", title="New Title")
         assert result["success"] is True
@@ -591,9 +585,7 @@ class TestIssueTools:
     def test_linear_issue_add_comment(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"commentCreate": {"success": True, "comment": {"id": "c1"}}}}
-            ),
+            json=MagicMock(return_value={"data": {"commentCreate": {"success": True, "comment": {"id": "c1"}}}}),
         )
         result = self._fn("linear_issue_add_comment")(issue_id="1", body="Test comment")
         assert result["success"] is True
@@ -656,9 +648,7 @@ class TestProjectTools:
     def test_linear_project_update(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"projectUpdate": {"success": True, "project": {"id": "p1"}}}}
-            ),
+            json=MagicMock(return_value={"data": {"projectUpdate": {"success": True, "project": {"id": "p1"}}}}),
         )
         result = self._fn("linear_project_update")(project_id="p1", name="New Name")
         assert result["success"] is True
@@ -698,9 +688,7 @@ class TestTeamTools:
     def test_linear_teams_list(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"teams": {"nodes": [{"id": "t1", "name": "Eng"}]}}}
-            ),
+            json=MagicMock(return_value={"data": {"teams": {"nodes": [{"id": "t1", "name": "Eng"}]}}}),
         )
         result = self._fn("linear_teams_list")()
         assert result["total"] == 1
@@ -709,9 +697,7 @@ class TestTeamTools:
     def test_linear_team_get(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"team": {"id": "t1", "name": "Eng", "key": "ENG"}}}
-            ),
+            json=MagicMock(return_value={"data": {"team": {"id": "t1", "name": "Eng", "key": "ENG"}}}),
         )
         result = self._fn("linear_team_get")(team_id="t1")
         assert result["key"] == "ENG"
@@ -720,9 +706,7 @@ class TestTeamTools:
     def test_linear_workflow_states_get(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"workflowStates": {"nodes": [{"id": "s1", "name": "Todo"}]}}}
-            ),
+            json=MagicMock(return_value={"data": {"workflowStates": {"nodes": [{"id": "s1", "name": "Todo"}]}}}),
         )
         result = self._fn("linear_workflow_states_get")(team_id="t1")
         assert result["total"] == 1
@@ -744,9 +728,7 @@ class TestUserTools:
     def test_linear_users_list(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"users": {"nodes": [{"id": "u1", "name": "Alice"}]}}}
-            ),
+            json=MagicMock(return_value={"data": {"users": {"nodes": [{"id": "u1", "name": "Alice"}]}}}),
         )
         result = self._fn("linear_users_list")()
         assert result["total"] == 1
@@ -804,9 +786,7 @@ class TestLabelTools:
     def test_linear_labels_list(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"data": {"issueLabels": {"nodes": [{"id": "l1", "name": "bug"}]}}}
-            ),
+            json=MagicMock(return_value={"data": {"issueLabels": {"nodes": [{"id": "l1", "name": "bug"}]}}}),
         )
         result = self._fn("linear_labels_list")()
         assert result["total"] == 1

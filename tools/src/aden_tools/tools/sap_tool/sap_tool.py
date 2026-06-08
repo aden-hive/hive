@@ -8,25 +8,13 @@ from __future__ import annotations
 
 import base64
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastmcp import FastMCP
 
-
-def _get_config() -> tuple[str, dict] | dict:
-    """Return (base_url, headers) or error dict."""
-    base_url = os.getenv("SAP_BASE_URL", "").rstrip("/")
-    username = os.getenv("SAP_USERNAME", "")
-    password = os.getenv("SAP_PASSWORD", "")
-    if not base_url or not username or not password:
-        return {
-            "error": "SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD are required",
-            "help": "Set SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD environment variables",
-        }
-    creds = base64.b64encode(f"{username}:{password}".encode()).decode()
-    headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
-    return base_url, headers
+if TYPE_CHECKING:
+    from aden_tools.credentials import CredentialStoreAdapter
 
 
 def _get(url: str, headers: dict, params: dict | None = None) -> dict:
@@ -45,8 +33,42 @@ def _odata_list(data: dict) -> tuple[list, int | None]:
     return results, count
 
 
-def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
+def register_tools(
+    mcp: FastMCP,
+    credentials: CredentialStoreAdapter | None = None,
+) -> None:
     """Register SAP S/4HANA tools."""
+
+    def _get_config() -> tuple[str, dict] | dict[str, str]:
+        """Return (base_url, headers) or error dict."""
+        base_url = username = password = None
+        if credentials is not None:
+            try:
+                base_url = credentials.get("sap_base_url")
+                username = credentials.get("sap_username")
+                password = credentials.get("sap_password")
+            except KeyError:
+                pass
+
+        base_url = base_url or os.getenv("SAP_BASE_URL")
+        username = username or os.getenv("SAP_USERNAME")
+        password = password or os.getenv("SAP_PASSWORD")
+
+        if not base_url or not username or not password:
+            return {
+                "error": "SAP credentials not configured",
+                "help": (
+                    "Set SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD "
+                    "environment variables or configure via credential store"
+                ),
+            }
+        base_url = base_url.rstrip("/")
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+        headers = {
+            "Authorization": f"Basic {encoded}",
+            "Accept": "application/json",
+        }
+        return base_url, headers
 
     @mcp.tool()
     def sap_list_purchase_orders(

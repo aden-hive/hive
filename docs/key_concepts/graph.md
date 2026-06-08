@@ -4,13 +4,13 @@
 
 Real business processes aren't linear. A sales outreach might go: research a prospect, draft a message, realize the research is thin, go back and dig deeper, draft again, get human approval, send. There are loops, branches, fallbacks, and decision points.
 
-Hive models this as a directed graph. Nodes do work, edges connect them, and shared memory lets them pass data. The framework walks this structure — running nodes, following edges, managing retries — until the agent reaches its goal or exhausts its step budget.
+Hive models this as a directed graph. Nodes do work, edges connect them, and a shared data buffer lets them pass data. The framework walks this structure — running nodes, following edges, managing retries — until the agent reaches its goal or exhausts its step budget.
 
 Edges can loop back, creating feedback cycles where an agent retries a step or takes a different path. That's intentional. A graph that only moves forward can't self-correct.
 
 ## Nodes
 
-A node is a unit of work. Each node reads inputs from shared memory, does something, and writes outputs back.
+A node is a unit of work. Each node reads inputs from the shared buffer, does something, and writes outputs back.
 
 **`event_loop`** — This is the only node type in Hive. It's a multi-turn LLM loop where the model reasons about the current state, calls tools, observes results, and keeps going until it has produced the required outputs. All agent behavior happens in these nodes. They handle long-running tasks, manage their own context window, and can recover from crashes mid-conversation.
 
@@ -47,11 +47,11 @@ Edges also handle data plumbing between nodes — mapping one node's outputs to 
 
 When a node has multiple outgoing edges, the framework can run those branches in parallel and reconverge when they're all done. This is useful for tasks like researching a prospect from multiple sources simultaneously.
 
-## Shared Memory
+## Shared Buffer
 
-Shared memory is how nodes communicate. It's a key-value store scoped to a single [session](./worker_agent.md). Every node declares which keys it reads and which it writes, and the framework enforces those boundaries — a node can't quietly access data it hasn't declared.
+The shared buffer is how nodes communicate. It's a key-value store scoped to a single [session](./worker_agent.md). Every node declares which keys it reads and which it writes, and the framework enforces those boundaries — a node can't quietly access data it hasn't declared.
 
-Data flows through the graph in a natural way: input arrives at the start, each node reads what it needs and writes what it produces, and edges map outputs to inputs as data moves between nodes. At the end, the full memory state is the execution result.
+Data flows through the graph in a natural way: input arrives at the start, each node reads what it needs and writes what it produces, and edges map outputs to inputs as data moves between nodes. At the end, the full buffer state is the execution result.
 
 ## Human-in-the-Loop
 

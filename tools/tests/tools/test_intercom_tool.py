@@ -341,9 +341,7 @@ class TestIntercomGetContact:
         monkeypatch.setenv("INTERCOM_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "intercom_get_contact")
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(
-                200, {"data": [{"id": "c1", "email": "a@b.com"}]}
-            )
+            mock_post.return_value = _mock_response(200, {"data": [{"id": "c1", "email": "a@b.com"}]})
             result = fn(email="a@b.com")
             assert result["id"] == "c1"
 
@@ -449,9 +447,7 @@ class TestIntercomAssignConversation:
         fn = _tool_fn(mcp, "intercom_assign_conversation")
         with patch("httpx.get") as mock_get, patch("httpx.post") as mock_post:
             mock_get.return_value = _mock_response(200, {"id": "admin-1"})
-            mock_post.return_value = _mock_response(
-                200, {"id": "conv-1", "assignee": {"id": "admin-2"}}
-            )
+            mock_post.return_value = _mock_response(200, {"id": "conv-1", "assignee": {"id": "admin-2"}})
             result = fn(
                 conversation_id="conv-1",
                 assignee_id="admin-2",
@@ -493,9 +489,7 @@ class TestIntercomListTeams:
         monkeypatch.setenv("INTERCOM_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "intercom_list_teams")
         with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(
-                200, {"teams": [{"id": "t1", "name": "Support"}]}
-            )
+            mock_get.return_value = _mock_response(200, {"teams": [{"id": "t1", "name": "Support"}]})
             result = fn()
             assert "teams" in result
 

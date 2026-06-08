@@ -928,10 +928,7 @@ class _SlackClient:
                 "user": msg.get("user"),
                 "ts": msg.get("ts"),
                 "is_bot": bool(msg.get("bot_id")),
-                "reactions": [
-                    {"emoji": r.get("name"), "count": r.get("count", 0)}
-                    for r in msg.get("reactions", [])
-                ],
+                "reactions": [{"emoji": r.get("name"), "count": r.get("count", 0)} for r in msg.get("reactions", [])],
                 "reply_count": msg.get("reply_count", 0),
                 "is_thread_parent": bool(msg.get("thread_ts") and msg.get("reply_count", 0) > 0),
                 "is_thread_reply": bool(msg.get("parent_user_id")),
@@ -1266,9 +1263,7 @@ def register_tools(
                 return credentials.get_by_alias("slack", account)
             token = credentials.get("slack")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('slack'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('slack'), got {type(token).__name__}")
             return token
         return os.getenv("SLACK_BOT_TOKEN")
 
@@ -1284,9 +1279,7 @@ def register_tools(
         if not token:
             return {
                 "error": "Slack credentials not configured",
-                "help": (
-                    "Set SLACK_BOT_TOKEN environment variable or configure via credential store"
-                ),
+                "help": ("Set SLACK_BOT_TOKEN environment variable or configure via credential store"),
             }
         user_token = _get_user_token()
         return _SlackClient(token, user_token=user_token)

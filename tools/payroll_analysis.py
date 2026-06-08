@@ -48,10 +48,7 @@ def main():
         else:
             # Windows Authentication
             connection_string = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={SERVER};"
-                f"DATABASE={DATABASE};"
-                f"Trusted_Connection=yes;"
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};DATABASE={DATABASE};Trusted_Connection=yes;"
             )
 
         print("Connecting to database...")
@@ -79,9 +76,7 @@ def main():
 
         cursor.execute(payroll_query)
 
-        print(
-            f"\n{'Department':<25} {'Employees':<12} {'Total Salary Cost':<20} {'Avg Salary':<15}"
-        )
+        print(f"\n{'Department':<25} {'Employees':<12} {'Total Salary Cost':<20} {'Avg Salary':<15}")
         print("-" * 80)
 
         total_company_payroll = 0

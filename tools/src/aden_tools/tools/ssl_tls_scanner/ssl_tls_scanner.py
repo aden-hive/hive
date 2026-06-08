@@ -82,8 +82,7 @@ def register_tools(mcp: FastMCP) -> None:
                         "severity": "critical",
                         "finding": f"SSL certificate verification failed: {e}",
                         "remediation": (
-                            "Obtain a valid certificate from a trusted CA. "
-                            "Let's Encrypt provides free certificates."
+                            "Obtain a valid certificate from a trusted CA. Let's Encrypt provides free certificates."
                         ),
                     }
                 )
@@ -140,10 +139,7 @@ def register_tools(mcp: FastMCP) -> None:
                 {
                     "severity": "high",
                     "finding": f"Insecure TLS version: {tls_version}",
-                    "remediation": (
-                        "Disable TLS 1.0 and 1.1 in your server configuration. "
-                        "Use TLS 1.2 or 1.3 only."
-                    ),
+                    "remediation": ("Disable TLS 1.0 and 1.1 in your server configuration. Use TLS 1.2 or 1.3 only."),
                 }
             )
 
@@ -156,8 +152,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "severity": "high",
                     "finding": f"Weak cipher suite: {cipher_name}",
                     "remediation": (
-                        "Configure your server to use strong cipher suites only. "
-                        "Prefer AES-GCM and ChaCha20-Poly1305."
+                        "Configure your server to use strong cipher suites only. Prefer AES-GCM and ChaCha20-Poly1305."
                     ),
                 }
             )
@@ -201,8 +196,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "severity": "high",
                     "finding": "Self-signed certificate detected",
                     "remediation": (
-                        "Replace with a certificate from a trusted CA. "
-                        "Let's Encrypt provides free certificates."
+                        "Replace with a certificate from a trusted CA. Let's Encrypt provides free certificates."
                     ),
                 }
             )

@@ -1,6 +1,6 @@
 """Node definitions for Tech & AI News Reporter."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (client-facing)
 # Brief conversation to understand what topics the user cares about.

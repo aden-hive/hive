@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
-from framework.runner.tool_registry import _execution_context
+from framework.loader.tool_registry import _execution_context
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,7 @@ TOOLS = {
                 "page_token": {
                     "type": "string",
                     "description": (
-                        "Gmail API page token from a previous call's next_page_token. "
-                        "Omit for the first page."
+                        "Gmail API page token from a previous call's next_page_token. Omit for the first page."
                     ),
                 },
                 "after_timestamp": {
@@ -101,10 +100,7 @@ def _get_data_dir() -> str:
     """Get the session-scoped data_dir from ToolRegistry execution context."""
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
-        raise RuntimeError(
-            "data_dir not set in execution context. "
-            "Is the tool running inside a GraphExecutor?"
-        )
+        raise RuntimeError("data_dir not set in execution context. Is the tool running inside a Orchestrator?")
     return ctx["data_dir"]
 
 
@@ -139,8 +135,7 @@ def _get_access_token(account: str = "") -> str:
         return token
 
     raise RuntimeError(
-        "Gmail credentials not configured. "
-        "Connect Gmail via hive.adenhq.com or set GOOGLE_ACCESS_TOKEN."
+        "Gmail credentials not configured. Connect Gmail via hive.adenhq.com or set GOOGLE_ACCESS_TOKEN."
     )
 
 
@@ -216,9 +211,7 @@ def _bulk_fetch_emails(
 
             resp = client.get(f"{GMAIL_API_BASE}/messages", params=params)
             if resp.status_code != 200:
-                raise RuntimeError(
-                    f"Gmail list failed (HTTP {resp.status_code}): {resp.text}"
-                )
+                raise RuntimeError(f"Gmail list failed (HTTP {resp.status_code}): {resp.text}")
 
             data = resp.json()
             messages = data.get("messages", [])
@@ -261,9 +254,7 @@ def _bulk_fetch_emails(
                     )
                     if r.status_code == 200:
                         raw = r.json()
-                        parsed = _parse_headers(
-                            raw.get("payload", {}).get("headers", [])
-                        )
+                        parsed = _parse_headers(raw.get("payload", {}).get("headers", []))
                         emails.append(
                             {
                                 "id": raw.get("id"),
@@ -285,15 +276,12 @@ def _bulk_fetch_emails(
                     if attempt < retries:
                         time.sleep(0.5)
                         continue
-                    logger.warning(
-                        f"Failed to fetch {msg_id} after {retries + 1} attempts: {e}"
-                    )
+                    logger.warning(f"Failed to fetch {msg_id} after {retries + 1} attempts: {e}")
 
     dropped = len(message_ids) - len(emails)
     if dropped > 0:
         logger.warning(
-            f"Dropped {dropped}/{len(message_ids)} emails during metadata fetch "
-            f"(wrote {len(emails)} to emails.jsonl)"
+            f"Dropped {dropped}/{len(message_ids)} emails during metadata fetch (wrote {len(emails)} to emails.jsonl)"
         )
 
     # Phase 3: Append JSONL (append so pagination accumulates across pages)
@@ -302,9 +290,7 @@ def _bulk_fetch_emails(
         for email in emails:
             f.write(json.dumps(email, ensure_ascii=False) + "\n")
 
-    logger.info(
-        f"Wrote {len(emails)} emails to emails.jsonl ({output_path.stat().st_size} bytes)"
-    )
+    logger.info(f"Wrote {len(emails)} emails to emails.jsonl ({output_path.stat().st_size} bytes)")
     return {
         "filename": "emails.jsonl",
         "count": len(emails),

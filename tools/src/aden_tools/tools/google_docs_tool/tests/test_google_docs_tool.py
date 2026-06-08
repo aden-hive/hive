@@ -125,9 +125,7 @@ class TestGoogleDocsReplaceAllText:
         """Test successful find and replace."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "replies": [{"replaceAllText": {"occurrencesChanged": 3}}]
-        }
+        mock_response.json.return_value = {"replies": [{"replaceAllText": {"occurrencesChanged": 3}}]}
         mock_post.return_value = mock_response
 
         tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_replace_all_text")

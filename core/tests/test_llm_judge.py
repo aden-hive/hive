@@ -23,6 +23,8 @@ from framework.testing.llm_judge import LLMJudge
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
 
+    model: str = "mock"
+
     def __init__(self, response_content: str = '{"passes": true, "explanation": "Test passed"}'):
         self.response_content = response_content
         self.complete_calls = []
@@ -71,9 +73,7 @@ class TestLLMJudgeWithProvider:
 
     def test_evaluate_uses_provider(self):
         """Test that evaluate() uses the injected provider."""
-        provider = MockLLMProvider(
-            response_content='{"passes": true, "explanation": "Summary is accurate"}'
-        )
+        provider = MockLLMProvider(response_content='{"passes": true, "explanation": "Summary is accurate"}')
         judge = LLMJudge(llm_provider=provider)
 
         result = judge.evaluate(
@@ -139,51 +139,37 @@ class TestLLMJudgeResponseParsing:
         provider = MockLLMProvider(response_content='{"passes": true, "explanation": "OK"}')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is True
         assert result["explanation"] == "OK"
 
     def test_parse_json_in_markdown_code_block(self):
         """Test parsing JSON wrapped in markdown code block."""
-        provider = MockLLMProvider(
-            response_content='```json\n{"passes": false, "explanation": "Failed"}\n```'
-        )
+        provider = MockLLMProvider(response_content='```json\n{"passes": false, "explanation": "Failed"}\n```')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is False
         assert result["explanation"] == "Failed"
 
     def test_parse_json_in_plain_code_block(self):
         """Test parsing JSON wrapped in plain code block (no json label)."""
-        provider = MockLLMProvider(
-            response_content='```\n{"passes": true, "explanation": "Passed"}\n```'
-        )
+        provider = MockLLMProvider(response_content='```\n{"passes": true, "explanation": "Passed"}\n```')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is True
         assert result["explanation"] == "Passed"
 
     def test_parse_response_with_whitespace(self):
         """Test parsing response with extra whitespace."""
-        provider = MockLLMProvider(
-            response_content='\n  {"passes": true, "explanation": "Clean"}  \n'
-        )
+        provider = MockLLMProvider(response_content='\n  {"passes": true, "explanation": "Clean"}  \n')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is True
 
@@ -192,9 +178,7 @@ class TestLLMJudgeResponseParsing:
         provider = MockLLMProvider(response_content='{"passes": true}')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is True
         assert result["explanation"] == "No explanation provided"
@@ -205,9 +189,7 @@ class TestLLMJudgeResponseParsing:
         provider = MockLLMProvider(response_content='{"passes": "yes", "explanation": "OK"}')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is True
 
@@ -216,9 +198,7 @@ class TestLLMJudgeResponseParsing:
         provider = MockLLMProvider(response_content='{"explanation": "No pass key"}')
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is False
 
@@ -231,9 +211,7 @@ class TestLLMJudgeErrorHandling:
         provider = MockLLMProvider(response_content="This is not JSON")
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is False
         assert "LLM judge error" in result["explanation"]
@@ -246,9 +224,7 @@ class TestLLMJudgeErrorHandling:
 
         judge = LLMJudge(llm_provider=provider)
 
-        result = judge.evaluate(
-            constraint="test", source_document="doc", summary="sum", criteria="crit"
-        )
+        result = judge.evaluate(constraint="test", source_document="doc", summary="sum", criteria="crit")
 
         assert result["passes"] is False
         assert "LLM judge error" in result["explanation"]
@@ -277,9 +253,7 @@ class TestLLMJudgeBackwardCompatibility:
         # Mock the _get_client method and Anthropic response
         mock_client = MagicMock()
         mock_response = MagicMock()
-        mock_response.content = [
-            MagicMock(text='{"passes": true, "explanation": "Anthropic response"}')
-        ]
+        mock_response.content = [MagicMock(text='{"passes": true, "explanation": "Anthropic response"}')]
         mock_client.messages.create.return_value = mock_response
 
         judge._get_client = MagicMock(return_value=mock_client)
@@ -338,6 +312,69 @@ class TestLLMJudgeBackwardCompatibility:
         assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
         assert call_kwargs["max_tokens"] == 500
 
+    def test_openai_fallback_uses_litellm_provider(self, monkeypatch):
+        """When OPENAI_API_KEY is set, evaluate() should use a LiteLLM-based provider."""
+        # Force the OpenAI fallback path (no injected provider, no Anthropic key)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        # Stub LiteLLMProvider so we don't call the real API; record what judge passes through
+        captured_calls: list[dict] = []
+
+        class DummyProvider:
+            def __init__(self, model: str = "gpt-4o-mini"):
+                self.model = model
+
+            def complete(
+                self,
+                messages,
+                system="",
+                tools=None,
+                max_tokens=1024,
+                response_format=None,
+                json_mode=False,
+                max_retries=None,
+            ):
+                captured_calls.append(
+                    {
+                        "messages": messages,
+                        "system": system,
+                        "max_tokens": max_tokens,
+                        "json_mode": json_mode,
+                        "model": self.model,
+                    }
+                )
+
+                class _Resp:
+                    def __init__(self, content: str):
+                        self.content = content
+
+                # Minimal response object with a content attribute
+                return _Resp('{"passes": true, "explanation": "OK"}')
+
+        monkeypatch.setattr(
+            "framework.llm.litellm.LiteLLMProvider",
+            DummyProvider,
+        )
+
+        judge = LLMJudge()
+        result = judge.evaluate(
+            constraint="no-hallucination",
+            source_document="The sky is blue.",
+            summary="The sky is blue.",
+            criteria="Summary must only contain facts from source",
+        )
+
+        # Judge should have used our stub once and returned the stub's JSON result
+        assert result["passes"] is True
+        assert result["explanation"] == "OK"
+        assert len(captured_calls) == 1
+
+        call = captured_calls[0]
+        assert call["model"] == "gpt-4o-mini"
+        assert call["max_tokens"] == 500
+        assert call["json_mode"] is True
+
 
 # ============================================================================
 # LLMJudge Integration Pattern Tests
@@ -351,9 +388,7 @@ class TestLLMJudgeIntegrationPatterns:
         """Test pattern: using LLMJudge with AnthropicProvider."""
         # This demonstrates the intended usage pattern without actually calling the API
         # Create a mock that behaves like AnthropicProvider
-        mock_anthropic = MockLLMProvider(
-            response_content='{"passes": true, "explanation": "Matches source"}'
-        )
+        mock_anthropic = MockLLMProvider(response_content='{"passes": true, "explanation": "Matches source"}')
 
         judge = LLMJudge(llm_provider=mock_anthropic)
 

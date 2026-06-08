@@ -4,7 +4,7 @@
 #
 # An interactive setup wizard that:
 # 1. Installs Python dependencies
-# 2. Installs Playwright browser for web scraping
+# 2. Checks for Chrome/Edge browser for web automation
 # 3. Helps configure LLM API keys
 # 4. Verifies everything works
 #
@@ -32,6 +32,25 @@ NC='\033[0m' # No Color
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# Hive LLM router endpoint
+HIVE_LLM_ENDPOINT="https://api.adenhq.com"
+HIVE_LLM_AVAILABILITY_ENDPOINT="$HIVE_LLM_ENDPOINT/v1/gateway/availability"
+
+check_hive_llm_availability() {
+    local from_source="$1"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 2
+    fi
+
+    local response
+    response="$(curl -fsSL --max-time 5 "${HIVE_LLM_AVAILABILITY_ENDPOINT}?from=${from_source}" 2>/dev/null)" || return 2
+    if [ "$response" = "true" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # Helper function for prompts
 prompt_yes_no() {
     local prompt="$1"
@@ -43,7 +62,6 @@ prompt_yes_no() {
     else
         prompt="$prompt [y/N] "
     fi
-
     read -r -p "$prompt" response
     response="${response:-$default}"
     [[ "$response" =~ ^[Yy] ]]
@@ -253,16 +271,97 @@ else
     exit 1
 fi
 
-# Install Playwright browser
-echo -n "  Installing Playwright browser... "
-if uv run python -c "import playwright" > /dev/null 2>&1; then
-    if uv run python -m playwright install chromium > /dev/null 2>&1; then
+# Check for sqlite3 CLI (required for colony progress tracking)
+echo -n "  Checking for sqlite3... "
+if command -v sqlite3 &> /dev/null; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}not found${NC}"
+    # Attempt auto-install on common package managers
+    SQLITE_INSTALLED=false
+    if command -v apt-get &> /dev/null; then
+        echo -n "  Installing sqlite3 via apt... "
+        if sudo apt-get install -y sqlite3 > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v brew &> /dev/null; then
+        echo -n "  Installing sqlite3 via brew... "
+        if brew install sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v apk &> /dev/null; then
+        echo -n "  Installing sqlite3 via apk... "
+        if apk add sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v dnf &> /dev/null; then
+        echo -n "  Installing sqlite3 via dnf... "
+        if sudo dnf install -y sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v pacman &> /dev/null; then
+        echo -n "  Installing sqlite3 via pacman... "
+        if sudo pacman -S --noconfirm sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    fi
+    if [ "$SQLITE_INSTALLED" = true ]; then
         echo -e "${GREEN}ok${NC}"
     else
-        echo -e "${YELLOW}⏭${NC}"
+        echo -e "${YELLOW}  ⚠ Could not install sqlite3 automatically${NC}"
+        echo -e "${DIM}    Install manually: apt install sqlite3 / brew install sqlite / apk add sqlite${NC}"
+    fi
+fi
+
+# Check for Chrome/Edge (required for GCU browser tools)
+echo -n "  Checking for Chrome/Edge browser... "
+# Check common browser locations
+CHROME_FOUND=false
+for browser in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge"; do
+    if command -v "$browser" &> /dev/null; then
+        CHROME_FOUND=true
+        break
+    fi
+done
+# Also check common desktop locations (for macOS/Windows)
+if [ "$CHROME_FOUND" = false ]; then
+    for path in "/Applications/Google Chrome.app" "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" "$HOME/Applications/Google Chrome.app" "$HOME/.local/share/applications/google-chrome.desktop"; do
+        if [ -e "$path" ]; then
+            CHROME_FOUND=true
+            break
+        fi
+    done
+fi
+if [ "$CHROME_FOUND" = true ]; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
+fi
+
+# Ensure playwright is installed for web scraping tools
+echo -n "  Checking playwright installation... "
+if uv run python -c "import playwright" > /dev/null 2>&1; then
+    # Check if browser binaries are installed
+    if uv run playwright install --dry-run chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}installing browser...${NC}"
+        uv run playwright install chromium > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✓ playwright chromium installed${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ playwright browser installation failed (web scraping may not work)${NC}"
+        fi
     fi
 else
-    echo -e "${YELLOW}⏭${NC}"
+    echo -e "${YELLOW}not found — installing...${NC}"
+    uv pip install playwright playwright-stealth > /dev/null 2>&1
+    uv run playwright install chromium > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✓ playwright installed${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ playwright installation failed (web scraping may not work)${NC}"
+    fi
 fi
 
 cd "$SCRIPT_DIR"
@@ -305,17 +404,10 @@ if [ "$NODE_AVAILABLE" = true ]; then
 fi
 
 # ============================================================
-# Step 3: Configure LLM API Key
-# ============================================================
-
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC}"
-echo ""
-
-# ============================================================
 # Step 3: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
@@ -371,13 +463,6 @@ fi
 
 echo ""
 
-# ============================================================
-# Step 4: Verify Claude Code Skills
-# ============================================================
-
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
-echo ""
-
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - use associative arrays (cleaner and more efficient)
@@ -389,6 +474,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["GOOGLE_API_KEY"]="Google AI"
         ["GROQ_API_KEY"]="Groq"
         ["CEREBRAS_API_KEY"]="Cerebras"
+        ["OPENROUTER_API_KEY"]="OpenRouter"
         ["MISTRAL_API_KEY"]="Mistral"
         ["TOGETHER_API_KEY"]="Together AI"
         ["DEEPSEEK_API_KEY"]="DeepSeek"
@@ -402,93 +488,10 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["GOOGLE_API_KEY"]="google"
         ["GROQ_API_KEY"]="groq"
         ["CEREBRAS_API_KEY"]="cerebras"
+        ["OPENROUTER_API_KEY"]="openrouter"
         ["MISTRAL_API_KEY"]="mistral"
         ["TOGETHER_API_KEY"]="together"
         ["DEEPSEEK_API_KEY"]="deepseek"
-    )
-
-    declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5-20251001"
-        ["openai"]="gpt-5-mini"
-        ["minimax"]="MiniMax-M2.5"
-        ["gemini"]="gemini-3-flash-preview"
-        ["groq"]="moonshotai/kimi-k2-instruct-0905"
-        ["cerebras"]="zai-glm-4.7"
-        ["mistral"]="mistral-large-latest"
-        ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-        ["deepseek"]="deepseek-chat"
-    )
-
-    # Model choices per provider: composite-key associative arrays
-    # Keys: "provider:index" -> value
-    declare -A MODEL_CHOICES_ID=(
-        ["anthropic:0"]="claude-haiku-4-5-20251001"
-        ["anthropic:1"]="claude-sonnet-4-20250514"
-        ["anthropic:2"]="claude-sonnet-4-5-20250929"
-        ["anthropic:3"]="claude-opus-4-6"
-        ["openai:0"]="gpt-5-mini"
-        ["openai:1"]="gpt-5.2"
-        ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3.1-pro-preview"
-        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
-        ["groq:1"]="openai/gpt-oss-120b"
-        ["cerebras:0"]="zai-glm-4.7"
-        ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
-    )
-
-    declare -A MODEL_CHOICES_LABEL=(
-        ["anthropic:0"]="Haiku 4.5 - Fast + cheap (recommended)"
-        ["anthropic:1"]="Sonnet 4 - Fast + capable"
-        ["anthropic:2"]="Sonnet 4.5 - Best balance"
-        ["anthropic:3"]="Opus 4.6 - Most capable"
-        ["openai:0"]="GPT-5 Mini - Fast + cheap (recommended)"
-        ["openai:1"]="GPT-5.2 - Most capable"
-        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
-        ["groq:0"]="Kimi K2 - Best quality (recommended)"
-        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
-        ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
-        ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
-    )
-
-    declare -A MODEL_CHOICES_MAXTOKENS=(
-        ["anthropic:0"]=8192
-        ["anthropic:1"]=8192
-        ["anthropic:2"]=16384
-        ["anthropic:3"]=32768
-        ["openai:0"]=16384
-        ["openai:1"]=16384
-        ["gemini:0"]=8192
-        ["gemini:1"]=8192
-        ["groq:0"]=8192
-        ["groq:1"]=8192
-        ["cerebras:0"]=8192
-        ["cerebras:1"]=8192
-    )
-
-    # Max context tokens (input history budget) per model, based on actual context windows.
-    # Leave ~10% headroom for system prompt and output tokens.
-    declare -A MODEL_CHOICES_MAXCONTEXTTOKENS=(
-        ["anthropic:0"]=180000   # Claude Haiku 4.5 — 200k context window
-        ["anthropic:1"]=180000   # Claude Sonnet 4 — 200k context window
-        ["anthropic:2"]=180000   # Claude Sonnet 4.5 — 200k context window
-        ["anthropic:3"]=180000   # Claude Opus 4.6 — 200k context window
-        ["openai:0"]=120000      # GPT-5 Mini — 128k context window
-        ["openai:1"]=120000      # GPT-5.2 — 128k context window
-        ["gemini:0"]=900000      # Gemini 3 Flash — 1M context window
-        ["gemini:1"]=900000      # Gemini 3.1 Pro — 1M context window
-        ["groq:0"]=120000        # Kimi K2 — 128k context window
-        ["groq:1"]=120000        # GPT-OSS 120B — 128k context window
-        ["cerebras:0"]=120000    # ZAI-GLM 4.7 — 128k context window
-        ["cerebras:1"]=120000    # Qwen3 235B — 128k context window
-    )
-
-    declare -A MODEL_CHOICES_COUNT=(
-        ["anthropic"]=4
-        ["openai"]=2
-        ["gemini"]=2
-        ["groq"]=2
-        ["cerebras"]=2
     )
 
     # Helper functions for Bash 4+
@@ -499,39 +502,11 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_provider_id() {
         echo "${PROVIDER_IDS[$1]}"
     }
-
-    get_default_model() {
-        echo "${DEFAULT_MODELS[$1]}"
-    }
-
-    get_model_choice_count() {
-        echo "${MODEL_CHOICES_COUNT[$1]:-0}"
-    }
-
-    get_model_choice_id() {
-        echo "${MODEL_CHOICES_ID[$1:$2]}"
-    }
-
-    get_model_choice_label() {
-        echo "${MODEL_CHOICES_LABEL[$1:$2]}"
-    }
-
-    get_model_choice_maxtokens() {
-        echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
-    }
-
-    get_model_choice_maxcontexttokens() {
-        echo "${MODEL_CHOICES_MAXCONTEXTTOKENS[$1:$2]}"
-    }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras mistral together deepseek)
-
-    # Default models by provider id (parallel arrays)
-    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -558,116 +533,199 @@ else
             i=$((i + 1))
         done
     }
+fi
 
-    # Helper: get default model for a provider id
-    get_default_model() {
-        local provider_id="$1"
-        local i=0
-        while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
-            if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
-                echo "${MODEL_DEFAULTS[$i]}"
+MODEL_DEFAULT_ROWS=""
+MODEL_CHOICE_ROWS=""
+PRESET_ROWS=""
+PRESET_MODEL_CHOICE_ROWS=""
+
+load_model_catalog_rows() {
+    # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
+    # into simple tab-separated rows once and reuse them for the interactive flow.
+    local catalog_lines=""
+    catalog_lines="$(uv run python -c '
+from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
+
+for provider_id, default_model in sorted(get_default_models().items()):
+    print(f"DEFAULT\t{provider_id}\t{default_model}")
+
+for provider_id, models in sorted(get_models_catalogue().items()):
+    for model in models:
+        print(
+            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
+                provider=provider_id,
+                id=model["id"],
+                label=model["label"],
+                max_tokens=model["max_tokens"],
+                max_context_tokens=model["max_context_tokens"],
+            )
+        )
+
+for preset_id, preset in sorted(get_presets().items()):
+    print(
+        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
+            preset_id=preset_id,
+            provider=preset["provider"],
+            model=preset.get("model", ""),
+            max_tokens=preset["max_tokens"],
+            max_context_tokens=preset["max_context_tokens"],
+            api_key_env_var=preset.get("api_key_env_var", ""),
+            api_base=preset.get("api_base", ""),
+        )
+    )
+    for choice in preset.get("model_choices", []):
+        print(
+            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
+                preset_id=preset_id,
+                id=choice["id"],
+                label=choice["label"],
+                recommended=str(choice["recommended"]).lower(),
+            )
+        )
+' 2>/dev/null)" || return 1
+
+    MODEL_DEFAULT_ROWS=""
+    MODEL_CHOICE_ROWS=""
+    PRESET_ROWS=""
+    PRESET_MODEL_CHOICE_ROWS=""
+
+    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
+        [ -n "$row_type" ] || continue
+        if [ "$row_type" = "DEFAULT" ]; then
+            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
+        elif [ "$row_type" = "MODEL" ]; then
+            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
+        elif [ "$row_type" = "PRESET" ]; then
+            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
+        elif [ "$row_type" = "PRESET_MODEL" ]; then
+            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
+        fi
+    done <<< "$catalog_lines"
+}
+
+get_default_model() {
+    local provider_id="$1"
+    while IFS=$'\t' read -r row_provider row_model; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            echo "$row_model"
+            return
+        fi
+    done <<< "$MODEL_DEFAULT_ROWS"
+}
+
+get_model_choice_count() {
+    local provider_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_provider _; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_model_choice_field() {
+    local provider_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    max_tokens) echo "$row_max_tokens" ;;
+                    max_context_tokens) echo "$row_max_context_tokens" ;;
+                esac
                 return
             fi
-            i=$((i + 1))
-        done
-    }
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+}
 
-    # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
-    # Max context tokens per model (same order as MC_PROVIDERS/MC_IDS above)
-    # Based on actual context windows with ~10% headroom for system prompt + output.
-    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000)
+get_model_choice_id() {
+    get_model_choice_field "$1" "$2" "id"
+}
 
-    # Helper: get number of model choices for a provider
-    get_model_choice_count() {
-        local provider_id="$1"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                count=$((count + 1))
+get_model_choice_label() {
+    get_model_choice_field "$1" "$2" "label"
+}
+
+get_model_choice_maxtokens() {
+    get_model_choice_field "$1" "$2" "max_tokens"
+}
+
+get_model_choice_maxcontexttokens() {
+    get_model_choice_field "$1" "$2" "max_context_tokens"
+}
+
+get_preset_field() {
+    local preset_id="$1"
+    local field="$2"
+    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            case "$field" in
+                provider) echo "$row_provider" ;;
+                model) echo "$row_model" ;;
+                max_tokens) echo "$row_max_tokens" ;;
+                max_context_tokens) echo "$row_max_context_tokens" ;;
+                api_key_env_var) echo "$row_env_var" ;;
+                api_base) echo "$row_api_base" ;;
+            esac
+            return
+        fi
+    done <<< "$PRESET_ROWS"
+}
+
+apply_preset() {
+    local preset_id="$1"
+    SELECTED_PROVIDER_ID="$(get_preset_field "$preset_id" "provider")"
+    SELECTED_MODEL="$(get_preset_field "$preset_id" "model")"
+    SELECTED_MAX_TOKENS="$(get_preset_field "$preset_id" "max_tokens")"
+    SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "$preset_id" "max_context_tokens")"
+    SELECTED_ENV_VAR="$(get_preset_field "$preset_id" "api_key_env_var")"
+    SELECTED_API_BASE="$(get_preset_field "$preset_id" "api_base")"
+}
+
+get_preset_model_choice_count() {
+    local preset_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id _; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_preset_model_choice_field() {
+    local preset_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    recommended) echo "$row_recommended" ;;
+                esac
+                return
             fi
-            i=$((i + 1))
-        done
-        echo "$count"
-    }
-
-    # Helper: get model choice id by provider and index (0-based within provider)
-    get_model_choice_id() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_IDS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice label by provider and index
-    get_model_choice_label() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_LABELS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice max_tokens by provider and index
-    get_model_choice_maxtokens() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_MAXTOKENS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice max_context_tokens by provider and index
-    get_model_choice_maxcontexttokens() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_MAXCONTEXTTOKENS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-fi
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+}
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -687,7 +745,18 @@ detect_shell_rc() {
             fi
             ;;
         bash)
-            if [ -f "$HOME/.bashrc" ]; then
+            # Git Bash on Windows commonly starts as a login shell, so prefer
+            # .bash_profile there when it already exists. On Unix-like shells,
+            # keep the traditional .bashrc-first behavior.
+            if [ -n "$MSYSTEM" ] || [ -n "$MINGW_PREFIX" ]; then
+                if [ -f "$HOME/.bash_profile" ]; then
+                    echo "$HOME/.bash_profile"
+                elif [ -f "$HOME/.bashrc" ]; then
+                    echo "$HOME/.bashrc"
+                else
+                    echo "$HOME/.profile"
+                fi
+            elif [ -f "$HOME/.bashrc" ]; then
                 echo "$HOME/.bashrc"
             elif [ -f "$HOME/.bash_profile" ]; then
                 echo "$HOME/.bash_profile"
@@ -705,10 +774,91 @@ detect_shell_rc() {
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
+# Normalize user-pasted OpenRouter model IDs:
+# - trim whitespace
+# - strip leading "openrouter/" if present
+normalize_openrouter_model_id() {
+    local raw="$1"
+    # Trim leading/trailing whitespace
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    if [[ "$raw" =~ ^[Oo][Pp][Ee][Nn][Rr][Oo][Uu][Tt][Ee][Rr]/(.+)$ ]]; then
+        raw="${BASH_REMATCH[1]}"
+    fi
+    printf '%s' "$raw"
+}
+
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL, SELECTED_MAX_TOKENS, and SELECTED_MAX_CONTEXT_TOKENS.
 prompt_model_selection() {
     local provider_id="$1"
+
+    if [ "$provider_id" = "openrouter" ]; then
+        local default_model=""
+        if [ -n "$PREV_MODEL" ] && [ "$provider_id" = "$PREV_PROVIDER" ]; then
+            default_model="$(normalize_openrouter_model_id "$PREV_MODEL")"
+        fi
+        echo ""
+        echo -e "${BOLD}Enter your OpenRouter model id:${NC}"
+        echo -e "  ${DIM}Paste from openrouter.ai (example: x-ai/grok-4.20-beta)${NC}"
+        echo -e "  ${DIM}If calls fail with guardrail/privacy errors: openrouter.ai/settings/privacy${NC}"
+        echo ""
+        local input_model=""
+        while true; do
+            if [ -n "$default_model" ]; then
+                read -r -p "Model id [$default_model]: " input_model || true
+                input_model="${input_model:-$default_model}"
+            else
+                read -r -p "Model id: " input_model || true
+            fi
+            local normalized_model
+            normalized_model="$(normalize_openrouter_model_id "$input_model")"
+            if [ -n "$normalized_model" ]; then
+                local openrouter_key=""
+                if [ -n "${SELECTED_ENV_VAR:-}" ]; then
+                    openrouter_key="${!SELECTED_ENV_VAR:-}"
+                fi
+
+                if [ -n "$openrouter_key" ]; then
+                    local model_hc_result=""
+                    local model_hc_valid=""
+                    local model_hc_msg=""
+                    local model_hc_canonical=""
+                    local model_hc_base="${SELECTED_API_BASE:-https://openrouter.ai/api/v1}"
+                    echo -n "  Verifying model id... "
+                    model_hc_result="$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "openrouter" "$openrouter_key" "$model_hc_base" "$normalized_model" 2>/dev/null)" || true
+                    model_hc_valid="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null)" || true
+                    model_hc_msg="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null)" || true
+                    model_hc_canonical="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('model',''))" 2>/dev/null)" || true
+                    if [ "$model_hc_valid" = "True" ]; then
+                        if [ -n "$model_hc_canonical" ]; then
+                            normalized_model="$model_hc_canonical"
+                        fi
+                        echo -e "${GREEN}ok${NC}"
+                    elif [ "$model_hc_valid" = "False" ]; then
+                        echo -e "${RED}failed${NC}"
+                        echo -e "  ${YELLOW}⚠ $model_hc_msg${NC}"
+                        echo ""
+                        continue
+                    else
+                        echo -e "${YELLOW}--${NC}"
+                        echo -e "  ${DIM}Could not verify model id (network issue). Continuing with your selection.${NC}"
+                    fi
+                else
+                    echo -e "  ${DIM}Skipping model verification (OpenRouter key not available in current shell).${NC}"
+                fi
+
+                SELECTED_MODEL="$normalized_model"
+                SELECTED_MAX_TOKENS=8192
+                SELECTED_MAX_CONTEXT_TOKENS=120000
+                echo ""
+                echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
+                return
+            fi
+            echo -e "${RED}Model id cannot be empty.${NC}"
+        done
+    fi
+
     local count
     count="$(get_model_choice_count "$provider_id")"
 
@@ -780,7 +930,7 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_antigravity_sub]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
@@ -790,6 +940,7 @@ save_configuration() {
     local use_claude_code_sub="${6:-}"
     local api_base="${7:-}"
     local use_codex_sub="${8:-}"
+    local use_antigravity_sub="${9:-}"
 
     # Fallbacks if not provided
     if [ -z "$model" ]; then
@@ -802,34 +953,136 @@ save_configuration() {
         max_context_tokens=120000
     fi
 
-    mkdir -p "$HIVE_CONFIG_DIR"
-
-    $PYTHON_CMD -c "
+    uv run python - \
+        "$provider_id" \
+        "$env_var" \
+        "$model" \
+        "$max_tokens" \
+        "$max_context_tokens" \
+        "$use_claude_code_sub" \
+        "$api_base" \
+        "$use_codex_sub" \
+        "$use_antigravity_sub" \
+        "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" 2>/dev/null <<'PY'
 import json
-config = {
-    'llm': {
-        'provider': '$provider_id',
-        'model': '$model',
-        'max_tokens': $max_tokens,
-        'max_context_tokens': $max_context_tokens,
-        'api_key_env_var': '$env_var'
-    },
-    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
+import sys
+from pathlib import Path
+
+(
+    provider_id,
+    env_var,
+    model,
+    max_tokens,
+    max_context_tokens,
+    use_claude_code_sub,
+    api_base,
+    use_codex_sub,
+    use_antigravity_sub,
+    created_at,
+) = sys.argv[1:11]
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+try:
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        config = json.load(f)
+except (OSError, json.JSONDecodeError):
+    config = {}
+
+config["llm"] = {
+    "provider": provider_id,
+    "model": model,
+    "max_tokens": int(max_tokens),
+    "max_context_tokens": int(max_context_tokens),
 }
-if '$use_claude_code_sub' == 'true':
-    config['llm']['use_claude_code_subscription'] = True
-    # No api_key_env_var needed for Claude Code subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$use_codex_sub' == 'true':
-    config['llm']['use_codex_subscription'] = True
-    # No api_key_env_var needed for Codex subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$api_base':
-    config['llm']['api_base'] = '$api_base'
-with open('$HIVE_CONFIG_FILE', 'w') as f:
+if env_var:
+    config["llm"]["api_key_env_var"] = env_var
+config["created_at"] = created_at
+
+if use_claude_code_sub == "true":
+    config["llm"]["use_claude_code_subscription"] = True
+    config["llm"].pop("api_key_env_var", None)
+else:
+    config["llm"].pop("use_claude_code_subscription", None)
+
+if use_codex_sub == "true":
+    config["llm"]["use_codex_subscription"] = True
+    config["llm"].pop("api_key_env_var", None)
+else:
+    config["llm"].pop("use_codex_subscription", None)
+
+if use_antigravity_sub == "true":
+    config["llm"]["use_antigravity_subscription"] = True
+    config["llm"].pop("api_key_env_var", None)
+    # Store the Antigravity OAuth client secret so token refresh works
+    # without hardcoding it in source code (read at runtime via config.py).
+    import os as _os
+    _secret = _os.environ.get("ANTIGRAVITY_CLIENT_SECRET") or ""
+    if _secret:
+        config["llm"]["antigravity_client_secret"] = _secret
+    _client_id = _os.environ.get("ANTIGRAVITY_CLIENT_ID") or ""
+    if _client_id:
+        config["llm"]["antigravity_client_id"] = _client_id
+else:
+    config["llm"].pop("use_antigravity_subscription", None)
+    config["llm"].pop("antigravity_client_secret", None)
+    config["llm"].pop("antigravity_client_id", None)
+
+if api_base:
+    config["llm"]["api_base"] = api_base
+else:
+    config["llm"].pop("api_base", None)
+
+tmp_path = cfg_path.with_name(cfg_path.name + ".tmp")
+with open(tmp_path, "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2)
+tmp_path.replace(cfg_path)
 print(json.dumps(config, indent=2))
-" 2>/dev/null
+PY
+}
+
+save_vision_fallback() {
+    # Write the `vision_fallback` block to ~/.hive/configuration.json.
+    # Args: provider_id, model, env_var (api_key_env_var), api_base (optional)
+    # When provider_id is empty, REMOVE the block entirely (user opted out).
+    local provider_id="$1"
+    local model="$2"
+    local env_var="$3"
+    local api_base="${4:-}"
+
+    uv run python - "$provider_id" "$model" "$env_var" "$api_base" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+provider_id, model, env_var, api_base = sys.argv[1:5]
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+try:
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        config = json.load(f)
+except (OSError, json.JSONDecodeError):
+    config = {}
+
+# Empty provider_id means the user opted out — drop the block.
+if not provider_id:
+    config.pop("vision_fallback", None)
+else:
+    block = {"provider": provider_id, "model": model}
+    if env_var:
+        block["api_key_env_var"] = env_var
+    if api_base:
+        block["api_base"] = api_base
+    config["vision_fallback"] = block
+
+tmp_path = cfg_path.with_name(cfg_path.name + ".tmp")
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(config, f, indent=2)
+tmp_path.replace(cfg_path)
+PY
 }
 
 # Source shell rc file to pick up existing env vars (temporarily disable set -e)
@@ -882,6 +1135,33 @@ elif [ -n "${KIMI_API_KEY:-}" ]; then
     KIMI_CRED_DETECTED=true
 fi
 
+HIVE_CRED_DETECTED=false
+if [ -n "${HIVE_API_KEY:-}" ]; then
+    HIVE_CRED_DETECTED=true
+fi
+
+ANTIGRAVITY_CRED_DETECTED=false
+# Check native Antigravity IDE (macOS/Linux) SQLite state DB first
+if [ -f "$HOME/Library/Application Support/Antigravity/User/globalStorage/state.vscdb" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+elif [ -f "$HOME/.config/Antigravity/User/globalStorage/state.vscdb" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+# Native OAuth credentials
+elif [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+fi
+
+OLLAMA_DETECTED=false
+if ollama list >/dev/null 2>&1; then
+    OLLAMA_DETECTED=true
+fi
+
+if ! load_model_catalog_rows; then
+    echo -e "${RED}Failed to load core/framework/llm/model_catalog.json.${NC}"
+    echo -e "${YELLOW}Please ensure your Python environment is set up, then rerun quickstart.${NC}"
+    exit 1
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -905,25 +1185,41 @@ PREV_MODEL=""
 PREV_ENV_VAR=""
 PREV_SUB_MODE=""
 if [ -f "$HIVE_CONFIG_FILE" ]; then
-    eval "$($PYTHON_CMD -c "
-import json, sys
+    eval "$(uv run python - 2>/dev/null <<'PY'
+import json
+from pathlib import Path
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
 try:
-    with open('$HIVE_CONFIG_FILE') as f:
+    with open(cfg_path, encoding="utf-8-sig") as f:
         c = json.load(f)
-    llm = c.get('llm', {})
-    print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
-    print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
-    print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
-    sub = ''
-    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
-    elif llm.get('use_codex_subscription'): sub = 'codex'
-    elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
-    elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
-    elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
-    print(f'PREV_SUB_MODE={sub}')
+    llm = c.get("llm", {})
+    prov = llm.get("provider", "")
+    mod = llm.get("model", "")
+    env = llm.get("api_key_env_var", "")
+    print(f"PREV_PROVIDER='{prov}'")
+    print(f"PREV_MODEL='{mod}'")
+    print(f"PREV_ENV_VAR='{env}'")
+    sub = ""
+    if llm.get("use_claude_code_subscription"):
+        sub = "claude_code"
+    elif llm.get("use_codex_subscription"):
+        sub = "codex"
+    elif llm.get("use_kimi_code_subscription"):
+        sub = "kimi_code"
+    elif llm.get("use_antigravity_subscription"):
+        sub = "antigravity"
+    elif llm.get("provider", "") == "minimax" or "api.minimax.io" in llm.get("api_base", ""):
+        sub = "minimax_code"
+    elif llm.get("provider", "") == "hive" or "adenhq.com" in llm.get("api_base", ""):
+        sub = "hive_llm"
+    elif "api.z.ai" in llm.get("api_base", ""):
+        sub = "zai_code"
+    print(f"PREV_SUB_MODE={sub}")
 except Exception:
     pass
-" 2>/dev/null)" || true
+PY
+)" || true
 fi
 
 # Compute default menu number from previous config (only if credential is still valid)
@@ -935,9 +1231,15 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
-            # API key provider — check if the env var is set
-            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
+            # API key provider — check if the env var is set; ollama uses local runtime detection
+            if [ "$PREV_PROVIDER" = "ollama" ]; then
+                if [ "$OLLAMA_DETECTED" = true ]; then
+                    PREV_CRED_VALID=true
+                fi
+            elif [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
                 PREV_CRED_VALID=true
             fi
             ;;
@@ -950,23 +1252,43 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             codex)       DEFAULT_CHOICE=3 ;;
             minimax_code) DEFAULT_CHOICE=4 ;;
             kimi_code)   DEFAULT_CHOICE=5 ;;
+            hive_llm)    DEFAULT_CHOICE=6 ;;
+            antigravity) DEFAULT_CHOICE=7 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=6 ;;
-                openai)    DEFAULT_CHOICE=7 ;;
-                gemini)    DEFAULT_CHOICE=8 ;;
-                groq)      DEFAULT_CHOICE=9 ;;
-                cerebras)  DEFAULT_CHOICE=10 ;;
+                anthropic) DEFAULT_CHOICE=8 ;;
+                openai)    DEFAULT_CHOICE=9 ;;
+                gemini)    DEFAULT_CHOICE=10 ;;
+                groq)      DEFAULT_CHOICE=11 ;;
+                cerebras)  DEFAULT_CHOICE=12 ;;
+                openrouter) DEFAULT_CHOICE=13 ;;
+                ollama)    DEFAULT_CHOICE=14 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
+                hive)      DEFAULT_CHOICE=6 ;;
             esac
         fi
     fi
 fi
 
+HIVE_LLM_AVAILABLE="unknown"
+if check_hive_llm_availability "quickstart"; then
+    HIVE_LLM_AVAILABLE="yes"
+elif [ $? -eq 1 ]; then
+    HIVE_LLM_AVAILABLE="no"
+fi
+
 # ── Show unified provider selection menu ─────────────────────
 echo -e "${BOLD}Select your default LLM provider:${NC}"
+echo ""
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    echo -e "${GREEN}⬢${NC} Hive LLM availability check: ${DIM}available${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}currently unavailable${NC}"
+else
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}could not verify${NC}"
+fi
 echo ""
 echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
 
@@ -1005,14 +1327,38 @@ else
     echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}"
 fi
 
+# 6) Hive LLM
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    HIVE_LLM_STATUS="${GREEN}(available)${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    HIVE_LLM_STATUS="${YELLOW}(unavailable)${NC}"
+else
+    HIVE_LLM_STATUS="${YELLOW}(status unknown)${NC}"
+fi
+
+if [ "$HIVE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS"
+fi
+
+# 7) Antigravity
+if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 6-10) API key providers — show (credential detected) if key already set
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
-for idx in 0 1 2 3 4; do
-    num=$((idx + 6))
+# 8-N) API key providers — show (credential detected) if key already set.
+# Order is reflected directly in the menu numbering; the case dispatcher
+# below resolves choice numbers via $((8 + index_in_arrays)).
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family")
+for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
+    num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -1021,7 +1367,17 @@ for idx in 0 1 2 3 4; do
     fi
 done
 
-echo -e "  ${CYAN}11)${NC} Skip for now"
+# Local (Ollama) — slot computed from the provider list so adding/removing
+# API-key providers above doesn't require renumbering by hand.
+OLLAMA_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
+if [ "$OLLAMA_DETECTED" = true ]; then
+    echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+else
+    echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed"
+fi
+
+SKIP_CHOICE=$((OLLAMA_CHOICE + 1))
+echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
 if [ -n "$DEFAULT_CHOICE" ]; then
@@ -1031,15 +1387,15 @@ fi
 
 while true; do
     if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-11) [$DEFAULT_CHOICE]: " choice || true
+        read -r -p "Enter choice (1-$SKIP_CHOICE) [$DEFAULT_CHOICE]: " choice || true
         choice="${choice:-$DEFAULT_CHOICE}"
     else
-        read -r -p "Enter choice (1-11): " choice || true
+        read -r -p "Enter choice (1-$SKIP_CHOICE): " choice || true
     fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 11 ]; then
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$SKIP_CHOICE" ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-11${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-$SKIP_CHOICE${NC}"
 done
 
 case $choice in
@@ -1054,10 +1410,7 @@ case $choice in
             exit 1
         else
             SUBSCRIPTION_MODE="claude_code"
-            SELECTED_PROVIDER_ID="anthropic"
-            SELECTED_MODEL="claude-opus-4-6"
-            SELECTED_MAX_TOKENS=32768
-            SELECTED_MAX_CONTEXT_TOKENS=180000  # Claude — 200k context window
+            apply_preset "claude_code"
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi
@@ -1065,11 +1418,7 @@ case $choice in
     2)
         # ZAI Code Subscription
         SUBSCRIPTION_MODE="zai_code"
-        SELECTED_PROVIDER_ID="openai"
-        SELECTED_ENV_VAR="ZAI_API_KEY"
-        SELECTED_MODEL="glm-5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000  # GLM-5 — 128k context window
+        apply_preset "zai_code"
         PROVIDER_NAME="ZAI"
         echo ""
         echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
@@ -1097,10 +1446,7 @@ case $choice in
         fi
         if [ "$CODEX_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="codex"
-            SELECTED_PROVIDER_ID="openai"
-            SELECTED_MODEL="gpt-5.3-codex"
-            SELECTED_MAX_TOKENS=16384
-            SELECTED_MAX_CONTEXT_TOKENS=120000  # GPT Codex — 128k context window
+            apply_preset "codex"
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi
@@ -1108,27 +1454,17 @@ case $choice in
     4)
         # MiniMax Coding Key
         SUBSCRIPTION_MODE="minimax_code"
-        SELECTED_ENV_VAR="MINIMAX_API_KEY"
-        SELECTED_PROVIDER_ID="minimax"
-        SELECTED_MODEL="MiniMax-M2.5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.5 — 1M context window
-        SELECTED_API_BASE="https://api.minimax.io/v1"
+        apply_preset "minimax_code"
         PROVIDER_NAME="MiniMax"
         SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
         echo ""
         echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
-        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        echo -e "  ${DIM}Model: MiniMax-M2.7 | API: api.minimax.io${NC}"
         ;;
     5)
         # Kimi Code Subscription
         SUBSCRIPTION_MODE="kimi_code"
-        SELECTED_PROVIDER_ID="kimi"
-        SELECTED_ENV_VAR="KIMI_API_KEY"
-        SELECTED_MODEL="kimi-k2.5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000  # Kimi K2.5 — 128k context window
-        SELECTED_API_BASE="https://api.kimi.com/coding"
+        apply_preset "kimi_code"
         PROVIDER_NAME="Kimi"
         SIGNUP_URL="https://www.kimi.com/code"
         echo ""
@@ -1136,36 +1472,173 @@ case $choice in
         echo -e "  ${DIM}Model: kimi-k2.5 | API: api.kimi.com/coding${NC}"
         ;;
     6)
+        # Hive LLM
+        SUBSCRIPTION_MODE="hive_llm"
+        apply_preset "hive_llm"
+        PROVIDER_NAME="Hive"
+        SIGNUP_URL="https://discord.com/invite/MXE49hrKDk"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Hive LLM"
+        echo ""
+        echo -e "  Select a model:"
+        hive_choice_count="$(get_preset_model_choice_count "hive_llm")"
+        hive_default_choice=1
+        hive_idx=0
+        while [ "$hive_idx" -lt "$hive_choice_count" ]; do
+            hive_num=$((hive_idx + 1))
+            hive_model_id="$(get_preset_model_choice_field "hive_llm" "$hive_idx" "id")"
+            hive_recommended="$(get_preset_model_choice_field "hive_llm" "$hive_idx" "recommended")"
+            if [ "$hive_recommended" = "true" ]; then
+                echo -e "  ${CYAN}${hive_num})${NC} ${hive_model_id}              ${DIM}(default — Hive flagship)${NC}"
+                hive_default_choice="$hive_num"
+            else
+                echo -e "  ${CYAN}${hive_num})${NC} ${hive_model_id}"
+            fi
+            hive_idx=$((hive_idx + 1))
+        done
+        echo ""
+        while true; do
+            read -r -p "  Enter model choice (1-$hive_choice_count) [$hive_default_choice]: " hive_model_choice || true
+            hive_model_choice="${hive_model_choice:-$hive_default_choice}"
+            if [[ "$hive_model_choice" =~ ^[0-9]+$ ]] && [ "$hive_model_choice" -ge 1 ] && [ "$hive_model_choice" -le "$hive_choice_count" ]; then
+                SELECTED_MODEL="$(get_preset_model_choice_field "hive_llm" "$((hive_model_choice - 1))" "id")"
+                break
+            fi
+            echo -e "${RED}Invalid choice. Please enter 1-$hive_choice_count${NC}"
+        done
+        echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
+        ;;
+    7)
+        # Antigravity Subscription
+        if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+            echo ""
+            echo -e "${CYAN}  Setting up Antigravity authentication...${NC}"
+            echo ""
+            echo -e "  ${YELLOW}A browser window will open for Google OAuth.${NC}"
+            echo -e "  Sign in with your Google account that has Antigravity access."
+            echo ""
+
+            # Run native OAuth flow
+            if uv run python "$SCRIPT_DIR/core/antigravity_auth.py" auth account add; then
+                # Re-detect credentials
+                if [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
+                    ANTIGRAVITY_CRED_DETECTED=true
+                fi
+            fi
+
+            if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+                echo ""
+                echo -e "${RED}  Authentication failed or was cancelled.${NC}"
+                echo ""
+                SELECTED_PROVIDER_ID=""
+            fi
+        fi
+
+        if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
+            SUBSCRIPTION_MODE="antigravity"
+            apply_preset "antigravity"
+            echo ""
+            echo -e "${YELLOW}  ⚠ Using Antigravity can technically cause your account suspension. Please use at your own risk.${NC}"
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Antigravity subscription"
+            echo -e "  ${DIM}Model: gemini-3-flash | Direct OAuth (no proxy required)${NC}"
+        fi
+        ;;
+    8)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    7)
+    9)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    8)
+    10)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    9)
+    11)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    10)
+    12)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    11)
+    13)
+        SELECTED_ENV_VAR="OPENROUTER_API_KEY"
+        SELECTED_PROVIDER_ID="openrouter"
+        SELECTED_API_BASE="https://openrouter.ai/api/v1"
+        PROVIDER_NAME="OpenRouter"
+        SIGNUP_URL="https://openrouter.ai/keys"
+        ;;
+    14)
+        SELECTED_ENV_VAR="DEEPSEEK_API_KEY"
+        SELECTED_PROVIDER_ID="deepseek"
+        SELECTED_API_BASE="https://api.deepseek.com"
+        PROVIDER_NAME="DeepSeek"
+        SIGNUP_URL="https://platform.deepseek.com/api_keys"
+        ;;
+    "$OLLAMA_CHOICE")
+        # Local (Ollama) — no API key; pick model from ollama list
+        if [ "$OLLAMA_DETECTED" != true ]; then
+            echo ""
+            echo -e "${YELLOW}Ollama depends on a local Ollama server, but 'ollama list' failed.${NC}"
+            echo -e "  Please install Ollama (https://ollama.com) and start the server,"
+            echo -e "  then run this quickstart again."
+            echo ""
+            exit 1
+        fi
+        SELECTED_PROVIDER_ID="ollama"
+        SELECTED_ENV_VAR=""
+        SELECTED_MAX_TOKENS="$(get_preset_field "ollama_local" "max_tokens")"
+        SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "ollama_local" "max_context_tokens")"
+        OLLAMA_MODELS=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && OLLAMA_MODELS+=("$line")
+        done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ ${#OLLAMA_MODELS[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${BOLD}Select an Ollama model:${NC}"
+            echo ""
+            for idx in "${!OLLAMA_MODELS[@]}"; do
+                num=$((idx + 1))
+                echo -e "  ${CYAN}$num)${NC} ${OLLAMA_MODELS[$idx]}"
+            done
+            echo ""
+            while true; do
+                read -r -p "Enter choice (1-${#OLLAMA_MODELS[@]}): " model_choice
+                if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#OLLAMA_MODELS[@]} ]; then
+                    SELECTED_MODEL="${OLLAMA_MODELS[$((model_choice - 1))]}"
+                    SELECTED_API_BASE="$(get_preset_field "ollama_local" "api_base")"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-${#OLLAMA_MODELS[@]}${NC}"
+            done
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Ollama with model ${DIM}$SELECTED_MODEL${NC}"
+            echo -e "${YELLOW}  ⚠ Note: The framework uses a ~9,500 token system prompt and requires strong tool use.${NC}"
+            echo -e "${YELLOW}    For best results, use models like qwen2.5:72b+ or mistral-large.${NC}"
+            echo ""
+        else
+            echo ""
+            echo -e "${RED}No Ollama models found.${NC}"
+            echo -e "  Please open another terminal, run ${CYAN}ollama pull llama3${NC} (or another model),"
+            echo -e "  and then run this quickstart again."
+            echo ""
+            exit 1
+        fi
+        ;;
+    "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -1178,7 +1651,7 @@ case $choice in
 esac
 
 # For API-key providers: prompt for key (allow replacement if already set)
-if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
+if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
     while true; do
         CURRENT_KEY="${!SELECTED_ENV_VAR}"
         if [ -n "$CURRENT_KEY" ]; then
@@ -1206,7 +1679,7 @@ if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] ||
             echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
             # Health check the new key
             echo -n "  Verifying API key... "
-            if { [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "${SELECTED_API_BASE:-}" ]; then
+            if [ -n "${SELECTED_API_BASE:-}" ]; then
                 HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
             else
                 HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
@@ -1271,7 +1744,7 @@ if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
             echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
             # Health check the new key
             echo -n "  Verifying ZAI API key... "
-            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "https://api.z.ai/api/coding/paas/v4" 2>/dev/null) || true
+            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
             HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
             HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
             if [ "$HC_VALID" = "True" ]; then
@@ -1318,18 +1791,34 @@ fi
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
+    SAVE_OK=true
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" "true" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "antigravity" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "" "true" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
+        # to the local Ollama server instead of trying to reach a remote endpoint.
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
+    fi
+    if [ "$SAVE_OK" = false ]; then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not write ~/.hive/configuration.json. Please rerun quickstart.${NC}"
+        exit 1
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
@@ -1338,38 +1827,219 @@ fi
 echo ""
 
 # ============================================================
-# Step 4b: Browser Automation (GCU) — always enabled
+# Vision Fallback (subagent for tool-result images)
+# ============================================================
+#
+# When a tool returns an image (browser_screenshot, render_image, etc.)
+# but the main agent's model is text-only, the framework can route the
+# image through a separate VLM subagent that returns a text caption,
+# preserving the agent's ability to reason about visual state.
+#
+# Skip entirely when the chosen main model already supports vision per
+# the catalog's ``supports_vision`` flag — the fallback would never fire
+# in that case, and prompting for it just adds friction. For text-only
+# mains we still offer the prompt so the user can wire up a captioning
+# subagent.
+
+MAIN_MODEL_HAS_VISION="false"
+if [ -n "$SELECTED_MODEL" ]; then
+    MAIN_MODEL_HAS_VISION=$(uv run python - "$SELECTED_MODEL" <<'PY' 2>/dev/null || echo "false"
+import sys
+from framework.llm.model_catalog import model_supports_vision
+print("true" if model_supports_vision(sys.argv[1]) else "false")
+PY
+)
+fi
+
+if [ -n "$SELECTED_PROVIDER_ID" ] && [ "$MAIN_MODEL_HAS_VISION" = "true" ]; then
+    # Drop any stale vision_fallback block so the config reflects the
+    # current main model's capabilities.
+    save_vision_fallback "" "" "" "" > /dev/null 2>&1 || true
+    echo -e "${GREEN}⬢${NC} Vision fallback ${DIM}skipped — ${SELECTED_MODEL} already supports vision${NC}"
+    echo ""
+elif [ -n "$SELECTED_PROVIDER_ID" ]; then
+    echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Vision fallback subagent${NC}"
+    echo ""
+    echo -e "  ${DIM}When a screenshot/image tool is called from a text-only model,${NC}"
+    echo -e "  ${DIM}the framework can route the image through a vision-capable VLM${NC}"
+    echo -e "  ${DIM}and inject the caption into the conversation. Inert when your${NC}"
+    echo -e "  ${DIM}main model already supports vision (most do).${NC}"
+    echo ""
+
+    # Build the candidate list from the same model_catalog.json the main
+    # LLM step uses — never hardcode model IDs in this script. For each
+    # provider in the catalogue, pick a model whose ``supports_vision``
+    # flag is true (since the fallback subagent's whole purpose is to
+    # caption images — a text-only candidate would be useless). Prefer
+    # the provider's default when it supports vision, otherwise fall
+    # back to the first vision-capable model in the provider's list.
+    # Skip the provider entirely if no model in its catalog supports
+    # vision. Output one TSV row per candidate:
+    # provider_id<TAB>model<TAB>env_var<TAB>display_name
+    VISION_CANDIDATES_TSV=$(uv run python - <<'PY'
+import os
+from framework.llm.model_catalog import get_default_models, get_models_catalogue
+
+# Map provider_id → the env-var name the framework reads its key from.
+# Mirrors PROVIDER_ENV_VARS at the top of quickstart.sh, plus how the
+# rest of the script picks an env var per provider.
+PROVIDER_KEY_ENV = {
+    "anthropic":  "ANTHROPIC_API_KEY",
+    "openai":     "OPENAI_API_KEY",
+    "gemini":     "GEMINI_API_KEY",
+    "groq":       "GROQ_API_KEY",
+    "cerebras":   "CEREBRAS_API_KEY",
+    "minimax":    "MINIMAX_API_KEY",
+    "mistral":    "MISTRAL_API_KEY",
+    "together":   "TOGETHER_API_KEY",
+    "deepseek":   "DEEPSEEK_API_KEY",
+    "kimi":       "KIMI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+defaults = get_default_models()
+catalog  = get_models_catalogue()
+for provider_id, default_model in sorted(defaults.items()):
+    env = PROVIDER_KEY_ENV.get(provider_id)
+    if not env:
+        continue
+    # GEMINI_API_KEY OR GOOGLE_API_KEY both unlock gemini
+    has_key = bool(os.environ.get(env))
+    if provider_id == "gemini" and not has_key:
+        if os.environ.get("GOOGLE_API_KEY"):
+            has_key = True
+            env = "GOOGLE_API_KEY"
+    if not has_key:
+        continue
+    # Pick a vision-capable model: prefer the catalog default if it has
+    # supports_vision=true, else the first vision-capable model in the
+    # provider's list. Skip the provider if none exist.
+    models = catalog.get(provider_id, [])
+    chosen = None
+    for m in models:
+        if m["id"] == default_model and m.get("supports_vision") is True:
+            chosen = m["id"]
+            break
+    if chosen is None:
+        for m in models:
+            if m.get("supports_vision") is True:
+                chosen = m["id"]
+                break
+    if chosen is None:
+        continue
+    # Display name: provider/model from the catalogue verbatim
+    display = f"{provider_id}/{chosen}"
+    print(f"{provider_id}\t{chosen}\t{env}\t{display}")
+PY
+)
+
+    if [ -z "$VISION_CANDIDATES_TSV" ]; then
+        echo -e "  ${YELLOW}No matching API keys detected for any catalog provider.${NC}"
+        echo -e "  ${DIM}Set an API key for any provider in model_catalog.json and rerun.${NC}"
+        echo -e "  ${DIM}Skipping for now — text-only models will lose image content silently.${NC}"
+    else
+        # Materialise into bash array for selection
+        VISION_CANDIDATES=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && VISION_CANDIDATES+=("$line")
+        done <<< "$VISION_CANDIDATES_TSV"
+
+        echo -e "  ${BOLD}Available vision-fallback models${NC} ${DIM}(from model_catalog.json):${NC}"
+        echo -e "    ${DIM}0)${NC} (skip — don't configure vision fallback)"
+        idx=1
+        for entry in "${VISION_CANDIDATES[@]}"; do
+            IFS=$'\t' read -r _vp _vm _vk _vd <<< "$entry"
+            echo -e "    ${DIM}${idx})${NC} ${_vd} ${DIM}[\$${_vk}]${NC}"
+            idx=$((idx + 1))
+        done
+        echo ""
+        VISION_CHOICE=""
+        while true; do
+            read -r -p "  Pick a vision-fallback model [1-${#VISION_CANDIDATES[@]}, 0=skip, default=1]: " VISION_CHOICE || VISION_CHOICE=""
+            VISION_CHOICE="${VISION_CHOICE:-1}"
+            if [[ "$VISION_CHOICE" =~ ^[0-9]+$ ]] && \
+               [ "$VISION_CHOICE" -ge 0 ] && \
+               [ "$VISION_CHOICE" -le "${#VISION_CANDIDATES[@]}" ]; then
+                break
+            fi
+            echo -e "  ${YELLOW}Please enter 0 (skip) or 1-${#VISION_CANDIDATES[@]}.${NC}"
+        done
+
+        if [ "$VISION_CHOICE" = "0" ]; then
+            # Explicit skip — drop any prior block so config stays clean.
+            save_vision_fallback "" "" "" "" > /dev/null 2>&1 || true
+            echo -e "  ${DIM}skipped — no vision_fallback block written${NC}"
+        else
+            chosen="${VISION_CANDIDATES[$((VISION_CHOICE - 1))]}"
+            IFS=$'\t' read -r vf_provider vf_model vf_env vf_display <<< "$chosen"
+            echo -n "  Saving vision_fallback... "
+            if save_vision_fallback "$vf_provider" "$vf_model" "$vf_env" "" > /dev/null; then
+                echo -e "${GREEN}⬢${NC}"
+                echo -e "  ${DIM}vision_fallback: ${vf_display} (key from \$${vf_env})${NC}"
+            else
+                echo -e "${RED}failed${NC}"
+                echo -e "  ${YELLOW}Could not write vision_fallback to ~/.hive/configuration.json — non-fatal, edit manually if needed.${NC}"
+            fi
+        fi
+    fi
+    echo ""
+fi
+
+# ============================================================
+# Browser Automation (GCU) — always enabled
 # ============================================================
 
 echo -e "${GREEN}⬢${NC} Browser automation enabled"
 
 # Patch gcu_enabled into configuration.json
 if [ -f "$HIVE_CONFIG_FILE" ]; then
-    uv run python -c "
+    if ! uv run python - <<'PY'
 import json
-with open('$HIVE_CONFIG_FILE') as f:
+from pathlib import Path
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
+with open(cfg_path, encoding="utf-8-sig") as f:
     config = json.load(f)
-config['gcu_enabled'] = True
-with open('$HIVE_CONFIG_FILE', 'w') as f:
+config["gcu_enabled"] = True
+tmp_path = cfg_path.with_name(cfg_path.name + ".tmp")
+with open(tmp_path, "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2)
-"
+tmp_path.replace(cfg_path)
+PY
+    then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not update ~/.hive/configuration.json with browser automation settings.${NC}"
+        exit 1
+    fi
 else
-    mkdir -p "$HIVE_CONFIG_DIR"
-    uv run python -c "
+    if ! uv run python - "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" <<'PY'
 import json
-config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
-with open('$HIVE_CONFIG_FILE', 'w') as f:
+import sys
+from pathlib import Path
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+config = {
+    "gcu_enabled": True,
+    "created_at": sys.argv[1],
+}
+with open(cfg_path, "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2)
-"
+PY
+    then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not create ~/.hive/configuration.json for browser automation settings.${NC}"
+        exit 1
+    fi
 fi
 
 echo ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Step 4: Initialize Credential Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 4: Initializing credential store...${NC}"
 echo ""
 echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
 echo ""
@@ -1436,10 +2106,41 @@ fi
 echo ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 4b: Install browser extension from Chrome Web Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Installing browser extension...${NC}"
+echo ""
+
+EXTENSION_URL="https://chromewebstore.google.com/detail/hive-browser-bridge/jkpcegnbfimimjodblcemoheedidnppm"
+EXTENSION_INSTALLED=false
+
+echo -e "  Install ${BOLD}Hive Browser Bridge${NC} from the Chrome Web Store, then click ${BOLD}Add to Chrome${NC}."
+echo -e "  ${DIM}${EXTENSION_URL}${NC}"
+echo ""
+read -r -p "  Press Enter to open the Web Store... " _dummy || true
+
+if [[ "$OSTYPE" == darwin* ]]; then
+    open "$EXTENSION_URL" 2>/dev/null
+elif command -v xdg-open &> /dev/null; then
+    xdg-open "$EXTENSION_URL" > /dev/null 2>&1 &
+elif command -v wslview &> /dev/null; then
+    wslview "$EXTENSION_URL" > /dev/null 2>&1 &
+else
+    echo -e "  ${DIM}Could not open browser automatically — open the URL above in Chrome.${NC}"
+fi
+
+echo ""
+read -r -p "  Press Enter once the extension is installed... " _dummy || true
+EXTENSION_INSTALLED=true
+
+echo ""
+
+# ============================================================
+# Step 5: Verify Setup
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -1475,6 +2176,13 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ MCP registry... "
+if uv run hive mcp init > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 
 
 echo -n "  ⬡ credential store... "
@@ -1491,6 +2199,13 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ browser extension... "
+if [ "$EXTENSION_INSTALLED" = true ]; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo ""
 
 if [ $ERRORS -gt 0 ]; then
@@ -1500,24 +2215,36 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
-# Step 7: Install hive CLI globally
+# Step 6: Install hive CLI globally
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Installing hive CLI...${NC}"
 echo ""
 
 # Ensure ~/.local/bin exists and is in PATH
 mkdir -p "$HOME/.local/bin"
 
-# Create/update symlink
+# Git Bash on Windows may materialize `ln -s` as a plain file copy.
+# Use a launcher shim there, but prefer a real symlink on Linux/macOS.
 HIVE_SCRIPT="$SCRIPT_DIR/hive"
 HIVE_LINK="$HOME/.local/bin/hive"
+HIVE_SCRIPT_ESCAPED=$(printf '%q' "$HIVE_SCRIPT")
 
 if [ -L "$HIVE_LINK" ] || [ -e "$HIVE_LINK" ]; then
     rm -f "$HIVE_LINK"
 fi
 
-ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+if [ -n "$MSYSTEM" ] || [ -n "$MINGW_PREFIX" ]; then
+    cat > "$HIVE_LINK" <<EOF
+#!/usr/bin/env bash
+set -e
+HIVE_SCRIPT=$HIVE_SCRIPT_ESCAPED
+exec "\$HIVE_SCRIPT" "\$@"
+EOF
+    chmod +x "$HIVE_LINK"
+else
+    ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+fi
 echo -e "${GREEN}  ✓ hive CLI installed to ~/.local/bin/hive${NC}"
 
 # Check if ~/.local/bin is in PATH
@@ -1530,6 +2257,17 @@ else
 fi
 
 echo ""
+
+# ============================================================
+# Initialize Queen Profiles
+# ============================================================
+
+echo -n "  ⬡ queen profiles... "
+if uv run python -c "from framework.agents.queen.queen_profiles import ensure_default_queens; ensure_default_queens()" > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}skipped${NC} ${DIM}(non-fatal)${NC}"
+fi
 
 # ============================================================
 # Success!
@@ -1561,6 +2299,12 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        echo -e "  ${GREEN}⬢${NC} OpenRouter API Key → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}API: openrouter.ai/api/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        echo -e "  ${GREEN}⬢${NC} Local (Ollama) → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}No API key required (runs locally via http://localhost:11434)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi
@@ -1605,40 +2349,16 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
-# Auto-launch dashboard if frontend was built
+echo -e "${DIM}API keys saved to ${CYAN}$SHELL_RC_FILE${NC}${DIM}. New terminals pick them up automatically.${NC}"
+echo -e "${DIM}Launch anytime from this project root with ${CYAN}./hive open${NC}${DIM}. Run ./quickstart.sh again to reconfigure.${NC}"
+echo ""
+
 if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "${BOLD}Launching dashboard...${NC}"
     echo ""
-    echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
-    echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
-    echo ""
-    echo -e "  ${DIM}Tip: You can restart the dashboard anytime with:${NC} ${CYAN}hive open${NC}"
-    echo ""
-    # exec replaces the quickstart process with hive open
-    exec "$SCRIPT_DIR/hive" open
+    "$SCRIPT_DIR/hive" open
 else
-    # No frontend — show manual instructions
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
-    echo -e "  To use them, either:"
-    echo ""
-    echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
-    echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
-    echo ""
-    echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    echo -e "${BOLD}Run an Agent:${NC}"
-    echo ""
-    echo -e "  Launch the interactive dashboard to browse and run agents:"
-    echo -e "  You can start an example agent or an agent built by yourself:"
-    echo -e "     ${CYAN}hive open${NC}"
-    echo ""
-    echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
+    echo -e "${YELLOW}Frontend build was skipped or failed.${NC} Launch manually when ready:"
+    echo -e "     ${CYAN}./hive open${NC}"
     echo ""
 fi

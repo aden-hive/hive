@@ -285,9 +285,7 @@ class TestRealAPIToolCallStreaming:
 
         # Must have multiple tool call events
         tool_calls = [e for e in events if isinstance(e, ToolCallEvent)]
-        assert len(tool_calls) >= 2, (
-            f"Expected 2+ ToolCallEvents for parallel requests, got {len(tool_calls)}"
-        )
+        assert len(tool_calls) >= 2, f"Expected 2+ ToolCallEvents for parallel requests, got {len(tool_calls)}"
 
         # Verify tool names used
         tool_names = {tc.tool_name for tc in tool_calls}

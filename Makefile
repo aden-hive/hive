@@ -1,4 +1,11 @@
-.PHONY: lint format check test install-hooks help frontend-install frontend-dev frontend-build
+.PHONY: lint format check test test-tools test-live test-all install-hooks help frontend-install frontend-dev frontend-build
+
+# ── Ensure uv is findable in Git Bash on Windows ──────────────────────────────
+# uv installs to ~/.local/bin on Windows/Linux/macOS. Git Bash may not include
+# this in PATH by default, so we prepend it here.
+export PATH := $(HOME)/.local/bin:$(PATH)
+
+# ── Targets ───────────────────────────────────────────────────────────────────
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -21,7 +28,7 @@ check: ## Run all checks without modifying files (CI-safe)
 	cd tools && uv run ruff format --check .
 
 test: ## Run all tests (core + tools, excludes live)
-	cd core && uv run python -m pytest tests/ -v
+	cd core && uv run python -m pytest tests/ -v --ignore=tests/dummy_agents
 	cd tools && uv run python -m pytest -v
 
 test-tools: ## Run tool tests only (mocked, no credentials needed)
@@ -31,7 +38,7 @@ test-live: ## Run live integration tests (requires real API credentials)
 	cd tools && uv run python -m pytest -m live -s -o "addopts=" --log-cli-level=INFO
 
 test-all: ## Run everything including live tests
-	cd core && uv run python -m pytest tests/ -v
+	cd core && uv run python -m pytest tests/ -v --ignore=tests/dummy_agents
 	cd tools && uv run python -m pytest -v
 	cd tools && uv run python -m pytest -m live -s -o "addopts=" --log-cli-level=INFO
 

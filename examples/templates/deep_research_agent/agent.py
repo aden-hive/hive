@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost
+from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
@@ -175,7 +175,7 @@ class DeepResearchAgent:
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
         self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         self._tool_registry: ToolRegistry | None = None
         self._storage_path: Path | None = None
 
@@ -244,7 +244,7 @@ class DeepResearchAgent:
             )
         ]
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
@@ -285,15 +285,11 @@ class DeepResearchAgent:
             session_state=session_state,
         )
 
-    async def run(
-        self, context: dict, mock_mode=False, session_state=None
-    ) -> ExecutionResult:
+    async def run(self, context: dict, mock_mode=False, session_state=None) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
-            result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -338,9 +334,7 @@ class DeepResearchAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
 
         return {
             "valid": len(errors) == 0,

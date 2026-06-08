@@ -16,24 +16,30 @@ after the user picks an account programmatically.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from framework.config import get_max_context_tokens
-from framework.graph import Goal, NodeSpec, SuccessCriterion
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
+from framework.host.agent_host import AgentHost
+from framework.host.execution_manager import EntryPointSpec
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.mcp_registry import MCPRegistry
+from framework.loader.tool_registry import ToolRegistry
+from framework.orchestrator import Goal, NodeSpec, SuccessCriterion
+from framework.orchestrator.checkpoint_config import CheckpointConfig
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult
 
 from .config import default_config
 from .nodes import build_tester_node
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from framework.runner import AgentRunner
+    from framework.loader import AgentLoader
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Goal
@@ -88,7 +94,7 @@ def _list_aden_accounts() -> list[dict]:
 
         client = AdenCredentialClient(
             AdenClientConfig(
-                base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                base_url=os.environ.get("ADEN_API_URL", "https://app.open-hive.com"),
             )
         )
         try:
@@ -107,7 +113,11 @@ def _list_aden_accounts() -> list[dict]:
             for c in integrations
             if c.status == "active"
         ]
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not list Aden accounts: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing Aden accounts", exc_info=True)
         return []
 
 
@@ -116,10 +126,12 @@ def _list_local_accounts() -> list[dict]:
     try:
         from framework.credentials.local.registry import LocalCredentialRegistry
 
-        return [
-            info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()
-        ]
+        return [info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()]
+    except ImportError as exc:
+        logger.debug("Local credential registry unavailable: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing local accounts", exc_info=True)
         return []
 
 
@@ -140,7 +152,11 @@ def _list_env_fallback_accounts() -> list[dict]:
         from framework.credentials.storage import EncryptedFileStorage
 
         encrypted_ids: set[str] = set(EncryptedFileStorage().list_all())
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not read encrypted store: %s", exc)
+        encrypted_ids = set()
     except Exception:
+        logger.warning("Unexpected error reading encrypted store", exc_info=True)
         encrypted_ids = set()
 
     def _is_configured(cred_name: str, spec) -> bool:
@@ -163,9 +179,7 @@ def _list_env_fallback_accounts() -> list[dict]:
             if spec.credential_group in seen_groups:
                 continue
             group_available = all(
-                _is_configured(n, s)
-                for n, s in CREDENTIAL_SPECS.items()
-                if s.credential_group == spec.credential_group
+                _is_configured(n, s) for n, s in CREDENTIAL_SPECS.items() if s.credential_group == spec.credential_group
             )
             if not group_available:
                 continue
@@ -197,9 +211,7 @@ def list_connected_accounts() -> list[dict]:
 
     # Show env-var fallbacks only for credentials not already in the named registry
     local_providers = {a["provider"] for a in local}
-    env_fallbacks = [
-        a for a in _list_env_fallback_accounts() if a["provider"] not in local_providers
-    ]
+    env_fallbacks = [a for a in _list_env_fallback_accounts() if a["provider"] not in local_providers]
 
     return aden + local + env_fallbacks
 
@@ -215,7 +227,7 @@ requires_account_selection = True
 """Signal TUI to show account picker before starting the agent."""
 
 
-def configure_for_account(runner: AgentRunner, account: dict) -> None:
+def configure_for_account(runner: AgentLoader, account: dict) -> None:
     """Scope the tester node's tools to the selected provider.
 
     Handles both Aden accounts (account= routing) and local accounts
@@ -254,9 +266,7 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
     group_specs = [
         (cred_name, spec)
         for cred_name, spec in CREDENTIAL_SPECS.items()
-        if spec.credential_group == credential_id
-        or spec.credential_id == credential_id
-        or cred_name == credential_id
+        if spec.credential_group == credential_id or spec.credential_id == credential_id or cred_name == credential_id
     ]
     # Deduplicate — credential_id and credential_group may both match the same spec
     seen_env_vars: set[str] = set()
@@ -300,12 +310,14 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
 
             if key:
                 os.environ[spec.env_var] = key
+    except (ImportError, KeyError, OSError) as exc:
+        logger.debug("Could not inject credentials: %s", exc)
     except Exception:
-        pass
+        logger.warning("Unexpected error injecting credentials", exc_info=True)
 
 
 def _configure_aden_node(
-    runner: AgentRunner,
+    runner: AgentLoader,
     provider: str,
     alias: str,
     detail: str,
@@ -348,7 +360,7 @@ or any other identifier — always use the alias exactly as shown.
 
 
 def _configure_local_node(
-    runner: AgentRunner,
+    runner: AgentLoader,
     provider: str,
     alias: str,
     identity: dict,
@@ -399,10 +411,7 @@ nodes = [
     NodeSpec(
         id="tester",
         name="Credential Tester",
-        description=(
-            "Interactive credential testing — lets the user pick an account "
-            "and verify it via API calls."
-        ),
+        description=("Interactive credential testing — lets the user pick an account and verify it via API calls."),
         node_type="event_loop",
         client_facing=True,
         max_node_visits=0,
@@ -449,10 +458,7 @@ pause_nodes = []
 terminal_nodes = ["tester"]  # Tester node can terminate
 
 conversation_mode = "continuous"
-identity_prompt = (
-    "You are a credential tester that verifies connected accounts and API keys "
-    "can make real API calls."
-)
+identity_prompt = "You are a credential tester that verifies connected accounts and API keys can make real API calls."
 loop_config = {
     "max_iterations": 50,
     "max_tool_calls_per_turn": 30,
@@ -477,7 +483,7 @@ class CredentialTesterAgent:
     def __init__(self, config=None):
         self.config = config or default_config
         self._selected_account: dict | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         self._tool_registry: ToolRegistry | None = None
         self._storage_path: Path | None = None
 
@@ -554,7 +560,9 @@ class CredentialTesterAgent:
         if self._selected_account is None:
             raise RuntimeError("No account selected. Call select_account() first.")
 
-        self._storage_path = Path.home() / ".hive" / "agents" / "credential_tester"
+        from framework.config import HIVE_HOME
+
+        self._storage_path = HIVE_HOME / "agents" / "credential_tester"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
@@ -562,6 +570,23 @@ class CredentialTesterAgent:
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
+
+        try:
+            agent_dir = Path(__file__).parent
+            registry = MCPRegistry()
+            registry.initialize()
+            if (agent_dir / "mcp_registry.json").is_file():
+                self._tool_registry.set_mcp_registry_agent_path(agent_dir)
+            registry_configs, selection_max_tools = registry.load_agent_selection(agent_dir)
+            if registry_configs:
+                self._tool_registry.load_registry_servers(
+                    registry_configs,
+                    preserve_existing_tools=True,
+                    log_collisions=True,
+                    max_tools=selection_max_tools,
+                )
+        except Exception:
+            logger.warning("MCP registry config failed to load", exc_info=True)
 
         extra_kwargs = getattr(self.config, "extra_kwargs", {}) or {}
         llm = LiteLLMProvider(
@@ -576,7 +601,7 @@ class CredentialTesterAgent:
 
         graph = self._build_graph()
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=graph,
             goal=goal,
             storage_path=self._storage_path,

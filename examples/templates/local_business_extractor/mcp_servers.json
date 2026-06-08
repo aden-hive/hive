@@ -1,5 +1,5 @@
 {
-  "hive-tools": {
+  "hive_tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],

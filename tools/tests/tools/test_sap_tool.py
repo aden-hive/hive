@@ -22,9 +22,26 @@ def _mock_resp(data, status_code=200):
     return resp
 
 
+def _mock_credentials() -> MagicMock:
+    creds = MagicMock()
+    creds.get.side_effect = lambda key: {
+        "sap_base_url": "https://cred-store.s4hana.ondemand.com",
+        "sap_username": "CRED_USER",
+        "sap_password": "cred-password",
+    }.get(key)
+    return creds
+
+
 @pytest.fixture
-def tool_fns(mcp: FastMCP):
+def tool_fns(mcp: FastMCP) -> dict:
     register_tools(mcp, credentials=None)
+    tools = mcp._tool_manager._tools
+    return {name: tools[name].fn for name in tools}
+
+
+@pytest.fixture
+def tool_fns_with_creds(mcp: FastMCP) -> dict:
+    register_tools(mcp, credentials=_mock_credentials())
     tools = mcp._tool_manager._tools
     return {name: tools[name].fn for name in tools}
 
@@ -176,3 +193,66 @@ class TestSAPListSalesOrders:
         assert result["count"] == 1
         assert result["sales_orders"][0]["sales_order"] == "1"
         assert result["sales_orders"][0]["net_amount"] == "25000.00"
+
+
+class TestCredentialStoreAdapter:
+    """Verify credentials are resolved via CredentialStoreAdapter."""
+
+    def test_credential_store_used(self, tool_fns_with_creds):
+        data = {
+            "d": {
+                "__count": "1",
+                "results": [
+                    {
+                        "PurchaseOrder": "4500000001",
+                        "PurchaseOrderType": "NB",
+                        "CompanyCode": "1010",
+                        "Supplier": "17300001",
+                        "CreationDate": "/Date(1672531200000)/",
+                        "PurchaseOrderNetAmount": "15000.00",
+                        "DocumentCurrency": "USD",
+                    }
+                ],
+            }
+        }
+        with patch(
+            "aden_tools.tools.sap_tool.sap_tool.httpx.get",
+            return_value=_mock_resp(data),
+        ) as mock_get:
+            result = tool_fns_with_creds["sap_list_purchase_orders"]()
+
+        assert result["count"] == 1
+        call_url = mock_get.call_args.args[0]
+        assert "cred-store.s4hana.ondemand.com" in call_url
+
+    def test_credential_store_missing_values(self):
+        creds = MagicMock()
+        creds.get.return_value = None
+
+        mcp = FastMCP("test")
+        register_tools(mcp, credentials=creds)
+        tools = mcp._tool_manager._tools
+        fn = tools["sap_list_purchase_orders"].fn
+
+        result = fn()
+        assert "error" in result
+
+    def test_env_fallback_when_no_adapter(self, tool_fns):
+        data = {
+            "d": {
+                "__count": "0",
+                "results": [],
+            }
+        }
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.sap_tool.sap_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ) as mock_get,
+        ):
+            result = tool_fns["sap_list_purchase_orders"]()
+
+        assert result["count"] == 0
+        call_url = mock_get.call_args.args[0]
+        assert "my-tenant-api.s4hana.ondemand.com" in call_url

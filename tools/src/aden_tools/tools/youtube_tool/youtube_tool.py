@@ -45,13 +45,7 @@ def _request(
             if errors:
                 reason = errors[0].get("reason", "")
             if reason == "quotaExceeded":
-                return {
-                    "error": (
-                        "YouTube API quota exceeded."
-                        " Try again tomorrow or"
-                        " request a quota increase."
-                    )
-                }
+                return {"error": ("YouTube API quota exceeded. Try again tomorrow or request a quota increase.")}
             return {"error": f"Forbidden: {reason or resp.text}"}
         if resp.status_code != 200:
             return {"error": f"YouTube API error {resp.status_code}: {resp.text[:500]}"}
@@ -285,9 +279,7 @@ def register_tools(
             "videoCount": int(stats.get("videoCount", 0)),
             "viewCount": int(stats.get("viewCount", 0)),
             "thumbnail": snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "uploadsPlaylistId": item.get("contentDetails", {})
-            .get("relatedPlaylists", {})
-            .get("uploads", ""),
+            "uploadsPlaylistId": item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads", ""),
         }
 
     @mcp.tool()

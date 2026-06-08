@@ -132,16 +132,12 @@ LEGACY_PORTS = {21, 23, 110, 143, 445}
 PORT_FINDINGS = {
     "database": {
         "severity": "high",
-        "remediation": (
-            "Restrict database ports to localhost or VPN only. "
-            "Use firewall rules to block public access."
-        ),
+        "remediation": ("Restrict database ports to localhost or VPN only. Use firewall rules to block public access."),
     },
     "admin": {
         "severity": "high",
         "remediation": (
-            "Restrict remote admin ports to VPN or trusted IP ranges. "
-            "Never expose RDP/VNC directly to the internet."
+            "Restrict remote admin ports to VPN or trusted IP ranges. Never expose RDP/VNC directly to the internet."
         ),
     },
     "legacy": {
@@ -229,15 +225,11 @@ def register_tools(mcp: FastMCP) -> None:
                         entry["remediation"] = PORT_FINDINGS["database"]["remediation"]
                     elif port in ADMIN_PORTS:
                         entry["severity"] = PORT_FINDINGS["admin"]["severity"]
-                        entry["finding"] = (
-                            f"{entry['service']} admin port ({port}) exposed to internet"
-                        )
+                        entry["finding"] = f"{entry['service']} admin port ({port}) exposed to internet"
                         entry["remediation"] = PORT_FINDINGS["admin"]["remediation"]
                     elif port in LEGACY_PORTS:
                         entry["severity"] = PORT_FINDINGS["legacy"]["severity"]
-                        entry["finding"] = (
-                            f"Legacy protocol {entry['service']} ({port}) still active"
-                        )
+                        entry["finding"] = f"Legacy protocol {entry['service']} ({port}) still active"
                         entry["remediation"] = PORT_FINDINGS["legacy"]["remediation"]
 
                     open_ports.append(entry)

@@ -285,9 +285,7 @@ def register_tools(
         if not html_content:
             return {"error": "Email content cannot be empty"}
         try:
-            result = client.send_email(
-                to_email, to_name, subject, html_content, from_email, from_name, text_content
-            )
+            result = client.send_email(to_email, to_name, subject, html_content, from_email, from_name, text_content)
             if "error" in result:
                 return result
             return {

@@ -23,6 +23,7 @@ class Checkpoint(BaseModel):
     checkpoint_id: str  # Format: cp_{type}_{node_id}_{timestamp}
     checkpoint_type: str  # "node_start" | "node_complete" | "loop_iteration"
     session_id: str
+    run_id: str | None = None
 
     # Timestamps
     created_at: str  # ISO 8601 format
@@ -33,7 +34,7 @@ class Checkpoint(BaseModel):
     execution_path: list[str] = Field(default_factory=list)  # Nodes executed so far
 
     # State snapshots
-    shared_memory: dict[str, Any] = Field(default_factory=dict)  # Full SharedMemory._data
+    data_buffer: dict[str, Any] = Field(default_factory=dict)  # Full DataBuffer._data
     accumulated_outputs: dict[str, Any] = Field(default_factory=dict)  # Outputs accumulated so far
 
     # Execution metrics (for resuming quality tracking)
@@ -50,9 +51,10 @@ class Checkpoint(BaseModel):
         cls,
         checkpoint_type: str,
         session_id: str,
+        run_id: str | None,
         current_node: str,
         execution_path: list[str],
-        shared_memory: dict[str, Any],
+        data_buffer: dict[str, Any],
         next_node: str | None = None,
         accumulated_outputs: dict[str, Any] | None = None,
         metrics_snapshot: dict[str, Any] | None = None,
@@ -65,9 +67,10 @@ class Checkpoint(BaseModel):
         Args:
             checkpoint_type: Type of checkpoint (node_start, node_complete, etc.)
             session_id: Session this checkpoint belongs to
+            run_id: Logical run this checkpoint belongs to
             current_node: Node ID at checkpoint time
             execution_path: List of node IDs executed so far
-            shared_memory: Full memory state snapshot
+            data_buffer: Full data buffer state snapshot
             next_node: Next node to execute (for node_complete checkpoints)
             accumulated_outputs: Outputs accumulated so far
             metrics_snapshot: Execution metrics at checkpoint time
@@ -87,11 +90,12 @@ class Checkpoint(BaseModel):
             checkpoint_id=checkpoint_id,
             checkpoint_type=checkpoint_type,
             session_id=session_id,
+            run_id=run_id,
             created_at=datetime.now().isoformat(),
             current_node=current_node,
             next_node=next_node,
             execution_path=execution_path,
-            shared_memory=shared_memory,
+            data_buffer=data_buffer,
             accumulated_outputs=accumulated_outputs or {},
             metrics_snapshot=metrics_snapshot or {},
             is_clean=is_clean,

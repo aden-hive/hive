@@ -69,8 +69,7 @@ class TestLiveHealthCheckers:
         )
 
         assert result.valid is True, (
-            f"Health check for '{credential_name}' returned valid=False: "
-            f"{result.message} (details: {result.details})"
+            f"Health check for '{credential_name}' returned valid=False: {result.message} (details: {result.details})"
         )
         assert result.message
 
@@ -84,17 +83,13 @@ class TestLiveHealthCheckers:
         checker = HEALTH_CHECKERS[credential_name]
         result = checker.check(credential_value)
 
-        assert result.valid is True, (
-            f"Cannot verify identity -- health check failed: {result.message}"
-        )
+        assert result.valid is True, f"Cannot verify identity -- health check failed: {result.message}"
 
         identity = result.details.get("identity", {})
         if identity:
             logger.info("Identity for %s: %s", credential_name, identity)
             for key, value in identity.items():
-                assert isinstance(value, str), (
-                    f"Identity key '{key}' is not a string: {type(value)}"
-                )
+                assert isinstance(value, str), f"Identity key '{key}' is not a string: {type(value)}"
                 assert value, f"Identity key '{key}' is empty"
         else:
             logger.info("No identity metadata for %s (OK for some APIs)", credential_name)
@@ -144,9 +139,7 @@ class TestLiveIntegrationWiring:
     def test_wiring_valid(self, credential_name):
         """No wiring issues for credentials with health checkers."""
         issues = validate_integration_wiring(credential_name)
-        assert not issues, f"Wiring issues for '{credential_name}':\n" + "\n".join(
-            f"  - {i}" for i in issues
-        )
+        assert not issues, f"Wiring issues for '{credential_name}':\n" + "\n".join(f"  - {i}" for i in issues)
 
 
 # ---------------------------------------------------------------------------

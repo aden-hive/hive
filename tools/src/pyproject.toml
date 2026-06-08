@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aden-tools"
+name = "hive_tools"
 version = "0.0.1"
 description = "Aden Tools package"
 requires-python = ">=3.8"

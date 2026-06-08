@@ -35,7 +35,8 @@ GITHUB_CREDENTIALS = {
         help_url="https://github.com/settings/tokens",
         description="GitHub Personal Access Token (classic)",
         # Auth method support
-        aden_supported=False,
+        aden_supported=True,
+        aden_provider_name="github",
         direct_api_key_supported=True,
         api_key_instructions="""To get a GitHub Personal Access Token:
 1. Go to GitHub Settings > Developer settings > Personal access tokens

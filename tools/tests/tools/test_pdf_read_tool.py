@@ -1,7 +1,9 @@
 """Tests for pdf_read tool (FastMCP)."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
+import httpx
 import pytest
 from fastmcp import FastMCP
 
@@ -111,3 +113,175 @@ class TestPdfReadTool:
         # New behavior: explicit truncation metadata instead of silent truncation
         assert result.get("truncated") is True
         assert "truncation_warning" in result
+
+
+class TestPdfReadUrlSupport:
+    """Tests for URL download support in pdf_read tool."""
+
+    @patch("httpx.get")
+    @patch("aden_tools.tools.pdf_read_tool.pdf_read_tool.PdfReader")
+    def test_url_download_succeeds(self, mock_pdf_reader, mock_get, pdf_read_fn):
+        """Valid PDF URL downloads and parses successfully."""
+        # Mock HTTP response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/pdf"}
+        mock_response.content = b"%PDF-1.4\nfake pdf content"
+        mock_get.return_value = mock_response
+
+        # Mock PdfReader
+        mock_reader_instance = MagicMock()
+        mock_reader_instance.is_encrypted = False
+        mock_reader_instance.pages = [MagicMock()]
+        mock_reader_instance.pages[0].extract_text.return_value = "PDF text content"
+        mock_reader_instance.metadata = None
+        mock_pdf_reader.return_value = mock_reader_instance
+
+        result = pdf_read_fn(file_path="https://example.com/document.pdf")
+
+        assert "error" not in result
+        assert "content" in result
+        assert "PDF text content" in result["content"]
+        mock_get.assert_called_once()
+
+    @patch("httpx.get")
+    def test_url_non_pdf_content_type(self, mock_get, pdf_read_fn):
+        """URL returning non-PDF content-type returns error."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html"}
+        mock_response.content = b"<html>Not a PDF</html>"
+        mock_get.return_value = mock_response
+
+        result = pdf_read_fn(file_path="https://example.com/page.html")
+
+        assert "error" in result
+        assert "does not point to a pdf" in result["error"].lower()
+        assert "content_type" in result
+        assert "text/html" in result["content_type"]
+
+    @patch("httpx.get")
+    def test_url_http_404_error(self, mock_get, pdf_read_fn):
+        """URL returning 404 returns appropriate error."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        result = pdf_read_fn(file_path="https://example.com/missing.pdf")
+
+        assert "error" in result
+        assert "404" in result["error"]
+
+    @patch("httpx.get")
+    def test_url_http_500_error(self, mock_get, pdf_read_fn):
+        """URL returning 500 returns appropriate error."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+
+        result = pdf_read_fn(file_path="https://example.com/error.pdf")
+
+        assert "error" in result
+        assert "500" in result["error"]
+
+    @patch("httpx.get")
+    def test_url_timeout_error(self, mock_get, pdf_read_fn):
+        """URL request timeout returns appropriate error."""
+        mock_get.side_effect = httpx.TimeoutException("Timeout")
+
+        result = pdf_read_fn(file_path="https://example.com/slow.pdf")
+
+        assert "error" in result
+        assert "timed out" in result["error"].lower()
+
+    @patch("httpx.get")
+    def test_url_network_error(self, mock_get, pdf_read_fn):
+        """Network error returns appropriate error."""
+        mock_get.side_effect = httpx.RequestError("Connection failed")
+
+        result = pdf_read_fn(file_path="https://example.com/doc.pdf")
+
+        assert "error" in result
+        assert "failed to download" in result["error"].lower()
+
+    @patch("httpx.get")
+    @patch("aden_tools.tools.pdf_read_tool.pdf_read_tool.PdfReader")
+    def test_url_with_http_scheme(self, mock_pdf_reader, mock_get, pdf_read_fn):
+        """HTTP URLs (not HTTPS) are handled correctly."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/pdf"}
+        mock_response.content = b"%PDF-1.4\ncontent"
+        mock_get.return_value = mock_response
+
+        mock_reader_instance = MagicMock()
+        mock_reader_instance.is_encrypted = False
+        mock_reader_instance.pages = [MagicMock()]
+        mock_reader_instance.pages[0].extract_text.return_value = "Text"
+        mock_reader_instance.metadata = None
+        mock_pdf_reader.return_value = mock_reader_instance
+
+        result = pdf_read_fn(file_path="http://example.com/doc.pdf")
+
+        assert "error" not in result
+        mock_get.assert_called_once()
+
+    def test_local_file_path_still_works(self, pdf_read_fn, tmp_path: Path):
+        """Local file paths still work (backward compatibility)."""
+        pdf_file = tmp_path / "local.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+
+        result = pdf_read_fn(file_path=str(pdf_file))
+
+        # Will error due to invalid PDF, but should not treat as URL
+        assert isinstance(result, dict)
+        # Should not have URL-specific errors
+        if "error" in result:
+            assert "download" not in result["error"].lower()
+
+    @patch("httpx.get")
+    @patch("aden_tools.tools.pdf_read_tool.pdf_read_tool.PdfReader")
+    @patch("aden_tools.tools.pdf_read_tool.pdf_read_tool.tempfile.NamedTemporaryFile")
+    def test_temporary_file_cleanup(self, mock_tempfile, mock_pdf_reader, mock_get, pdf_read_fn):
+        """Temporary file is cleaned up after processing."""
+        # Mock HTTP response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/pdf"}
+        mock_response.content = b"%PDF-1.4\ncontent"
+        mock_get.return_value = mock_response
+
+        # Mock temporary file
+        mock_temp = MagicMock()
+        mock_temp.name = "/tmp/test.pdf"
+        mock_tempfile.return_value = mock_temp
+
+        # Mock PdfReader
+        mock_reader_instance = MagicMock()
+        mock_reader_instance.is_encrypted = False
+        mock_reader_instance.pages = [MagicMock()]
+        mock_reader_instance.pages[0].extract_text.return_value = "Text"
+        mock_reader_instance.metadata = None
+        mock_pdf_reader.return_value = mock_reader_instance
+
+        pdf_read_fn(file_path="https://example.com/doc.pdf")
+
+        # Verify temp file operations
+        mock_temp.write.assert_called_once()
+        mock_temp.close.assert_called_once()
+
+    @patch("httpx.get")
+    def test_url_json_content_type(self, mock_get, pdf_read_fn):
+        """URL returning JSON returns appropriate error."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"error": "not a pdf"}'
+        mock_get.return_value = mock_response
+
+        result = pdf_read_fn(file_path="https://api.example.com/data")
+
+        assert "error" in result
+        assert "does not point to a pdf" in result["error"].lower()
+        assert "content_type" in result
+        assert "application/json" in result["content_type"]

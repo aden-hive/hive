@@ -1,0 +1,361 @@
+import ast
+import operator
+import signal
+import threading
+import time
+from contextlib import contextmanager
+from typing import Any
+
+# Power operations can allocate extremely large integers. Keep conservative
+# limits here so untrusted edge conditions cannot exhaust CPU or memory.
+MAX_POWER_ABS_EXPONENT = 1_000
+MAX_POWER_RESULT_BITS = 4_096
+# Typical edge-condition evaluations in this repo complete well under 1ms.
+# 100ms leaves ample headroom for legitimate checks while failing fast on abuse.
+# On Windows (where SIGALRM is unavailable) the fallback relies on periodic
+# perf_counter polling which is less precise, so we use a wider margin.
+DEFAULT_TIMEOUT_MS = 100 if hasattr(signal, "SIGALRM") else 500
+
+
+def _safe_pow(base: Any, exp: Any) -> Any:
+    if isinstance(exp, (int, float)) and abs(exp) > MAX_POWER_ABS_EXPONENT:
+        raise ValueError(f"Power exponent exceeds safe limit ({MAX_POWER_ABS_EXPONENT})")
+
+    if isinstance(base, int) and isinstance(exp, int) and exp > 0:
+        abs_base = abs(base)
+        if abs_base > 1:
+            # Estimate bit growth instead of materializing a huge integer.
+            estimated_bits = exp * abs_base.bit_length()
+            if estimated_bits > MAX_POWER_RESULT_BITS:
+                raise ValueError("Power operation exceeds safe size limit")
+
+    return operator.pow(base, exp)
+
+
+def _timeout_message(timeout_ms: int) -> str:
+    return f"safe_eval exceeded {timeout_ms}ms execution timeout"
+
+
+def _check_timeout(deadline: float | None, timeout_ms: int | None) -> None:
+    if deadline is not None and timeout_ms is not None and time.perf_counter() >= deadline:
+        raise TimeoutError(_timeout_message(timeout_ms))
+
+
+@contextmanager
+def _execution_timeout(timeout_ms: int | None):
+    if timeout_ms is None:
+        yield
+        return
+
+    if timeout_ms <= 0:
+        raise ValueError("timeout_ms must be greater than 0")
+
+    can_use_alarm = (
+        hasattr(signal, "SIGALRM")
+        and hasattr(signal, "ITIMER_REAL")
+        and hasattr(signal, "getitimer")
+        and hasattr(signal, "setitimer")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if not can_use_alarm:
+        yield
+        return
+
+    current_delay, current_interval = signal.getitimer(signal.ITIMER_REAL)
+    if current_delay > 0 or current_interval > 0:
+        # safe_eval runs inside a shared framework process, so it must not
+        # replace a timer another subsystem already owns.
+        yield
+        return
+
+    def _handle_timeout(signum, frame):
+        raise TimeoutError(_timeout_message(timeout_ms))
+
+    old_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    old_delay, old_interval = signal.setitimer(signal.ITIMER_REAL, timeout_ms / 1000)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGALRM, old_handler)
+        signal.setitimer(signal.ITIMER_REAL, old_delay, old_interval)
+
+
+# Safe operators whitelist
+SAFE_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: _safe_pow,
+    ast.LShift: operator.lshift,
+    ast.RShift: operator.rshift,
+    ast.BitOr: operator.or_,
+    ast.BitXor: operator.xor,
+    ast.BitAnd: operator.and_,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Is: operator.is_,
+    ast.IsNot: operator.is_not,
+    ast.In: lambda x, y: x in y,
+    ast.NotIn: lambda x, y: x not in y,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+    ast.Not: operator.not_,
+    ast.Invert: operator.inv,
+}
+
+# Safe functions whitelist
+SAFE_FUNCTIONS = {
+    "len": len,
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
+    "tuple": tuple,
+    "set": set,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "abs": abs,
+    "round": round,
+    "all": all,
+    "any": any,
+}
+
+
+class SafeEvalVisitor(ast.NodeVisitor):
+    def __init__(
+        self,
+        context: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        timeout_ms: int | None = None,
+    ):
+        self.context = context
+        self.deadline = deadline
+        self.timeout_ms = timeout_ms
+
+    def visit(self, node: ast.AST) -> Any:
+        _check_timeout(self.deadline, self.timeout_ms)
+        # Override visit to prevent default behavior and ensure only explicitly allowed nodes work
+        method = "visit_" + node.__class__.__name__
+        visitor = getattr(self, method, self.generic_visit)
+        return visitor(node)
+
+    def generic_visit(self, node: ast.AST):
+        raise ValueError(f"Use of {node.__class__.__name__} is not allowed")
+
+    def visit_Expression(self, node: ast.Expression) -> Any:
+        return self.visit(node.body)
+
+    def visit_Expr(self, node: ast.Expr) -> Any:
+        return self.visit(node.value)
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        return node.value
+
+    # --- Data Structures ---
+    def visit_List(self, node: ast.List) -> list:
+        return [self.visit(elt) for elt in node.elts]
+
+    def visit_Tuple(self, node: ast.Tuple) -> tuple:
+        return tuple(self.visit(elt) for elt in node.elts)
+
+    def visit_Dict(self, node: ast.Dict) -> dict:
+        return {self.visit(k): self.visit(v) for k, v in zip(node.keys, node.values, strict=False) if k is not None}
+
+    # --- Operations ---
+    def visit_BinOp(self, node: ast.BinOp) -> Any:
+        op_func = SAFE_OPERATORS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+        return op_func(self.visit(node.left), self.visit(node.right))
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        op_func = SAFE_OPERATORS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+        return op_func(self.visit(node.operand))
+
+    def visit_Compare(self, node: ast.Compare) -> Any:
+        left = self.visit(node.left)
+        for op, comparator in zip(node.ops, node.comparators, strict=False):
+            op_func = SAFE_OPERATORS.get(type(op))
+            if op_func is None:
+                raise ValueError(f"Operator {type(op).__name__} is not allowed")
+            right = self.visit(comparator)
+            if not op_func(left, right):
+                return False
+            left = right  # Chain comparisons
+        return True
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> Any:
+        # Short-circuit evaluation to match Python semantics.
+        # Previously all operands were eagerly evaluated, which broke
+        # guard patterns like: ``x is not None and x.get("key")``
+        if isinstance(node.op, ast.And):
+            result = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
+        elif isinstance(node.op, ast.Or):
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
+        raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
+
+    def visit_IfExp(self, node: ast.IfExp) -> Any:
+        # Ternary: true_val if test else false_val
+        if self.visit(node.test):
+            return self.visit(node.body)
+        else:
+            return self.visit(node.orelse)
+
+    # --- Variables and Attributes ---
+    def visit_Name(self, node: ast.Name) -> Any:
+        if isinstance(node.ctx, ast.Load):
+            if node.id in self.context:
+                return self.context[node.id]
+            raise NameError(f"Name '{node.id}' is not defined")
+        raise ValueError("Only reading variables is allowed")
+
+    def visit_Subscript(self, node: ast.Subscript) -> Any:
+        # value[slice]
+        val = self.visit(node.value)
+        idx = self.visit(node.slice)
+        return val[idx]
+
+    def visit_Attribute(self, node: ast.Attribute) -> Any:
+        # value.attr
+        # STRICT CHECK: No access to private attributes (starting with _)
+        if node.attr.startswith("_"):
+            raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
+
+        val = self.visit(node.value)
+
+        # Safe attribute access: only allow if it's in the dict (if val is dict)
+        # or it's a safe property of a basic type?
+        # Actually, for flexibility, people often use dot access for dicts in these expressions.
+        # But standard Python dict doesn't support dot access.
+        # If val is a dict, Attribute access usually fails in Python unless wrapped.
+        # If the user context provides objects, we might want to allow attribute access.
+        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
+        # The check starts_with("_") covers __class__, __init__, etc.
+
+        try:
+            return getattr(val, node.attr)
+        except AttributeError:
+            # Fallback: maybe it's a dict and they want dot access?
+            # (Only if we want to support that sugar, usually not standard python)
+            # Let's stick to standard python behavior + strict private check.
+            pass
+
+        raise AttributeError(f"Object has no attribute '{node.attr}'")
+
+    def visit_Call(self, node: ast.Call) -> Any:
+        _check_timeout(self.deadline, self.timeout_ms)
+        # Only allow calling whitelisted functions
+        func = self.visit(node.func)
+
+        # Check if the function object itself is in our whitelist values
+        # This is tricky because `func` is the actual function object,
+        # but we also want to verify it came from a safe place.
+        # Easier: Check if node.func is a Name and that name is in SAFE_FUNCTIONS.
+
+        is_safe = False
+        if isinstance(node.func, ast.Name):
+            if node.func.id in SAFE_FUNCTIONS:
+                is_safe = True
+
+        # Also allow methods on objects if they are safe?
+        # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)
+        # For now, restrict to SAFE_FUNCTIONS whitelist for global calls and deny method calls
+        # unless we explicitly add safe methods.
+        # Allowing method calls on strings/lists (split, join, get) is commonly needed.
+
+        if isinstance(node.func, ast.Attribute):
+            # Method call.
+            # Allow basic safe methods?
+            # For security, start strict. Only helper functions.
+            # Re-visiting: User might want 'output.get("key")'.
+            method_name = node.func.attr
+            if method_name in [
+                "get",
+                "keys",
+                "values",
+                "items",
+                "lower",
+                "upper",
+                "strip",
+                "split",
+            ]:
+                is_safe = True
+
+        if not is_safe and func not in SAFE_FUNCTIONS.values():
+            raise ValueError("Call to function/method is not allowed")
+
+        args = [self.visit(arg) for arg in node.args]
+        keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+
+        _check_timeout(self.deadline, self.timeout_ms)
+        return func(*args, **keywords)
+
+
+def safe_eval(
+    expr: str,
+    context: dict[str, Any] | None = None,
+    *,
+    timeout_ms: int | None = DEFAULT_TIMEOUT_MS,
+) -> Any:
+    """
+    Safely evaluate a python expression string.
+
+    Args:
+        expr: The expression string to evaluate.
+        context: Dictionary of variables available in the expression.
+        timeout_ms: Maximum evaluation time in milliseconds. Use ``None`` to
+            disable the timeout.
+
+    Returns:
+        The result of the evaluation.
+
+    Raises:
+        ValueError: If unsafe operations or syntax are detected.
+        SyntaxError: If the expression is invalid Python.
+    """
+    if context is None:
+        context = {}
+
+    # Add safe builtins to context
+    full_context = context.copy()
+    full_context.update(SAFE_FUNCTIONS)
+
+    deadline = None if timeout_ms is None else time.perf_counter() + (timeout_ms / 1000)
+
+    with _execution_timeout(timeout_ms):
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError as e:
+            raise SyntaxError(f"Invalid syntax in expression: {e}") from e
+
+        _check_timeout(deadline, timeout_ms)
+        visitor = SafeEvalVisitor(
+            full_context,
+            deadline=deadline,
+            timeout_ms=timeout_ms,
+        )
+        return visitor.visit(tree)

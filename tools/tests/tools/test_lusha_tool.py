@@ -50,13 +50,9 @@ class TestLushaEnrichPerson:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)),
         ):
-            result = tool_fns["lusha_enrich_person"](
-                first_name="Jane", last_name="Doe", company_domain="acme.com"
-            )
+            result = tool_fns["lusha_enrich_person"](first_name="Jane", last_name="Doe", company_domain="acme.com")
 
         assert result["full_name"] == "Jane Doe"
         assert result["job_title"] == "CTO"
@@ -74,9 +70,7 @@ class TestLushaEnrichPerson:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["lusha_enrich_person"](email="jane@acme.com")
 
@@ -103,9 +97,7 @@ class TestLushaEnrichCompany:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["lusha_enrich_company"](domain="acme.com")
 
@@ -139,13 +131,9 @@ class TestLushaSearchContacts:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.post", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.post", return_value=_mock_resp(data)),
         ):
-            result = tool_fns["lusha_search_contacts"](
-                seniorities="4,5", company_domains="acme.com"
-            )
+            result = tool_fns["lusha_search_contacts"](seniorities="4,5", company_domains="acme.com")
 
         assert result["count"] == 1
         assert result["contacts"][0]["first_name"] == "John"
@@ -174,9 +162,7 @@ class TestLushaSearchCompanies:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.post", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.post", return_value=_mock_resp(data)),
         ):
             result = tool_fns["lusha_search_companies"](country="United States")
 
@@ -194,9 +180,7 @@ class TestLushaGetUsage:
         data = {"credits_used": 150, "credits_remaining": 850, "plan": "Professional"}
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["lusha_get_usage"]()
 

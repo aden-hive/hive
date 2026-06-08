@@ -167,9 +167,7 @@ class TestPowerBIGetRefreshHistory:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["powerbi_get_refresh_history"](
-                workspace_id="ws-123", dataset_id="ds-456"
-            )
+            result = tool_fns["powerbi_get_refresh_history"](workspace_id="ws-123", dataset_id="ds-456")
 
         assert result["count"] == 1
         assert result["refreshes"][0]["status"] == "Completed"

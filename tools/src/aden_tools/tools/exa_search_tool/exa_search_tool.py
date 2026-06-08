@@ -428,9 +428,7 @@ def register_tools(
 
         from datetime import datetime, timedelta
 
-        start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime(
-            "%Y-%m-%dT00:00:00.000Z"
-        )
+        start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00.000Z")
 
         api_key = _get_api_key()
         if not api_key:

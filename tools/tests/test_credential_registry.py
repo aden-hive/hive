@@ -37,13 +37,9 @@ class TestRegistryCompleteness:
             if name in self.KNOWN_EXCEPTIONS:
                 continue
             if spec.health_check_endpoint and name not in HEALTH_CHECKERS:
-                missing.append(
-                    f"{name}: has endpoint '{spec.health_check_endpoint}' "
-                    f"but no dedicated health checker"
-                )
-        assert not missing, (
-            f"{len(missing)} credential(s) have health_check_endpoint but no checker:\n"
-            + "\n".join(f"  - {m}" for m in missing)
+                missing.append(f"{name}: has endpoint '{spec.health_check_endpoint}' but no dedicated health checker")
+        assert not missing, f"{len(missing)} credential(s) have health_check_endpoint but no checker:\n" + "\n".join(
+            f"  - {m}" for m in missing
         )
 
     def test_checkers_have_corresponding_specs(self):
@@ -77,9 +73,7 @@ class TestSpecRequiredFields:
         ids=list(CREDENTIAL_SPECS.keys()),
     )
     def test_has_tools_or_node_types(self, cred_name, spec):
-        assert spec.tools or spec.node_types, (
-            f"{cred_name}: must have at least one tool or node_type"
-        )
+        assert spec.tools or spec.node_types, f"{cred_name}: must have at least one tool or node_type"
 
 
 class TestNoDuplicateEnvVars:

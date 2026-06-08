@@ -83,18 +83,18 @@ configure_logging(level="INFO", format="auto")
 - Compact single-line format (easy to stream/parse)
 - All trace context fields included automatically
 
-### Human-Readable Format (Development)
+### Human-Readable Format (Development / Terminal)
 
 ```
-[INFO    ] [trace:12345678 | exec:a1b2c3d4 | agent:sales-agent] Starting agent execution
-[INFO    ] [trace:12345678 | exec:a1b2c3d4 | agent:sales-agent] Processing input data [node_id:input-processor]
-[INFO    ] [trace:12345678 | exec:a1b2c3d4 | agent:sales-agent] LLM call completed [latency_ms:1250] [tokens_used:450]
+[INFO    ] [agent:sales-agent] Starting agent execution
+[INFO    ] [agent:sales-agent] Processing input data [node_id:input-processor]
+[INFO    ] [agent:sales-agent] LLM call completed [latency_ms:1250] [tokens_used:450]
 ```
 
 **Features:**
 - Color-coded log levels
-- Shortened IDs for readability (first 8 chars)
-- Context prefix shows trace correlation
+- Terminal output omits trace_id and execution_id for readability
+- For full traceability (e.g. debugging), use `ENV=production` to get JSON file logs with trace_id and execution_id
 
 ## Trace Context Fields
 

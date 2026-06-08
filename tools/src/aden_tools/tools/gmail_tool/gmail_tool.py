@@ -60,9 +60,7 @@ def register_tools(
             return credentials.get("google")
         return os.getenv("GOOGLE_ACCESS_TOKEN")
 
-    def _gmail_request(
-        method: str, path: str, access_token: str, **kwargs: object
-    ) -> httpx.Response:
+    def _gmail_request(method: str, path: str, access_token: str, **kwargs: object) -> httpx.Response:
         """Make an authenticated Gmail API request."""
         return httpx.request(
             method,
@@ -330,7 +328,11 @@ def register_tools(
             return token
 
         if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
+            return {
+                "error": "At least one of add_labels or remove_labels is required. "
+                f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
+                'Pass label IDs like add_labels=["STARRED"] or remove_labels=["INBOX"].'
+            }
 
         body: dict[str, list[str]] = {}
         if add_labels:
@@ -387,7 +389,11 @@ def register_tools(
             return token
 
         if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
+            return {
+                "error": "At least one of add_labels or remove_labels is required. "
+                f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
+                'Pass label IDs like add_labels=["STARRED"] or remove_labels=["INBOX"].'
+            }
 
         body: dict = {"ids": message_ids}
         if add_labels:
@@ -559,9 +565,7 @@ def register_tools(
             orig_from = orig_headers.get("From", "")
             orig_date = orig_headers.get("Date", "")
             to = orig_from or to
-            subject = (
-                orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
-            )
+            subject = orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
 
             # Extract body recursively (prefer HTML, fall back to plain text)
             def _extract_body(part: dict, mime_type: str) -> str | None:

@@ -27,7 +27,7 @@ When someone comments "I'd like to work on this":
 5. Merge — the GitHub Action auto-awards XP and posts to Discord
 6. Close the linked bounty issue
 
-### Quality Gates
+### Quality Gates — Integration Bounties
 
 **`bounty:docs`:**
 - [ ] Follows the [tool README template](templates/tool-readme-template.md)
@@ -50,6 +50,31 @@ When someone comments "I'd like to work on this":
 - [ ] Full implementation: tool + credential spec + tests + README
 - [ ] `make check && make test` passes
 - [ ] Registered in `_register_unverified()` (not verified)
+
+### Quality Gates — Standard Bounties
+
+**`bounty:small`:**
+- [ ] Change is correct and doesn't introduce regressions
+- [ ] CI passes
+- [ ] Scope matches "small" — not padded into a bigger change
+
+**`bounty:medium`:**
+- [ ] CI passes
+- [ ] Bug fixes include a regression test
+- [ ] Docs/guides are accurate and follow existing style
+- [ ] Not AI-generated without verification
+
+**`bounty:large`:**
+- [ ] Design was discussed in the issue before implementation
+- [ ] CI passes, new tests cover the change
+- [ ] Benchmarks included for performance work (before/after)
+- [ ] Architecture docs reviewed by a second maintainer
+
+**`bounty:extreme`:**
+- [ ] Maintainer pre-approved the design proposal before work began
+- [ ] CI passes, comprehensive test coverage
+- [ ] Documentation updated to reflect the change
+- [ ] Reviewed by at least two maintainers
 
 ### Rejecting Submissions
 
@@ -78,12 +103,23 @@ If a Core Contributor is inactive 8+ weeks, reach out privately first, then remo
 
 Post dollar values in `#bounty-payouts` (Core Contributors only):
 
+### Integration bounties
+
 | Bounty Type | Dollar Range |
 |-------------|-------------|
 | `bounty:test` | $10–30 |
 | `bounty:docs` | $10–20 |
 | `bounty:code` | $20–50 |
 | `bounty:new-tool` | $50–150 |
+
+### Standard bounties
+
+| Bounty Type | Dollar Range |
+|-------------|-------------|
+| `bounty:small` | $5–15 |
+| `bounty:medium` | $20–50 |
+| `bounty:large` | $50–150 |
+| `bounty:extreme` | $150–500 |
 
 **Payout:** PR merged → verify quality → record in `#bounty-payouts` → process payment.
 

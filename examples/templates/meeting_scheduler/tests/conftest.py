@@ -25,10 +25,10 @@ def agent_module():
 @pytest.fixture(scope="session")
 def runner_loaded():
     """Load the agent through AgentRunner (structural only, no LLM needed)."""
-    from framework.runner.runner import AgentRunner
+    from framework.loader.agent_loader import AgentLoader
     from framework.credentials.models import CredentialError
 
     try:
-        return AgentRunner.load(AGENT_PATH)
+        return AgentLoader.load(AGENT_PATH)
     except CredentialError:
         pytest.skip("Google OAuth credentials not configured")

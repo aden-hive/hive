@@ -22,6 +22,16 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+  --color-sidebar-bg: hsl(var(--sidebar-bg));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-item-hover: hsl(var(--sidebar-item-hover));
+  --color-sidebar-active-bg: hsl(var(--sidebar-active-bg));
+  --color-sidebar-section-text: hsl(var(--sidebar-section-text));
+  --color-sidebar-muted: hsl(var(--sidebar-muted));
+  --color-status-online: hsl(var(--status-online));
+  --color-status-offline: hsl(var(--status-offline));
+  --color-badge-unread: hsl(var(--badge-unread));
+  --color-badge-unread-text: hsl(var(--badge-unread-text));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -30,7 +40,7 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 40 30% 96%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
@@ -38,18 +48,80 @@
     --popover-foreground: 0 0% 3.9%;
     --primary: 45 93% 47%;
     --primary-foreground: 0 0% 2%;
-    --secondary: 0 0% 96.1%;
+    --secondary: 40 20% 92%;
     --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
+    --muted: 40 20% 92%;
     --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
+    --accent: 40 20% 92%;
     --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --border: 35 15% 87%;
+    --input: 35 15% 87%;
     --ring: 45 93% 47%;
     --radius: 0.5rem;
+
+    /* Sidebar */
+    --sidebar-bg: 40 30% 96%;
+    --sidebar-border: 35 20% 90%;
+    --sidebar-item-hover: 40 20% 93%;
+    --sidebar-active-bg: 45 93% 47% / 0.12;
+    --sidebar-section-text: 0 0% 45%;
+    --sidebar-muted: 0 0% 55%;
+
+    /* Status indicators */
+    --status-online: 142 71% 45%;
+    --status-offline: 0 0% 70%;
+    --badge-unread: 25 95% 55%;
+    --badge-unread-text: 0 0% 100%;
+
+    /* Agent graph node status colors */
+    --node-running: 45 95% 42%;
+    --node-looping: 38 90% 42%;
+    --node-complete: 43 70% 38%;
+    --node-pending: 35 15% 72%;
+    --node-pending-bg: 35 10% 94%;
+    --node-pending-border: 35 10% 80%;
+    --node-error: 0 65% 50%;
+
+    /* Agent graph trigger node colors */
+    --trigger-bg: 210 25% 94%;
+    --trigger-border: 210 20% 78%;
+    --trigger-text: 210 30% 35%;
+    --trigger-icon: 210 40% 40%;
+
+    /* Draft graph chrome colors */
+    --draft-edge: 220 10% 75%;
+    --draft-edge-arrow: 220 10% 65%;
+    --draft-edge-label: 220 10% 50%;
+    --draft-back-edge: 220 10% 80%;
+    --draft-group-fill: 220 10% 96%;
+    --draft-group-stroke: 220 10% 72%;
+    --draft-chrome-text: 220 10% 45%;
+    --draft-chrome-text-dim: 220 10% 55%;
+    --draft-node-text: 0 0% 25%;
+    --draft-node-text-hover: 0 0% 10%;
+
+    /* Sub-agent mux pane colors */
+    --mux-title-bg: 220 10% 95%;
+    --mux-title-border: 220 10% 88%;
+    --mux-body-bg: 0 0% 98%;
+    --mux-grid-bg: 0 0% 93%;
+    --mux-frame-border: 220 10% 85%;
+    --mux-frame-bg: 0 0% 97%;
+    --mux-dim-text: 0 0% 45%;
+    --mux-content-text: 0 0% 15%;
+    --mux-waiting-text: 0 0% 70%;
+    --mux-overlay-bg: 0 0% 100% / 0.82;
+    --mux-finished-check: 142 50% 40%;
+
+    /* Trigger status colors */
+    --trigger-status-active: 142 40% 45%;
+    --trigger-status-inactive: 210 20% 55%;
+    --trigger-active-bg: 210 30% 90%;
+    --trigger-active-border: 210 40% 60%;
+    --trigger-active-text: 210 40% 30%;
+    --trigger-active-icon: 210 50% 45%;
   }
 
   .dark {
@@ -72,6 +144,20 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 45 93% 47%;
+
+    /* Sidebar */
+    --sidebar-bg: 240 6% 7%;
+    --sidebar-border: 240 4% 12%;
+    --sidebar-item-hover: 240 5% 11%;
+    --sidebar-active-bg: 45 93% 47% / 0.12;
+    --sidebar-section-text: 240 5% 55%;
+    --sidebar-muted: 240 5% 50%;
+
+    /* Status indicators */
+    --status-online: 142 71% 45%;
+    --status-offline: 240 5% 40%;
+    --badge-unread: 25 95% 55%;
+    --badge-unread-text: 0 0% 100%;
 
     /* Agent graph node status colors */
     --node-running: 45 95% 58%;
@@ -99,6 +185,27 @@
     --draft-chrome-text-dim: 220 10% 55%;
     --draft-node-text: 0 0% 78%;
     --draft-node-text-hover: 0 0% 92%;
+
+    /* Sub-agent mux pane colors */
+    --mux-title-bg: 240 15% 6%;
+    --mux-title-border: 240 10% 15%;
+    --mux-body-bg: 240 20% 4%;
+    --mux-grid-bg: 0 0% 7%;
+    --mux-frame-border: 240 10% 15%;
+    --mux-frame-bg: 240 20% 4%;
+    --mux-dim-text: 0 0% 33%;
+    --mux-content-text: 0 0% 80%;
+    --mux-waiting-text: 0 0% 20%;
+    --mux-overlay-bg: 240 20% 4% / 0.82;
+    --mux-finished-check: 142 50% 40%;
+
+    /* Trigger status colors */
+    --trigger-status-active: 140 40% 50%;
+    --trigger-status-inactive: 210 20% 40%;
+    --trigger-active-bg: 210 30% 18%;
+    --trigger-active-border: 210 50% 50%;
+    --trigger-active-text: 210 40% 75%;
+    --trigger-active-icon: 210 60% 65%;
   }
 }
 
@@ -202,4 +309,45 @@
 }
 .animate-in.slide-in-from-bottom {
   animation: slide-in-from-bottom 0.25s ease-out;
+}
+
+/* Home status line shimmer */
+@keyframes queen-debate-line {
+  0%, 100% {
+    opacity: 0.72;
+    transform: translateY(0);
+    background-position: 0% 50%;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+    background-position: 100% 50%;
+  }
+}
+
+.queen-debate-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  color: hsl(var(--muted-foreground));
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--muted-foreground) / 0.75),
+    hsl(var(--primary) / 0.95),
+    hsl(var(--muted-foreground) / 0.75)
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: queen-debate-line 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queen-debate-line {
+    animation: none;
+    background-image: none;
+    color: hsl(var(--muted-foreground));
+  }
 }

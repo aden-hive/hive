@@ -147,9 +147,7 @@ class TestHubSpotClient:
         }
         mock_post.return_value = mock_response
 
-        result = self.client.create_object(
-            "contacts", {"email": "new@example.com", "firstname": "Jane"}
-        )
+        result = self.client.create_object("contacts", {"email": "new@example.com", "firstname": "Jane"})
 
         mock_post.assert_called_once_with(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
@@ -289,17 +287,13 @@ class TestContactTools:
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_create_contact(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=201, json=MagicMock(return_value={"id": "2"})
-        )
+        mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value={"id": "2"}))
         result = self._fn("hubspot_create_contact")(properties={"email": "a@b.com"})
         assert result["id"] == "2"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.patch")
     def test_update_contact(self, mock_patch):
-        mock_patch.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "1"})
-        )
+        mock_patch.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "1"}))
         result = self._fn("hubspot_update_contact")(contact_id="1", properties={"phone": "123"})
         assert result["id"] == "1"
 
@@ -332,36 +326,26 @@ class TestCompanyTools:
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_search_companies(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"total": 2, "results": []})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"total": 2, "results": []}))
         result = self._fn("hubspot_search_companies")(query="acme")
         assert result["total"] == 2
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.get")
     def test_get_company(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "10"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "10"}))
         result = self._fn("hubspot_get_company")(company_id="10")
         assert result["id"] == "10"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_create_company(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=201, json=MagicMock(return_value={"id": "11"})
-        )
+        mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value={"id": "11"}))
         result = self._fn("hubspot_create_company")(properties={"name": "Acme"})
         assert result["id"] == "11"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.patch")
     def test_update_company(self, mock_patch):
-        mock_patch.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "10"})
-        )
-        result = self._fn("hubspot_update_company")(
-            company_id="10", properties={"industry": "Tech"}
-        )
+        mock_patch.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "10"}))
+        result = self._fn("hubspot_update_company")(company_id="10", properties={"industry": "Tech"})
         assert result["id"] == "10"
 
 
@@ -379,33 +363,25 @@ class TestDealTools:
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_search_deals(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"total": 3, "results": []})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"total": 3, "results": []}))
         result = self._fn("hubspot_search_deals")(query="big deal")
         assert result["total"] == 3
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.get")
     def test_get_deal(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "20"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "20"}))
         result = self._fn("hubspot_get_deal")(deal_id="20")
         assert result["id"] == "20"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_create_deal(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=201, json=MagicMock(return_value={"id": "21"})
-        )
+        mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value={"id": "21"}))
         result = self._fn("hubspot_create_deal")(properties={"dealname": "New Deal"})
         assert result["id"] == "21"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.patch")
     def test_update_deal(self, mock_patch):
-        mock_patch.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "20"})
-        )
+        mock_patch.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "20"}))
         result = self._fn("hubspot_update_deal")(deal_id="20", properties={"amount": "5000"})
         assert result["id"] == "20"
 

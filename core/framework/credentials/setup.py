@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -35,7 +36,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from framework.graph import NodeSpec
+    from framework.orchestrator import NodeSpec
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI colors for terminal output
@@ -265,9 +268,7 @@ class CredentialSetupSession:
         self._print(f"{Colors.YELLOW}Initializing credential store...{Colors.NC}")
         try:
             generate_and_save_credential_key()
-            self._print(
-                f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}"
-            )
+            self._print(f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}")
             return True
         except Exception as e:
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
@@ -365,8 +366,11 @@ class CredentialSetupSession:
         self._print("")
         try:
             api_key = self.password_fn(f"Paste your {cred.env_var}: ").strip()
+        except (EOFError, OSError) as exc:
+            logger.debug("Password input unavailable, falling back to plain input: %s", exc)
+            api_key = self._input(f"Paste your {cred.env_var}: ").strip()
         except Exception:
-            # Fallback to regular input if password input fails
+            logger.warning("Unexpected error reading password input", exc_info=True)
             api_key = self._input(f"Paste your {cred.env_var}: ").strip()
 
         if not api_key:
@@ -403,7 +407,11 @@ class CredentialSetupSession:
 
             try:
                 aden_key = self.password_fn("Paste your ADEN_API_KEY: ").strip()
+            except (EOFError, OSError) as exc:
+                logger.debug("Password input unavailable for ADEN_API_KEY: %s", exc)
+                aden_key = self._input("Paste your ADEN_API_KEY: ").strip()
             except Exception:
+                logger.warning("Unexpected error reading ADEN_API_KEY input", exc_info=True)
                 aden_key = self._input("Paste your ADEN_API_KEY: ").strip()
 
             if not aden_key:
@@ -433,13 +441,13 @@ class CredentialSetupSession:
                     value = store.get_key(cred_id, cred.credential_key)
                     if value:
                         os.environ[cred.env_var] = value
+                except (KeyError, OSError) as exc:
+                    logger.debug("Could not export credential to env: %s", exc)
                 except Exception:
-                    pass
+                    logger.warning("Unexpected error exporting credential to env", exc_info=True)
                 return True
             else:
-                self._print(
-                    f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}"
-                )
+                self._print(f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}")
                 self._print("Please connect this integration on https://hive.adenhq.com first.")
                 return False
         except Exception as e:
@@ -457,8 +465,11 @@ class CredentialSetupSession:
                 "message": result.message,
                 "details": result.details,
             }
-        except Exception:
+        except ImportError:
             # No health checker available
+            return None
+        except Exception:
+            logger.warning("Health check failed for %s", cred.credential_name, exc_info=True)
             return None
 
     def _store_credential(self, cred: MissingCredential, value: str) -> None:
@@ -518,7 +529,9 @@ class CredentialSetupSession:
 
 
 def load_agent_nodes(agent_path: str | Path) -> list:
-    """Load NodeSpec list from an agent's agent.py or agent.json.
+    """Load NodeSpec list from an agent directory.
+
+    Checks agent.json (declarative) first, then agent.py (legacy).
 
     Args:
         agent_path: Path to agent directory.
@@ -527,14 +540,26 @@ def load_agent_nodes(agent_path: str | Path) -> list:
         List of NodeSpec objects (empty list if agent can't be loaded).
     """
     agent_path = Path(agent_path)
+    agent_json_file = agent_path / "agent.json"
     agent_py = agent_path / "agent.py"
-    agent_json = agent_path / "agent.json"
 
-    if agent_py.exists():
+    if agent_json_file.exists():
+        return _load_nodes_from_json_declarative(agent_json_file)
+    elif agent_py.exists():
         return _load_nodes_from_python_agent(agent_path)
-    elif agent_json.exists():
-        return _load_nodes_from_json_agent(agent_json)
     return []
+
+
+def _load_nodes_from_json_declarative(agent_json: Path) -> list:
+    """Load nodes from a declarative JSON agent."""
+    try:
+        from framework.loader.agent_loader import load_agent_config
+
+        data = json.loads(agent_json.read_text(encoding="utf-8"))
+        graph, _ = load_agent_config(data)
+        return list(graph.nodes)
+    except Exception:
+        return []
 
 
 def _load_nodes_from_python_agent(agent_path: Path) -> list:
@@ -561,7 +586,11 @@ def _load_nodes_from_python_agent(agent_path: Path) -> list:
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return getattr(module, "nodes", [])
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not load agent module: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error loading agent module", exc_info=True)
         return []
 
 
@@ -571,7 +600,7 @@ def _load_nodes_from_json_agent(agent_json: Path) -> list:
         with open(agent_json, encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        from framework.graph import NodeSpec
+        from framework.orchestrator import NodeSpec
 
         nodes_data = data.get("graph", {}).get("nodes", [])
         nodes = []
@@ -588,7 +617,11 @@ def _load_nodes_from_json_agent(agent_json: Path) -> list:
                 )
             )
         return nodes
+    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        logger.debug("Could not load JSON agent: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error loading JSON agent", exc_info=True)
         return []
 
 

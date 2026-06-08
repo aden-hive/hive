@@ -158,9 +158,7 @@ class TokenLifecycleManager:
         """
         # Run in executor to avoid blocking
         loop = asyncio.get_event_loop()
-        token = await loop.run_in_executor(
-            None, lambda: self.provider.client_credentials_grant(scopes=scopes)
-        )
+        token = await loop.run_in_executor(None, lambda: self.provider.client_credentials_grant(scopes=scopes))
 
         self._save_token_to_store(token)
         self._cached_token = token

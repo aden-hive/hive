@@ -135,9 +135,7 @@ class _ApolloClient:
                         "name": person.get("organization", {}).get("name"),
                         "domain": person.get("organization", {}).get("primary_domain"),
                         "industry": person.get("organization", {}).get("industry"),
-                        "employee_count": person.get("organization", {}).get(
-                            "estimated_num_employees"
-                        ),
+                        "employee_count": person.get("organization", {}).get("estimated_num_employees"),
                     },
                 },
             }
@@ -253,12 +251,8 @@ class _ApolloClient:
                         "country": p.get("country"),
                         "seniority": p.get("seniority"),
                         "organization": {
-                            "id": p.get("organization", {}).get("id")
-                            if p.get("organization")
-                            else None,
-                            "name": p.get("organization", {}).get("name")
-                            if p.get("organization")
-                            else None,
+                            "id": p.get("organization", {}).get("id") if p.get("organization") else None,
+                            "name": p.get("organization", {}).get("name") if p.get("organization") else None,
                             "domain": p.get("organization", {}).get("primary_domain")
                             if p.get("organization")
                             else None,
@@ -436,9 +430,7 @@ def register_tools(
             api_key = credentials.get("apollo")
             # Defensive check: ensure we get a string, not a complex object
             if api_key is not None and not isinstance(api_key, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('apollo'), got {type(api_key).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('apollo'), got {type(api_key).__name__}")
             return api_key
         return os.getenv("APOLLO_API_KEY")
 

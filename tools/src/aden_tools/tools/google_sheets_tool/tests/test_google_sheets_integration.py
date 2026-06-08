@@ -239,9 +239,7 @@ class TestMCPToolRegistration:
         register_tools(mcp, credentials=creds)
 
         # Find the create tool
-        create_fn = next(
-            f for f in registered_fns if f.__name__ == "google_sheets_create_spreadsheet"
-        )
+        create_fn = next(f for f in registered_fns if f.__name__ == "google_sheets_create_spreadsheet")
 
         unique = uuid.uuid4().hex[:8]
         result = create_fn(title=f"hive-mcp-test-{unique}")

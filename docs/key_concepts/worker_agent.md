@@ -10,7 +10,7 @@ In Hive, a **Coding Agent** (like Claude Code or Cursor) generates worker agents
 
 A session is a single execution of a worker agent against a specific input. If your outreach agent processes 50 prospects, that's 50 sessions.
 
-Each session is isolated — it has its own shared memory, its own execution state, and its own history. This matters because sessions can be long-running. An agent might start researching a prospect, pause for human approval, wait hours or days, and then resume to send the message. The session preserves everything across that gap.
+Each session is isolated — it has its own shared buffer, its own execution state, and its own history. This matters because sessions can be long-running. An agent might start researching a prospect, pause for human approval, wait hours or days, and then resume to send the message. The session preserves everything across that gap.
 
 Sessions also make debugging straightforward. Every decision the agent made, every tool it called, every retry it attempted — it's all captured in the session. When something goes wrong, you can trace exactly what happened.
 
@@ -32,7 +32,7 @@ This is the operational model Hive is designed for: agents that run 24/7 as part
 
 ## The Runtime
 
-The worker agent runtime manages the lifecycle: starting sessions, executing the graph, handling pauses and resumes, tracking costs, and collecting metrics. It coordinates everything the agent needs — LLM access, tool execution, shared memory, credential management — so individual nodes can focus on their specific job.
+The worker agent runtime manages the lifecycle: starting sessions, executing the graph, handling pauses and resumes, tracking costs, and collecting metrics. It coordinates everything the agent needs — LLM access, tool execution, shared buffer state, credential management — so individual nodes can focus on their specific job.
 
 Key things the runtime handles:
 
@@ -42,7 +42,7 @@ Key things the runtime handles:
 
 **Event streaming** — The runtime emits events as the agent works. You can wire these up to dashboards, logs, or alerting systems to monitor agents in real time.
 
-**Crash recovery** — If execution is interrupted (process crash, deployment, anything), the runtime can resume from the last checkpoint. Conversation state and memory are persisted, so the agent picks up where it left off rather than starting over.
+**Crash recovery** — If execution is interrupted (process crash, deployment, anything), the runtime can resume from the last checkpoint. Conversation state and buffer state are persisted, so the agent picks up where it left off rather than starting over.
 
 ## The Big Picture
 

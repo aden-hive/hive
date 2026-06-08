@@ -1,0 +1,172 @@
+{
+  "original_draft": {
+    "agent_name": "twitter_news_agent",
+    "goal": "Achieve an accurate and concise daily news digest based on Twitter feed monitoring.",
+    "description": "",
+    "success_criteria": [
+      "Navigate and extract tweets from at least 3 handles.",
+      "Provide a summary of the most important stories.",
+      "Maintain a persistent log of daily digests."
+    ],
+    "constraints": [
+      "Respect rate limits and ethical web usage."
+    ],
+    "nodes": [
+      {
+        "id": "fetch-tweets",
+        "name": "Fetch Tech Tweets",
+        "description": "Browser subagent to navigate to tech news Twitter profiles and extract latest tweets.",
+        "node_type": "gcu",
+        "tools": [],
+        "input_keys": [
+          "twitter_handles"
+        ],
+        "output_keys": [
+          "raw_tweets"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "browser",
+        "flowchart_shape": "hexagon",
+        "flowchart_color": "#cc8850"
+      },
+      {
+        "id": "process-news",
+        "name": "Process Tech News",
+        "description": "Analyze and summarize the raw tweets into a daily tech digest.",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "load_data"
+        ],
+        "input_keys": [
+          "user_request",
+          "feedback",
+          "raw_tweets"
+        ],
+        "output_keys": [
+          "daily_digest"
+        ],
+        "success_criteria": "A high-quality, tech-focused news summary.",
+        "sub_agents": [
+          "fetch-tweets"
+        ],
+        "flowchart_type": "subprocess",
+        "flowchart_shape": "subroutine",
+        "flowchart_color": "#887a48"
+      },
+      {
+        "id": "review-digest",
+        "name": "Review Digest",
+        "description": "Present the news digest for user review and approval.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "daily_digest"
+        ],
+        "output_keys": [
+          "status",
+          "feedback"
+        ],
+        "success_criteria": "User has reviewed the digest and provided feedback or approval.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "process-news",
+        "target": "review-digest",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "review-digest",
+        "target": "process-news",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "review-digest",
+        "target": "process-news",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-subagent-3",
+        "source": "process-news",
+        "target": "fetch-tweets",
+        "condition": "always",
+        "description": "sub-agent delegation",
+        "label": "delegate"
+      },
+      {
+        "id": "edge-subagent-4",
+        "source": "fetch-tweets",
+        "target": "process-news",
+        "condition": "always",
+        "description": "sub-agent report back",
+        "label": "report"
+      }
+    ],
+    "entry_node": "process-news",
+    "terminal_nodes": [
+      "review-digest"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "process-news": [
+      "process-news",
+      "fetch-tweets"
+    ],
+    "review-digest": [
+      "review-digest"
+    ]
+  }
+}

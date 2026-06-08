@@ -175,8 +175,7 @@ def register_mcp_tools(
         except ImportError as e:
             return {
                 "error": str(e),
-                "help": "Install dependencies: "
-                "pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
+                "help": "Install dependencies: pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
             }
         except Exception as e:
             return {"error": f"Databricks MCP SQL query failed: {e!s}"}
@@ -259,8 +258,7 @@ def register_mcp_tools(
         except ImportError as e:
             return {
                 "error": str(e),
-                "help": "Install dependencies: "
-                "pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
+                "help": "Install dependencies: pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
             }
         except Exception as e:
             return {"error": f"Databricks UC function call failed: {e!s}"}
@@ -358,8 +356,7 @@ def register_mcp_tools(
         except ImportError as e:
             return {
                 "error": str(e),
-                "help": "Install dependencies: "
-                "pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
+                "help": "Install dependencies: pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
             }
         except Exception as e:
             return {"error": f"Databricks Vector Search failed: {e!s}"}
@@ -428,8 +425,7 @@ def register_mcp_tools(
             if not tools:
                 return {
                     "error": "No tools discovered on the Genie MCP server",
-                    "help": f"Check that the Genie space '{genie_space_id}' exists "
-                    "and you have access to it.",
+                    "help": f"Check that the Genie space '{genie_space_id}' exists and you have access to it.",
                 }
 
             tool_name = tools[0].name
@@ -444,8 +440,7 @@ def register_mcp_tools(
         except ImportError as e:
             return {
                 "error": str(e),
-                "help": "Install dependencies: "
-                "pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
+                "help": "Install dependencies: pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
             }
         except Exception as e:
             return {"error": f"Databricks Genie query failed: {e!s}"}
@@ -555,8 +550,7 @@ def register_mcp_tools(
         except ImportError as e:
             return {
                 "error": str(e),
-                "help": "Install dependencies: "
-                "pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
+                "help": "Install dependencies: pip install 'databricks-mcp>=0.1.0' 'databricks-sdk>=0.30.0'",
             }
         except Exception as e:
             return {"error": f"Failed to list MCP tools: {e!s}"}

@@ -35,9 +35,7 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(
-            f"{HUB_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
-        )
+        resp = httpx.get(f"{HUB_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your DOCKER_HUB_TOKEN."}
         if resp.status_code == 404:

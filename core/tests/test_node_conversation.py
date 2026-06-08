@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation, extract_tool_call_history
+from framework.agent_loop.conversation import (
+    Message,
+    NodeConversation,
+    extract_tool_call_history,
+)
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -20,6 +24,7 @@ class MockConversationStore:
 
     def __init__(self) -> None:
         self._parts: dict[int, dict] = {}
+        self._partials: dict[int, dict] = {}
         self._meta: dict | None = None
         self._cursor: dict | None = None
 
@@ -41,8 +46,20 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         self._parts = {k: v for k, v in self._parts.items() if k >= seq}
+
+    async def write_partial(self, seq: int, data: dict[str, Any]) -> None:
+        self._partials[seq] = data
+
+    async def read_partial(self, seq: int) -> dict[str, Any] | None:
+        return self._partials.get(seq)
+
+    async def read_all_partials(self) -> list[dict[str, Any]]:
+        return [self._partials[k] for k in sorted(self._partials)]
+
+    async def clear_partial(self, seq: int) -> None:
+        self._partials.pop(seq, None)
 
     async def close(self) -> None:
         pass
@@ -167,14 +184,15 @@ class TestNodeConversation:
     async def test_token_estimation(self):
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100
+        # chars // 3 (4/3 safety margin over chars/4 base)
+        assert conv.estimate_tokens() == 400 // 3
 
     @pytest.mark.asyncio
     async def test_update_token_count_overrides_estimate(self):
         """When actual API token count is provided, estimate_tokens uses it."""
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100  # chars/4 fallback
+        assert conv.estimate_tokens() == 400 // 3  # char-based fallback with safety margin
 
         conv.update_token_count(500)
         assert conv.estimate_tokens() == 500  # actual API value
@@ -188,8 +206,8 @@ class TestNodeConversation:
         assert conv.estimate_tokens() == 500
 
         await conv.compact("summary", keep_recent=0)
-        # Falls back to chars/4 for the summary message
-        assert conv.estimate_tokens() == len("summary") // 4
+        # Falls back to char-based heuristic with 4/3 safety margin (chars // 3)
+        assert conv.estimate_tokens() == len("summary") // 3
 
     @pytest.mark.asyncio
     async def test_clear_resets_token_count(self):
@@ -207,7 +225,8 @@ class TestNodeConversation:
         """usage_ratio returns estimate / max_context_tokens."""
         conv = NodeConversation(max_context_tokens=1000)
         await conv.add_user_message("a" * 400)
-        assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
+        # 400 // 3 = 133 tokens (with safety margin), so 133/1000
+        assert conv.usage_ratio() == pytest.approx(400 // 3 / 1000)
 
         conv.update_token_count(800)
         assert conv.usage_ratio() == pytest.approx(0.8)  # 800/1000
@@ -235,6 +254,90 @@ class TestNodeConversation:
     async def test_needs_compaction(self):
         conv = NodeConversation(max_context_tokens=100, compaction_threshold=0.8)
         await conv.add_user_message("x" * 320)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_uses_buffer_when_set(self):
+        """Gap 7: a compaction_buffer_tokens overrides the multiplicative
+        threshold - compaction triggers when estimate + buffer would
+        cross the hard context limit, not at a fractional threshold."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.9,  # would normally trigger at 900
+            compaction_buffer_tokens=300,  # buffer wants 700 hard cap
+        )
+        # 650 tokens is below the 700 budget - no compaction yet.
+        conv.update_token_count(650)
+        assert conv.needs_compaction() is False
+        # 700+ crosses the budget - compaction fires BEFORE reaching
+        # the hard 1000 limit, so the next turn's input has headroom.
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_compaction_warning_fires_before_hard_trigger(self):
+        """Gap 7: the warning threshold is meant to surface early signal
+        to telemetry without actually triggering compaction."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_buffer_tokens=200,
+            compaction_warning_buffer_tokens=400,
+        )
+        conv.update_token_count(500)
+        assert conv.compaction_warning() is False
+        assert conv.needs_compaction() is False
+
+        # Cross 600 tokens: warning fires (1000 - 400) but compaction
+        # doesn't yet (1000 - 200 = 800 budget).
+        conv.update_token_count(650)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is False
+
+        # Cross 800: both fire.
+        conv.update_token_count(820)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_uses_hybrid_buffer(self):
+        """Hybrid: effective buffer is fixed_tokens + ratio * max_context.
+
+        With max=1000, fixed=200, ratio=0.1 → effective_buffer=300, so
+        the trigger threshold is 700.
+        """
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_buffer_tokens=200,
+            compaction_buffer_ratio=0.1,
+        )
+        conv.update_token_count(650)
+        assert conv.needs_compaction() is False
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_ratio_only(self):
+        """Ratio component alone (without a fixed floor) still works."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_buffer_ratio=0.25,
+        )
+        conv.update_token_count(740)
+        assert conv.needs_compaction() is False
+        conv.update_token_count(760)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_legacy_threshold_rule_still_works_without_buffer(self):
+        """Without compaction_buffer_tokens, the old multiplicative rule
+        applies so existing callers keep behaving identically."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.75,
+        )
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is False
+        conv.update_token_count(800)
         assert conv.needs_compaction() is True
 
     @pytest.mark.asyncio
@@ -470,6 +573,73 @@ class TestPersistence:
         assert restored.messages[0].content == "u1"
 
     @pytest.mark.asyncio
+    async def test_restore_filters_by_run_id_for_crash_recovery(self):
+        """Restore with a non-legacy run_id only loads parts from that run.
+
+        This ensures intentional restarts (new run_id) start fresh while
+        crash recovery (same run_id) resumes correctly. Legacy parts (no
+        run_id) and other runs' parts are excluded.
+        """
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "user", "content": "legacy"})
+        await store.write_part(1, {"seq": 1, "role": "user", "content": "run-a", "run_id": "run-a"})
+        await store.write_part(
+            2,
+            {"seq": 2, "role": "assistant", "content": "run-b", "run_id": "run-b"},
+        )
+        await store.write_cursor({"next_seq": 3})
+
+        restored = await NodeConversation.restore(store, run_id="run-a")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["run-a"]
+        assert restored.next_seq == 3
+
+    @pytest.mark.asyncio
+    async def test_restore_phase_filter_falls_back_for_legacy_unphased_parts(self):
+        """Legacy stores without phase_id should still restore in isolated mode."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "assistant", "content": "restored"})
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["restored"]
+        assert restored.next_seq == 1
+
+    @pytest.mark.asyncio
+    async def test_restore_phase_filter_does_not_fall_back_for_mismatched_phased_parts(self):
+        """Phase filtering should still exclude stores that use explicit phase ids."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(
+            0,
+            {"seq": 0, "role": "assistant", "content": "node-a only", "phase_id": "node-a"},
+        )
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert restored.message_count == 0
+        assert restored.next_seq == 1
+
+    @pytest.mark.asyncio
+    async def test_clear_deletes_all_parts(self):
+        store = MockConversationStore()
+        conv_a = NodeConversation(system_prompt="hello", store=store, run_id="run-a")
+        conv_b = NodeConversation(system_prompt="hello", store=store, run_id="run-b")
+
+        await conv_a.add_user_message("a1")
+        await conv_b.add_user_message("b1")
+
+        await conv_a.clear()
+
+        restored = await NodeConversation.restore(store)
+        assert restored is not None
+        assert [m.content for m in restored.messages] == []
+
+    @pytest.mark.asyncio
     async def test_restore_preserves_tool_messages(self):
         store = MockConversationStore()
         conv = NodeConversation(store=store)
@@ -621,6 +791,33 @@ class TestFileConversationStore:
         assert (base / "cursor.json").exists()
         assert (base / "parts" / "0000000000.json").exists()
         assert (base / "parts" / "0000000001.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_partials_separate_from_parts(self, tmp_path):
+        """Partial checkpoints must not pollute read_parts() and vice versa."""
+        store = FileConversationStore(tmp_path / "conv")
+        await store.write_part(0, {"seq": 0, "content": "real"})
+        await store.write_partial(1, {"seq": 1, "content": "inflight", "truncated": True})
+        parts = await store.read_parts()
+        assert [p["seq"] for p in parts] == [0]
+        partials = await store.read_all_partials()
+        assert [p["seq"] for p in partials] == [1]
+        assert partials[0]["content"] == "inflight"
+        assert (await store.read_partial(1))["content"] == "inflight"
+        assert await store.read_partial(99) is None
+        await store.clear_partial(1)
+        assert await store.read_all_partials() == []
+
+    @pytest.mark.asyncio
+    async def test_partials_dir_does_not_break_parts_glob(self, tmp_path):
+        """delete_parts_before parses stems as int — partial files must not trip it."""
+        store = FileConversationStore(tmp_path / "conv")
+        for i in range(3):
+            await store.write_part(i, {"seq": i})
+            await store.write_partial(i + 100, {"seq": i + 100})
+        await store.delete_parts_before(2)
+        assert [p["seq"] for p in await store.read_parts()] == [2]
+        assert [p["seq"] for p in await store.read_all_partials()] == [100, 101, 102]
 
 
 # ===================================================================
@@ -831,9 +1028,7 @@ class TestConversationIntegration:
                 }
             ],
         )
-        await conv.add_tool_result(
-            "call_calc", "ZeroDivisionError: division by zero", is_error=True
-        )
+        await conv.add_tool_result("call_calc", "ZeroDivisionError: division by zero", is_error=True)
         await conv.add_assistant_message("The calculation failed: division by zero is undefined.")
 
         # Restore
@@ -985,9 +1180,7 @@ async def _build_tool_heavy_conversation(
 
     # set_output call — must be protected
     so_tc = [_make_tool_call("call_so", "set_output", {"key": "result", "value": "done"})]
-    conv._messages.append(
-        Message(seq=conv._next_seq, role="assistant", content="Setting output", tool_calls=so_tc)
-    )
+    conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="Setting output", tool_calls=so_tc))
     if store:
         await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
     conv._next_seq += 1
@@ -1075,20 +1268,14 @@ class TestAggressiveStructuralCompaction:
 
         # Regular tool call
         tc1 = [_make_tool_call("call_ok", "web_search", {"query": "test"})]
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc1)
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc1))
         conv._next_seq += 1
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="tool", content="results", tool_use_id="call_ok")
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="tool", content="results", tool_use_id="call_ok"))
         conv._next_seq += 1
 
         # Error tool call
         tc2 = [_make_tool_call("call_err", "web_scrape", {"url": "http://broken.com"})]
-        conv._messages.append(
-            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc2)
-        )
+        conv._messages.append(Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc2))
         conv._next_seq += 1
         conv._messages.append(
             Message(
@@ -1192,17 +1379,16 @@ class TestExtractToolCallHistory:
                 role="assistant",
                 content="",
                 tool_calls=[
-                    _make_tool_call(
-                        "c2", "save_data", {"filename": "output.txt", "content": "data"}
-                    ),
+                    _make_tool_call("c2", "read_file", {"path": "/tmp/output.txt"}),
                 ],
             ),
-            Message(seq=3, role="tool", content="saved", tool_use_id="c2"),
+            Message(seq=3, role="tool", content="contents", tool_use_id="c2"),
         ]
         result = extract_tool_call_history(msgs)
         assert "web_search (1x)" in result
-        assert "save_data (1x)" in result
-        assert "FILES SAVED: output.txt" in result
+        assert "read_file (1x)" in result
+        # read_file paths are tracked under FILES SAVED in production
+        assert "FILES SAVED: /tmp/output.txt" in result
 
     def test_errors_included(self):
         msgs = [
@@ -1229,7 +1415,7 @@ class TestExtractToolCallHistory:
 
 class TestIsContextTooLargeError:
     def test_context_window_class_name(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         class ContextWindowExceededError(Exception):
             pass
@@ -1237,25 +1423,25 @@ class TestIsContextTooLargeError:
         assert _is_context_too_large_error(ContextWindowExceededError("x"))
 
     def test_openai_context_length(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("This model's maximum context length is 128000 tokens")
         assert _is_context_too_large_error(err)
 
     def test_anthropic_too_long(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("prompt is too long: 150000 tokens > 100000")
         assert _is_context_too_large_error(err)
 
     def test_generic_exceeds_limit(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = ValueError("Request exceeds token limit")
         assert _is_context_too_large_error(err)
 
     def test_unrelated_error(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         assert not _is_context_too_large_error(ValueError("connection refused"))
         assert not _is_context_too_large_error(RuntimeError("timeout"))
@@ -1268,7 +1454,7 @@ class TestIsContextTooLargeError:
 
 class TestFormatMessagesForSummary:
     def test_user_assistant_messages(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="user", content="Hello world"),
@@ -1279,7 +1465,7 @@ class TestFormatMessagesForSummary:
         assert "[assistant]: Hi there" in result
 
     def test_tool_result_truncated(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="tool", content="x" * 1000, tool_use_id="c1"),
@@ -1291,7 +1477,7 @@ class TestFormatMessagesForSummary:
         assert len(result) < 600
 
     def test_assistant_with_tool_calls(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         tc = [_make_tool_call("c1", "web_search", {"query": "test"})]
         msgs = [
@@ -1312,7 +1498,8 @@ class TestLlmCompact:
 
     def _make_node(self):
         """Create a minimal EventLoopNode for testing."""
-        from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
+        from framework.agent_loop.internals.types import LoopConfig
 
         config = LoopConfig(max_context_tokens=32000)
         node = EventLoopNode.__new__(EventLoopNode)
@@ -1329,7 +1516,7 @@ class TestLlmCompact:
         """Create a mock NodeContext with controllable LLM."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from framework.graph.node import NodeSpec
+        from framework.orchestrator.node import NodeSpec
 
         spec = NodeSpec(
             id="test",
@@ -1528,3 +1715,159 @@ class TestRepairOrphanedToolCalls:
         roles = [m["role"] for m in repaired]
         assert roles == ["user", "assistant", "tool", "user"]
         assert repaired[2]["tool_call_id"] == "tc_2"
+
+
+# ===================================================================
+# Continue-nudge + replay-detector helpers (DS-14)
+# ===================================================================
+
+
+def _mk_assistant_with_tool_call(seq: int, tc_id: str, name: str, args: dict) -> Message:
+    return Message(
+        seq=seq,
+        role="assistant",
+        content="",
+        tool_calls=[
+            {
+                "id": tc_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }
+        ],
+    )
+
+
+class TestFindCompletedToolCall:
+    def test_returns_match_when_prior_non_error_result_exists(self):
+        conv = NodeConversation(system_prompt="s")
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_setup", {}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        match = conv.find_completed_tool_call("browser_setup", {})
+        assert match is not None
+        assert match.seq == 1
+
+    def test_ignores_error_result(self):
+        conv = NodeConversation(system_prompt="s")
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_navigate", {"url": "x"}),
+            Message(seq=2, role="tool", content="boom", tool_use_id="tc_a", is_error=True),
+        ]
+        assert conv.find_completed_tool_call("browser_navigate", {"url": "x"}) is None
+
+    def test_canonicalizes_json_args_regardless_of_key_order(self):
+        conv = NodeConversation(system_prompt="s")
+        # Prior args written in one order, new call re-emits in different order.
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "fetch", {"b": 2, "a": 1}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        assert conv.find_completed_tool_call("fetch", {"a": 1, "b": 2}) is not None
+        # Different args should NOT match.
+        assert conv.find_completed_tool_call("fetch", {"a": 1, "b": 3}) is None
+
+    def test_respects_within_last_turns_window(self):
+        conv = NodeConversation(system_prompt="s")
+        # Prior successful call, then 4 newer assistant turns of noise.
+        conv._messages = [
+            Message(seq=0, role="user", content="go"),
+            _mk_assistant_with_tool_call(1, "tc_a", "browser_setup", {}),
+            Message(seq=2, role="tool", content="ok", tool_use_id="tc_a"),
+        ]
+        # 4 newer assistant turns (no tool calls that match)
+        for i in range(3, 7):
+            conv._messages.append(Message(seq=i, role="assistant", content=f"noise {i}"))
+        # Window=3 → prior assistant with browser_setup is at turn index 5
+        # backwards (noise, noise, noise, noise, setup) — skipped.
+        assert conv.find_completed_tool_call("browser_setup", {}, within_last_turns=3) is None
+        # Window=10 → found.
+        assert conv.find_completed_tool_call("browser_setup", {}, within_last_turns=10) is not None
+
+
+class TestPartialCheckpoint:
+    @pytest.mark.asyncio
+    async def test_checkpoint_is_cleared_when_real_part_lands(self, tmp_path):
+        """A partial for seq N is wiped once add_assistant_message(seq=N) persists."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        # Seed a partial for the would-be next assistant seq.
+        await conv.checkpoint_partial_assistant("half-written...")
+        partials = await store.read_all_partials()
+        assert len(partials) == 1
+        assert partials[0]["content"] == "half-written..."
+        # Commit the real assistant turn — partial should be swept.
+        await conv.add_assistant_message("fully written")
+        assert await store.read_all_partials() == []
+
+    @pytest.mark.asyncio
+    async def test_restore_surfaces_partial_as_truncated_message(self, tmp_path):
+        """A partial left behind by a crashed stream is resurrected on restore."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        # Simulate a stream that produced some text + a tool call, then died
+        # before finishing. The checkpoint captures both.
+        await conv.checkpoint_partial_assistant(
+            "I was working on this when the stream died",
+            tool_calls=[
+                {
+                    "id": "tc_x",
+                    "type": "function",
+                    "function": {"name": "browser_click", "arguments": "{}"},
+                }
+            ],
+        )
+        # Fresh process — restore from disk.
+        fresh = await NodeConversation.restore(store)
+        assert fresh is not None
+        # The user message is there, plus the truncated assistant resurrected
+        # from the partial.
+        roles = [m.role for m in fresh.messages]
+        assert roles == ["user", "assistant"]
+        last = fresh.messages[-1]
+        assert last.truncated is True
+        assert last.content == "I was working on this when the stream died"
+        assert last.tool_calls and last.tool_calls[0]["function"]["name"] == "browser_click"
+
+    @pytest.mark.asyncio
+    async def test_restore_cleans_stale_partials(self, tmp_path):
+        """A partial whose seq was already committed as a real part is discarded."""
+        store = FileConversationStore(tmp_path / "c")
+        conv = NodeConversation(system_prompt="s", store=store)
+        await conv.add_user_message("hi")
+        await conv.add_assistant_message("real")  # seq=1
+        # Manually plant a stale partial at seq=1 (already committed).
+        await store.write_partial(1, {"seq": 1, "role": "assistant", "content": "stale", "truncated": True})
+        fresh = await NodeConversation.restore(store)
+        assert fresh is not None
+        assert [m.content for m in fresh.messages] == ["hi", "real"]
+        # Stale partial swept by restore.
+        assert await store.read_all_partials() == []
+
+
+class TestMessageFlags:
+    def test_is_system_nudge_roundtrip(self):
+        m = Message(seq=0, role="user", content="nudge", is_system_nudge=True)
+        d = m.to_storage_dict()
+        assert d.get("is_system_nudge") is True
+        r = Message.from_storage_dict(d)
+        assert r.is_system_nudge is True
+        assert r.role == "user"
+
+    def test_truncated_roundtrip(self):
+        m = Message(seq=0, role="assistant", content="half", truncated=True)
+        d = m.to_storage_dict()
+        assert d.get("truncated") is True
+        r = Message.from_storage_dict(d)
+        assert r.truncated is True
+
+    def test_defaults_omit_flags_from_storage(self):
+        m = Message(seq=0, role="user", content="plain")
+        d = m.to_storage_dict()
+        assert "is_system_nudge" not in d
+        assert "truncated" not in d

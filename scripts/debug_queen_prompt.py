@@ -4,9 +4,12 @@
 from framework.agents.queen.nodes import (
     _appendices,
     _queen_behavior_always,
+    _queen_behavior_independent,
     _queen_behavior_running,
-    _queen_identity_running,
-    _queen_style,
+    _queen_character_core,
+    _queen_role_independent,
+    _queen_role_running,
+    _queen_tools_independent,
     _queen_tools_running,
 )
 
@@ -23,15 +26,15 @@ def print_planning_prompt(worker_identity: str | None = None) -> None:
     from framework.agents.queen.nodes import (
         _planning_knowledge,
         _queen_behavior_planning,
-        _queen_identity_planning,
+        _queen_role_planning,
         _queen_tools_planning,
     )
 
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
     prompt = (
-        _queen_identity_planning
-        + _queen_style
+        _queen_character_core
+        + _queen_role_planning
         + _queen_tools_planning
         + _queen_behavior_always
         + _queen_behavior_planning
@@ -53,16 +56,16 @@ def print_building_prompt(worker_identity: str | None = None) -> None:
         _building_knowledge,
         _gcu_building_section,
         _queen_behavior_building,
-        _queen_identity_building,
         _queen_phase_7,
+        _queen_role_building,
         _queen_tools_building,
     )
 
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
     prompt = (
-        _queen_identity_building
-        + _queen_style
+        _queen_character_core
+        + _queen_role_building
         + _queen_tools_building
         + _queen_behavior_always
         + _queen_behavior_building
@@ -85,15 +88,15 @@ def print_staging_prompt(worker_identity: str | None = None) -> None:
     """Print the composed staging phase prompt."""
     from framework.agents.queen.nodes import (
         _queen_behavior_staging,
-        _queen_identity_staging,
+        _queen_role_staging,
         _queen_tools_staging,
     )
 
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
     prompt = (
-        _queen_identity_staging
-        + _queen_style
+        _queen_character_core
+        + _queen_role_staging
         + _queen_tools_staging
         + _queen_behavior_always
         + _queen_behavior_staging
@@ -118,8 +121,8 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
     prompt = (
-        _queen_identity_running
-        + _queen_style
+        _queen_character_core
+        + _queen_role_running
         + _queen_tools_running
         + _queen_behavior_always
         + _queen_behavior_running
@@ -128,6 +131,24 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
 
     print("=" * 80)
     print("QUEEN RUNNING PHASE PROMPT")
+    print("=" * 80)
+    print(prompt)
+    print("=" * 80)
+    print(f"\nTotal length: {len(prompt):,} characters")
+
+
+def print_independent_prompt() -> None:
+    """Print the composed independent phase prompt."""
+    prompt = (
+        _queen_character_core
+        + _queen_role_independent
+        + _queen_tools_independent
+        + _queen_behavior_always
+        + _queen_behavior_independent
+    )
+
+    print("=" * 80)
+    print("QUEEN INDEPENDENT PHASE PROMPT")
     print("=" * 80)
     print(prompt)
     print("=" * 80)
@@ -147,6 +168,8 @@ if __name__ == "__main__":
         print_staging_prompt()
         print("\n\n")
         print_running_prompt()
+        print("\n\n")
+        print_independent_prompt()
     elif phase == "planning":
         print_planning_prompt()
     elif phase == "building":
@@ -155,9 +178,9 @@ if __name__ == "__main__":
         print_staging_prompt()
     elif phase == "running":
         print_running_prompt()
+    elif phase == "independent":
+        print_independent_prompt()
     else:
         print(f"Unknown phase: {phase}")
-        print(
-            "Usage: uv run scripts/debug_queen_prompt.py [planning|building|staging|running|all]"
-        )
+        print("Usage: uv run scripts/debug_queen_prompt.py [planning|building|staging|running|independent|all]")
         sys.exit(1)

@@ -26,12 +26,60 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any
 
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
     from framework.credentials import CredentialStore
+
+
+# Worker profiles inject their per-provider account aliases into this
+# ContextVar before each tool turn. When a tool calls
+# ``credentials.get_by_alias(provider, "")`` (or ``credentials.get(name)``),
+# the adapter consults the map and, if the provider has a binding, uses
+# that alias for the lookup. An explicit non-empty alias on the call wins.
+# Keys are credential ids (matching ``CredentialSpec.credential_id``);
+# values are the account alias to route to.
+_active_account_overrides: ContextVar[dict[str, str] | None] = ContextVar(
+    "hive_credential_account_overrides", default=None
+)
+
+
+@contextmanager
+def account_overrides(overrides: dict[str, str] | None):
+    """Bind ``overrides`` for the duration of the ``with`` block.
+
+    Used by the colony runtime to pin a worker's MCP tool calls to its
+    profile's aliases. Empty / ``None`` is a no-op so callers can safely
+    pass through unbound profiles without conditional logic.
+    """
+    if not overrides:
+        yield
+        return
+    token = _active_account_overrides.set(dict(overrides))
+    try:
+        yield
+    finally:
+        _active_account_overrides.reset(token)
+
+
+# Process-wide memoization for CredentialStoreAdapter.default().
+#
+# Without this, every caller (e.g. each MCP server registration in
+# tool_registry._build_mcp_admission_gate) rebuilds a fresh CredentialStore +
+# AdenSyncProvider and re-runs sync_all() against the Aden server. On a typical
+# `hive open` startup that meant 4 full syncs (one per MCP server + the parent
+# bootstrap), each round-tripping every credential. The cache key includes the
+# specs identity and ADEN_API_KEY so a deliberate change still rebuilds.
+_DEFAULT_ADAPTER_CACHE: dict[tuple[int, str | None], Any] = {}
+
+
+def _reset_default_adapter_cache() -> None:
+    """Clear the memoized default adapter. Intended for tests."""
+    _DEFAULT_ADAPTER_CACHE.clear()
 
 
 class CredentialStoreAdapter:
@@ -104,9 +152,25 @@ class CredentialStoreAdapter:
 
         Raises:
             KeyError: If the credential name is not in specs
+            CredentialExpiredError: If the credential is expired and refresh failed.
+                Tool runners catch this and emit a structured ``credential_expired``
+                tool result so the agent can ask the user to reauthorize.
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
+
+        if account is None:
+            # No explicit caller-supplied alias — check whether the active
+            # worker profile has pinned this credential to a specific
+            # account. Falls through to the unaliased default lookup when
+            # no profile binding exists.
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(name)
+                if bound_alias:
+                    aliased = self.get_by_alias(name, bound_alias)
+                    if aliased is not None:
+                        return aliased
 
         if account is not None:
             try:
@@ -118,7 +182,19 @@ class CredentialStoreAdapter:
             except Exception:
                 pass  # Fall through to standard store lookup
 
-        return self._store.get(name)
+        try:
+            return self._store.get(name, raise_on_refresh_failure=True)
+        except Exception as exc:
+            # CredentialExpiredError must propagate for the tool runner to
+            # convert into a structured result. Only enrich help_url here
+            # so the runner does not need to import specs.
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
 
     def get_spec(self, name: str) -> CredentialSpec:
         """Get the spec for a credential."""
@@ -331,9 +407,42 @@ class CredentialStoreAdapter:
         return dict(self._tool_to_cred)
 
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
-        """Resolve a specific account's token by alias."""
+        """Resolve a specific account's token by alias.
+
+        When ``alias`` is empty, falls back to the active worker profile's
+        binding (if any). MCP tools default ``account=""`` so this lets a
+        worker profile pin a default account without requiring the agent
+        to supply it on every call.
+
+        Raises:
+            CredentialExpiredError: If the matched credential is expired and
+                refresh failed.
+        """
+        if not alias:
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(provider_name)
+                if bound_alias:
+                    alias = bound_alias
+        if not alias:
+            return None
         cred = self._store.get_credential_by_alias(provider_name, alias)
-        return cred.get_default_key() if cred else None
+        if cred is None:
+            return None
+        # Re-fetch through get_credential so refresh-on-access fires with
+        # raise_on_refresh_failure semantics. Aliased lookups otherwise skip
+        # the refresh path.
+        try:
+            refreshed = self._store.get_credential(cred.id, raise_on_refresh_failure=True)
+        except Exception as exc:
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(provider_name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
+        return refreshed.get_default_key() if refreshed else None
 
     def get_by_identity(self, provider_name: str, label: str) -> str | None:
         """Alias for get_by_alias (backward compat)."""
@@ -498,6 +607,15 @@ class CredentialStoreAdapter:
 
             specs = CREDENTIAL_SPECS
 
+        # Return memoized instance when available. The full default() body —
+        # provider construction + sync_all() — is expensive (network round-trip
+        # per credential). Multiple call sites (notably the MCP admission gate
+        # in tool_registry, which fires once per server) hit this on startup.
+        cache_key = (id(specs), os.environ.get("ADEN_API_KEY"))
+        cached = _DEFAULT_ADAPTER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
         # --- Aden sync branch ---
@@ -521,9 +639,11 @@ class CredentialStoreAdapter:
                 local_composite = CompositeStorage(primary=encrypted, fallbacks=[env])
 
                 # Aden components
+                # Use 5-second timeout to avoid blocking on slow/failed requests
                 client = AdenCredentialClient(
                     AdenClientConfig(
-                        base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                        base_url=os.environ.get("ADEN_API_URL", "https://app.open-hive.com"),
+                        timeout=5.0,
                     )
                 )
                 provider = AdenSyncProvider(client=client)
@@ -548,12 +668,12 @@ class CredentialStoreAdapter:
                 except Exception as e:
                     log.warning("Aden initial sync failed (will retry on access): %s", e)
 
-                return cls(store=store, specs=specs)
+                instance = cls(store=store, specs=specs)
+                _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+                return instance
 
             except Exception as e:
-                log.warning(
-                    "Aden credential sync unavailable, falling back to default storage: %s", e
-                )
+                log.warning("Aden credential sync unavailable, falling back to default storage: %s", e)
 
         # --- Default branch (no ADEN_API_KEY or Aden setup failed) ---
         try:
@@ -565,7 +685,9 @@ class CredentialStoreAdapter:
             log.warning("Encrypted credential storage unavailable, falling back to env vars: %s", e)
             store = CredentialStore.with_env_storage(env_mapping)
 
-        return cls(store=store, specs=specs)
+        instance = cls(store=store, specs=specs)
+        _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+        return instance
 
     @classmethod
     def for_testing(

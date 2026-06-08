@@ -11,9 +11,15 @@ export interface MultiQuestionWidgetProps {
   questions: QuestionItem[];
   onSubmit: (answers: Record<string, string>) => void;
   onDismiss?: () => void;
+  /**
+   * When true, skip the global Enter-to-submit listener. Use this when rendering
+   * the widget inline alongside other inputs (e.g. the chat textarea) so Enter
+   * isn't hijacked from the surrounding UI.
+   */
+  inline?: boolean;
 }
 
-export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: MultiQuestionWidgetProps) {
+export default function MultiQuestionWidget({ questions, onSubmit, onDismiss, inline = false }: MultiQuestionWidgetProps) {
   // Per-question state: selected index (null = nothing, options.length = "Other")
   const [selections, setSelections] = useState<(number | null)[]>(
     () => questions.map(() => null),
@@ -50,8 +56,10 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
     onSubmit(answers);
   }, [canSubmit, submitted, questions, selections, customTexts, onSubmit]);
 
-  // Enter to submit (only when not focused on a text input)
+  // Enter to submit (only when not focused on a text input).
+  // Skipped in inline mode so the widget doesn't hijack keys from surrounding inputs.
   useEffect(() => {
+    if (inline) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (submitted) return;
       const target = e.target as HTMLElement;
@@ -63,7 +71,7 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSubmit, submitted]);
+  }, [handleSubmit, submitted, inline]);
 
   if (submitted) return null;
 

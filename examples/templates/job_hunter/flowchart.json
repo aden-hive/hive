@@ -1,0 +1,186 @@
+{
+  "original_draft": {
+    "agent_name": "job_hunter",
+    "goal": "Analyze a user's resume to identify their strongest role fits, find 10 matching job opportunities, let the user select which to pursue, then generate a resume customization list and cold outreach email for each selected job.",
+    "description": "",
+    "success_criteria": [
+      "Identifies 2-3 role types that genuinely match the user's experience",
+      "Found jobs align with identified roles and user's background",
+      "Resume changes are specific, actionable, and tailored to each job posting",
+      "Cold emails are personalized, professional, and reference specific company/role details",
+      "User approves outputs without major revisions needed"
+    ],
+    "constraints": [
+      "Only suggest roles the user is realistically qualified for - no aspirational stretch roles",
+      "Resume customizations must be truthful - enhance presentation, never fabricate experience",
+      "Cold emails must be professional and not spammy",
+      "Only customize for jobs the user explicitly selects"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Analyze resume and identify 3-5 strongest role types",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "resume_text"
+        ],
+        "output_keys": [
+          "resume_text",
+          "role_analysis"
+        ],
+        "success_criteria": "The user's resume has been analyzed and 3-5 target roles identified based on their actual experience.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "job-search",
+        "name": "Job Search",
+        "description": "Search for 10 jobs matching identified roles by scraping job board sites directly",
+        "node_type": "event_loop",
+        "tools": [
+          "web_scrape"
+        ],
+        "input_keys": [
+          "role_analysis"
+        ],
+        "output_keys": [
+          "job_listings"
+        ],
+        "success_criteria": "10 relevant job listings have been found with complete details including title, company, location, description, and URL.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "job-review",
+        "name": "Job Review",
+        "description": "Present all 10 jobs to the user, let them select which to pursue",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "job_listings",
+          "resume_text"
+        ],
+        "output_keys": [
+          "selected_jobs"
+        ],
+        "success_criteria": "User has reviewed all job listings and explicitly selected which jobs they want to apply to.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "customize",
+        "name": "Customize",
+        "description": "For each selected job, generate resume customization list and cold outreach email, create Gmail drafts",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "append_data",
+          "serve_file_to_user",
+          "gmail_create_draft"
+        ],
+        "input_keys": [
+          "selected_jobs",
+          "resume_text"
+        ],
+        "output_keys": [
+          "application_materials"
+        ],
+        "success_criteria": "Resume customization list and cold outreach email generated for each selected job, saved as HTML, and Gmail drafts created in user's inbox.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "job-search",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "job-search",
+        "target": "job-review",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "job-review",
+        "target": "customize",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "customize"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "job-search": [
+      "job-search"
+    ],
+    "job-review": [
+      "job-review"
+    ],
+    "customize": [
+      "customize"
+    ]
+  }
+}

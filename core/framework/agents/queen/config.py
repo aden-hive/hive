@@ -2,12 +2,13 @@
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 def _load_preferred_model() -> str:
-    """Load preferred model from ~/.hive/configuration.json."""
-    config_path = Path.home() / ".hive" / "configuration.json"
+    """Load preferred model from $HIVE_HOME/configuration.json."""
+    from framework.config import HIVE_HOME
+
+    config_path = HIVE_HOME / "configuration.json"
     if config_path.exists():
         try:
             with open(config_path, encoding="utf-8") as f:

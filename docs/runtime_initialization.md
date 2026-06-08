@@ -9,14 +9,14 @@ ENDPOINT: POST /api/sessions (line 103)
 FUNCTION: async def handle_create_session(request: web.Request) -> web.Response
 
 - Accepts optional "agent_path" in request body
-- If agent_path provided: calls manager.create_session_with_worker()
+- If agent_path provided: calls manager.create_session_with_worker_graph()
 - If no agent_path: calls manager.create_session()
 - Returns 201 with session details
 
 CALL CHAIN:
 handle_create_session (line 103)
   ├─ validate_agent_path(agent_path) [line 128]
-  ├─ manager.create_session_with_worker() [line 135] OR manager.create_session() [line 143]
+  ├─ manager.create_session_with_worker_graph() [line 135] OR manager.create_session() [line 143]
   └─ _session_to_live_dict(session) [line 169]
 
 
@@ -26,16 +26,16 @@ STEP 2: SESSION CREATION (MANAGER LAYER)
 
 FILE: /Users/timothy/repo/hive/core/framework/server/session_manager.py
 
-FLOW A: Create Session with Worker (Single Step)
+FLOW A: Create Session with Graph (Single Step)
 ─────────────────────────────────────────────────
 
-FUNCTION: async def create_session_with_worker() (line 128)
+FUNCTION: async def create_session_with_worker_graph() (line 128)
   - Creates session infrastructure (EventBus, LLM)
   - Loads worker agent
   - Starts queen
   
 CALL SEQUENCE:
-create_session_with_worker (line 128)
+create_session_with_worker_graph (line 128)
   ├─ _create_session_core(model=model) [line 150]
   │  │ Creates RuntimeConfig, LiteLLMProvider, EventBus
   │  │ Creates Session dataclass with event_bus and llm
@@ -45,12 +45,12 @@ create_session_with_worker (line 128)
   ├─ _load_worker_core(session, agent_path, worker_id) [line 153]
   │  │ Loads AgentRunner (blocking I/O via executor)
   │  │ Calls runner._setup(event_bus=session.event_bus)
-  │  │ Starts worker_runtime if not already running
+  │  │ Starts graph_runtime if not already running
   │  │ Cleans up stale sessions on disk
-  │  │ Updates session.runner, session.worker_runtime, etc.
+  │  │ Updates session.runner, session.graph_runtime, etc.
   │  └─ returns None (modifies session in-place)
   │
-  ├─ build_worker_profile(session.worker_runtime) [line 162]
+  ├─ build_worker_profile(session.graph_runtime) [line 162]
   │  └─ returns worker identity string for queen
   │
   └─ _start_queen(session, worker_identity) [line 166]
@@ -228,7 +228,7 @@ AgentRuntime.__init__(...) (line 118)
   ├─ Initialize SessionStore for unified sessions [line 182]
   │
   ├─ Initialize shared components:
-  │  ├─ SharedStateManager [line 185]
+  │  ├─ SharedBufferManager [line 185]
   │  ├─ EventBus (or use shared one) [line 186]
   │  └─ OutcomeAggregator [line 187]
   │
@@ -256,7 +256,7 @@ STEP 7: QUEEN STARTUP (CONCURRENT WITH WORKER)
 FILE: /Users/timothy/repo/hive/core/framework/server/session_manager.py
 
 FUNCTION: _start_queen() (line 394)
-CALLED BY: create_session() OR create_session_with_worker()
+CALLED BY: create_session() OR create_session_with_worker_graph()
 
 QUEEN STARTUP SEQUENCE:
 _start_queen(session, worker_identity, initial_prompt) (line 394)
@@ -411,8 +411,8 @@ await _run_execution(ctx) (line 538)
   │
   ├─ Mark status as "running" [line 559]
   │
-  ├─ Create execution-scoped memory [line 572-576]
-  │  └─ self._state_manager.create_memory(execution_id, stream_id, isolation)
+  ├─ Create execution-scoped buffer [line 572-576]
+  │  └─ self._state_manager.create_buffer(execution_id, stream_id, isolation)
   │
   ├─ Start runtime adapter [line 579-586]
   │  └─ runtime_adapter.start_run(goal_id, goal_description, input_data)
@@ -467,7 +467,7 @@ RESULT: Execution complete, event emitted, task ends
 STEP 12: GRAPH EXECUTION (THE ACTUAL AGENT LOGIC)
 ===================================================================
 
-FILE: /Users/timothy/repo/hive/core/framework/graph/executor.py
+FILE: core/framework/orchestrator/orchestrator.py
 
 FUNCTION: GraphExecutor.execute() (line 289)
 CALLED BY: ExecutionStream._run_execution() [line 644]
@@ -480,7 +480,7 @@ await executor.execute(graph, goal, input_data, session_state, checkpoint_config
   │
   ├─ Validate tool availability [line 320-332]
   │
-  ├─ Initialize SharedMemory for session [line 335]
+  ├─ Initialize DataBuffer for session [line 335]
   │
   ├─ Restore session state if resuming [line 353-369]
   │  └─ Load memory from previous session
@@ -576,7 +576,7 @@ Shared Component: LLM Provider
 
 Memory Flow:
   ├─ Each execution has ExecutionContext with input_data
-  ├─ SharedMemory created per execution (line 572-576 in execution_stream.py)
+  ├─ DataBuffer created per execution (line 572-576 in execution_stream.py)
   ├─ Session state restored if resuming (line 354-369 in executor.py)
   ├─ Each node reads from memory via input_keys
   ├─ Each node writes to memory via output_keys
@@ -588,13 +588,13 @@ Memory Flow:
 KEY FILE PATHS AND LINE NUMBERS
 ===================================================================
 
-1. API Entry: /Users/timothy/repo/hive/core/framework/server/routes_sessions.py:103
-2. Session Manager: /Users/timothy/repo/hive/core/framework/server/session_manager.py:128
-3. Agent Runner Load: /Users/timothy/repo/hive/core/framework/runner/runner.py:789
-4. Agent Runner Setup: /Users/timothy/repo/hive/core/framework/runner/runner.py:1012
-5. Runtime Creation: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:1642
-6. Runtime Class: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:66
-7. Trigger Method: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:790
-8. Execution Stream: /Users/timothy/repo/hive/core/framework/runtime/execution_stream.py:134
-9. Graph Executor: /Users/timothy/repo/hive/core/framework/graph/executor.py:102
-10. Main Loop: /Users/timothy/repo/hive/core/framework/graph/executor.py:596
+1. API Entry: core/framework/server/routes_sessions.py:103
+2. Session Manager: core/framework/server/session_manager.py:128
+3. Agent Runner Load: core/framework/loader/agent_loader.py:789
+4. Agent Runner Setup: core/framework/host/agent_host.py:1012
+5. Runtime Creation: core/framework/host/agent_host.py:1642
+6. Runtime Class: core/framework/host/agent_host.py:66
+7. Trigger Method: core/framework/host/agent_host.py:790
+8. Execution Stream: core/framework/host/execution_manager.py:134
+9. Graph Executor: core/framework/orchestrator/orchestrator.py:102
+10. Main Loop: core/framework/orchestrator/orchestrator.py:596

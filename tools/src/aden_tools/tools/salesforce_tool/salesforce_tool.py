@@ -281,9 +281,7 @@ def register_tools(
                     "required": not f.get("nillable", True) and f.get("createable", False),
                 }
                 if f.get("picklistValues"):
-                    entry["picklist_values"] = [
-                        pv["value"] for pv in f["picklistValues"] if pv.get("active")
-                    ]
+                    entry["picklist_values"] = [pv["value"] for pv in f["picklistValues"] if pv.get("active")]
                 fields_summary.append(entry)
 
             return {

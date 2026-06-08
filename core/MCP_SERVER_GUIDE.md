@@ -1,6 +1,6 @@
 # MCP Server Guide - Agent Building Tools
 
-> **Note:** The standalone `agent-builder` MCP server (`framework.mcp.agent_builder_server`) has been replaced. Agent building is now done via the `coder-tools` server's `initialize_and_build_agent` tool, with underlying logic in `tools/coder_tools_server.py`.
+> **Note:** This document is stale. The previous `coder-tools` MCP server has been replaced by `files-tools` (`tools/files_server.py`), which only exposes file I/O (`read_file`, `write_file`, `edit_file`, `hashline_edit`, `search_files`). The agent-building, shell, and snapshot tools that used to live here have been removed.
 
 This guide covers the MCP tools available for building goal-driven agents.
 
@@ -20,9 +20,9 @@ Add to your MCP client configuration (e.g., Claude Desktop):
 ```json
 {
   "mcpServers": {
-    "coder-tools": {
+    "files-tools": {
       "command": "uv",
-      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "args": ["run", "files_server.py", "--stdio"],
       "cwd": "/path/to/hive/tools"
     }
   }

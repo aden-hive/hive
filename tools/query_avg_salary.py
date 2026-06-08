@@ -40,10 +40,7 @@ def main():
         else:
             # Windows Authentication
             connection_string = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={SERVER};"
-                f"DATABASE={DATABASE};"
-                f"Trusted_Connection=yes;"
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};DATABASE={DATABASE};Trusted_Connection=yes;"
             )
 
         connection = pyodbc.connect(connection_string)

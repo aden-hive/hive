@@ -370,9 +370,7 @@ class TestAssignConversation:
         mock_response.json.return_value = {"type": "conversation", "id": "456"}
         mock_post.return_value = mock_response
 
-        result = self.client.assign_conversation(
-            "456", assignee_id="team-1", assignee_type="team", body=""
-        )
+        result = self.client.assign_conversation("456", assignee_id="team-1", assignee_type="team", body="")
 
         mock_post.assert_called_once_with(
             f"{INTERCOM_API_BASE}/conversations/456/parts",
@@ -549,9 +547,7 @@ class TestConversationTools:
     def test_search_conversations(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"type": "conversation.list", "conversations": [{"id": "1"}]}
-            ),
+            json=MagicMock(return_value={"type": "conversation.list", "conversations": [{"id": "1"}]}),
         )
         result = self._fn("intercom_search_conversations")(status="open")
         assert result["type"] == "conversation.list"
@@ -601,9 +597,7 @@ class TestContactTools:
 
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.get")
     def test_get_contact_by_id(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"type": "contact", "id": "1"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"type": "contact", "id": "1"}))
         result = self._fn("intercom_get_contact")(contact_id="1")
         assert result["id"] == "1"
 
@@ -655,9 +649,7 @@ class TestNoteTagAssignTools:
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
     def test_add_note(self, mock_post, mock_get):
         # Mock /me for admin_id
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "admin-1"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "admin-1"}))
         mock_post.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"type": "conversation", "id": "1"})
         )
@@ -668,9 +660,7 @@ class TestNoteTagAssignTools:
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
     def test_add_tag_to_conversation(self, mock_post, mock_get):
         # Mock /me for admin_id
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "admin-1"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "admin-1"}))
         # First post: create_or_get_tag, second: tag_conversation
         mock_post.side_effect = [
             MagicMock(
@@ -694,23 +684,17 @@ class TestNoteTagAssignTools:
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.get")
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
     def test_assign_conversation(self, mock_post, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "admin-1"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "admin-1"}))
         mock_post.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"type": "conversation", "id": "1"})
         )
-        result = self._fn("intercom_assign_conversation")(
-            conversation_id="1", assignee_id="admin-2"
-        )
+        result = self._fn("intercom_assign_conversation")(conversation_id="1", assignee_id="admin-2")
         assert result["type"] == "conversation"
 
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.get")
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
     def test_assign_conversation_team_type(self, mock_post, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"id": "admin-1"})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"id": "admin-1"}))
         mock_post.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"type": "conversation", "id": "1"})
         )
@@ -723,9 +707,7 @@ class TestNoteTagAssignTools:
         assert call_payload["assignee_type"] == "team"
 
     def test_assign_conversation_invalid_type(self):
-        result = self._fn("intercom_assign_conversation")(
-            conversation_id="1", assignee_id="2", assignee_type="invalid"
-        )
+        result = self._fn("intercom_assign_conversation")(conversation_id="1", assignee_id="2", assignee_type="invalid")
         assert "error" in result
 
     @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.get")

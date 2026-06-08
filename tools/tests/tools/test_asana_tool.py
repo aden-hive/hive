@@ -44,11 +44,7 @@ class TestAsanaListProjects:
         assert "error" in result
 
     def test_successful_list(self, tool_fns):
-        mock_resp = {
-            "data": [
-                {"gid": "proj-1", "name": "Website Redesign", "color": "blue", "archived": False}
-            ]
-        }
+        mock_resp = {"data": [{"gid": "proj-1", "name": "Website Redesign", "color": "blue", "archived": False}]}
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.asana_tool.asana_tool.httpx.get") as mock_get,
@@ -139,9 +135,7 @@ class TestAsanaCreateTask:
         ):
             mock_post.return_value.status_code = 201
             mock_post.return_value.json.return_value = mock_resp
-            result = tool_fns["asana_create_task"](
-                workspace_gid="ws-1", name="New Task", due_on="2024-07-01"
-            )
+            result = tool_fns["asana_create_task"](workspace_gid="ws-1", name="New Task", due_on="2024-07-01")
 
         assert result["status"] == "created"
         assert result["gid"] == "task-new"

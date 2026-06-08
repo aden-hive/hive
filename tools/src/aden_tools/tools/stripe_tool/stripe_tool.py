@@ -218,9 +218,7 @@ class _StripeClient:
         at_period_end: bool = False,
     ) -> dict[str, Any]:
         if at_period_end:
-            sub = self._stripe().subscriptions.update(
-                subscription_id, {"cancel_at_period_end": True}
-            )
+            sub = self._stripe().subscriptions.update(subscription_id, {"cancel_at_period_end": True})
         else:
             sub = self._stripe().subscriptions.cancel(subscription_id)
         return self._format_subscription(sub)
@@ -1096,8 +1094,7 @@ def register_tools(
         return {
             "error": "Stripe credentials not configured",
             "help": (
-                "Set STRIPE_API_KEY environment variable. "
-                "Get your credentials at https://dashboard.stripe.com/apikeys"
+                "Set STRIPE_API_KEY environment variable. Get your credentials at https://dashboard.stripe.com/apikeys"
             ),
         }
 
@@ -1371,9 +1368,7 @@ def register_tools(
         if quantity < 1:
             return {"error": "Quantity must be at least 1"}
         try:
-            return client.create_subscription(
-                customer_id, price_id, quantity, trial_period_days, metadata
-            )
+            return client.create_subscription(customer_id, price_id, quantity, trial_period_days, metadata)
         except stripe.StripeError as e:
             return _stripe_error(e)
 
@@ -1407,9 +1402,7 @@ def register_tools(
         if not subscription_id or not subscription_id.startswith("sub_"):
             return {"error": "Invalid subscription_id. Must start with: sub_"}
         try:
-            return client.update_subscription(
-                subscription_id, price_id, quantity, metadata, cancel_at_period_end
-            )
+            return client.update_subscription(subscription_id, price_id, quantity, metadata, cancel_at_period_end)
         except stripe.StripeError as e:
             return _stripe_error(e)
 
@@ -1988,9 +1981,7 @@ def register_tools(
         if not currency or len(currency) != 3:
             return {"error": "Currency must be a 3-letter ISO code (e.g., usd)"}
         try:
-            return client.create_invoice_item(
-                customer_id, amount, currency, description, invoice_id, metadata
-            )
+            return client.create_invoice_item(customer_id, amount, currency, description, invoice_id, metadata)
         except stripe.StripeError as e:
             return _stripe_error(e)
 

@@ -234,9 +234,7 @@ class TestCertificateValidation:
             mock_conn.version.return_value = "TLSv1.3"
             mock_conn.cipher.return_value = ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
             # Self-signed: subject == issuer
-            mock_conn.getpeercert.return_value = _mock_cert_dict(
-                subject="example.com", issuer="example.com"
-            )
+            mock_conn.getpeercert.return_value = _mock_cert_dict(subject="example.com", issuer="example.com")
             mock_conn.getpeercert.side_effect = [
                 b"fake_der_cert",
                 _mock_cert_dict(subject="example.com", issuer="example.com"),

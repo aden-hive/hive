@@ -333,6 +333,29 @@ class CredentialRefreshError(CredentialError):
     pass
 
 
+class CredentialExpiredError(CredentialError):
+    """Raised when a credential is expired and refresh has failed.
+
+    Carries the metadata an agent (or the tool runner) needs to surface a
+    reauth request to the user without having to look anything else up.
+    """
+
+    def __init__(
+        self,
+        credential_id: str,
+        message: str,
+        *,
+        provider: str | None = None,
+        alias: str | None = None,
+        help_url: str | None = None,
+    ):
+        self.credential_id = credential_id
+        self.provider = provider
+        self.alias = alias
+        self.help_url = help_url
+        super().__init__(message)
+
+
 class CredentialValidationError(CredentialError):
     """Raised when credential validation fails."""
 

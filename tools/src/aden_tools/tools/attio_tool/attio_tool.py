@@ -126,9 +126,7 @@ class _AttioClient:
     ) -> dict[str, Any]:
         """Update an existing record (PATCH - appends multiselect values)."""
         body = {"data": {"values": values}}
-        result = self._request(
-            "PATCH", f"/objects/{object_handle}/records/{record_id}", json_body=body
-        )
+        result = self._request("PATCH", f"/objects/{object_handle}/records/{record_id}", json_body=body)
         if "error" in result:
             return result
         return result.get("data", result)
@@ -294,10 +292,7 @@ def register_tools(
             try:
                 api_key = credentials.get("attio")
                 if api_key is not None and not isinstance(api_key, str):
-                    raise TypeError(
-                        "Expected string from credentials.get('attio'), "
-                        f"got {type(api_key).__name__}"
-                    )
+                    raise TypeError(f"Expected string from credentials.get('attio'), got {type(api_key).__name__}")
                 if api_key is not None:
                     return api_key
             except Exception:

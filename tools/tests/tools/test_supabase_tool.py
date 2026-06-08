@@ -94,9 +94,7 @@ class TestSupabaseUpdate:
         ):
             mock_patch.return_value.status_code = 200
             mock_patch.return_value.json.return_value = [{"id": 1, "status": "done"}]
-            result = tool_fns["supabase_update"](
-                table="tasks", filters="id=eq.1", data='{"status": "done"}'
-            )
+            result = tool_fns["supabase_update"](table="tasks", filters="id=eq.1", data='{"status": "done"}')
 
         assert result["table"] == "tasks"
         assert result["updated"][0]["status"] == "done"
@@ -139,9 +137,7 @@ class TestSupabaseAuth:
             patch("aden_tools.tools.supabase_tool.supabase_tool.httpx.post") as mock_post,
         ):
             mock_post.return_value.status_code = 200
-            mock_post.return_value.json.return_value = {
-                "user": {"id": "u-1", "email": "a@b.com", "confirmed_at": None}
-            }
+            mock_post.return_value.json.return_value = {"user": {"id": "u-1", "email": "a@b.com", "confirmed_at": None}}
             result = tool_fns["supabase_auth_signup"](email="a@b.com", password="password123")
 
         assert result["user_id"] == "u-1"
@@ -188,9 +184,7 @@ class TestSupabaseEdgeInvoke:
             mock_post.return_value.status_code = 200
             mock_post.return_value.headers = {"content-type": "application/json"}
             mock_post.return_value.json.return_value = {"result": "ok"}
-            result = tool_fns["supabase_edge_invoke"](
-                function_name="process", body='{"input": "data"}'
-            )
+            result = tool_fns["supabase_edge_invoke"](function_name="process", body='{"input": "data"}')
 
         assert result["status_code"] == 200
         assert result["response"]["result"] == "ok"

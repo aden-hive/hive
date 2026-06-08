@@ -1,6 +1,6 @@
 """Node definitions for Local Business Extractor."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # GCU Subagent for Google Maps
 map_search_gcu = NodeSpec(
@@ -17,16 +17,15 @@ map_search_gcu = NodeSpec(
 You are a browser agent. Your job: Search Google Maps for the provided query and extract business names and website URLs.
 
 ## Workflow
-1. browser_start
-2. browser_open(url="https://www.google.com/maps")
-3. use the url query to search for the keyword
-3.1 alternatively, use browser_type or browser_click to search for the "query" in memory.'
-4. browser_wait(seconds=3)
-5. browser_snapshot to find the list of results.
-6. For each relevant result, extract:
+1. browser_open(url="https://www.google.com/maps")  # lazy-creates the context
+2. use the url query to search for the keyword
+2.1 alternatively, use browser_type or browser_click to search for the "query" in memory.'
+3. browser_wait(seconds=3)
+4. browser_snapshot to find the list of results.
+5. For each relevant result, extract:
    - Name of the business
    - Website URL (look for the website icon/link)
-7. set_output("business_list", [{"name": "...", "website": "..."}, ...])
+6. set_output("business_list", [{"name": "...", "website": "..."}, ...])
 
 ## Constraints
 - Extract at least 5-10 businesses if possible.

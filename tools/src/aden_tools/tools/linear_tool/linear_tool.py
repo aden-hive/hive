@@ -806,10 +806,7 @@ def register_tools(
                 api_key = credentials.get("linear")
                 # Defensive check: ensure we get a string, not a complex object
                 if api_key is not None and not isinstance(api_key, str):
-                    raise TypeError(
-                        "Expected string from credentials.get('linear'), "
-                        f"got {type(api_key).__name__}"
-                    )
+                    raise TypeError(f"Expected string from credentials.get('linear'), got {type(api_key).__name__}")
                 if api_key is not None:
                     return api_key
             except Exception:

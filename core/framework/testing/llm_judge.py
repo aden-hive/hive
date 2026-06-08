@@ -40,18 +40,31 @@ class LLMJudge:
 
     def _get_fallback_provider(self) -> LLMProvider | None:
         """
-        Auto-detects available API keys and returns the appropriate provider.
-        Priority: OpenAI -> Anthropic.
+        Auto-detects available API keys and returns an appropriate provider.
+        Uses LiteLLM for OpenAI (framework has no framework.llm.openai module).
+        Priority:
+        1. OpenAI-compatible models via LiteLLM (OPENAI_API_KEY)
+        2. Anthropic via AnthropicProvider (ANTHROPIC_API_KEY)
         """
+        # OpenAI: use LiteLLM (the framework's standard multi-provider integration)
         if os.environ.get("OPENAI_API_KEY"):
-            from framework.llm.openai import OpenAIProvider
+            try:
+                from framework.llm.litellm import LiteLLMProvider
 
-            return OpenAIProvider(model="gpt-4o-mini")
+                return LiteLLMProvider(model="gpt-4o-mini")
+            except ImportError:
+                # LiteLLM is optional; fall through to Anthropic/None
+                pass
 
+        # Anthropic via dedicated provider (wraps LiteLLM internally)
         if os.environ.get("ANTHROPIC_API_KEY"):
-            from framework.llm.anthropic import AnthropicProvider
+            try:
+                from framework.llm.anthropic import AnthropicProvider
 
-            return AnthropicProvider(model="claude-3-haiku-20240307")
+                return AnthropicProvider(model="claude-haiku-4-5-20251001")
+            except Exception:
+                # If AnthropicProvider cannot be constructed, treat as no fallback
+                return None
 
         return None
 
@@ -77,11 +90,16 @@ SUMMARY TO EVALUATE:
 Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
 
         try:
+            # Compute fallback provider once so we do not create multiple instances
+            fallback_provider = self._get_fallback_provider()
+
             # 1. Use injected provider
             if self._provider:
                 active_provider = self._provider
-            # 2. Check if _get_client was MOCKED (legacy tests) or use Agnostic Fallback
-            elif hasattr(self._get_client, "return_value") or not self._get_fallback_provider():
+            # 2. Legacy path: anthropic client mocked in tests takes precedence,
+            #    or no fallback provider is available.
+            elif hasattr(self._get_client, "return_value") or fallback_provider is None:
+                # Use legacy Anthropic client (e.g. when tests mock _get_client, or no env keys set)
                 client = self._get_client()
                 response = client.messages.create(
                     model="claude-haiku-4-5-20251001",
@@ -90,7 +108,8 @@ Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
                 )
                 return self._parse_json_result(response.content[0].text.strip())
             else:
-                active_provider = self._get_fallback_provider()
+                # Use env-based fallback (LiteLLM or AnthropicProvider)
+                active_provider = fallback_provider
 
             response = active_provider.complete(
                 messages=[{"role": "user", "content": prompt}],

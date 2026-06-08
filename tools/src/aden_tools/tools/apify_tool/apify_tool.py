@@ -35,9 +35,7 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(
-            f"{APIFY_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
-        )
+        resp = httpx.get(f"{APIFY_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your APIFY_API_TOKEN."}
         if resp.status_code == 404:
@@ -53,9 +51,7 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
 
 def _post(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.post(
-            f"{APIFY_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=60.0
-        )
+        resp = httpx.post(f"{APIFY_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=60.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your APIFY_API_TOKEN."}
         if resp.status_code not in (200, 201):

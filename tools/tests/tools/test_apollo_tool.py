@@ -546,9 +546,7 @@ class TestEnrichCompanyTool:
 
     @patch("aden_tools.tools.apollo_tool.apollo_tool.httpx.post")
     def test_enrich_company_not_found(self, mock_post):
-        mock_post.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"organization": None})
-        )
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"organization": None}))
         result = self._fn("apollo_enrich_company")(domain="notreal.xyz")
         assert result["match_found"] is False
 

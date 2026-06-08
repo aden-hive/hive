@@ -612,9 +612,7 @@ def register_tools(
                 return credentials.get_by_alias("github", account)
             token = credentials.get("github")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('github'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('github'), got {type(token).__name__}")
             return token
         return os.getenv("GITHUB_TOKEN")
 
@@ -1191,9 +1189,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.create_release(
-                owner, repo, tag_name, name, body, draft, prerelease, target_commitish
-            )
+            return client.create_release(owner, repo, tag_name, name, body, draft, prerelease, target_commitish)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

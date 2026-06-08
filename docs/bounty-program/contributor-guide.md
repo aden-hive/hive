@@ -1,14 +1,12 @@
-# Contributor Guide — Integration Bounty Program
+# Contributor Guide — Bounty Program
 
-Earn XP, Discord roles, and eventually real money by testing and building integrations for the Aden agent framework.
+Earn XP, Discord roles, and eventually real money by contributing to the Aden agent framework — from quick fixes to major features and integration work.
 
 ## Getting Started
 
 ### 1. Link your GitHub and Discord
 
-Open a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue — just paste your Discord ID and submit. A GitHub Action will automatically add you to `contributors.yml` and close the issue.
-
-To find your Discord ID: Discord Settings > Advanced > Enable **Developer Mode**, then right-click your name > **Copy User ID**.
+Run `/link-github your-github-username` in Discord. The bot will give you a verification code — create a public gist with that code, then run `/verify`. Done.
 
 Without this link, Lurkr can't push XP to your Discord account.
 
@@ -30,7 +28,13 @@ XP comes from GitHub bounties (auto-pushed on PR merge) and Discord activity in 
 
 ## Bounty Types
 
-### Test a Tool (20 pts)
+There are two categories: **integration bounties** (tool-specific) and **standard bounties** (general contributions).
+
+---
+
+### Integration Bounties
+
+#### Test a Tool (20 pts)
 
 Test an unverified tool with a real API key and report what happens.
 
@@ -41,7 +45,7 @@ Test an unverified tool with a real API key and report what happens.
 
 Report both successes and failures. Finding bugs is valuable.
 
-### Write Docs (20 pts)
+#### Write Docs (20 pts)
 
 Write a README for a tool that's missing one.
 
@@ -52,7 +56,7 @@ Write a README for a tool that's missing one.
 
 Function names and API URLs must match reality — no AI hallucinations.
 
-### Code Contribution (30 pts)
+#### Code Contribution (30 pts)
 
 Add a health checker, fix a bug, or improve an integration.
 
@@ -66,7 +70,7 @@ Add a health checker, fix a bug, or improve an integration.
 1. Find a bug during testing, file an issue
 2. Fix it in a PR with a test covering the bug
 
-### New Integration (75 pts)
+#### New Integration (75 pts)
 
 Build a complete integration from scratch.
 
@@ -76,6 +80,60 @@ Build a complete integration from scratch.
 4. Run `make check && make test`
 
 Expect multiple review rounds.
+
+---
+
+### Standard Bounties
+
+General contributions to the framework — not tied to a specific integration. Sized by effort and impact.
+
+#### Small (10 pts)
+
+Quick, focused fixes. Great for first-time contributors.
+
+- Fix typos or broken links in documentation
+- Improve an error message to include actionable guidance
+- Add missing type annotations to a module
+- Reproduce and confirm a bug report with environment details
+- Fix linting or CI warnings
+
+**How:** Open a PR with the fix. Tag with `bounty:small`.
+
+#### Medium (30 pts)
+
+Meaningful improvements that require reading and understanding existing code.
+
+- Fix a non-critical bug with a regression test
+- Write a how-to guide or tutorial
+- Add or significantly improve test coverage for a core module
+- Improve CLI help text, argument validation, or UX
+- Add structured logging or observability to a module
+
+**How:** Claim the issue first. Submit a PR with tests where applicable. Tag with `bounty:medium`.
+
+#### Large (75 pts)
+
+Significant work that adds real capability or improves the project substantially.
+
+- Implement a new user-facing feature end to end
+- Performance optimization with before/after benchmarks
+- Build a new CLI command or subcommand
+- Write comprehensive architecture documentation for a subsystem
+- Add a new credential adapter type
+
+**How:** Claim the issue and discuss your approach in the issue before starting. Submit a PR. Tag with `bounty:large`.
+
+#### Extreme (150 pts)
+
+Major contributions that shape the project's direction. Requires maintainer pre-approval.
+
+- Design and implement a major subsystem (e.g., plugin system, caching layer)
+- Security audit of a core module with findings and fixes
+- Major refactor of core architecture
+- Build a complete example application or reference implementation
+- End-to-end testing framework for agent workflows
+
+**How:** Comment on the issue with a design proposal. Wait for maintainer approval before starting work. Tag with `bounty:extreme`.
 
 ## Rules
 
@@ -94,7 +152,7 @@ A: Yes. Most services have free tiers. The bounty issue links to where you get t
 A: Contribute consistently across different bounty types for 4+ weeks. Maintainers will nominate you.
 
 **Q: What if I haven't linked my Discord yet?**
-A: You'll still get credit in GitHub, but no Lurkr XP or Discord roles. Add yourself to `contributors.yml`.
+A: You'll still get credit in GitHub, but no Lurkr XP or Discord roles. Run `/link-github` in Discord.
 
 ## Quick Reference
 

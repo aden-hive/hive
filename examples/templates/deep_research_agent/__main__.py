@@ -68,18 +68,16 @@ def tui(verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo(
-            "TUI requires the 'textual' package. Install with: pip install textual"
-        )
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
         sys.exit(1)
 
     from pathlib import Path
 
     from framework.llm import LiteLLMProvider
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.event_bus import EventBus
-    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.agent_host import AgentHost
+    from framework.host.event_bus import EventBus
+    from framework.host.execution_manager import EntryPointSpec
 
     async def run_with_tui():
         agent = DeepResearchAgent()
@@ -105,7 +103,7 @@ def tui(verbose, debug):
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
-        runtime = create_agent_runtime(
+        runtime = AgentHost(
             graph=graph,
             goal=agent.goal,
             storage_path=storage_path,
@@ -187,9 +185,7 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                topic = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Topic> "
-                )
+                topic = await asyncio.get_event_loop().run_in_executor(None, input, "Topic> ")
                 if topic.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break

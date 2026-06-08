@@ -53,9 +53,7 @@ class TestTinesListStories:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["tines_list_stories"]()
 
@@ -87,9 +85,7 @@ class TestTinesGetStory:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["tines_get_story"](story_id=123)
 
@@ -115,9 +111,7 @@ class TestTinesListActions:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["tines_list_actions"](story_id=123)
 
@@ -148,9 +142,7 @@ class TestTinesGetAction:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["tines_get_action"](action_id=456)
 
@@ -178,9 +170,7 @@ class TestTinesGetActionLogs:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)
-            ),
+            patch("aden_tools.tools.tines_tool.tines_tool.httpx.get", return_value=_mock_resp(data)),
         ):
             result = tool_fns["tines_get_action_logs"](action_id=456)
 

@@ -140,11 +140,7 @@ def register_tools(
         # Basic query validation
         query_upper = query.strip().upper()
         if not query_upper.startswith("SELECT") and not query_upper.startswith("WITH"):
-            return {
-                "error": (
-                    "Only SELECT queries are allowed. Use mssql_execute_update for modifications."
-                )
-            }
+            return {"error": ("Only SELECT queries are allowed. Use mssql_execute_update for modifications.")}
 
         connection, error = _create_connection()
         if error:
@@ -216,8 +212,7 @@ def register_tools(
         allowed_keywords = ["INSERT", "UPDATE", "DELETE", "MERGE"]
         if not any(query_upper.startswith(kw) for kw in allowed_keywords):
             return {
-                "error": f"Only {', '.join(allowed_keywords)} queries are allowed. "
-                "Use mssql_execute_query for SELECT."
+                "error": f"Only {', '.join(allowed_keywords)} queries are allowed. Use mssql_execute_query for SELECT."
             }
 
         # Safety check for DELETE without WHERE

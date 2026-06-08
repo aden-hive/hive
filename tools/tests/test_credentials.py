@@ -448,8 +448,7 @@ class TestSpecCompleteness:
         for name, spec in CREDENTIAL_SPECS.items():
             if spec.direct_api_key_supported:
                 assert spec.api_key_instructions.strip(), (
-                    f"Credential '{name}' has direct_api_key_supported=True "
-                    f"but empty api_key_instructions"
+                    f"Credential '{name}' has direct_api_key_supported=True but empty api_key_instructions"
                 )
 
     def test_all_specs_have_credential_id(self):

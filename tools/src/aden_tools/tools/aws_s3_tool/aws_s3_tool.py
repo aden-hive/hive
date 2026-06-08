@@ -69,8 +69,7 @@ def _sign_request(
     # Canonical query string
     sorted_params = sorted(query_params.items())
     canonical_qs = "&".join(
-        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
-        for k, v in sorted_params
+        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}" for k, v in sorted_params
     )
 
     # Canonical headers
@@ -78,14 +77,11 @@ def _sign_request(
     canonical_headers = "".join(f"{k}:{headers[k].strip()}\n" for k in signed_header_names)
     signed_headers = ";".join(signed_header_names)
 
-    canonical_request = (
-        f"{method}\n{path}\n{canonical_qs}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
-    )
+    canonical_request = f"{method}\n{path}\n{canonical_qs}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
 
     credential_scope = f"{datestamp}/{region}/s3/aws4_request"
     string_to_sign = (
-        f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n"
-        f"{hashlib.sha256(canonical_request.encode()).hexdigest()}"
+        f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode()).hexdigest()}"
     )
 
     signing_key = _get_signing_key(secret_key, datestamp, region)
@@ -302,9 +298,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         body = content.encode("utf-8")
         extra = {"content-type": content_type}
 
-        resp = _s3_request(
-            "PUT", bucket, key, access_key, secret_key, region, body=body, extra_headers=extra
-        )
+        resp = _s3_request("PUT", bucket, key, access_key, secret_key, region, body=body, extra_headers=extra)
         if resp.status_code >= 400:
             return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
 
@@ -363,9 +357,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         extra = {"x-amz-copy-source": f"/{source_bucket}/{source_key}"}
 
-        resp = _s3_request(
-            "PUT", dest_bucket, dest_key, access_key, secret_key, region, extra_headers=extra
-        )
+        resp = _s3_request("PUT", dest_bucket, dest_key, access_key, secret_key, region, extra_headers=extra)
         if resp.status_code >= 400:
             return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
 
@@ -458,8 +450,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         sorted_params = sorted(query_params.items())
         canonical_qs = "&".join(
-            f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
-            for k, v in sorted_params
+            f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}" for k, v in sorted_params
         )
 
         canonical_request = f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
@@ -470,9 +461,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         )
 
         signing_key = _get_signing_key(secret_key, datestamp, region)
-        signature = hmac.new(
-            signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
         presigned_url = f"https://{host}{path}?{canonical_qs}&X-Amz-Signature={signature}"
 

@@ -146,9 +146,7 @@ class TestZohoCrmListModules:
 class TestZohoCrmAddNote:
     def test_missing_content(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["zoho_crm_add_note"](
-                module="Leads", record_id="123", title="Note", content=""
-            )
+            result = tool_fns["zoho_crm_add_note"](module="Leads", record_id="123", title="Note", content="")
         assert "error" in result
 
     def test_successful_add(self, tool_fns):
@@ -159,8 +157,6 @@ class TestZohoCrmAddNote:
         ):
             mock_post.return_value.status_code = 201
             mock_post.return_value.json.return_value = mock_resp
-            result = tool_fns["zoho_crm_add_note"](
-                module="Leads", record_id="123", title="Note", content="Follow up"
-            )
+            result = tool_fns["zoho_crm_add_note"](module="Leads", record_id="123", title="Note", content="Follow up")
 
         assert result["status"] == "success"

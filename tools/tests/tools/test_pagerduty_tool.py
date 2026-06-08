@@ -101,9 +101,7 @@ class TestPagerdutyCreateIncident:
                 return_value=_mock_resp(data, 201),
             ),
         ):
-            result = tool_fns["pagerduty_create_incident"](
-                title="Server is on fire", service_id="PWIXJZS"
-            )
+            result = tool_fns["pagerduty_create_incident"](title="Server is on fire", service_id="PWIXJZS")
 
         assert result["result"] == "created"
         assert result["id"] == "PT4KHLK"
@@ -126,9 +124,7 @@ class TestPagerdutyUpdateIncident:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["pagerduty_update_incident"](
-                incident_id="PT4KHLK", status="acknowledged"
-            )
+            result = tool_fns["pagerduty_update_incident"](incident_id="PT4KHLK", status="acknowledged")
 
         assert result["status"] == "acknowledged"
 

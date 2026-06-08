@@ -55,7 +55,7 @@ metadata = AgentMetadata()
 ```python
 """Node definitions for My Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Process (autonomous entry node)
 # The queen handles intake and passes structured input via
@@ -123,14 +123,15 @@ __all__ = ["process_node", "handoff_node"]
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost
+from framework.host.execution_manager import EntryPointSpec
+
 
 from .config import default_config, metadata
 from .nodes import process_node, handoff_node
@@ -227,7 +228,7 @@ class MyAgent:
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph, goal=self.goal, storage_path=self._storage_path,
             entry_points=[EntryPointSpec(id="default", name="Default", entry_node=self.entry_node,
                                          trigger_type="manual", isolation_level="shared")],
@@ -460,8 +461,8 @@ def tui():
     from framework.tui.app import AdenTUI
     from framework.llm import LiteLLMProvider
     from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.host.agent_host import AgentHost
+    from framework.host.execution_manager import EntryPointSpec
 
     async def run_tui():
         agent = MyAgent()
@@ -471,7 +472,7 @@ def tui():
         mcp_cfg = Path(__file__).parent / "mcp_servers.json"
         if mcp_cfg.exists(): agent._tool_registry.load_mcp_config(mcp_cfg)
         llm = LiteLLMProvider(model=agent.config.model, api_key=agent.config.api_key, api_base=agent.config.api_base)
-        runtime = create_agent_runtime(
+        runtime = AgentHost(
             graph=agent._build_graph(), goal=agent.goal, storage_path=storage,
             entry_points=[EntryPointSpec(id="start", name="Start", entry_node="process", trigger_type="manual", isolation_level="isolated")],
             llm=llm, tools=list(agent._tool_registry.get_tools().values()), tool_executor=agent._tool_registry.get_executor())
@@ -509,17 +510,17 @@ if __name__ == "__main__":
 
 ## mcp_servers.json
 
-> **Auto-generated.** `initialize_and_build_agent` creates this file with hive-tools
+> **Auto-generated.** `initialize_and_build_agent` creates this file with hive_tools
 > as the default. Only edit manually to add additional MCP servers.
 
 ```json
 {
-  "hive-tools": {
+  "hive_tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],
     "cwd": "../../tools",
-    "description": "Hive tools MCP server"
+    "description": "hive_tools MCP server"
   }
 }
 ```

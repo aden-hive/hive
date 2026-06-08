@@ -161,9 +161,7 @@ class TestGetBooking:
         with patch("httpx.get") as mock_get:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "booking": {"id": 123, "title": "Meeting", "status": "accepted"}
-            }
+            mock_response.json.return_value = {"booking": {"id": 123, "title": "Meeting", "status": "accepted"}}
             mock_get.return_value = mock_response
 
             result = calcom_tools["get_booking"](booking_id=123)
@@ -373,9 +371,7 @@ class TestGetEventType:
         with patch("httpx.get") as mock_get:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "event_type": {"id": 123, "title": "30 Min Meeting", "length": 30}
-            }
+            mock_response.json.return_value = {"event_type": {"id": 123, "title": "30 Min Meeting", "length": 30}}
             mock_get.return_value = mock_response
 
             result = calcom_tools["get_event_type"](event_type_id=123)

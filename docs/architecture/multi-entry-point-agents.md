@@ -141,9 +141,9 @@ Compare to proper state management:
 
 ```python
 # Isolated test - no external dependencies
-memory = manager.create_memory("test-exec", "test-stream", IsolationLevel.ISOLATED)
-await memory.write("key", "value")
-assert await memory.read("key") == "value"
+buf = manager.create_buffer("test-exec", "test-stream", IsolationLevel.ISOLATED)
+await buf.write("key", "value")
+assert await buf.read("key") == "value"
 # Other tests unaffected
 ```
 
@@ -169,7 +169,7 @@ The new architecture introduces explicit state management with proper isolation:
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
 │         └────────────────┼────────────────┘        │
 │                          ↓                         │
-│              SharedStateManager                    │
+│              SharedBufferManager                    │
 │              (Isolation Levels)                    │
 │                                                    │
 │              OutcomeAggregator                     │
@@ -179,7 +179,7 @@ The new architecture introduces explicit state management with proper isolation:
 
 ### Key Components
 
-#### 1. SharedStateManager with Isolation Levels
+#### 1. SharedBufferManager with Isolation Levels
 
 ```python
 class IsolationLevel(Enum):
@@ -272,11 +272,11 @@ The key distinction:
 
 | Use Case                             | Correct Approach                  |
 | ------------------------------------ | --------------------------------- |
-| Coordinate between executions        | SharedStateManager                |
+| Coordinate between executions        | SharedBufferManager                |
 | Track decision outcomes              | StreamRuntime + OutcomeAggregator |
 | Call external API                    | Tool                              |
 | Persist business data                | Tool (to external storage)        |
-| Share scratch state during execution | StreamMemory                      |
+| Share scratch state during execution | StreamBuffer                      |
 | Publish events to other streams      | EventBus                          |
 
 ---
@@ -332,6 +332,6 @@ The multi-entry-point architecture doesn't just enable concurrent execution—it
 ## References
 
 - [core/framework/runtime/agent_runtime.py](../../core/framework/runtime/agent_runtime.py) - AgentRuntime implementation
-- [core/framework/runtime/shared_state.py](../../core/framework/runtime/shared_state.py) - SharedStateManager
+- [core/framework/runtime/shared_state.py](../../core/framework/runtime/shared_state.py) - SharedBufferManager
 - [core/framework/runtime/outcome_aggregator.py](../../core/framework/runtime/outcome_aggregator.py) - Cross-stream goal evaluation
 - [core/framework/runtime/tests/test_agent_runtime.py](../../core/framework/runtime/tests/test_agent_runtime.py) - Test examples

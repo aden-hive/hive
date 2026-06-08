@@ -12,13 +12,12 @@
  *   GITHUB_REPOSITORY_OWNER    — e.g. "adenhq"
  *   GITHUB_REPOSITORY_NAME     — e.g. "hive"
  *   DISCORD_WEBHOOK_URL        — Discord webhook for #integrations-announcements
+ *   MONGODB_URI                — MongoDB connection string (contributors collection)
  *   LURKR_API_KEY              — Lurkr Read/Write API key (for XP push)
  *   LURKR_GUILD_ID             — Discord server ID where Lurkr is installed
  *   PR_NUMBER                  — (notify mode) The merged PR number
  */
 
-import { readFileSync } from "fs";
-import { join } from "path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,10 +67,16 @@ interface LeaderboardEntry {
 // ---------------------------------------------------------------------------
 
 const POINTS: Record<string, number> = {
+  // Integration bounties
   "bounty:test": 20,
   "bounty:docs": 20,
   "bounty:code": 30,
   "bounty:new-tool": 75,
+  // Standard bounties
+  "bounty:small": 10,
+  "bounty:medium": 30,
+  "bounty:large": 75,
+  "bounty:extreme": 150,
 };
 
 // ---------------------------------------------------------------------------
@@ -145,59 +150,38 @@ async function getMergedBountyPRs(
 }
 
 // ---------------------------------------------------------------------------
-// Identity resolution
+// Identity resolution (via bot API)
 // ---------------------------------------------------------------------------
 
-// Parse contributors.yml without a YAML dependency.
-// The format is simple enough to parse with regex:
-//   contributors:
-//     - github: jane-doe
-//       discord: "123456789012345678"
-//       name: Jane Doe
-function parseContributorsYaml(raw: string): Contributor[] {
-  const contributors: Contributor[] = [];
-  let current: Partial<Contributor> | null = null;
-
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith("- github:")) {
-      if (current?.github && current?.discord) {
-        contributors.push(current as Contributor);
-      }
-      current = { github: trimmed.replace("- github:", "").trim() };
-    } else if (trimmed.startsWith("discord:") && current) {
-      current.discord = trimmed.replace("discord:", "").trim().replace(/^["']|["']$/g, "");
-    } else if (trimmed.startsWith("name:") && current) {
-      current.name = trimmed.replace("name:", "").trim();
-    }
-  }
-
-  // Don't forget the last entry
-  if (current?.github && current?.discord) {
-    contributors.push(current as Contributor);
-  }
-
-  return contributors;
-}
-
-function loadContributors(): Map<string, Contributor> {
+async function loadContributors(): Promise<Map<string, Contributor>> {
   const map = new Map<string, Contributor>();
 
-  try {
-    // Resolve path relative to the script location (scripts/ dir → repo root)
-    const scriptDir = new URL(".", import.meta.url).pathname;
-    const raw = readFileSync(
-      join(scriptDir, "..", "contributors.yml"),
-      "utf-8"
-    );
-    const entries = parseContributorsYaml(raw);
+  const apiUrl = process.env.BOT_API_URL;
+  if (!apiUrl) {
+    console.warn("Warning: BOT_API_URL not set, contributor lookups disabled");
+    return map;
+  }
 
-    for (const c of entries) {
-      map.set(c.github.toLowerCase(), c);
+  try {
+    const headers: Record<string, string> = {};
+    const apiKey = process.env.BOT_API_KEY;
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
     }
-  } catch {
-    console.warn("Warning: could not load contributors.yml");
+
+    const res = await fetch(`${apiUrl}/api/contributors`, { headers });
+    if (!res.ok) {
+      throw new Error(`${res.status} ${res.statusText}`);
+    }
+
+    const docs = (await res.json()) as Contributor[];
+    for (const doc of docs) {
+      map.set(doc.github.toLowerCase(), doc);
+    }
+
+    console.log(`Loaded ${map.size} contributors from bot API`);
+  } catch (err) {
+    console.warn(`Warning: could not load contributors from bot API: ${err}`);
   }
 
   return map;
@@ -276,6 +260,10 @@ function formatBountyNotification(bounty: BountyResult): string {
     docs: "\u{1F4DD}",
     code: "\u{1F527}",
     "new-tool": "\u{2B50}",
+    small: "\u{1F4A1}",
+    medium: "\u{1F6E0}",
+    large: "\u{1F680}",
+    extreme: "\u{1F525}",
   };
 
   const emoji = typeEmoji[bounty.bountyType] ?? "\u{1F3AF}";
@@ -285,7 +273,7 @@ function formatBountyNotification(bounty: BountyResult): string {
   msg += `PR: ${bounty.pr.html_url}\n`;
 
   if (!bounty.discordId) {
-    msg += `\n_\u{1F517} @${bounty.contributor}: link your Discord in \`contributors.yml\` to get pinged!_`;
+    msg += `\n_\u{1F517} @${bounty.contributor}: use \`/link-github\` in Discord to get pinged!_`;
   }
 
   return msg;
@@ -301,7 +289,7 @@ function formatLeaderboard(entries: LeaderboardEntry[]): string {
 
   const medals = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
-  let msg = "**\u{1F3C6} Integration Bounty Leaderboard**\n\n";
+  let msg = "**\u{1F3C6} Bounty Leaderboard**\n\n";
 
   for (let i = 0; i < top10.length; i++) {
     const entry = top10[i];
@@ -454,7 +442,7 @@ async function main() {
     process.exit(1);
   }
 
-  const contributors = loadContributors();
+  const contributors = await loadContributors();
 
   if (mode === "notify") {
     // Single bounty notification

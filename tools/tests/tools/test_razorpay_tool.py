@@ -123,9 +123,7 @@ class TestRazorpayClient:
         mock_response.json.return_value = {"count": 1, "items": []}
         mock_get.return_value = mock_response
 
-        self.client.list_payments(
-            count=20, skip=5, from_timestamp=1640000000, to_timestamp=1650000000
-        )
+        self.client.list_payments(count=20, skip=5, from_timestamp=1640000000, to_timestamp=1650000000)
 
         call_params = mock_get.call_args.kwargs["params"]
         assert call_params["count"] == 20
@@ -506,9 +504,7 @@ class TestListPaymentsTool:
 
     @patch("aden_tools.tools.razorpay_tool.razorpay_tool.httpx.get")
     def test_list_payments_normalizes_count(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"count": 0, "items": []})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"count": 0, "items": []}))
         # Count too high
         self._fn("razorpay_list_payments")(count=500)
         assert mock_get.call_args.kwargs["params"]["count"] == 100
@@ -602,31 +598,23 @@ class TestCreatePaymentLinkTool:
                 }
             ),
         )
-        result = self._fn("razorpay_create_payment_link")(
-            amount=50000, currency="INR", description="Test"
-        )
+        result = self._fn("razorpay_create_payment_link")(amount=50000, currency="INR", description="Test")
         assert result["id"] == "plink_123"
         assert result["short_url"] == "https://rzp.io/rzp/test"
 
     def test_create_payment_link_validation(self):
         # Negative amount
-        result = self._fn("razorpay_create_payment_link")(
-            amount=-100, currency="INR", description="Test"
-        )
+        result = self._fn("razorpay_create_payment_link")(amount=-100, currency="INR", description="Test")
         assert "error" in result
         assert "positive" in result["error"]
 
         # Invalid currency
-        result = self._fn("razorpay_create_payment_link")(
-            amount=50000, currency="INVALID", description="Test"
-        )
+        result = self._fn("razorpay_create_payment_link")(amount=50000, currency="INVALID", description="Test")
         assert "error" in result
         assert "3-letter code" in result["error"]
 
         # Missing description
-        result = self._fn("razorpay_create_payment_link")(
-            amount=50000, currency="INR", description=""
-        )
+        result = self._fn("razorpay_create_payment_link")(amount=50000, currency="INR", description="")
         assert "error" in result
         assert "required" in result["error"]
 
@@ -668,9 +656,7 @@ class TestListInvoicesTool:
 
     @patch("aden_tools.tools.razorpay_tool.razorpay_tool.httpx.get")
     def test_list_invoices_with_filter(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"count": 0, "items": []})
-        )
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"count": 0, "items": []}))
         self._fn("razorpay_list_invoices")(count=10, type_filter="invoice")
         call_params = mock_get.call_args.kwargs["params"]
         assert call_params["type"] == "invoice"

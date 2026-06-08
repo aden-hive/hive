@@ -74,9 +74,7 @@ class TestGoogleMapsCredentials:
         assert "not configured" in result["error"]
         assert "help" in result
 
-    def test_reverse_geocode_no_credentials_returns_error(
-        self, maps_reverse_geocode_fn, monkeypatch
-    ):
+    def test_reverse_geocode_no_credentials_returns_error(self, maps_reverse_geocode_fn, monkeypatch):
         """Reverse geocode without credentials returns helpful error."""
         monkeypatch.delenv("GOOGLE_MAPS_API_KEY", raising=False)
 
@@ -94,9 +92,7 @@ class TestGoogleMapsCredentials:
         assert "error" in result
         assert "not configured" in result["error"]
 
-    def test_distance_matrix_no_credentials_returns_error(
-        self, maps_distance_matrix_fn, monkeypatch
-    ):
+    def test_distance_matrix_no_credentials_returns_error(self, maps_distance_matrix_fn, monkeypatch):
         """Distance matrix without credentials returns helpful error."""
         monkeypatch.delenv("GOOGLE_MAPS_API_KEY", raising=False)
 

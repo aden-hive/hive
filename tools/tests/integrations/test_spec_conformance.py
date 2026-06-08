@@ -55,9 +55,7 @@ class TestModuleStructure:
     def test_module_exports_register_tools(self, import_path: str, short_name: str):
         """register_tools is importable from the module's package."""
         mod = importlib.import_module(import_path)
-        assert hasattr(mod, "register_tools"), (
-            f"Module {import_path} does not export 'register_tools'"
-        )
+        assert hasattr(mod, "register_tools"), f"Module {import_path} does not export 'register_tools'"
         assert callable(mod.register_tools), f"{import_path}.register_tools is not callable"
 
     @pytest.mark.parametrize(
@@ -70,9 +68,7 @@ class TestModuleStructure:
         mod = importlib.import_module(import_path)
         all_list = getattr(mod, "__all__", None)
         if all_list is not None:
-            assert "register_tools" in all_list, (
-                f"{import_path}.__all__ does not include 'register_tools'"
-            )
+            assert "register_tools" in all_list, f"{import_path}.__all__ does not include 'register_tools'"
 
 
 # ---------------------------------------------------------------------------
@@ -94,9 +90,7 @@ class TestRegisterToolsSignature:
         sig = inspect.signature(mod.register_tools)
         params = list(sig.parameters.keys())
         assert len(params) >= 1, f"{import_path}.register_tools has no parameters"
-        assert params[0] == "mcp", (
-            f"{import_path}.register_tools first param should be 'mcp', got '{params[0]}'"
-        )
+        assert params[0] == "mcp", f"{import_path}.register_tools first param should be 'mcp', got '{params[0]}'"
 
     @pytest.mark.parametrize(
         "import_path,short_name",
@@ -107,14 +101,10 @@ class TestRegisterToolsSignature:
         """Tools with CredentialSpecs must accept a 'credentials' parameter."""
         mod = importlib.import_module(import_path)
         sig = inspect.signature(mod.register_tools)
-        assert "credentials" in sig.parameters, (
-            f"{import_path}.register_tools should accept 'credentials' param"
-        )
+        assert "credentials" in sig.parameters, f"{import_path}.register_tools should accept 'credentials' param"
 
         param = sig.parameters["credentials"]
-        assert param.default is None, (
-            f"{import_path}.register_tools 'credentials' param should default to None"
-        )
+        assert param.default is None, f"{import_path}.register_tools 'credentials' param should default to None"
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +125,7 @@ class TestCredentialSpecFields:
     def test_tools_or_node_types_non_empty(self, spec_name: str):
         """CredentialSpec must have non-empty tools or node_types."""
         spec = CREDENTIAL_SPECS[spec_name]
-        assert spec.tools or spec.node_types, (
-            f"Spec '{spec_name}' has both empty tools and empty node_types"
-        )
+        assert spec.tools or spec.node_types, f"Spec '{spec_name}' has both empty tools and empty node_types"
 
     @pytest.mark.parametrize("spec_name", list(CREDENTIAL_SPECS.keys()))
     def test_help_url_non_empty(self, spec_name: str):
@@ -218,9 +206,7 @@ class TestSpecsMergedIntoCredentialSpecs:
         """Every key in the category dict must exist in CREDENTIAL_SPECS."""
         category = self.CATEGORY_DICTS[category_name]
         for spec_name, spec in category.items():
-            assert spec_name in CREDENTIAL_SPECS, (
-                f"'{spec_name}' from {category_name} is not in CREDENTIAL_SPECS"
-            )
+            assert spec_name in CREDENTIAL_SPECS, f"'{spec_name}' from {category_name} is not in CREDENTIAL_SPECS"
             assert CREDENTIAL_SPECS[spec_name] is spec, (
                 f"'{spec_name}' in CREDENTIAL_SPECS is not the same object as in {category_name}"
             )
@@ -251,8 +237,7 @@ class TestToolNamesInReturnList:
             if tool_name in KNOWN_PHANTOM_TOOLS:
                 continue
             assert tool_name in all_tools_return, (
-                f"Tool '{tool_name}' (from spec '{spec_name}') "
-                f"not in register_all_tools() return list"
+                f"Tool '{tool_name}' (from spec '{spec_name}') not in register_all_tools() return list"
             )
 
 
@@ -285,9 +270,7 @@ class TestCredentialCoverage:
         CREDENTIAL_TOOL_MODULES,
         ids=CREDENTIAL_TOOL_MODULE_IDS,
     )
-    def test_credential_tools_have_specs(
-        self, import_path: str, short_name: str, all_spec_tools: set[str]
-    ):
+    def test_credential_tools_have_specs(self, import_path: str, short_name: str, all_spec_tools: set[str]):
         """Every tool from a module with credentials param must have a spec.
 
         If this test fails, you have two options:

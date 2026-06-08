@@ -54,9 +54,7 @@ def create_label_fn(gmail_tools):
     return gmail_tools["gmail_create_label"]
 
 
-def _mock_response(
-    status_code: int = 200, json_data: dict | None = None, text: str = ""
-) -> MagicMock:
+def _mock_response(status_code: int = 200, json_data: dict | None = None, text: str = "") -> MagicMock:
     """Create a mock httpx.Response."""
     resp = MagicMock()
     resp.status_code = status_code

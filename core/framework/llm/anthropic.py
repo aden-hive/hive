@@ -50,9 +50,7 @@ class AnthropicProvider(LLMProvider):
         # Delegate to LiteLLMProvider internally.
         self.api_key = api_key or _get_api_key_from_credential_store()
         if not self.api_key:
-            raise ValueError(
-                "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
-            )
+            raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key.")
 
         self.model = model
 

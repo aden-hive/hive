@@ -24,13 +24,8 @@ INTERCOM_CREDENTIALS = {
         ],
         required=True,
         startup_required=False,
-        help_url=(
-            "https://developers.intercom.com/docs/build-an-integration/learn-more/authentication"
-        ),
-        description=(
-            "Intercom access token (Settings > Integrations"
-            " > Developer Hub > Your App > Authentication)"
-        ),
+        help_url=("https://developers.intercom.com/docs/build-an-integration/learn-more/authentication"),
+        description=("Intercom access token (Settings > Integrations > Developer Hub > Your App > Authentication)"),
         # Auth method support
         aden_supported=False,
         direct_api_key_supported=True,

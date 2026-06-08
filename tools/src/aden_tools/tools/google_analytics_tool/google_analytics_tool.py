@@ -134,10 +134,7 @@ def register_tools(
         if credentials is not None:
             path = credentials.get("google_analytics")
             if path is not None and not isinstance(path, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('google_analytics'), "
-                    f"got {type(path).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('google_analytics'), got {type(path).__name__}")
             return path
         return os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
@@ -161,9 +158,7 @@ def register_tools(
     def _validate_inputs(property_id: str, *, limit: int | None = None) -> dict[str, str] | None:
         """Validate common inputs. Returns an error dict or None."""
         if not property_id or not property_id.startswith("properties/"):
-            return {
-                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
-            }
+            return {"error": "property_id must start with 'properties/' (e.g., 'properties/123456')"}
         if limit is not None and (limit < 1 or limit > 10000):
             return {"error": "limit must be between 1 and 10000"}
         return None

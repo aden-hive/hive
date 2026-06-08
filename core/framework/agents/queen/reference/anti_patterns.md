@@ -13,7 +13,7 @@
 6. **Calling set_output in same turn as tool calls** — Call set_output in a SEPARATE turn.
 
 ## File Template Errors
-7. **Wrong import paths** — Use `from framework.graph import ...`, NOT `from core.framework.graph import ...`.
+7. **Wrong import paths** — Use `from framework.orchestrator import ...`, NOT `from framework.graph import ...` or `from core.framework...`.
 8. **Missing storage path** — Agent class must set `self._storage_path = Path.home() / ".hive" / "agents" / "agent_name"`.
 9. **Missing mcp_servers.json** — Without this, the agent has no tools at runtime.
 10. **Bare `python` command** — Use `"command": "uv"` with args `["run", "python", ...]`.
@@ -25,9 +25,8 @@
 14. **Forgetting sys.path setup in conftest.py** — Tests need `exports/` and `core/` on sys.path.
 
 ## GCU Errors
-15. **Manually wiring browser tools on event_loop nodes** — Use `node_type="gcu"` which auto-includes browser tools. Do NOT manually list browser tool names.
-16. **Using GCU nodes as regular graph nodes** — GCU nodes are subagents only. They must ONLY appear in `sub_agents=["gcu-node-id"]` and be invoked via `delegate_to_sub_agent()`. Never connect via edges or use as entry/terminal nodes.
+15. **Manually wiring browser tools on event_loop nodes** — Browser nodes use tools: {policy: "all"} to get all browser tools.
 
 ## Worker Agent Errors
-17. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Client-facing nodes in workers are for mid-execution review/approval only.
-18. **Putting `escalate` or `set_output` in NodeSpec `tools=[]`** — These are synthetic framework tools, auto-injected at runtime. Only list MCP tools from `list_agent_tools()`.
+19. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Route worker review/approval through queen escalation instead of direct worker HITL.
+20. **Putting `escalate` or `set_output` in NodeSpec `tools=[]`** — These are synthetic framework tools, auto-injected at runtime. Only list MCP tools from `list_agent_tools()`.

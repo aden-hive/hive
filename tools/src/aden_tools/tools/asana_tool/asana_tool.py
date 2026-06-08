@@ -34,9 +34,7 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(
-            f"{ASANA_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
-        )
+        resp = httpx.get(f"{ASANA_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your ASANA_ACCESS_TOKEN."}
         if resp.status_code == 403:
@@ -237,10 +235,7 @@ def register_tools(
             return {"error": "task_gid is required"}
 
         params = {
-            "opt_fields": (
-                "name,notes,completed,due_on,assignee.name,"
-                "projects.name,tags.name,created_at,modified_at"
-            )
+            "opt_fields": ("name,notes,completed,due_on,assignee.name,projects.name,tags.name,created_at,modified_at")
         }
         data = _get(f"tasks/{task_gid}", token, params)
         if "error" in data:
