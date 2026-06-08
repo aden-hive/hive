@@ -210,9 +210,7 @@ def register_tools(
         if credentials is not None:
             token = credentials.get("whatsapp")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('whatsapp'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('whatsapp'), got {type(token).__name__}")
             return token
         return os.getenv("WHATSAPP_ACCESS_TOKEN")
 
@@ -221,8 +219,7 @@ def register_tools(
             val = credentials.get("whatsapp_phone_number_id")
             if val is not None and not isinstance(val, str):
                 raise TypeError(
-                    f"Expected string from credentials.get('whatsapp_phone_number_id'), "
-                    f"got {type(val).__name__}"
+                    f"Expected string from credentials.get('whatsapp_phone_number_id'), got {type(val).__name__}"
                 )
             return val
         return os.getenv("WHATSAPP_PHONE_NUMBER_ID")

@@ -199,9 +199,7 @@ class TestWhatsAppClient:
         mock_response.json.return_value = {"messages": [{"id": "wamid.img1"}]}
         mock_post.return_value = mock_response
 
-        self.client.send_media(
-            "+14155552671", "image", "https://example.com/photo.jpg", caption="A photo"
-        )
+        self.client.send_media("+14155552671", "image", "https://example.com/photo.jpg", caption="A photo")
 
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args.kwargs
@@ -481,9 +479,7 @@ class TestErrorHandling:
         tools = self._get_tools()
 
         with self._env_patch():
-            result = tools["whatsapp_send_image"].fn(
-                to="+1234", image_url="https://example.com/img.jpg"
-            )
+            result = tools["whatsapp_send_image"].fn(to="+1234", image_url="https://example.com/img.jpg")
 
         assert "error" in result
         assert "timed out" in result["error"].lower()
@@ -496,9 +492,7 @@ class TestErrorHandling:
         tools = self._get_tools()
 
         with self._env_patch():
-            result = tools["whatsapp_send_document"].fn(
-                to="+1234", document_url="https://example.com/doc.pdf"
-            )
+            result = tools["whatsapp_send_document"].fn(to="+1234", document_url="https://example.com/doc.pdf")
 
         assert "error" in result
 
