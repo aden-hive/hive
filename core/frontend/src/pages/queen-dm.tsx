@@ -9,6 +9,7 @@ import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi } from "@/api/queens";
+import { ApiError } from "@/api/client";
 import { useMultiSSE } from "@/hooks/use-sse";
 import { usePendingQueue } from "@/hooks/use-pending-queue";
 import type { AgentEvent, HistorySession } from "@/api/types";
@@ -311,7 +312,22 @@ export default function QueenDM() {
           );
           bootstrapSessionId = bootstrapResult.session_id;
         } else if (selectedSessionParam) {
-          await queensApi.selectSession(queenId, selectedSessionParam);
+          // Validate the stored/URL session before trusting it downstream.
+          // If the sessions folder was deleted while hive was closed, this
+          // id is stale and selectSession 404s. Recover by clearing the
+          // stale pointer and stripping the param; clearing the param
+          // re-runs this effect into the get-or-create path, so a single
+          // queen selection works instead of erroring on the first click.
+          try {
+            await queensApi.selectSession(queenId, selectedSessionParam);
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 404) {
+              clearLastSession(queenId);
+              setSearchParams({}, { replace: true });
+              return;
+            }
+            throw err;
+          }
         }
         if (cancelled) return;
         let sid: string;
