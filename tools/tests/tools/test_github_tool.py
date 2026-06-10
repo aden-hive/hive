@@ -290,7 +290,7 @@ class TestGitHubClient:
         assert result["success"] is True
         assert result["data"]["name"] == "main"
 
-    @patch("httpx.get")
+    @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
     def test_get_branch_with_slash(self, mock_get):
         """Slash-separated branch names like feature/my-branch must be accepted."""
         mock_response = MagicMock()
@@ -310,7 +310,7 @@ class TestGitHubClient:
         called_url = mock_get.call_args[0][0]
         assert "feature%2Fmy-branch" in called_url
 
-    @patch("httpx.get")
+    @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
     def test_get_branch_with_multiple_slashes(self, mock_get):
         """Deeply nested branch names like release/v2/hotfix must also be accepted."""
         mock_response = MagicMock()
