@@ -41,6 +41,36 @@ def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
     return param
 
 
+def _sanitize_branch_param(branch: str) -> str:
+    """
+    Sanitize a Git branch name for use as a URL path segment.
+
+    Unlike ``_sanitize_path_param``, slashes are **allowed** in branch names
+    (e.g. ``feature/my-branch``) because they are a standard Git convention.
+    Each slash-delimited segment is validated individually so that traversal
+    sequences such as ``../secret`` are still rejected.
+
+    Args:
+        branch: The branch name to sanitize (e.g. ``"main"``, ``"feature/login"``).
+
+    Returns:
+        The branch name with slashes URL-encoded so it can be safely embedded
+        in a URL path (e.g. ``"feature%2Flogin"``).
+
+    Raises:
+        ValueError: If any path segment contains ``..`` or is empty.
+    """
+    from urllib.parse import quote
+
+    segments = branch.split("/")
+    for segment in segments:
+        if not segment:
+            raise ValueError("Invalid branch: branch name must not contain empty segments")
+        if ".." in segment:
+            raise ValueError("Invalid branch: branch name must not contain '..'")
+    return quote(branch, safe="")
+
+
 def _sanitize_error_message(error: Exception) -> str:
     """
     Sanitize error messages to prevent token leaks.
@@ -396,7 +426,7 @@ class _GitHubClient:
         """Get a specific branch."""
         owner = _sanitize_path_param(owner, "owner")
         repo = _sanitize_path_param(repo, "repo")
-        branch = _sanitize_path_param(branch, "branch")
+        branch = _sanitize_branch_param(branch)
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{branch}",
             headers=self._headers,

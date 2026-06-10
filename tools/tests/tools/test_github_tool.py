@@ -290,6 +290,112 @@ class TestGitHubClient:
         assert result["success"] is True
         assert result["data"]["name"] == "main"
 
+    @patch("httpx.get")
+    def test_get_branch_with_slash(self, mock_get):
+        """Slash-separated branch names like feature/my-branch must be accepted."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "name": "feature/my-branch",
+            "protected": False,
+            "commit": {"sha": "def456"},
+        }
+        mock_get.return_value = mock_response
+
+        result = self.client.get_branch("owner", "repo", "feature/my-branch")
+
+        assert result["success"] is True
+        assert result["data"]["name"] == "feature/my-branch"
+        # Confirm the URL had the slash URL-encoded
+        called_url = mock_get.call_args[0][0]
+        assert "feature%2Fmy-branch" in called_url
+
+    @patch("httpx.get")
+    def test_get_branch_with_multiple_slashes(self, mock_get):
+        """Deeply nested branch names like release/v2/hotfix must also be accepted."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"name": "release/v2/hotfix", "protected": True}
+        mock_get.return_value = mock_response
+
+        result = self.client.get_branch("owner", "repo", "release/v2/hotfix")
+
+        assert result["success"] is True
+        called_url = mock_get.call_args[0][0]
+        assert "release%2Fv2%2Fhotfix" in called_url
+
+    def test_get_branch_rejects_path_traversal(self):
+        """Branch names containing '..' must still be rejected."""
+        with pytest.raises(ValueError, match="'\\.\\.'"):
+            self.client.get_branch("owner", "repo", "../etc/passwd")
+
+    def test_get_branch_rejects_traversal_in_slash_name(self):
+        """Traversal sequences inside slash-separated segments must be rejected."""
+        with pytest.raises(ValueError, match="'\\.\\.'"):
+            self.client.get_branch("owner", "repo", "feature/../secret")
+
+    def test_get_branch_rejects_empty_segment(self):
+        """Branch names with empty segments (double slash) must be rejected."""
+        with pytest.raises(ValueError, match="empty segments"):
+            self.client.get_branch("owner", "repo", "feature//broken")
+
+
+# --- _sanitize_branch_param unit tests ---
+
+
+class TestSanitizeBranchParam:
+    """Unit tests for the _sanitize_branch_param helper."""
+
+    def test_simple_branch_name(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        assert _sanitize_branch_param("main") == "main"
+
+    def test_slash_branch_is_url_encoded(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        assert _sanitize_branch_param("feature/my-branch") == "feature%2Fmy-branch"
+
+    def test_multiple_slashes_are_url_encoded(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        assert _sanitize_branch_param("release/v1/patch") == "release%2Fv1%2Fpatch"
+
+    def test_rejects_dotdot_traversal(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        with pytest.raises(ValueError, match="'\\.\\.'"):
+            _sanitize_branch_param("../secret")
+
+    def test_rejects_dotdot_inside_slash_segment(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        with pytest.raises(ValueError, match="'\\.\\.'"):
+            _sanitize_branch_param("feature/../secret")
+
+    def test_rejects_empty_segment_from_double_slash(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        with pytest.raises(ValueError, match="empty segments"):
+            _sanitize_branch_param("feature//broken")
+
+    def test_rejects_leading_slash(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        with pytest.raises(ValueError, match="empty segments"):
+            _sanitize_branch_param("/leading-slash")
+
+    def test_rejects_trailing_slash(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        with pytest.raises(ValueError, match="empty segments"):
+            _sanitize_branch_param("trailing-slash/")
+
+    def test_hyphenated_branch_name_unchanged(self):
+        from aden_tools.tools.github_tool.github_tool import _sanitize_branch_param
+
+        assert _sanitize_branch_param("fix-issue-123") == "fix-issue-123"
+
 
 # --- Credential retrieval tests ---
 
