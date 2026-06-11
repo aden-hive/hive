@@ -401,14 +401,16 @@ export default function QueenDM() {
       } catch {
         // Session creation/selection failed. If the URL param came from
         // our own localStorage restore, the stored session is stale (e.g.
-        // deleted on disk) — clear it so the next navigation falls
-        // through to getOrCreate instead of looping on the bad id.
+        // deleted on disk) — clear it and remove the ?session= URL param
+        // so the effect re-runs immediately with getOrCreate instead of
+        // requiring a second click on the same queen.
         if (
           queenId &&
           selectedSessionParam &&
           selectedSessionParam === readLastSession(queenId)
         ) {
           clearLastSession(queenId);
+          setSearchParams({}, { replace: true });
         }
       } finally {
         if (!cancelled) {
