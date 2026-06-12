@@ -74,7 +74,7 @@ interface UseMultiSSEOptions {
 
 /**
  * Manages one EventSource per loaded session. Diffs `sessions` on each render:
- * opens new connections, closes removed ones, leaves existing ones alone.
+ * opens new connections, closes removed or changed ones, leaves matching ones alone.
  */
 export function useMultiSSE({ sessions, onEvent }: UseMultiSSEOptions) {
   const onEventRef = useRef(onEvent);
@@ -86,20 +86,21 @@ export function useMultiSSE({ sessions, onEvent }: UseMultiSSEOptions) {
   // Diff-based open/close — runs on every `sessions` change
   useEffect(() => {
     const current = sourcesRef.current;
-    const desired = new Set(Object.keys(sessions));
+    const desired = new Map(Object.entries(sessions).filter(([, sessionId]) => sessionId));
 
     // Close connections for removed agents OR changed session IDs
     for (const [agentType, entry] of current) {
-      if (!desired.has(agentType) || sessions[agentType] !== entry.sessionId) {
-        console.log('[SSE] closing:', agentType, entry.sessionId, desired.has(agentType) ? '(session changed)' : '(removed)');
+      const nextSessionId = desired.get(agentType);
+      if (!nextSessionId || nextSessionId !== entry.sessionId) {
+        console.log('[SSE] closing:', agentType, entry.sessionId, nextSessionId ? '(session changed)' : '(removed)');
         entry.es.close();
         current.delete(agentType);
       }
     }
 
     // Open connections for new/changed sessions
-    for (const [agentType, sessionId] of Object.entries(sessions)) {
-      if (!sessionId || current.has(agentType)) continue;
+    for (const [agentType, sessionId] of desired) {
+      if (current.has(agentType)) continue;
 
       const url = `/api/sessions/${sessionId}/events`;
       console.log('[SSE] opening:', agentType, sessionId);
