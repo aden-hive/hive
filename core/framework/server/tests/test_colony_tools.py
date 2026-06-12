@@ -23,6 +23,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from framework.host.colony_runtime import ColonyRuntime
 from framework.llm.provider import Tool
 from framework.server import routes_colony_tools
+from framework.server.app import MANAGER_KEY
 
 
 def _tool(name: str) -> Tool:
@@ -121,7 +122,7 @@ def colony_dir(tmp_path, monkeypatch):
 
 async def _app(manager: _FakeManager) -> web.Application:
     app = web.Application()
-    app["manager"] = manager
+    app[MANAGER_KEY] = manager
     routes_colony_tools.register_routes(app)
     return app
 

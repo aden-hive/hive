@@ -23,6 +23,7 @@ from framework.agents.queen.queen_profiles import (
     update_queen_profile,
 )
 from framework.config import QUEENS_DIR
+from framework.server.app import MANAGER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     from framework.server.session_manager import SessionManager
 
     queen_id = request.match_info["queen_id"]
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[MANAGER_KEY]
 
     ensure_default_queens()
     try:
@@ -333,7 +334,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
 async def handle_select_queen_session(request: web.Request) -> web.Response:
     """POST /api/queen/{queen_id}/session/select -- resume a specific queen session."""
     queen_id = request.match_info["queen_id"]
-    manager = request.app["manager"]
+    manager = request.app[MANAGER_KEY]
 
     ensure_default_queens()
     try:
@@ -388,7 +389,7 @@ async def handle_new_queen_session(request: web.Request) -> web.Response:
     from framework.tools.queen_lifecycle_tools import QUEEN_PHASES
 
     queen_id = request.match_info["queen_id"]
-    manager = request.app["manager"]
+    manager = request.app[MANAGER_KEY]
 
     ensure_default_queens()
     try:

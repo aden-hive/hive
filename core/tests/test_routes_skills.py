@@ -17,6 +17,7 @@ import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from framework.server.app import MANAGER_KEY
 from framework.server.routes_skills import register_routes
 from framework.skills.overrides import (
     OverrideEntry,
@@ -45,7 +46,7 @@ class _StubSessionManager:
 
 def _build_app() -> web.Application:
     application = web.Application()
-    application["manager"] = _StubSessionManager()
+    application[MANAGER_KEY] = _StubSessionManager()
     register_routes(application)
     return application
 

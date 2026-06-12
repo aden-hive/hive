@@ -30,6 +30,7 @@ from framework.llm.model_catalog import (
     get_models_catalogue,
     get_preset,
 )
+from framework.server.app import CREDENTIAL_STORE_KEY, MANAGER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ def _resolve_api_key(provider: str, request: web.Request) -> str | None:
     cred_id = _PROVIDER_CRED_MAP.get(provider.lower())
     if cred_id:
         try:
-            store = request.app["credential_store"]
+            store = request.app[CREDENTIAL_STORE_KEY]
             key = store.get(cred_id)
             if key:
                 return key
@@ -293,7 +294,7 @@ def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | Non
     """
     from framework.server.session_manager import SessionManager
 
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[MANAGER_KEY]
     manager._model = full_model
     swapped = 0
     for session in manager.list_sessions():

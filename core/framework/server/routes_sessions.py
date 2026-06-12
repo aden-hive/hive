@@ -29,6 +29,7 @@ from pathlib import Path
 from aiohttp import web
 
 from framework.server.app import (
+    MANAGER_KEY,
     resolve_session,
     validate_agent_path,
 )
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_manager(request: web.Request) -> SessionManager:
-    return request.app["manager"]
+    return request.app[MANAGER_KEY]
 
 
 def _session_to_live_dict(session) -> dict:
@@ -1121,7 +1122,7 @@ async def handle_delete_agent(request: web.Request) -> web.Response:
 
 async def handle_reveal_session_folder(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/reveal — open session data folder in the OS file manager."""
-    manager: SessionManager = request.app["manager"]
+    manager: SessionManager = request.app[MANAGER_KEY]
     session_id = request.match_info["session_id"]
 
     session = manager.get_session(session_id)

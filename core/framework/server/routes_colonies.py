@@ -36,6 +36,7 @@ from pathlib import Path
 from aiohttp import web
 
 from framework.config import COLONIES_DIR
+from framework.server.app import MANAGER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -510,7 +511,7 @@ def _find_workers_bound_to_profile(request: web.Request, colony_name: str, profi
     spawn time and a profile mutation underneath a running worker would
     leave its tool calls pointing at a removed alias on the next turn.
     """
-    manager = request.app.get("manager")
+    manager = request.app.get(MANAGER_KEY)
     if manager is None:
         return []
     bound: list[str] = []

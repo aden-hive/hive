@@ -24,6 +24,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from framework.llm.provider import Tool
 from framework.server import routes_queen_tools
+from framework.server.app import MANAGER_KEY
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,7 @@ def queen_dir(tmp_path, monkeypatch):
 
 async def _make_app(*, manager: _FakeManager) -> web.Application:
     app = web.Application()
-    app["manager"] = manager
+    app[MANAGER_KEY] = manager
     routes_queen_tools.register_routes(app)
     return app
 
