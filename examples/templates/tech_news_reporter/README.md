@@ -109,7 +109,7 @@ JSON payload.
 
 **Sample input** (your answer when the agent asks what to cover):
 
-```
+```text
 Latest large language model and semiconductor news from the past week
 ```
 
