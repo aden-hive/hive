@@ -120,8 +120,12 @@ cd hive
 .\quickstart.ps1
 ```
 
-> **Set your LLM API key** before running an agent. Export the environment
-> variable for your provider, for example `export ANTHROPIC_API_KEY="sk-ant-..."`.
+> **Set your LLM API key** before running an agent. Set the environment
+> variable for your provider, for example `ANTHROPIC_API_KEY`:
+>
+> - macOS/Linux: `export ANTHROPIC_API_KEY="sk-ant-..."`
+> - Windows (PowerShell): `setx ANTHROPIC_API_KEY "sk-ant-..."`
+>
 > The quickstart helps you choose a default model; see
 > [Environment Variables](docs/configuration.md#environment-variables) for the
 > complete list of provider keys (OpenAI, Gemini, OpenRouter, Groq, Hive LLM, …)
