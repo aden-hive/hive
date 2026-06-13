@@ -96,7 +96,7 @@ Use Hive when the bottleneck is no longer the model but the harness around it:
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- An LLM provider that powers the agents
+- An LLM provider API key to power the agents, set as an environment variable (e.g. `ANTHROPIC_API_KEY`). Hive works with 100+ providers through LiteLLM — see [Environment Variables](docs/configuration.md#environment-variables) for the full list of supported keys and runtime flags.
 - **ripgrep (optional, recommended on Windows):** The `search_files` tool uses ripgrep for faster file search. If not installed, a Python fallback is used. On Windows: `winget install BurntSushi.ripgrep` or `scoop install ripgrep`
 
 > **Windows Users:** Native Windows is supported via `quickstart.ps1` and `hive.ps1`. Run these in PowerShell 5.1+. WSL is also an option but not required.
@@ -119,6 +119,13 @@ cd hive
 # Windows (PowerShell)
 .\quickstart.ps1
 ```
+
+> **Set your LLM API key** before running an agent. Export the environment
+> variable for your provider, for example `export ANTHROPIC_API_KEY="sk-ant-..."`.
+> The quickstart helps you choose a default model; see
+> [Environment Variables](docs/configuration.md#environment-variables) for the
+> complete list of provider keys (OpenAI, Gemini, OpenRouter, Groq, Hive LLM, …)
+> and optional runtime flags such as `MOCK_MODE`.
 
 This sets up:
 
