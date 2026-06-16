@@ -20,6 +20,23 @@ def web_scrape_fn(mcp: FastMCP):
     return mcp._tool_manager._tools["web_scrape"].fn
 
 
+@pytest.fixture(autouse=True)
+def allow_robots_txt():
+    """Neutralize the robots.txt network fetch for all tests by default.
+
+    The scrape path fetches robots.txt before launching the browser, which
+    would make a real network request and make these (otherwise mocked) tests
+    non-hermetic. Default to allow-all; tests that specifically exercise
+    robots.txt behavior patch RobotFileParser themselves, which takes
+    precedence over this fixture.
+    """
+    with patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser") as mock_rp_cls:
+        mock_rp = MagicMock()
+        mock_rp.can_fetch.return_value = True
+        mock_rp_cls.return_value = mock_rp
+        yield mock_rp_cls
+
+
 def _make_playwright_mocks(html, status=200, final_url="https://example.com/page"):
     """Build a full playwright mock chain and return (context_manager, response, page)."""
     mock_response = MagicMock(
