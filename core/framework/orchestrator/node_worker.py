@@ -790,8 +790,15 @@ class NodeWorker:
                         f"[Saved to '{filename}' ({file_size:,} bytes). Use read_file(path='{filename}') to access.]"
                     )
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Worker %s: failed to spill buffer key '%s' to '%s': %s",
+                        self.node_spec.id,
+                        key,
+                        file_path,
+                        exc,
+                        exc_info=True,
+                    )
 
             buffer_items[key] = val_str[:300] + "..." if len(val_str) > 300 else val_str
 
