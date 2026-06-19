@@ -1172,7 +1172,11 @@ class GraphExecutor:
 
                             # Calculate quality metrics
                             total_retries_count = sum(node_retry_totals.values())
-                            nodes_failed = list(node_retry_totals.keys())
+                            nodes_failed = [
+                                nid
+                                for nid, count in node_retry_totals.items()
+                                if count > 0
+                            ]
 
                             if self.runtime_logger:
                                 await self.runtime_logger.end_run(
@@ -1728,7 +1732,9 @@ class GraphExecutor:
 
             # Calculate quality metrics even for exceptions
             total_retries_count = sum(node_retry_totals.values())
-            nodes_failed = list(node_retry_totals.keys())
+            nodes_failed = [
+                nid for nid, count in node_retry_totals.items() if count > 0
+            ]
 
             if self.runtime_logger:
                 await self.runtime_logger.end_run(

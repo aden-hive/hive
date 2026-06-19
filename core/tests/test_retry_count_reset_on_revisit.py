@@ -181,6 +181,13 @@ async def test_retry_budget_reset_on_revisit_via_on_failure(runtime, goal):
     )
     assert result.retry_details == {"flaky": 3}
 
+    # Retry telemetry: a successful run that needed retries is a degraded success,
+    # and the failed-but-recovered node must surface in the failure list.
+    assert result.execution_quality == "degraded"
+    assert result.is_degraded_success is True
+    assert result.had_partial_failures is True
+    assert result.nodes_with_failures == ["flaky"]
+
 
 # ---------------------------------------------------------------------------
 # Test 2 — two failure cycles: each visit independently gets full retry budget
@@ -269,6 +276,12 @@ async def test_retry_budget_independent_per_visit(runtime, goal):
     )
     assert result.retry_details == {"flaky": 6}
 
+    # Retry telemetry: degraded success, failed-but-recovered node reported once.
+    assert result.execution_quality == "degraded"
+    assert result.is_degraded_success is True
+    assert result.had_partial_failures is True
+    assert result.nodes_with_failures == ["flaky"]
+
 
 # ---------------------------------------------------------------------------
 # Test 3 — linear graph: existing single-visit retry behavior unchanged
@@ -326,3 +339,9 @@ async def test_linear_graph_retry_unaffected(runtime, goal):
     # Cumulative metrics for single-visit: 2 retries
     assert result.total_retries == 2
     assert result.retry_details == {"flaky": 2}
+
+    # Retry telemetry must be identical in the linear (single-visit) path.
+    assert result.execution_quality == "degraded"
+    assert result.is_degraded_success is True
+    assert result.had_partial_failures is True
+    assert result.nodes_with_failures == ["flaky"]
