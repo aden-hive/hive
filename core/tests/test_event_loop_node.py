@@ -2257,3 +2257,90 @@ class TestReplayDetector:
         await node.execute(ctx)
 
         assert captured == []
+
+
+# ===========================================================================
+# Mid-stream retry must not duplicate already-published tokens (#5923)
+# ===========================================================================
+
+
+def _partial_then_recoverable_error(tokens: list[str], error: str = "429 mid-stream") -> list:
+    """A stream that yields text deltas then fails mid-stream with a recoverable
+    error and no FinishEvent — what LiteLLMProvider.stream now emits instead of
+    silently re-streaming after a mid-stream RateLimitError/transient error.
+    """
+    events: list = []
+    snapshot = ""
+    for tok in tokens:
+        snapshot += tok
+        events.append(TextDeltaEvent(content=tok, snapshot=snapshot))
+    events.append(StreamErrorEvent(error=error, recoverable=True))
+    return events
+
+
+class TestMidStreamRetryNoDuplication:
+    """End-to-end (AgentLoop + provider contract): a recoverable error that
+    arrives AFTER text was published commits the partial turn and does NOT re-run
+    the LLM; one that arrives BEFORE any text triggers the outer retry."""
+
+    @pytest.mark.asyncio
+    async def test_partial_stream_recoverable_error_no_outer_retry(self, runtime, node_spec, buffer):
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(scenarios=[_partial_then_recoverable_error(["Hel", "lo ", "world"])])
+        bus = EventBus()
+        deltas: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: deltas.append(e),
+        )
+
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        # The stream ran exactly once — the partial turn was committed, not
+        # re-run (a re-run would re-publish every token).
+        assert llm._call_index == 1
+        # Each of the three tokens was published exactly once (no duplication).
+        assert len(deltas) == 3
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_partial_stream_many_chunks_no_duplicate_deltas(self, runtime, node_spec, buffer):
+        node_spec.output_keys = []
+        tokens = [f"t{i} " for i in range(20)]
+        llm = MockStreamingLLM(scenarios=[_partial_then_recoverable_error(tokens)])
+        bus = EventBus()
+        deltas: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: deltas.append(e),
+        )
+
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        assert llm._call_index == 1
+        assert len(deltas) == 20  # exactly the 20 published tokens, none re-sent
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_recoverable_error_before_text_triggers_outer_retry(self, runtime, node_spec, buffer):
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(
+            scenarios=[
+                # attempt 1: recoverable error before any text was published
+                [StreamErrorEvent(error="429 at chunk 0", recoverable=True)],
+                # attempt 2: succeeds
+                text_scenario("recovered"),
+            ]
+        )
+
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
+        node = EventLoopNode(event_bus=None, config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        # Nothing was published, so the outer retry correctly re-ran the stream.
+        assert llm._call_index == 2
+        assert result.success is True
