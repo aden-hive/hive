@@ -2285,6 +2285,7 @@ class TestMidStreamRetryNoDuplication:
 
     @pytest.mark.asyncio
     async def test_partial_stream_recoverable_error_no_outer_retry(self, runtime, node_spec, buffer):
+        """Text + recoverable error commits the partial turn: one stream call, each delta once."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[_partial_then_recoverable_error(["Hel", "lo ", "world"])])
         bus = EventBus()
@@ -2307,6 +2308,7 @@ class TestMidStreamRetryNoDuplication:
 
     @pytest.mark.asyncio
     async def test_partial_stream_many_chunks_no_duplicate_deltas(self, runtime, node_spec, buffer):
+        """A 20-token partial stream publishes exactly 20 deltas with no outer retry."""
         node_spec.output_keys = []
         tokens = [f"t{i} " for i in range(20)]
         llm = MockStreamingLLM(scenarios=[_partial_then_recoverable_error(tokens)])
@@ -2327,6 +2329,7 @@ class TestMidStreamRetryNoDuplication:
 
     @pytest.mark.asyncio
     async def test_recoverable_error_before_text_triggers_outer_retry(self, runtime, node_spec, buffer):
+        """A recoverable error before any text was published still triggers the outer retry."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
             scenarios=[

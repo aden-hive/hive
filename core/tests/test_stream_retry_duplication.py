@@ -16,6 +16,7 @@ text was published) must remain intact.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -25,53 +26,36 @@ from framework.llm.litellm import LiteLLMProvider
 from framework.llm.stream_events import StreamErrorEvent, TextDeltaEvent
 
 # ---------------------------------------------------------------------------
-# Minimal chunk stubs mirroring the litellm streaming chunk shape the loop
-# actually touches: chunk.choices[0].delta.content / .tool_calls and
-# choice.finish_reason.
+# Minimal stubs mirroring the litellm streaming chunk shape the loop actually
+# touches: chunk.choices[0].delta.content / .tool_calls and choice.finish_reason.
 # ---------------------------------------------------------------------------
 
 
-class _Fn:
-    def __init__(self, name=None, arguments=None):
-        self.name = name
-        self.arguments = arguments
+def _tool_call(name, arguments, tc_id="call_1"):
+    """Build a stub tool-call delta entry (id + index + function name/args)."""
+    return SimpleNamespace(id=tc_id, index=0, function=SimpleNamespace(name=name, arguments=arguments))
 
 
-class _ToolCall:
-    def __init__(self, tc_id=None, name=None, arguments=None, index=0):
-        self.id = tc_id
-        self.index = index
-        self.function = _Fn(name, arguments)
-
-
-class _Delta:
-    def __init__(self, content=None, tool_calls=None):
-        self.content = content
-        self.tool_calls = tool_calls
-
-
-class _Choice:
-    def __init__(self, content=None, finish_reason=None, tool_calls=None):
-        self.delta = _Delta(content, tool_calls)
-        self.finish_reason = finish_reason
-
-
-class _Chunk:
-    def __init__(self, content=None, finish_reason=None, tool_calls=None):
-        self.choices = [_Choice(content, finish_reason, tool_calls)]
-        self.usage = None
+def _chunk(content=None, finish_reason=None, tool_calls=None):
+    """Build a stub streaming chunk wrapping a single choice/delta."""
+    delta = SimpleNamespace(content=content, tool_calls=tool_calls)
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=None)
 
 
 def _text(content):
-    return _Chunk(content=content)
+    """A chunk carrying a single text delta."""
+    return _chunk(content=content)
 
 
 def _tool(name, arguments, tc_id="call_1"):
-    return _Chunk(tool_calls=[_ToolCall(tc_id=tc_id, name=name, arguments=arguments)])
+    """A chunk carrying a single tool-call delta (no text)."""
+    return _chunk(tool_calls=[_tool_call(name, arguments, tc_id)])
 
 
 def _finish(reason="stop"):
-    return _Chunk(finish_reason=reason)
+    """A terminal chunk carrying a finish_reason and no delta content."""
+    return _chunk(finish_reason=reason)
 
 
 def _scripted_acompletion(scripts):
@@ -99,6 +83,7 @@ def _scripted_acompletion(scripts):
 
 
 async def _collect(provider):
+    """Drive ``provider.stream(...)`` to exhaustion and return all emitted events."""
     events = []
     async for event in provider.stream(
         messages=[{"role": "user", "content": "hi"}],
@@ -112,6 +97,7 @@ async def _collect(provider):
 @patch("framework.llm.litellm._compute_retry_delay", return_value=0.0)
 @patch("litellm.acompletion")
 async def test_rate_limit_after_streamed_text_does_not_duplicate(mock_acompletion, _delay):
+    """A 429 after text was streamed yields one recoverable error, no retry, no duplication."""
     provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
 
     rate_limited = RateLimitError(message="429 rate limited", llm_provider="openai", model="gpt-4o-mini")
@@ -142,6 +128,7 @@ async def test_rate_limit_after_streamed_text_does_not_duplicate(mock_acompletio
 @patch("framework.llm.litellm._compute_retry_delay", return_value=0.0)
 @patch("litellm.acompletion")
 async def test_transient_error_after_streamed_text_does_not_duplicate(mock_acompletion, _delay):
+    """A transient error after text was streamed behaves like the 429 case: no retry, no duplication."""
     provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
 
     transient = ConnectionError("connection reset by peer")
