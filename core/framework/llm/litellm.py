@@ -2693,6 +2693,17 @@ class LiteLLMProvider(LLMProvider):
 
             except RateLimitError as e:
                 if attempt < RATE_LIMIT_MAX_RETRIES:
+                    if accumulated_text:
+                        # Text deltas were already yielded to the caller (and
+                        # published to the event bus) in real time — they cannot
+                        # be recalled.  Retrying restarts the stream from token 1
+                        # (accumulated_text is reset per attempt above),
+                        # duplicating content the client already received.
+                        # Signal a recoverable error instead: the consumer
+                        # (AgentLoop) commits the partial text and skips the
+                        # outer retry when accumulated_text is non-empty.
+                        yield StreamErrorEvent(error=str(e), recoverable=True)
+                        return
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
@@ -2746,6 +2757,14 @@ class LiteLLMProvider(LLMProvider):
                         yield event
                     return
                 if _is_stream_transient_error(e) and attempt < STREAM_TRANSIENT_MAX_RETRIES:
+                    if accumulated_text:
+                        # Same guard as RateLimitError: text already streamed to
+                        # the caller in real time cannot be recalled.  Stop
+                        # retrying to avoid client-visible duplication; signal a
+                        # recoverable error so the consumer commits the partial
+                        # text instead of re-streaming from token 1.
+                        yield StreamErrorEvent(error=str(e), recoverable=True)
+                        return
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} transient error "
