@@ -16,6 +16,18 @@ from framework.utils.io import atomic_write
 logger = logging.getLogger(__name__)
 
 
+class CheckpointError(Exception):
+    """Base exception for checkpoint operations."""
+
+    pass
+
+
+class CheckpointCorruptionError(CheckpointError):
+    """Raised when a checkpoint or index file is corrupted or cannot be parsed."""
+
+    pass
+
+
 class CheckpointStore:
     """
     Manages checkpoint storage with atomic writes.
@@ -40,6 +52,29 @@ class CheckpointStore:
         self.checkpoints_dir = self.base_path / "checkpoints"
         self.index_path = self.checkpoints_dir / "index.json"
         self._index_lock = asyncio.Lock()
+
+    def _isolate_corrupted_file(self, file_path: Path) -> Path:
+        """
+        Isolate a corrupted file by moving it to the .corrupted/ directory.
+        """
+        corrupted_dir = self.checkpoints_dir / ".corrupted"
+        corrupted_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        isolated_path = corrupted_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"
+
+        try:
+            file_path.rename(isolated_path)
+            logger.warning(f"Isolated corrupted file {file_path} to {isolated_path}")
+        except Exception as e:
+            logger.error(f"Failed to isolate corrupted file {file_path}: {e}")
+            try:
+                file_path.unlink()
+                logger.warning(f"Deleted corrupted file {file_path} after failed rename")
+            except Exception as delete_err:
+                logger.error(f"Failed to delete corrupted file {file_path}: {delete_err}")
+
+        return isolated_path
 
     async def save_checkpoint(self, checkpoint: Checkpoint) -> None:
         """
@@ -98,7 +133,8 @@ class CheckpointStore:
                 return Checkpoint.model_validate_json(checkpoint_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}")
-                return None
+                self._isolate_corrupted_file(checkpoint_path)
+                raise CheckpointCorruptionError(f"Checkpoint file '{checkpoint_id}.json' is corrupted: {e}") from e
 
         # Load index to get checkpoint ID if not provided
         if checkpoint_id is None:
@@ -126,7 +162,8 @@ class CheckpointStore:
                 return CheckpointIndex.model_validate_json(self.index_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.error(f"Failed to load checkpoint index: {e}")
-                return None
+                self._isolate_corrupted_file(self.index_path)
+                raise CheckpointCorruptionError(f"Checkpoint index file 'index.json' is corrupted: {e}") from e
 
         return await asyncio.to_thread(_read)
 

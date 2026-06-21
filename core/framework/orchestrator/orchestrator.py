@@ -31,7 +31,7 @@ from framework.orchestrator.node import (
 )
 from framework.orchestrator.validator import OutputValidator
 from framework.schemas.checkpoint import Checkpoint
-from framework.storage.checkpoint_store import CheckpointStore
+from framework.storage.checkpoint_store import CheckpointStore, CheckpointCorruptionError
 from framework.tracker.decision_tracker import DecisionTracker
 from framework.utils.io import atomic_write
 
@@ -646,6 +646,11 @@ class Orchestrator:
                     self.logger.warning(f"Checkpoint {checkpoint_id} not found, resuming from normal entry point")
                     current_node_id = graph.get_entry_point(session_state)
 
+            except CheckpointCorruptionError as e:
+                self.logger.error(
+                    f"🛑 Critical: Checkpoint corruption detected for {checkpoint_id}: {e}. Aborting execution to prevent silent data loss."
+                )
+                raise
             except Exception as e:
                 self.logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}, resuming from normal entry point")
                 current_node_id = graph.get_entry_point(session_state)
