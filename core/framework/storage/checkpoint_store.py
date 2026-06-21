@@ -53,12 +53,21 @@ class CheckpointStore:
         self.index_path = self.checkpoints_dir / "index.json"
         self._index_lock = asyncio.Lock()
 
-    def _isolate_corrupted_file(self, file_path: Path) -> Path:
+    def _isolate_corrupted_file(self, file_path: Path) -> Path | None:
         """
         Isolate a corrupted file by moving it to the .corrupted/ directory.
         """
         corrupted_dir = self.checkpoints_dir / ".corrupted"
-        corrupted_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            corrupted_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Failed to create corruption quarantine directory: {e}")
+            try:
+                file_path.unlink()
+                logger.warning(f"Deleted corrupted file {file_path} after failed directory creation")
+            except Exception as delete_err:
+                logger.error(f"Failed to delete corrupted file {file_path}: {delete_err}")
+            return None
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         isolated_path = corrupted_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"

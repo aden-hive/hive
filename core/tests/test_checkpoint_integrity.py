@@ -103,3 +103,57 @@ async def test_load_corrupted_index_raises_and_isolates(tmp_path):
     corrupted_files = list(corrupted_dir.glob("index_*.json"))
     assert len(corrupted_files) == 1
     assert "checkpoints" in corrupted_files[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_load_invalid_schema_checkpoint_raises_and_isolates(tmp_path):
+    # Setup CheckpointStore
+    store = CheckpointStore(base_path=tmp_path)
+    store.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write a valid JSON but invalid schema checkpoint (missing required fields like created_at, checkpoint_type)
+    checkpoint_id = "cp_node_start_node_1_12345"
+    checkpoint_path = store.checkpoints_dir / f"{checkpoint_id}.json"
+    checkpoint_path.write_text(
+        '{"checkpoint_id": "cp_node_start_node_1_12345", "session_id": "test"}', encoding="utf-8"
+    )
+
+    # Attempt to load and verify it raises exception
+    with pytest.raises(CheckpointCorruptionError) as exc_info:
+        await store.load_checkpoint(checkpoint_id)
+
+    assert "is corrupted" in str(exc_info.value)
+
+    # Verify original file is moved to .corrupted
+    assert not checkpoint_path.exists()
+
+    corrupted_dir = store.checkpoints_dir / ".corrupted"
+    assert corrupted_dir.exists()
+    corrupted_files = list(corrupted_dir.glob(f"{checkpoint_id}_*.json"))
+    assert len(corrupted_files) == 1
+    assert "checkpoint_id" in corrupted_files[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_load_invalid_schema_index_raises_and_isolates(tmp_path):
+    # Setup CheckpointStore
+    store = CheckpointStore(base_path=tmp_path)
+    store.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write a valid JSON but invalid schema index (missing required session_id)
+    store.index_path.write_text('{"checkpoints": []}', encoding="utf-8")
+
+    # Attempt to load index and verify it raises exception
+    with pytest.raises(CheckpointCorruptionError) as exc_info:
+        await store.load_index()
+
+    assert "is corrupted" in str(exc_info.value)
+
+    # Verify original index file is moved to .corrupted
+    assert not store.index_path.exists()
+
+    corrupted_dir = store.checkpoints_dir / ".corrupted"
+    assert corrupted_dir.exists()
+    corrupted_files = list(corrupted_dir.glob("index_*.json"))
+    assert len(corrupted_files) == 1
+    assert "checkpoints" in corrupted_files[0].read_text(encoding="utf-8")
