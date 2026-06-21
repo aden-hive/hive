@@ -11,6 +11,8 @@ def test_node_worker_spillover_exception_logging(caplog):
     
     # Configure GraphContext mocks
     gc.storage_path = Path("/some/path")
+    gc.graph.get_incoming_edges.return_value = []
+    gc.graph.get_outgoing_edges.return_value = []
     gc.buffer.read_all.return_value = {
         "large_key": "x" * 500  # Longer than 300 characters
     }
