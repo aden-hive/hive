@@ -5,8 +5,8 @@ Verifies that the _validate_key() method properly blocks path traversal
 attempts and that the public storage API enforces these checks end-to-end.
 """
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
 
