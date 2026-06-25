@@ -200,8 +200,11 @@ class Worker:
             duration = time.monotonic() - self._started_at
 
             if result.success:
-                self.status = WorkerStatus.COMPLETED
                 self._result = self._build_result(result, duration, default_status="success")
+                if self._result.status == "failed":
+                    self.status = WorkerStatus.FAILED
+                else:
+                    self.status = WorkerStatus.COMPLETED
             else:
                 self.status = WorkerStatus.FAILED
                 self._result = self._build_result(result, duration, default_status="failed")
@@ -286,6 +289,7 @@ class Worker:
         status: str,
         summary: str,
         data: dict[str, Any] | None = None,
+        error: str | None = None,
     ) -> None:
         """Called by AgentLoop when the worker's LLM invokes ``report_to_parent``.
 
@@ -296,6 +300,7 @@ class Worker:
             "status": status,
             "summary": summary,
             "data": data or {},
+            "error": error,
         }
 
     def _build_result(
@@ -309,7 +314,7 @@ class Worker:
         if explicit is not None:
             return WorkerResult(
                 output=dict(agent_result.output or {}),
-                error=agent_result.error,
+                error=agent_result.error or explicit.get("error"),
                 tokens_used=getattr(agent_result, "tokens_used", 0),
                 duration_seconds=duration,
                 status=explicit["status"],

@@ -1298,12 +1298,16 @@ def register_queen_lifecycle_tools(
                 }
                 if _enqueued_task_ids[i]:
                     spec_data["task_id"] = _enqueued_task_ids[i]
-            normalised.append(
-                {
-                    "task": task_text,
-                    "data": spec_data or None,
-                }
-            )
+            
+            output_schema = spec.get("output_schema")
+            
+            item = {
+                "task": task_text,
+                "data": spec_data or None,
+            }
+            if output_schema is not None:
+                item["output_schema"] = output_schema
+            normalised.append(item)
 
         if _colony_db_path:
             _pinned = sum(1 for tid in _enqueued_task_ids if tid)
@@ -1476,7 +1480,9 @@ def register_queen_lifecycle_tools(
                         "The 'task' string becomes the worker's initial "
                         "user message. 'data' is merged into the worker's "
                         "AgentContext.input_data so structured fields are "
-                        "available to the worker's first turn."
+                        "available to the worker's first turn.\n\n"
+                        "Use 'output_schema' to declare the expected JSON-Schema "
+                        "for the worker's success report data payload."
                     ),
                     "items": {
                         "type": "object",
@@ -1488,6 +1494,10 @@ def register_queen_lifecycle_tools(
                             "data": {
                                 "type": "object",
                                 "description": "Optional structured input fields.",
+                            },
+                            "output_schema": {
+                                "type": "object",
+                                "description": "Optional JSON Schema for worker's success report.",
                             },
                         },
                         "required": ["task"],

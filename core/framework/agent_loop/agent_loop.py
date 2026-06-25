@@ -3189,10 +3189,24 @@ class AgentLoop(AgentProtocol):
                     owner_worker = getattr(self, "_owner_worker", None)
                     if owner_worker is not None:
                         normalised = report_tc_input.get("_normalised", {})
+                        schema = getattr(ctx.agent_spec, "output_schema", None)
+                        status = normalised.get("status", "success")
+                        error_reason = None
+                        if status == "success" and schema:
+                            from framework.orchestrator.validator import OutputValidator
+                            validator = OutputValidator()
+                            data = normalised.get("data", {})
+                            val_res = validator.validate_schema(data, schema)
+                            if not val_res.success:
+                                error_reason = f"Schema validation failed: {val_res.error}"
+                                normalised["status"] = "failed"
+                                normalised["summary"] = f"{normalised.get('summary', '')}\n\n[Schema Validation Failure]: {val_res.error}"
+                                normalised["error"] = error_reason
                         owner_worker.record_explicit_report(
                             status=normalised.get("status", "success"),
                             summary=normalised.get("summary", ""),
                             data=normalised.get("data", {}),
+                            error=error_reason,
                         )
 
                     # Terminate the loop cleanly after this turn. Set the

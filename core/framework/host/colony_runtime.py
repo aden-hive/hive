@@ -1094,12 +1094,17 @@ class ColonyRuntime:
             # Per-task profile_name override beats the batch-level default,
             # so a fan-out can mix profiles (e.g. half tasks routed to
             # Slack:work and half to Slack:personal).
+            output_schema = spec.get("output_schema")
+            agent_spec_override = None
+            if output_schema is not None:
+                agent_spec_override = self._agent_spec.model_copy(update={"output_schema": output_schema})
             ids = await self.spawn(
                 task=task_text,
                 count=1,
                 input_data=task_data or {"task": task_text},
                 tools=tools_override,
                 profile_name=spec.get("profile_name") or profile_name,
+                agent_spec=agent_spec_override,
             )
             worker_ids.extend(ids)
         return worker_ids
