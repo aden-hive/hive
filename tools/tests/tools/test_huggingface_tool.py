@@ -286,6 +286,89 @@ class TestHuggingFaceRunInference:
         assert result["error"] == "Model is loading"
         assert result["estimated_time"] == 30.5
 
+    def test_malformed_503_json_without_estimated_time(self, tool_fns):
+        """503 with JSON body but no estimated_time should return a generic API error, not 'Model is loading'."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        mock_resp.headers = {"content-type": "application/json"}
+        mock_resp.json.return_value = {"message": "Service temporarily unavailable"}
+        mock_resp.text = '{"message": "Service temporarily unavailable"}'
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.post",
+                return_value=mock_resp,
+            ),
+        ):
+            result = tool_fns["huggingface_run_inference"](model_id="bigscience/bloom", inputs="Hello")
+
+        assert "error" in result
+        assert result["error"] != "Model is loading"
+        assert "503" in result["error"]
+
+    def test_malformed_503_non_json_body(self, tool_fns):
+        """503 with non-JSON content-type should return a generic API error, not 'Model is loading'."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        mock_resp.headers = {"content-type": "text/plain"}
+        mock_resp.text = "upstream connect error or disconnect"
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.post",
+                return_value=mock_resp,
+            ),
+        ):
+            result = tool_fns["huggingface_run_inference"](model_id="bigscience/bloom", inputs="Hello")
+
+        assert "error" in result
+        assert result["error"] != "Model is loading"
+        assert "503" in result["error"]
+
+    def test_task_override_uses_pipeline_url(self, tool_fns):
+        """When task is provided, the request URL should use the /pipeline/{task}/ format."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [{"generated_text": "Paris"}]
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.post",
+                return_value=mock_resp,
+            ) as mock_post,
+        ):
+            result = tool_fns["huggingface_run_inference"](
+                model_id="deepset/roberta-base-squad2",
+                inputs="What is the capital of France?",
+                task="question-answering",
+            )
+
+        assert result["task"] == "question-answering"
+        called_url = mock_post.call_args[0][0]
+        assert "/pipeline/question-answering/deepset/roberta-base-squad2" in called_url
+
+    def test_no_task_override_uses_models_url(self, tool_fns):
+        """When task is omitted, the request URL should use the /models/ format."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [{"generated_text": "Hello world"}]
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.post",
+                return_value=mock_resp,
+            ) as mock_post,
+        ):
+            result = tool_fns["huggingface_run_inference"](
+                model_id="facebook/bart-large-cnn",
+                inputs="Some text",
+            )
+
+        assert result["task"] == "auto"
+        called_url = mock_post.call_args[0][0]
+        assert "/models/facebook/bart-large-cnn" in called_url
+        assert "/pipeline/" not in called_url
+
 
 class TestHuggingFaceRunEmbedding:
     def test_missing_token(self, tool_fns):

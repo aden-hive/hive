@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 BASE_URL = "https://huggingface.co/api"
 INFERENCE_URL = "https://api-inference.huggingface.co/models"
+INFERENCE_PIPELINE_URL = "https://api-inference.huggingface.co/pipeline"
 
 
 def _get_token(credentials: CredentialStoreAdapter | None) -> str | None:
@@ -83,12 +84,14 @@ def _post(
             return {"error": f"Model not found: {url}"}
         if resp.status_code == 503:
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            estimated = body.get("estimated_time", "unknown")
-            return {
-                "error": "Model is loading",
-                "estimated_time": estimated,
-                "help": "The model is being loaded. Retry after the estimated time.",
-            }
+            estimated = body.get("estimated_time")
+            if estimated is not None:
+                return {
+                    "error": "Model is loading",
+                    "estimated_time": estimated,
+                    "help": "The model is being loaded. Retry after the estimated time.",
+                }
+            return {"error": f"HuggingFace Inference API error 503: {resp.text[:500]}"}
         if resp.status_code != 200:
             return {"error": (f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}")}
         return resp.json()
@@ -410,7 +413,7 @@ def register_tools(
             except _json.JSONDecodeError:
                 return {"error": "parameters must be a valid JSON string"}
 
-        url = f"{INFERENCE_URL}/{model_id}"
+        url = f"{INFERENCE_PIPELINE_URL}/{task}/{model_id}" if task else f"{INFERENCE_URL}/{model_id}"
         data = _post(url, token, payload)
 
         if isinstance(data, dict) and "error" in data:
