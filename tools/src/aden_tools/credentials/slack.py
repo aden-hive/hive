@@ -25,7 +25,6 @@ SLACK_CREDENTIALS = {
             "slack_remove_reaction",
             "slack_list_users",
             "slack_upload_file",
-            "slack_search_messages",
             "slack_get_thread_replies",
             "slack_pin_message",
             "slack_unpin_message",
@@ -94,5 +93,34 @@ SLACK_CREDENTIALS = {
         # Credential store mapping
         credential_id="slack",
         credential_key="access_token",
+    ),
+    "slack_user": CredentialSpec(
+        env_var="SLACK_USER_TOKEN",
+        tools=[
+            "slack_search_messages",
+        ],
+        required=False,
+        startup_required=False,
+        help_url="https://api.slack.com/apps",
+        description="Slack User Token (starts with xoxp-) for search and user-scoped APIs",
+        # Auth method support
+        aden_supported=True,
+        aden_provider_name="slack",
+        direct_api_key_supported=True,
+        api_key_instructions="""To get a Slack User Token:
+1. Go to https://api.slack.com/apps and select your app
+2. Go to "OAuth & Permissions" in the sidebar
+3. Add the following User Token Scopes:
+   - search:read
+   - users.profile:write (for setting status)
+   - users:read (for user presence)
+4. Click "Reinstall to Workspace" if needed
+5. Copy the "User OAuth Token" (starts with xoxp-)""",
+        # Health check configuration
+        health_check_endpoint="https://slack.com/api/auth.test",
+        health_check_method="POST",
+        # Credential store mapping
+        credential_id="slack",
+        credential_key="user_token",
     ),
 }

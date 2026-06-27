@@ -1411,6 +1411,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "serpapi": SerpApiHealthChecker(),
     "similarweb": SimilarWebHealthChecker(),
     "slack": SlackHealthChecker(),
+    "slack_user": SlackHealthChecker(),
     "stripe": StripeHealthChecker(),
     "telegram": TelegramHealthChecker(),
     "trello_key": TrelloKeyHealthChecker(),
