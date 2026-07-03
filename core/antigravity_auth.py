@@ -20,6 +20,7 @@ import secrets
 import socket
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -29,6 +30,42 @@ from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Error types
+# ---------------------------------------------------------------------------
+
+
+class OAuthError(Exception):
+    """Base class for OAuth-related errors."""
+
+    def __init__(self, message: str, *, suggestion: str = "", retryable: bool = False) -> None:
+        super().__init__(message)
+        self.suggestion = suggestion
+        self.retryable = retryable
+
+    def __str__(self) -> str:
+        msg = super().__str__()
+        if self.suggestion:
+            return f"{msg}\n  → {self.suggestion}"
+        return msg
+
+
+class OAuthNetworkError(OAuthError):
+    """Raised when a network request fails due to connectivity issues."""
+
+
+class OAuthCredentialError(OAuthError):
+    """Raised when credentials are missing, expired, or rejected by the server."""
+
+
+class OAuthConfigError(OAuthError):
+    """Raised when required configuration is missing or invalid."""
+
+
+class OAuthServerError(OAuthError):
+    """Raised when the OAuth server returns an unexpected HTTP error."""
 
 # OAuth endpoints
 _OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -60,31 +97,47 @@ _cached_client_secret: str | None = None
 
 
 def _fetch_credentials_from_public_source() -> tuple[str | None, str | None]:
-    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
+    """Fetch OAuth client ID and secret from the public npm package source on GitHub.
+
+    Returns:
+        Tuple of (client_id, client_secret), either may be None on failure.
+    """
     global _cached_client_id, _cached_client_secret
     if _cached_client_id and _cached_client_secret:
         return _cached_client_id, _cached_client_secret
 
+    import re
+
+    req = urllib.request.Request(_CREDENTIALS_URL, headers={"User-Agent": "Hive-Antigravity-Auth/1.0"})
     try:
-        req = urllib.request.Request(_CREDENTIALS_URL, headers={"User-Agent": "Hive-Antigravity-Auth/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             content = resp.read().decode("utf-8")
-            import re
-
             id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
             secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
             if id_match:
                 _cached_client_id = id_match.group(1)
             if secret_match:
                 _cached_client_secret = secret_match.group(1)
+            if not _cached_client_id:
+                logger.debug("Public source did not contain ANTIGRAVITY_CLIENT_ID")
             return _cached_client_id, _cached_client_secret
-    except Exception as e:
-        logger.debug(f"Failed to fetch credentials from public source: {e}")
+    except urllib.error.HTTPError as e:
+        logger.debug(f"HTTP {e.code} fetching credentials from public source: {e.reason}")
+    except urllib.error.URLError as e:
+        logger.debug(f"Network error fetching credentials from public source: {e.reason}")
+    except TimeoutError:
+        logger.debug("Timeout fetching credentials from public source")
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Unexpected error fetching credentials from public source: {e}")
     return None, None
 
 
 def get_client_id() -> str:
-    """Get OAuth client ID from env, config, or public source."""
+    """Get OAuth client ID from env, config, or public source.
+
+    Raises:
+        OAuthConfigError: If the client ID cannot be found from any source.
+    """
     env_id = os.environ.get("ANTIGRAVITY_CLIENT_ID")
     if env_id:
         return env_id
@@ -98,19 +151,30 @@ def get_client_id() -> str:
                 cfg_id = cfg.get("llm", {}).get("antigravity_client_id")
                 if cfg_id:
                     return cfg_id
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"Could not parse {hive_cfg}: {e}")
+        except OSError as e:
+            logger.debug(f"Could not read {hive_cfg}: {e}")
 
     # Fetch from public source
     client_id, _ = _fetch_credentials_from_public_source()
     if client_id:
         return client_id
 
-    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+    raise OAuthConfigError(
+        "Could not obtain Antigravity OAuth client ID",
+        suggestion=(
+            "Set the ANTIGRAVITY_CLIENT_ID environment variable, or add "
+            "'antigravity_client_id' under the 'llm' key in ~/.hive/configuration.json"
+        ),
+    )
 
 
 def get_client_secret() -> str | None:
-    """Get OAuth client secret from env, config, or public source."""
+    """Get OAuth client secret from env, config, or public source.
+
+    Returns None if not found (some flows work without a secret).
+    """
     secret = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
     if secret:
         return secret
@@ -124,8 +188,10 @@ def get_client_secret() -> str | None:
                 secret = cfg.get("llm", {}).get("antigravity_client_secret")
                 if secret:
                     return secret
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"Could not parse {hive_cfg}: {e}")
+        except OSError as e:
+            logger.debug(f"Could not read {hive_cfg}: {e}")
 
     # Fetch from public source (npm package on GitHub)
     _, secret = _fetch_credentials_from_public_source()
@@ -208,7 +274,15 @@ def wait_for_callback(port: int, timeout: int = 300) -> tuple[str | None, str | 
 def exchange_code_for_tokens(
     code: str, redirect_uri: str, client_id: str, client_secret: str | None
 ) -> dict[str, Any] | None:
-    """Exchange authorization code for tokens."""
+    """Exchange authorization code for tokens.
+
+    Returns:
+        Token response dict, or None on failure (error already logged).
+
+    Raises:
+        OAuthServerError: On unexpected HTTP errors (4xx/5xx).
+        OAuthNetworkError: On network connectivity failures.
+    """
     data = {
         "code": code,
         "client_id": client_id,
@@ -230,13 +304,65 @@ def exchange_code_for_tokens(
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
-    except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
+    except urllib.error.HTTPError as e:
+        raw = b""
+        try:
+            raw = e.read()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            error_body = json.loads(raw)
+            error_code = error_body.get("error", "unknown_error")
+            error_desc = error_body.get("error_description", "No description provided")
+        except (json.JSONDecodeError, ValueError):
+            error_code = "parse_error"
+            error_desc = raw.decode("utf-8", errors="replace") or e.reason
+
+        if e.code == 400:
+            # authorization_code is one-time-use; a 400 here often means it was already redeemed
+            if error_code in ("invalid_grant", "invalid_code"):
+                logger.error(
+                    f"Token exchange failed: authorization code is invalid or has already been used.\n"
+                    f"  Error: {error_code} — {error_desc}\n"
+                    f"  → Restart the OAuth flow to obtain a fresh authorization code."
+                )
+            else:
+                logger.error(
+                    f"Token exchange failed with HTTP 400 ({error_code}): {error_desc}\n"
+                    f"  → Check that redirect_uri matches your OAuth application configuration."
+                )
+        elif e.code == 401:
+            logger.error(
+                f"Token exchange failed with HTTP 401 ({error_code}): {error_desc}\n"
+                f"  → Verify that ANTIGRAVITY_CLIENT_ID and ANTIGRAVITY_CLIENT_SECRET are correct."
+            )
+        else:
+            logger.error(
+                f"Token exchange failed with HTTP {e.code} ({error_code}): {error_desc}"
+            )
+        return None
+    except urllib.error.URLError as e:
+        logger.error(
+            f"Token exchange failed: network error — {e.reason}\n"
+            f"  → Check your internet connection and try again."
+        )
+        return None
+    except TimeoutError:
+        logger.error(
+            "Token exchange timed out after 30 seconds.\n"
+            "  → Check your internet connection or try again."
+        )
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Token exchange failed unexpectedly: {e}")
         return None
 
 
 def get_user_email(access_token: str) -> str | None:
-    """Get user email from Google API."""
+    """Get user email from Google API.
+
+    Returns None on failure — email is optional context, not critical.
+    """
     req = urllib.request.Request(
         "https://www.googleapis.com/oauth2/v2/userinfo",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -245,27 +371,57 @@ def get_user_email(access_token: str) -> str | None:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
             return data.get("email")
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            logger.debug("Could not fetch user email: access token is invalid or expired (HTTP 401)")
+        else:
+            logger.debug(f"Could not fetch user email: HTTP {e.code}")
+        return None
+    except urllib.error.URLError as e:
+        logger.debug(f"Could not fetch user email: network error — {e.reason}")
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Could not fetch user email: {e}")
         return None
 
 
 def load_accounts() -> dict[str, Any]:
-    """Load existing accounts from file."""
+    """Load existing accounts from file.
+
+    Returns an empty accounts dict if the file is missing, unreadable, or corrupt.
+    """
     if not _ACCOUNTS_FILE.exists():
         return {"schemaVersion": 4, "accounts": []}
     try:
         with open(_ACCOUNTS_FILE) as f:
-            return json.load(f)
-    except Exception:
+            data = json.load(f)
+            # Ensure expected shape
+            if not isinstance(data, dict):
+                logger.warning(f"Accounts file {_ACCOUNTS_FILE} has unexpected format; resetting.")
+                return {"schemaVersion": 4, "accounts": []}
+            return data
+    except json.JSONDecodeError as e:
+        logger.warning(f"Accounts file {_ACCOUNTS_FILE} is corrupt (JSON error: {e}); resetting.")
+        return {"schemaVersion": 4, "accounts": []}
+    except OSError as e:
+        logger.warning(f"Could not read accounts file {_ACCOUNTS_FILE}: {e}")
         return {"schemaVersion": 4, "accounts": []}
 
 
 def save_accounts(data: dict[str, Any]) -> None:
-    """Save accounts to file."""
+    """Save accounts to file.
+
+    Raises:
+        OSError: If the file cannot be written (propagated to caller).
+    """
     _ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_ACCOUNTS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-    logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
+    try:
+        with open(_ACCOUNTS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
+    except OSError as e:
+        logger.error(f"Failed to save credentials to {_ACCOUNTS_FILE}: {e}")
+        raise
 
 
 def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_ID) -> bool:
@@ -294,22 +450,44 @@ def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_I
         "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     }
 
+    req = urllib.request.Request(
+        f"{endpoint}/v1internal:generateContent",
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
     try:
-        req = urllib.request.Request(
-            f"{endpoint}/v1internal:generateContent",
-            data=json.dumps(body).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
         with urllib.request.urlopen(req, timeout=30) as resp:
             json.loads(resp.read())
             return True
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            logger.debug("Credential validation failed: access token rejected (HTTP 401)")
+        elif e.code == 403:
+            logger.debug(
+                f"Credential validation failed: access denied for project '{project_id}' (HTTP 403). "
+                "The account may not have Cloud Code Assist entitlement."
+            )
+        else:
+            logger.debug(f"Credential validation failed: HTTP {e.code}")
+        return False
+    except urllib.error.URLError as e:
+        logger.debug(f"Credential validation failed: network error — {e.reason}")
+        return False
+    except TimeoutError:
+        logger.debug("Credential validation timed out")
+        return False
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Credential validation failed unexpectedly: {e}")
         return False
 
 
 def refresh_access_token(refresh_token: str, client_id: str, client_secret: str | None) -> dict | None:
-    """Refresh the access token using the refresh token."""
+    """Refresh the access token using the refresh token.
+
+    Returns:
+        Token response dict, or None if the refresh fails (error is logged at debug level).
+    """
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -328,8 +506,36 @@ def refresh_access_token(refresh_token: str, client_id: str, client_secret: str 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
-    except Exception as e:
-        logger.debug(f"Token refresh failed: {e}")
+    except urllib.error.HTTPError as e:
+        raw = b""
+        try:
+            raw = e.read()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            error_body = json.loads(raw)
+            error_code = error_body.get("error", "unknown_error")
+            error_desc = error_body.get("error_description", "")
+        except (json.JSONDecodeError, ValueError):
+            error_code = "parse_error"
+            error_desc = raw.decode("utf-8", errors="replace") or e.reason
+
+        if e.code in (400, 401) and error_code in ("invalid_grant", "token_expired"):
+            logger.debug(
+                f"Token refresh rejected (HTTP {e.code}): {error_code} — {error_desc}. "
+                "Refresh token has been revoked or expired."
+            )
+        else:
+            logger.debug(f"Token refresh failed with HTTP {e.code} ({error_code}): {error_desc}")
+        return None
+    except urllib.error.URLError as e:
+        logger.debug(f"Token refresh failed: network error — {e.reason}")
+        return None
+    except TimeoutError:
+        logger.debug("Token refresh timed out after 30 seconds")
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Token refresh failed unexpectedly: {e}")
         return None
 
 
@@ -339,7 +545,12 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     First checks if valid credentials already exist. If so, validates them
     and skips OAuth if they work. Otherwise, proceeds with OAuth flow.
     """
-    client_id = get_client_id()
+    try:
+        client_id = get_client_id()
+    except OAuthConfigError as e:
+        logger.error(f"Configuration error: {e}")
+        return 1
+
     client_secret = get_client_secret()
 
     # Check if credentials already exist
@@ -379,7 +590,11 @@ def cmd_account_add(args: argparse.Namespace) -> int:
                     account["access"] = new_access
                     account["expires"] = int((time.time() + expires_in) * 1000)
                     accounts_data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                    save_accounts(accounts_data)
+                    try:
+                        save_accounts(accounts_data)
+                    except OSError:
+                        # save_accounts already logged the error
+                        return 1
 
                     # Validate the refreshed token
                     logger.info("Validating refreshed credentials...")
@@ -428,16 +643,30 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     logger.info(f"Listening for callback on port {port}...")
     code, received_state, error = wait_for_callback(port)
 
+    if error == "timeout":
+        logger.error(
+            "Authentication timed out: no callback received within 300 seconds.\n"
+            "  → Ensure the browser opened and you completed the sign-in flow.\n"
+            f"  → If the browser did not open automatically, visit:\n    {auth_url}"
+        )
+        return 1
+
     if error:
-        logger.error(f"Authentication failed: {error}")
+        logger.error(
+            f"Authentication failed: Google returned error '{error}'.\n"
+            "  → Check that your account has access to Antigravity / Cloud Code Assist."
+        )
         return 1
 
     if not code:
-        logger.error("No authorization code received")
+        logger.error("No authorization code received from browser callback.")
         return 1
 
     if received_state != state:
-        logger.error("State mismatch - possible CSRF attack")
+        logger.error(
+            "State mismatch in OAuth callback — possible CSRF attack or stale redirect.\n"
+            "  → Do not reuse browser tabs from a previous authentication attempt."
+        )
         return 1
 
     # Exchange code for tokens
@@ -445,6 +674,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret)
 
     if not tokens:
+        # exchange_code_for_tokens already logged a specific error
         return 1
 
     access_token = tokens.get("access_token")
@@ -452,13 +682,24 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     expires_in = tokens.get("expires_in", 3600)
 
     if not access_token:
-        logger.error("No access token in response")
+        logger.error(
+            "Token exchange succeeded but no access_token was returned.\n"
+            "  → This may indicate a misconfigured OAuth application or a server-side issue."
+        )
         return 1
+
+    if not refresh_token:
+        logger.warning(
+            "No refresh_token was returned. You will need to re-authenticate when the access token expires.\n"
+            "  → To enable refresh tokens, ensure 'prompt=consent' and 'access_type=offline' are set."
+        )
 
     # Get user email
     email = get_user_email(access_token)
     if email:
         logger.info(f"Authenticated as: {email}")
+    else:
+        logger.warning("Could not retrieve account email — proceeding anyway.")
 
     # Load existing accounts and add/update
     accounts_data = load_accounts()
@@ -466,7 +707,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
     # Build new account entry (V4 schema)
     expires_ms = int((time.time() + expires_in) * 1000)
-    refresh_entry = f"{refresh_token}|{_DEFAULT_PROJECT_ID}"
+    refresh_entry = f"{refresh_token}|{_DEFAULT_PROJECT_ID}" if refresh_token else ""
 
     new_account = {
         "access": access_token,
@@ -489,7 +730,12 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     accounts_data["schemaVersion"] = 4
     accounts_data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    save_accounts(accounts_data)
+    try:
+        save_accounts(accounts_data)
+    except OSError:
+        # save_accounts already logged the error
+        return 1
+
     logger.info("\n✓ Authentication complete!")
     return 0
 
