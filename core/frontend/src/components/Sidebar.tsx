@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -12,6 +12,7 @@ import {
   Crown,
   Loader2,
   Library,
+  Search,
 } from "lucide-react";
 import SidebarColonyItem from "./SidebarColonyItem";
 import SidebarQueenItem from "./SidebarQueenItem";
@@ -29,6 +30,32 @@ export default function Sidebar() {
   const [coloniesExpanded, setColoniesExpanded] = useState(true);
   const [queensExpanded, setQueensExpanded] = useState(true);
   const [libraryExpanded, setLibraryExpanded] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
+
+  // Filtered lists — case-insensitive search across id, name, title
+  const filteredColonies = useMemo(() => {
+    if (!filterQuery.trim()) return colonies;
+    const q = filterQuery.toLowerCase();
+    return colonies.filter(
+      (c) => c.id.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+    );
+  }, [colonies, filterQuery]);
+
+  const filteredQueens = useMemo(() => {
+    if (!filterQuery.trim()) return queenProfiles;
+    const q = filterQuery.toLowerCase();
+    return queenProfiles.filter(
+      (qn) => qn.id.toLowerCase().includes(q) || qn.title.toLowerCase().includes(q)
+    );
+  }, [queenProfiles, filterQuery]);
+
+  // Auto-expand both sections when user is filtering
+  useEffect(() => {
+    if (filterQuery.trim()) {
+      setColoniesExpanded(true);
+      setQueensExpanded(true);
+    }
+  }, [filterQuery]);
 
   // Colony creation
   const [createColonyOpen, setCreateColonyOpen] = useState(false);
@@ -57,7 +84,7 @@ export default function Sidebar() {
     }
   };
 
-  // ── Resizable width ──────────────────────────────────────────────────
+  // ΓöÇΓöÇ Resizable width ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   const MIN_WIDTH = 180;
   const MAX_WIDTH = 400;
   const [width, setWidth] = useState(240);
@@ -209,6 +236,28 @@ export default function Sidebar() {
         )}
       </div>
 
+      {/* Search / Filter */}
+      <div className="px-3 py-2 border-b border-border/60">
+        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5">
+          <Search className="w-3.5 h-3.5 text-sidebar-muted flex-shrink-0" />
+          <input
+            type="text"
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            placeholder="Filter colonies & queens..."
+            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+          />
+          {filterQuery && (
+            <button
+              onClick={() => setFilterQuery("")}
+              className="text-sidebar-muted hover:text-foreground transition-colors"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* COLONIES section */}
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="py-2">
@@ -223,7 +272,7 @@ export default function Sidebar() {
               <span>Colonies</span>
               {colonies.length > 0 && (
                 <span className="text-[10px] bg-sidebar-item-hover rounded-full px-1.5 py-0.5 font-medium">
-                  {colonies.length}
+                  {filterQuery.trim() ? filteredColonies.length : colonies.length}
                 </span>
               )}
             </button>
@@ -237,12 +286,12 @@ export default function Sidebar() {
           </div>
           {coloniesExpanded && (
             <div className="flex flex-col gap-0.5 mt-0.5">
-              {colonies.map((colony) => (
+              {filteredColonies.map((colony) => (
                 <SidebarColonyItem key={colony.id} colony={colony} />
               ))}
-              {colonies.length === 0 && (
+              {filteredColonies.length === 0 && (
                 <p className="px-5 py-2 text-xs text-sidebar-muted">
-                  No colonies yet
+                  {filterQuery.trim() ? `No colonies matching "${filterQuery}"` : "No colonies yet"}
                 </p>
               )}
             </div>
@@ -262,16 +311,16 @@ export default function Sidebar() {
           </button>
           {queensExpanded && (
             <div className="flex flex-col gap-0.5 mt-0.5">
-              {queenProfiles.map((queen) => (
+              {filteredQueens.map((queen) => (
                 <SidebarQueenItem
                   key={queen.id}
                   queen={queen}
                   isActive={activeQueenIds.has(queen.id)}
                 />
               ))}
-              {queenProfiles.length === 0 && (
+              {filteredQueens.length === 0 && (
                 <p className="px-5 py-2 text-xs text-sidebar-muted">
-                  Loading queens...
+                  {filterQuery.trim() ? `No queens matching "${filterQuery}"` : "Loading queens..."}
                 </p>
               )}
             </div>
