@@ -81,8 +81,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if hasattr(args, "func"):
-        sys.exit(args.func(args))
+    # Preflight path validation check to prevent directory crashes
+    if hasattr(args, "colony") and args.colony:
+        for colony_arg in args.colony:
+            if colony_arg:
+                import os
+                if os.path.isdir(os.path.abspath(colony_arg)):
+                    print(f"Error: input file is a directory, not a file: {colony_arg}")
+                    sys.exit(1)
 
 
 if __name__ == "__main__":
