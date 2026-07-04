@@ -408,3 +408,106 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def n8n_trigger_webhook(
+        webhook_url: str,
+        payload: dict | None = None,
+        method: str = "POST",
+        headers: dict | None = None,
+        timeout: int = 30,
+    ) -> dict:
+        """
+        Trigger an n8n workflow via its webhook URL.
+
+        Sends an HTTP request to an n8n webhook endpoint to start a workflow
+        execution. The webhook URL is obtained from the n8n workflow editor
+        (Webhook node → "Webhook URL"). No API key is required — the webhook
+        URL itself is the authentication token.
+
+        Args:
+            webhook_url: Full webhook URL from the n8n Webhook node
+                         (e.g. "https://my-n8n.example.com/webhook/abc123").
+            payload: JSON-serialisable dict to send as the request body.
+                     Passed to the workflow as incoming data (default: {}).
+            method: HTTP method — "POST" or "GET" (default: "POST").
+            headers: Optional extra HTTP headers to include in the request.
+            timeout: Request timeout in seconds (default: 30, max: 120).
+
+        Returns:
+            Dict with the webhook response body, HTTP status code, and a
+            ``triggered`` flag; or an error dict on failure.
+
+        Example:
+            n8n_trigger_webhook(
+                webhook_url="https://my-n8n.example.com/webhook/order-alert",
+                payload={"order_id": "ORD-999", "amount": 149.99},
+            )
+        """
+        if not webhook_url:
+            return {"error": "webhook_url is required"}
+
+        method = method.upper()
+        if method not in ("POST", "GET"):
+            return {"error": "method must be 'POST' or 'GET'"}
+
+        # Clamp timeout to a sane maximum so callers cannot hang indefinitely.
+        clamped_timeout = float(min(max(timeout, 1), 120))
+
+        request_headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+        if headers:
+            request_headers.update(headers)
+
+        body = payload or {}
+
+        try:
+            if method == "POST":
+                resp = httpx.post(
+                    webhook_url,
+                    json=body,
+                    headers=request_headers,
+                    timeout=clamped_timeout,
+                )
+            else:
+                # GET — send payload as query params (flat string values only)
+                str_params = {k: str(v) for k, v in body.items()}
+                resp = httpx.get(
+                    webhook_url,
+                    params=str_params,
+                    headers=request_headers,
+                    timeout=clamped_timeout,
+                )
+
+            # n8n webhooks return 200 with a JSON body on success.
+            # Some workflows return 204 No Content when configured to
+            # respond immediately without data.
+            if resp.status_code == 204:
+                return {"triggered": True, "status_code": 204, "response": {}}
+
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = resp.text
+                return {
+                    "error": f"Webhook returned HTTP {resp.status_code}",
+                    "detail": detail,
+                    "triggered": False,
+                }
+
+            try:
+                response_body = resp.json()
+            except Exception:
+                # Webhook responded with plain text (e.g. "Workflow executed")
+                response_body = resp.text
+
+            return {
+                "triggered": True,
+                "status_code": resp.status_code,
+                "response": response_body,
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Request timed out", "triggered": False}
+        except httpx.RequestError as exc:
+            return {"error": f"Network error: {exc}", "triggered": False}

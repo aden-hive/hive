@@ -197,3 +197,218 @@ class TestN8nGetExecution:
 
         assert result["status"] == "error"
         assert result["mode"] == "manual"
+
+
+# ---------------------------------------------------------------------------
+# n8n_trigger_webhook tests
+# ---------------------------------------------------------------------------
+
+WEBHOOK_URL = "https://my-n8n.example.com/webhook/abc123"
+
+
+class TestN8nTriggerWebhook:
+    # ------------------------------------------------------------------
+    # Input validation
+    # ------------------------------------------------------------------
+
+    def test_missing_webhook_url(self, tool_fns):
+        result = tool_fns["n8n_trigger_webhook"](webhook_url="")
+        assert "error" in result
+        assert result["error"] == "webhook_url is required"
+
+    def test_invalid_method(self, tool_fns):
+        result = tool_fns["n8n_trigger_webhook"](
+            webhook_url=WEBHOOK_URL,
+            method="DELETE",
+        )
+        assert "error" in result
+        assert "method" in result["error"].lower()
+
+    # ------------------------------------------------------------------
+    # Successful POST
+    # ------------------------------------------------------------------
+
+    def test_post_json_response(self, tool_fns):
+        response_data = {"executionId": "exec-42", "status": "running"}
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.post",
+            return_value=_mock_resp(response_data, status_code=200),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](
+                webhook_url=WEBHOOK_URL,
+                payload={"order_id": "ORD-1"},
+            )
+
+        assert result["triggered"] is True
+        assert result["status_code"] == 200
+        assert result["response"]["executionId"] == "exec-42"
+
+    def test_post_plain_text_response(self, tool_fns):
+        """Webhook that returns plain text (not JSON) should still succeed."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.side_effect = ValueError("not json")
+        resp.text = "Workflow executed"
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", return_value=resp):
+            result = tool_fns["n8n_trigger_webhook"](
+                webhook_url=WEBHOOK_URL,
+                payload={"ping": True},
+            )
+
+        assert result["triggered"] is True
+        assert result["response"] == "Workflow executed"
+
+    def test_post_204_no_content(self, tool_fns):
+        """HTTP 204 means the webhook triggered but returned no body."""
+        resp = MagicMock()
+        resp.status_code = 204
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", return_value=resp):
+            result = tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL)
+
+        assert result["triggered"] is True
+        assert result["status_code"] == 204
+        assert result["response"] == {}
+
+    # ------------------------------------------------------------------
+    # Successful GET
+    # ------------------------------------------------------------------
+
+    def test_get_request(self, tool_fns):
+        response_data = {"pong": True}
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.get",
+            return_value=_mock_resp(response_data, status_code=200),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](
+                webhook_url=WEBHOOK_URL,
+                method="GET",
+                payload={"check": "health"},
+            )
+
+        assert result["triggered"] is True
+        assert result["status_code"] == 200
+
+    # ------------------------------------------------------------------
+    # Custom headers
+    # ------------------------------------------------------------------
+
+    def test_custom_headers_forwarded(self, tool_fns):
+        """Extra headers supplied by the caller should reach the HTTP layer."""
+        response_data = {"ok": True}
+        captured: dict = {}
+
+        def fake_post(url, json, headers, timeout):
+            captured["headers"] = headers
+            return _mock_resp(response_data)
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", side_effect=fake_post):
+            tool_fns["n8n_trigger_webhook"](
+                webhook_url=WEBHOOK_URL,
+                headers={"X-Source": "hive-agent"},
+            )
+
+        assert captured["headers"].get("X-Source") == "hive-agent"
+        # Default Content-Type should still be present
+        assert "Content-Type" in captured["headers"]
+
+    # ------------------------------------------------------------------
+    # Timeout clamping
+    # ------------------------------------------------------------------
+
+    def test_timeout_clamped_to_max(self, tool_fns):
+        """Timeout values above 120 should be clamped to 120."""
+        captured: dict = {}
+
+        def fake_post(url, json, headers, timeout):
+            captured["timeout"] = timeout
+            return _mock_resp({"ok": True})
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", side_effect=fake_post):
+            tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL, timeout=9999)
+
+        assert captured["timeout"] == 120.0
+
+    def test_timeout_clamped_to_min(self, tool_fns):
+        """Timeout values below 1 should be clamped to 1."""
+        captured: dict = {}
+
+        def fake_post(url, json, headers, timeout):
+            captured["timeout"] = timeout
+            return _mock_resp({"ok": True})
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", side_effect=fake_post):
+            tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL, timeout=0)
+
+        assert captured["timeout"] == 1.0
+
+    # ------------------------------------------------------------------
+    # HTTP error responses
+    # ------------------------------------------------------------------
+
+    def test_http_404_returns_error(self, tool_fns):
+        error_body = {"message": "Workflow not found"}
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.post",
+            return_value=_mock_resp(error_body, status_code=404),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL)
+
+        assert result["triggered"] is False
+        assert "404" in result["error"]
+
+    def test_http_500_returns_error(self, tool_fns):
+        error_body = {"message": "Internal server error"}
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.post",
+            return_value=_mock_resp(error_body, status_code=500),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL)
+
+        assert result["triggered"] is False
+        assert "500" in result["error"]
+
+    # ------------------------------------------------------------------
+    # Network-level errors
+    # ------------------------------------------------------------------
+
+    def test_timeout_exception(self, tool_fns):
+        import httpx as _httpx
+
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.post",
+            side_effect=_httpx.TimeoutException("timed out"),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL)
+
+        assert result["triggered"] is False
+        assert "timed out" in result["error"].lower()
+
+    def test_network_error(self, tool_fns):
+        import httpx as _httpx
+
+        with patch(
+            "aden_tools.tools.n8n_tool.n8n_tool.httpx.post",
+            side_effect=_httpx.RequestError("connection refused"),
+        ):
+            result = tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL)
+
+        assert result["triggered"] is False
+        assert "network error" in result["error"].lower()
+
+    # ------------------------------------------------------------------
+    # Empty / None payload defaults to empty dict
+    # ------------------------------------------------------------------
+
+    def test_none_payload_defaults_to_empty_dict(self, tool_fns):
+        captured: dict = {}
+
+        def fake_post(url, json, headers, timeout):
+            captured["json"] = json
+            return _mock_resp({"ok": True})
+
+        with patch("aden_tools.tools.n8n_tool.n8n_tool.httpx.post", side_effect=fake_post):
+            tool_fns["n8n_trigger_webhook"](webhook_url=WEBHOOK_URL, payload=None)
+
+        assert captured["json"] == {}

@@ -53,4 +53,24 @@ N8N_CREDENTIALS = {
         credential_id="n8n_base_url",
         credential_key="api_key",
     ),
+    # n8n_trigger_webhook uses a self-contained webhook URL — no API key needed.
+    # This entry exists so the tool appears in the credential registry and
+    # help text is surfaced to users who need to locate their webhook URL.
+    "n8n_webhook": CredentialSpec(
+        env_var="N8N_WEBHOOK_URL",
+        tools=["n8n_trigger_webhook"],
+        required=False,
+        startup_required=False,
+        help_url="https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/",
+        description="n8n webhook URL — obtained from the Webhook node in the workflow editor",
+        direct_api_key_supported=True,
+        api_key_instructions="""To get the webhook URL:
+1. Open your workflow in the n8n editor
+2. Add or click an existing Webhook node
+3. Copy the 'Webhook URL' shown in the node panel
+4. Pass it directly as the webhook_url parameter to n8n_trigger_webhook""",
+        health_check_endpoint="",
+        credential_id="n8n_webhook",
+        credential_key="api_key",
+    ),
 }

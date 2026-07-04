@@ -1,6 +1,6 @@
 # n8n Tool
 
-Manage n8n workflows and executions via the n8n REST API.
+Manage n8n workflows, executions, and trigger workflows via webhooks using the n8n REST API.
 
 ## Tools
 
@@ -12,8 +12,11 @@ Manage n8n workflows and executions via the n8n REST API.
 | `n8n_deactivate_workflow` | Deactivate a workflow |
 | `n8n_list_executions` | List workflow executions with optional status filter |
 | `n8n_get_execution` | Get details of a specific execution |
+| `n8n_trigger_webhook` | Trigger a workflow via its webhook URL (no API key needed) |
 
 ## Setup
+
+### API-based tools (workflow & execution management)
 
 Set the following environment variables:
 
@@ -24,7 +27,39 @@ Set the following environment variables:
 
 Get an API key at: Settings → API → Create API Key in your n8n instance.
 
+### Webhook tool (`n8n_trigger_webhook`)
+
+No API key or environment variable needed. The webhook URL is self-contained
+and acts as the authentication token. Simply copy it from the Webhook node in
+your n8n workflow editor and pass it directly as the `webhook_url` argument.
+
 ## Usage Examples
+
+### Trigger a workflow via webhook
+```python
+n8n_trigger_webhook(
+    webhook_url="https://my-n8n.example.com/webhook/order-alert",
+    payload={"order_id": "ORD-999", "amount": 149.99},
+)
+```
+
+### Trigger with custom headers
+```python
+n8n_trigger_webhook(
+    webhook_url="https://my-n8n.example.com/webhook/abc123",
+    payload={"event": "user_signup", "email": "user@example.com"},
+    headers={"X-Source": "hive-agent"},
+)
+```
+
+### Trigger via GET (for webhooks configured to accept GET requests)
+```python
+n8n_trigger_webhook(
+    webhook_url="https://my-n8n.example.com/webhook/ping",
+    method="GET",
+    payload={"check": "health"},
+)
+```
 
 ### List active workflows
 ```python
@@ -50,7 +85,9 @@ n8n_list_executions(status="success", limit=10)
 
 All tools return error dicts on failure:
 ```python
-{"error": "n8n credentials not configured", "help": "Set N8N_API_KEY and N8N_BASE_URL environment variables or configure via credential store"}
+{"error": "webhook_url is required"}
+{"error": "Webhook returned HTTP 404", "detail": "...", "triggered": false}
+{"error": "Request timed out", "triggered": false}
+{"error": "n8n credentials not configured", "help": "Set N8N_API_KEY and N8N_BASE_URL ..."}
 {"error": "n8n API error (HTTP 404): Workflow not found"}
-{"error": "Request timed out"}
 ```
