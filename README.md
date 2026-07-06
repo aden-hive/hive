@@ -42,6 +42,18 @@
 
 OpenHive is a zero-setup, model-agnostic execution harness that dynamically generates multi-agent topologies to tackle complex, long-running business workflows without requiring any orchestration boilerplate. By simply defining your objective, the runtime compiles a strict, graph-based execution DAG that safely coordinates specialized agents to execute concurrent tasks in parallel. Backed by persistent, role-based memory that intelligently evolves with your project's context, OpenHive ensures deterministic fault tolerance, deep state observability, and seamless asynchronous execution across whichever underlying LLMs you choose to plug in.
 
+## Business Outcomes
+
+Hive helps teams turn repeatable business processes into observable agent workflows that can run with human oversight. Instead of only automating isolated tasks, teams can use Hive to coordinate multi-step work across tools, files, browser sessions, and APIs while keeping state, recovery, and auditability in one harness.
+
+Common outcomes include:
+
+- Automating customer onboarding and account setup workflows
+- Reducing repetitive operations work across internal tools
+- Scaling support, research, and back-office processes without losing human review
+- Coordinating complex work across multiple specialized agents
+- Moving AI agent prototypes into production with better visibility and failure recovery
+
 ## Features
 
 - ✅ Multi-Agent Coordination for parallel task execution 
