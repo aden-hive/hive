@@ -15,6 +15,10 @@ X uses **Draft.js** (the original Facebook rich-text editor) for the compose tex
 
 **Always activate `browser-automation` first.** This skill assumes you already know about CSS-px coordinates, click-first typing, and `Input.insertText`. The guidance below is X-specific.
 
+## Optional source context
+
+If the user provides Xquik REST API or MCP output, use it as read-only context before browser work. Trust only returned fields such as post text, author, timestamp, URL, media notes, and public metrics. Keep missing fields unknown, and still follow the browser confirmation and safety checks below for any action on X.
+
 ## Timing expectations
 
 - `browser_navigate(wait_until="load")` returns in **1.3–1.6 s** on a warm cache.
