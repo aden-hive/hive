@@ -21,11 +21,24 @@ import socket
 import sys
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+
+from oauth_exceptions import (
+    OAuthConfigurationError,
+    OAuthCredentialError,
+    OAuthNetworkError,
+    OAuthRedirectError,
+    OAuthServerError,
+    OAuthTimeoutError,
+    OAuthTokenRefreshError,
+    OAuthValidationError,
+    parse_oauth_error_response,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -78,6 +91,11 @@ def _fetch_credentials_from_public_source() -> tuple[str | None, str | None]:
             if secret_match:
                 _cached_client_secret = secret_match.group(1)
             return _cached_client_id, _cached_client_secret
+    except urllib.error.URLError as e:
+        raise OAuthNetworkError(
+            "Failed to fetch OAuth credentials from public source",
+            details={"url": _CREDENTIALS_URL, "error": str(e)},
+        )
     except Exception as e:
         logger.debug(f"Failed to fetch credentials from public source: {e}")
     return None, None
@@ -106,7 +124,16 @@ def get_client_id() -> str:
     if client_id:
         return client_id
 
-    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+    raise OAuthConfigurationError(
+        "Could not obtain Antigravity OAuth client ID",
+        details={
+            "suggestions": [
+                "Set ANTIGRAVITY_CLIENT_ID environment variable",
+                "Add 'antigravity_client_id' to ~/.hive/configuration.json",
+                "Check network connection to fetch from public source",
+            ]
+        },
+    )
 
 
 def get_client_secret() -> str | None:
@@ -202,13 +229,23 @@ def wait_for_callback(port: int, timeout: int = 300) -> tuple[str | None, str | 
             )
         server.handle_request()
 
-    return None, None, "timeout"
+    raise OAuthTimeoutError(
+        "OAuth callback not received within timeout period",
+        timeout_seconds=timeout,
+        details={"port": port, "suggestion": "Try authenticating again or check if the browser blocked the redirect"},
+    )
 
 
 def exchange_code_for_tokens(
     code: str, redirect_uri: str, client_id: str, client_secret: str | None
-) -> dict[str, Any] | None:
-    """Exchange authorization code for tokens."""
+) -> dict[str, Any]:
+    """Exchange authorization code for tokens.
+    
+    Raises:
+        OAuthCredentialError: Invalid or expired authorization code
+        OAuthServerError: OAuth server error
+        OAuthNetworkError: Network-related failure
+    """
     data = {
         "code": code,
         "client_id": client_id,
@@ -230,13 +267,41 @@ def exchange_code_for_tokens(
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # Parse error response from OAuth server
+        try:
+            error_data = json.loads(e.read().decode())
+            raise parse_oauth_error_response(error_data, e.code)
+        except (json.JSONDecodeError, AttributeError):
+            raise OAuthServerError(
+                f"Token exchange failed with HTTP {e.code}",
+                status_code=e.code,
+                details={"url": _OAUTH_TOKEN_URL},
+            )
+    except urllib.error.URLError as e:
+        raise OAuthNetworkError(
+            "Network error during token exchange",
+            details={"url": _OAUTH_TOKEN_URL, "error": str(e.reason)},
+        )
+    except socket.timeout:
+        raise OAuthTimeoutError(
+            "Token exchange request timed out",
+            timeout_seconds=30,
+            details={"url": _OAUTH_TOKEN_URL},
+        )
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
-        return None
+        raise OAuthServerError(
+            f"Unexpected error during token exchange: {type(e).__name__}",
+            details={"error": str(e), "url": _OAUTH_TOKEN_URL},
+        )
 
 
 def get_user_email(access_token: str) -> str | None:
-    """Get user email from Google API."""
+    """Get user email from Google API.
+    
+    Returns:
+        User email or None if request fails
+    """
     req = urllib.request.Request(
         "https://www.googleapis.com/oauth2/v2/userinfo",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -245,7 +310,14 @@ def get_user_email(access_token: str) -> str | None:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
             return data.get("email")
-    except Exception:
+    except urllib.error.HTTPError as e:
+        logger.debug(f"Failed to get user email (HTTP {e.code}): {e.reason}")
+        return None
+    except urllib.error.URLError as e:
+        logger.debug(f"Network error getting user email: {e.reason}")
+        return None
+    except Exception as e:
+        logger.debug(f"Error getting user email: {e}")
         return None
 
 
@@ -272,6 +344,9 @@ def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_I
     """Test if credentials work by making a simple API call to Antigravity.
 
     Returns True if credentials are valid, False otherwise.
+    
+    Raises:
+        OAuthValidationError: If validation fails with actionable error details
     """
     endpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
     body = {
@@ -304,12 +379,35 @@ def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_I
         with urllib.request.urlopen(req, timeout=30) as resp:
             json.loads(resp.read())
             return True
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise OAuthValidationError(
+                "Access token is invalid or expired",
+                details={"status_code": 401, "suggestion": "Re-authenticate to obtain a new token"},
+            )
+        elif e.code == 403:
+            raise OAuthValidationError(
+                "Access forbidden - token may lack required permissions",
+                details={"status_code": 403, "project_id": project_id},
+            )
+        logger.debug(f"Validation failed with HTTP {e.code}")
+        return False
+    except urllib.error.URLError as e:
+        logger.debug(f"Network error during validation: {e.reason}")
+        return False
+    except Exception as e:
+        logger.debug(f"Validation error: {e}")
         return False
 
 
-def refresh_access_token(refresh_token: str, client_id: str, client_secret: str | None) -> dict | None:
-    """Refresh the access token using the refresh token."""
+def refresh_access_token(refresh_token: str, client_id: str, client_secret: str | None) -> dict[str, Any]:
+    """Refresh the access token using the refresh token.
+    
+    Raises:
+        OAuthTokenRefreshError: If refresh fails
+        OAuthCredentialError: If refresh token is invalid or expired
+        OAuthNetworkError: If network error occurs
+    """
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -328,9 +426,36 @@ def refresh_access_token(refresh_token: str, client_id: str, client_secret: str 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        try:
+            error_data = json.loads(e.read().decode())
+            error = parse_oauth_error_response(error_data, e.code)
+            # Wrap in TokenRefreshError for clearer context
+            raise OAuthTokenRefreshError(
+                f"Failed to refresh token: {error.message}",
+                details={"original_error": error_data, "status_code": e.code},
+            )
+        except (json.JSONDecodeError, AttributeError):
+            raise OAuthTokenRefreshError(
+                f"Token refresh failed with HTTP {e.code}",
+                details={"status_code": e.code, "url": _OAUTH_TOKEN_URL},
+            )
+    except urllib.error.URLError as e:
+        raise OAuthNetworkError(
+            "Network error during token refresh",
+            details={"url": _OAUTH_TOKEN_URL, "error": str(e.reason)},
+        )
+    except socket.timeout:
+        raise OAuthTimeoutError(
+            "Token refresh request timed out",
+            timeout_seconds=30,
+            details={"url": _OAUTH_TOKEN_URL},
+        )
     except Exception as e:
-        logger.debug(f"Token refresh failed: {e}")
-        return None
+        raise OAuthTokenRefreshError(
+            f"Unexpected error during token refresh: {type(e).__name__}",
+            details={"error": str(e)},
+        )
 
 
 def cmd_account_add(args: argparse.Namespace) -> int:
@@ -339,8 +464,20 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     First checks if valid credentials already exist. If so, validates them
     and skips OAuth if they work. Otherwise, proceeds with OAuth flow.
     """
-    client_id = get_client_id()
-    client_secret = get_client_secret()
+    try:
+        client_id = get_client_id()
+        client_secret = get_client_secret()
+    except OAuthConfigurationError as e:
+        logger.error(f"Configuration error: {e.message}")
+        if e.details.get("suggestions"):
+            logger.info("\nSuggestions:")
+            for suggestion in e.details["suggestions"]:
+                logger.info(f"  - {suggestion}")
+        return 1
+    except OAuthNetworkError as e:
+        logger.error(f"Network error: {e.message}")
+        logger.info("Check your internet connection and try again.")
+        return 1
 
     # Check if credentials already exist
     accounts_data = load_accounts()
@@ -361,17 +498,21 @@ def cmd_account_add(args: argparse.Namespace) -> int:
             # Token still valid, test it
             logger.info(f"Found existing credentials for: {email}")
             logger.info("Validating existing credentials...")
-            if validate_credentials(access_token, project_id):
-                logger.info("✓ Credentials valid! Skipping OAuth.")
-                return 0
-            else:
-                logger.info("Credentials failed validation, refreshing...")
+            try:
+                if validate_credentials(access_token, project_id):
+                    logger.info("✓ Credentials valid! Skipping OAuth.")
+                    return 0
+                else:
+                    logger.info("Credentials failed validation, refreshing...")
+            except OAuthValidationError as e:
+                logger.warning(f"Validation failed: {e.message}")
+                logger.info("Attempting to refresh token...")
         elif refresh_token:
             logger.info(f"Found expired credentials for: {email}")
             logger.info("Attempting token refresh...")
 
-            tokens = refresh_access_token(refresh_token, client_id, client_secret)
-            if tokens:
+            try:
+                tokens = refresh_access_token(refresh_token, client_id, client_secret)
                 new_access = tokens.get("access_token")
                 expires_in = tokens.get("expires_in", 3600)
                 if new_access:
@@ -383,13 +524,21 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
                     # Validate the refreshed token
                     logger.info("Validating refreshed credentials...")
-                    if validate_credentials(new_access, project_id):
-                        logger.info("✓ Credentials refreshed and validated!")
-                        return 0
-                    else:
-                        logger.info("Refreshed token failed validation, proceeding with OAuth...")
-            else:
-                logger.info("Token refresh failed, proceeding with OAuth...")
+                    try:
+                        if validate_credentials(new_access, project_id):
+                            logger.info("✓ Credentials refreshed and validated!")
+                            return 0
+                        else:
+                            logger.info("Refreshed token failed validation, proceeding with OAuth...")
+                    except OAuthValidationError as e:
+                        logger.warning(f"Validation failed: {e.message}")
+                        logger.info("Proceeding with OAuth...")
+            except (OAuthTokenRefreshError, OAuthCredentialError) as e:
+                logger.warning(f"Token refresh failed: {e.message}")
+                logger.info("Proceeding with OAuth flow...")
+            except OAuthNetworkError as e:
+                logger.error(f"Network error during refresh: {e.message}")
+                return 1
 
     # No valid credentials, proceed with OAuth
     if not client_secret:
@@ -426,7 +575,13 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
     # Wait for callback
     logger.info(f"Listening for callback on port {port}...")
-    code, received_state, error = wait_for_callback(port)
+    try:
+        code, received_state, error = wait_for_callback(port)
+    except OAuthTimeoutError as e:
+        logger.error(f"Timeout: {e.message}")
+        if e.details.get("suggestion"):
+            logger.info(f"Suggestion: {e.details['suggestion']}")
+        return 1
 
     if error:
         logger.error(f"Authentication failed: {error}")
@@ -442,9 +597,30 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
     # Exchange code for tokens
     logger.info("Exchanging authorization code for tokens...")
-    tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret)
-
-    if not tokens:
+    try:
+        tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret)
+    except OAuthCredentialError as e:
+        logger.error(f"Credential error: {e.message}")
+        if e.error_code == "invalid_grant":
+            logger.info("The authorization code may have expired. Please try again.")
+        return 1
+    except OAuthRedirectError as e:
+        logger.error(f"Redirect URI error: {e.message}")
+        logger.info(
+            f"Expected redirect URI: {redirect_uri}\n"
+            "Ensure this matches the OAuth client configuration."
+        )
+        return 1
+    except OAuthServerError as e:
+        logger.error(f"Server error: {e.message}")
+        if e.recoverable:
+            logger.info("This may be a temporary issue. Please try again later.")
+        return 1
+    except OAuthNetworkError as e:
+        logger.error(f"Network error: {e.message}")
+        return 1
+    except OAuthTimeoutError as e:
+        logger.error(f"Timeout: {e.message}")
         return 1
 
     access_token = tokens.get("access_token")
