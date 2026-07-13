@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from framework.llm.provider import LLMProvider, Tool
+from framework.output_key_validation import validate_output_keys
 from framework.tracker.decision_tracker import DecisionTracker
 
 
@@ -104,6 +105,11 @@ class AgentSpec(BaseModel):
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
+
+    @model_validator(mode="after")
+    def _validate_output_keys(self) -> Self:
+        validate_output_keys(self.output_keys, self.nullable_output_keys)
+        return self
 
     def is_queen(self) -> bool:
         return self.id == "queen"
