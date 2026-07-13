@@ -43,6 +43,7 @@ from .asana_tool import register_tools as register_asana
 from .attio_tool import register_tools as register_attio
 from .aws_s3_tool import register_tools as register_aws_s3
 from .azure_sql_tool import register_tools as register_azure_sql
+from .cloudwatch_tool import register_tools as register_cloudwatch
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
@@ -257,6 +258,7 @@ def _register_unverified(
     register_attio(mcp, credentials=credentials)
     register_aws_s3(mcp, credentials=credentials)
     register_azure_sql(mcp, credentials=credentials)
+    register_cloudwatch(mcp, credentials=credentials)
     register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
