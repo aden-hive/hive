@@ -87,19 +87,19 @@ intake → research → compile-report
 ### Basic Usage
 
 ```python
-from framework.runner import AgentRunner
+from examples.templates.tech_news_reporter.agent import TechNewsReporterAgent
 
 # Load the agent
-runner = AgentRunner.load("examples/templates/tech_news_reporter")
+agent = TechNewsReporterAgent()
 
 # Run with an initial topic
-result = await runner.run({
+result = await agent.run({
     "user_message": "Find me the latest news about AI startups"
 })
 
 # Access results
 print(result.output)
-print(result.status)
+print(result.success)
 ```
 
 ### Input Schema
