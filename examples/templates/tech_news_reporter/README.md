@@ -92,8 +92,10 @@ from framework.runner import AgentRunner
 # Load the agent
 runner = AgentRunner.load("examples/templates/tech_news_reporter")
 
-# Run with input
-result = await runner.run({"input_key": "value"})
+# Run with an initial topic
+result = await runner.run({
+    "user_message": "Find me the latest news about AI startups"
+})
 
 # Access results
 print(result.output)
@@ -102,12 +104,25 @@ print(result.status)
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
+The agent's entry node `intake` can accept an initial user message. If provided, it uses this to guide the research. If omitted, the agent will prompt the user for topics.
 
+```json
+{
+  "user_message": "Find me the latest news about AI startups"
+}
+```
 
 ### Output Schema
 
 Terminal nodes: `compile-report`
+
+The agent outputs the path to the generated HTML report:
+
+```json
+{
+  "report_file": "tech_news_report.html"
+}
+```
 
 ## Version History
 
