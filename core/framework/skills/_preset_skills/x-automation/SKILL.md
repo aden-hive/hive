@@ -404,3 +404,5 @@ If not logged in, **stop immediately** and surface. Do not attempt to log in via
 
 - `browser-automation` skill — general CDP/coord/screenshot rules, click-then-type pattern, Input.insertText
 - `linkedin-automation` skill — LinkedIn equivalent
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
