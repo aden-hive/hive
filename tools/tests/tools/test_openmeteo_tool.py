@@ -96,9 +96,7 @@ class TestWeatherGetForecast:
             }
         }
         with patch(HTTPX_GET, return_value=_mock_response(payload)) as mock_get:
-            result = tool_fns["weather_get_forecast"](
-                latitude=52.52, longitude=13.41, days=2
-            )
+            result = tool_fns["weather_get_forecast"](latitude=52.52, longitude=13.41, days=2)
 
         assert result["dates"] == ["2026-07-18", "2026-07-19"]
         assert result["temperature_max"] == [25.1, 27.3]
@@ -111,9 +109,7 @@ class TestWeatherGetForecast:
     @pytest.mark.parametrize("days", [0, -1, 17, 100])
     def test_days_out_of_range(self, tool_fns, days):
         with patch(HTTPX_GET) as mock_get:
-            result = tool_fns["weather_get_forecast"](
-                latitude=52.52, longitude=13.41, days=days
-            )
+            result = tool_fns["weather_get_forecast"](latitude=52.52, longitude=13.41, days=days)
 
         assert result == {"error": "days must be between 1 and 16"}
         mock_get.assert_not_called()
@@ -121,9 +117,7 @@ class TestWeatherGetForecast:
     @pytest.mark.parametrize("days", [1, 16])
     def test_days_boundary_values_accepted(self, tool_fns, days):
         with patch(HTTPX_GET, return_value=_mock_response({"daily": {}})):
-            result = tool_fns["weather_get_forecast"](
-                latitude=52.52, longitude=13.41, days=days
-            )
+            result = tool_fns["weather_get_forecast"](latitude=52.52, longitude=13.41, days=days)
 
         assert "error" not in result
 
