@@ -194,6 +194,16 @@ def test_minimax_preset_uses_current_default_model():
     assert preset["max_context_tokens"] == 180800
 
 
+def test_lmstudio_preset_uses_local_openai_compatible_endpoint():
+    preset = model_catalog.get_preset("lmstudio_local")
+
+    assert preset is not None
+    assert preset["provider"] == "lm_studio"
+    assert preset["max_tokens"] == 8192
+    assert preset["max_context_tokens"] == 32768
+    assert preset["api_base"] == "http://localhost:1234/v1"
+
+
 def test_load_model_catalog_rejects_duplicate_model_ids(tmp_path, monkeypatch):
     bad_catalog = {
         "schema_version": 1,

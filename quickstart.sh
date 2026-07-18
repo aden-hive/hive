@@ -788,6 +788,18 @@ normalize_openrouter_model_id() {
     printf '%s' "$raw"
 }
 
+# Normalize model ids returned by LM Studio's local OpenAI-compatible API.
+normalize_lm_studio_model_id() {
+    local raw="$1"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    case "$raw" in
+        lm_studio/*) raw="${raw#lm_studio/}" ;;
+        lmstudio/*) raw="${raw#lmstudio/}" ;;
+    esac
+    printf '%s' "$raw"
+}
+
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL, SELECTED_MAX_TOKENS, and SELECTED_MAX_CONTEXT_TOKENS.
 prompt_model_selection() {
@@ -1156,6 +1168,32 @@ if ollama list >/dev/null 2>&1; then
     OLLAMA_DETECTED=true
 fi
 
+LM_STUDIO_DETECTED=false
+LM_STUDIO_MODELS=()
+LM_STUDIO_MODELS_TSV=$(uv run python - <<'PY' 2>/dev/null || true
+import json
+from urllib.request import Request, urlopen
+
+req = Request("http://localhost:1234/v1/models", headers={"User-Agent": "Hive quickstart"})
+try:
+    with urlopen(req, timeout=2) as resp:
+        data = json.load(resp)
+except Exception:
+    raise SystemExit(1)
+
+for item in data.get("data", []):
+    model_id = item.get("id")
+    if model_id:
+        print(model_id)
+PY
+)
+while IFS= read -r line; do
+    [ -n "$line" ] && LM_STUDIO_MODELS+=("$line")
+done <<< "$LM_STUDIO_MODELS_TSV"
+if [ ${#LM_STUDIO_MODELS[@]} -gt 0 ]; then
+    LM_STUDIO_DETECTED=true
+fi
+
 if ! load_model_catalog_rows; then
     echo -e "${RED}Failed to load core/framework/llm/model_catalog.json.${NC}"
     echo -e "${YELLOW}Please ensure your Python environment is set up, then rerun quickstart.${NC}"
@@ -1376,7 +1414,14 @@ else
     echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed"
 fi
 
-SKIP_CHOICE=$((OLLAMA_CHOICE + 1))
+LM_STUDIO_CHOICE=$((OLLAMA_CHOICE + 1))
+if [ "$LM_STUDIO_DETECTED" = true ]; then
+    echo -e "  ${CYAN}$LM_STUDIO_CHOICE)${NC} Local (LM Studio) - OpenAI-compatible  ${GREEN}(lm studio detected)${NC}"
+else
+    echo -e "  ${CYAN}$LM_STUDIO_CHOICE)${NC} Local (LM Studio) - OpenAI-compatible"
+fi
+
+SKIP_CHOICE=$((LM_STUDIO_CHOICE + 1))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1638,6 +1683,68 @@ case $choice in
             exit 1
         fi
         ;;
+    "$LM_STUDIO_CHOICE")
+        # Local (LM Studio) — no API key; pick model from the local OpenAI-compatible server.
+        if [ "$LM_STUDIO_DETECTED" != true ]; then
+            echo ""
+            echo -e "${YELLOW}LM Studio depends on a local server at ${CYAN}http://localhost:1234/v1${NC}${YELLOW}, but 'GET /v1/models' failed.${NC}"
+            echo -e "  Please start LM Studio's local server, then run this quickstart again."
+            echo ""
+            exit 1
+        fi
+        SELECTED_PROVIDER_ID="lm_studio"
+        SELECTED_ENV_VAR=""
+        SELECTED_MAX_TOKENS=8192
+        SELECTED_MAX_CONTEXT_TOKENS=32768
+        SELECTED_API_BASE="http://localhost:1234/v1"
+        LM_STUDIO_MODELS=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && LM_STUDIO_MODELS+=("$line")
+        done < <(uv run python - <<'PY' 2>/dev/null
+import json
+from urllib.request import Request, urlopen
+
+req = Request("http://localhost:1234/v1/models", headers={"User-Agent": "Hive quickstart"})
+with urlopen(req, timeout=2) as resp:
+    data = json.load(resp)
+
+for item in data.get("data", []):
+    model_id = item.get("id")
+    if model_id:
+        print(model_id)
+PY
+)
+        if [ ${#LM_STUDIO_MODELS[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${BOLD}Select an LM Studio model:${NC}"
+            echo ""
+            for idx in "${!LM_STUDIO_MODELS[@]}"; do
+                num=$((idx + 1))
+                echo -e "  ${CYAN}$num)${NC} ${LM_STUDIO_MODELS[$idx]}"
+            done
+            echo ""
+            while true; do
+                read -r -p "Enter choice (1-${#LM_STUDIO_MODELS[@]}): " model_choice
+                if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#LM_STUDIO_MODELS[@]} ]; then
+                    SELECTED_MODEL="$(normalize_lm_studio_model_id "${LM_STUDIO_MODELS[$((model_choice - 1))]}")"
+                    SELECTED_API_BASE="http://localhost:1234/v1"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-${#LM_STUDIO_MODELS[@]}${NC}"
+            done
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using LM Studio with model ${DIM}lm_studio/$SELECTED_MODEL${NC}"
+            echo -e "${DIM}  API: ${SELECTED_API_BASE}${NC}"
+            echo ""
+        else
+            echo ""
+            echo -e "${RED}No LM Studio models found.${NC}"
+            echo -e "  Please load a model in LM Studio and then run this quickstart again."
+            echo ""
+            exit 1
+        fi
+
+        ;;
     "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
@@ -1807,6 +1914,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "lm_studio" ]; then
+        # LM Studio is a local OpenAI-compatible server, so persist its local base URL.
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
         # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
