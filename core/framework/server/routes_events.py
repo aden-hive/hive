@@ -9,6 +9,9 @@ from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConn
 from framework.host.event_bus import EventType
 from framework.server.app import resolve_session
 
+# Keep the route module lightweight by avoiding any extra imports here.
+# The event stream logic only needs the shared event type definitions.
+
 logger = logging.getLogger(__name__)
 
 # Default event types streamed to clients
