@@ -70,6 +70,7 @@ from .google_maps_tool import register_tools as register_google_maps
 from .google_search_console_tool import register_tools as register_google_search_console
 from .google_sheets_tool import register_tools as register_google_sheets
 from .greenhouse_tool import register_tools as register_greenhouse
+from .hackernews_tool import register_tools as register_hackernews
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .huggingface_tool import register_tools as register_huggingface
@@ -249,6 +250,7 @@ def _register_unverified(
     register_duckduckgo(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
+    register_hackernews(mcp)
 
     # --- Credentials required ---
     register_airtable(mcp, credentials=credentials)
