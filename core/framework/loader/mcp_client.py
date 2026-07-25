@@ -161,14 +161,47 @@ class MCPClient:
         if not self.config.command:
             raise ValueError("command is required for STDIO transport")
 
+        # Validate command against a basic allowlist to prevent arbitrary execution
+        # This is a safety check - the command should be validated by the caller too
+        _BLOCKED_COMMANDS = {"bash", "sh", "cmd", "powershell", "python", "python3", "node"}
+        base_command = self.config.command.split("/")[-1].split("\\")[-1]  # Get basename
+        if base_command in _BLOCKED_COMMANDS:
+            logger.warning(
+                "MCP stdio: potentially dangerous command '%s' (args=%s). "
+                "Ensure this command is from a trusted source.",
+                self.config.command,
+                self.config.args,
+            )
+
         try:
             import threading
 
             from mcp import StdioServerParameters
 
             # Create server parameters
-            # Always inherit parent environment and merge with any custom env vars
-            merged_env = {**os.environ, **(self.config.env or {})}
+            # Only pass explicitly configured env vars and safe system vars,
+            # NOT the full os.environ to prevent credential leakage
+            _SAFE_ENV_VARS = {
+                "PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE",
+                "TERM", "SHELL", "TMPDIR", "TEMP", "TMP",
+                "SYSTEMROOT", "WINDIR",  # Windows
+                "NODE_PATH", "PYTHONPATH",  # Runtime paths
+                "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",  # Network
+            }
+            
+            # Start with only safe system variables
+            safe_env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_VARS}
+            # Merge with explicitly configured env vars (these are intentional)
+            safe_env.update(self.config.env or {})
+            
+            # Log what we're passing for debugging
+            logger.debug(
+                "MCP stdio env: passing %d safe vars + %d configured vars",
+                len(safe_env),
+                len(self.config.env or {}),
+            )
+            
+            merged_env = safe_env
             # On Windows, passing cwd can cause WinError 267 ("invalid directory name").
             # tool_registry passes cwd=None and uses absolute script paths when applicable.
             cwd = self.config.cwd

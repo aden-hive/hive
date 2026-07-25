@@ -525,8 +525,34 @@ class _FilePolicy:
         if p.startswith("~"):
             p = os.path.expanduser(p)
         if os.path.isabs(p):
-            return os.path.realpath(p)
-        return os.path.realpath(os.path.join(self.home, p))
+            resolved = os.path.realpath(p)
+        else:
+            resolved = os.path.realpath(os.path.join(self.home, p))
+        
+        # Security check: verify the resolved path is still within allowed directories
+        # This prevents symlink traversal attacks where a symlink inside the allowed
+        # directory points to a location outside it
+        if self.write_safe_roots:
+            # For write operations, ensure resolved path is under an allowed root
+            if not any(_path_is_under(resolved, r) for r in self.write_safe_roots):
+                raise ValueError(
+                    f"symlink traversal denied: '{path}' resolves to '{resolved}' "
+                    "which is outside the allowed write directories"
+                )
+        elif self.home:
+            # For read operations, ensure resolved path is under the home directory
+            # or another safe location (not arbitrary system paths)
+            home_real = os.path.realpath(self.home)
+            if not _path_is_under(resolved, home_real):
+                # Allow common safe system directories
+                _SAFE_SYSTEM_DIRS = {"/usr", "/bin", "/sbin", "/lib", "/etc/ssl"}
+                if not any(_path_is_under(resolved, d) for d in _SAFE_SYSTEM_DIRS):
+                    raise ValueError(
+                        f"symlink traversal denied: '{path}' resolves to '{resolved}' "
+                        "which is outside the home directory or safe system paths"
+                    )
+        
+        return resolved
 
     def _check_read(self, resolved: str, original: str) -> None:
         if resolved in _READ_DENY_FILES:

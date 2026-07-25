@@ -3,6 +3,7 @@
 import hmac
 import logging
 import os
+import secrets
 from pathlib import Path
 
 from aiohttp import web
@@ -172,16 +173,27 @@ async def no_cache_api_middleware(request: web.Request, handler):
 # When the runtime is spawned by the Electron main process, a fresh random
 # token is passed via ``HIVE_DESKTOP_TOKEN``. Every request from main must
 # carry the matching ``X-Hive-Token`` header. If the env var is unset (e.g.
-# running ``hive serve`` directly from a terminal), the check is skipped —
-# OSS behaviour is preserved.
+# running ``hive serve`` directly from a terminal), a random token is
+# auto-generated to prevent unauthenticated access.
 # ---------------------------------------------------------------------------
 _EXPECTED_DESKTOP_TOKEN: str | None = os.environ.get("HIVE_DESKTOP_TOKEN") or None
+
+# Auto-generate a random token if none was provided to prevent auth bypass.
+if _EXPECTED_DESKTOP_TOKEN is None:
+    _EXPECTED_DESKTOP_TOKEN = secrets.token_urlsafe(32)
+    logger.warning(
+        "HIVE_DESKTOP_TOKEN not set — auto-generated a random token for this session. "
+        "If you are running `hive serve` from a terminal, the token has been logged to stderr. "
+        "Set HIVE_DESKTOP_TOKEN in your environment for deterministic auth."
+    )
+    # Print to stderr so the user can see it without polluting stdout logs
+    import sys
+    print(f"[hive] Auto-generated desktop auth token: {_EXPECTED_DESKTOP_TOKEN}", file=sys.stderr)
 
 
 @web.middleware
 async def desktop_auth_middleware(request: web.Request, handler):
-    if _EXPECTED_DESKTOP_TOKEN is None:
-        return await handler(request)
+    # Always require authentication - no bypass when token is unset
     provided = request.headers.get("X-Hive-Token", "")
     if not hmac.compare_digest(provided, _EXPECTED_DESKTOP_TOKEN):
         return web.json_response({"error": "unauthorized"}, status=401)
