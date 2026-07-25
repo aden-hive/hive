@@ -11,6 +11,7 @@ API Reference: https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/a
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 API_VERSION = "v62.0"
+
+# Regex for valid Salesforce SObject type names (alphanumeric + underscore, max 40 chars)
+_VALID_SOBJECT_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,39}$")
 
 
 def _get_creds(
@@ -50,8 +54,16 @@ def _headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-        "Accept": "application/json",
     }
+
+
+def _validate_sobject(object_type: str) -> str | None:
+    """Validate Salesforce SObject type name. Returns error message or None if valid."""
+    if not object_type:
+        return "object_type is required"
+    if not _VALID_SOBJECT_PATTERN.match(object_type):
+        return f"Invalid SObject type: {object_type!r} (must be alphanumeric/underscore, 1-40 chars)"
+    return None
 
 
 def _handle_response(resp: httpx.Response) -> dict[str, Any]:
@@ -158,8 +170,10 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type or not record_id:
-            return {"error": "object_type and record_id are required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
 
         try:
             url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/{record_id}"
@@ -193,8 +207,10 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type:
-            return {"error": "object_type is required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
         if not fields:
             return {"error": "fields dict is required"}
 
@@ -229,8 +245,12 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type or not record_id:
-            return {"error": "object_type and record_id are required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
+        if not record_id:
+            return {"error": "record_id is required"}
         if not fields:
             return {"error": "fields dict is required"}
 
@@ -261,8 +281,10 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type:
-            return {"error": "object_type is required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
 
         try:
             url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/describe"
@@ -357,8 +379,12 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type or not record_id:
-            return {"error": "object_type and record_id are required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
+        if not record_id:
+            return {"error": "record_id is required"}
 
         try:
             url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/{record_id}"
@@ -435,8 +461,10 @@ def register_tools(
             return creds
         token, instance_url = creds
 
-        if not object_type:
-            return {"error": "object_type is required"}
+        # Validate object_type to prevent SOQL injection
+        err = _validate_sobject(object_type)
+        if err:
+            return {"error": err}
 
         try:
             url = f"{instance_url}/services/data/{API_VERSION}/query/"

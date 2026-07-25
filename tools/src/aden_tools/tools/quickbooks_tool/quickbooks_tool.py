@@ -8,6 +8,7 @@ Uses OAuth 2.0 Bearer token auth.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import httpx
@@ -15,6 +16,21 @@ from fastmcp import FastMCP
 
 PROD_URL = "https://quickbooks.api.intuit.com/v3/company"
 SANDBOX_URL = "https://sandbox-quickbooks.api.intuit.com/v3/company"
+
+# Whitelist of allowed QuickBooks entity types
+_VALID_ENTITIES = frozenset({
+    "Account", "Attachable", "Bill", "BillPayment", "Class",
+    "CompanyInfo", "CreditMemo", "Currency", "Customer",
+    "Department", "Employee", "Estimate", "ExchangeRate",
+    "Invoice", "Item", "JournalEntry", "JournalEntryLineDetail",
+    "Payment", "PaymentMethod", "Preferences", "Purchase",
+    "PurchaseOrder", "Query", "ReceivePayment", "Report",
+    "SalesReceipt", "TaxCode", "TaxRate", "Term",
+    "TimeActivity", "Transfer", "Vendor", "VendorCredit",
+})
+
+# Regex for safe WHERE/ORDER BY clause characters
+_SAFE_CLAUSE_PATTERN = re.compile(r"^[a-zA-Z0-9_.'\"><= !&|()]+$")
 
 
 def _get_config() -> tuple[str, str] | dict:
@@ -82,6 +98,19 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         base_url, token = cfg
         if not entity:
             return {"error": "entity is required"}
+
+        # Validate entity against whitelist to prevent SOQL injection
+        if entity not in _VALID_ENTITIES:
+            return {
+                "error": f"Invalid entity type: {entity!r}",
+                "valid_entities": sorted(_VALID_ENTITIES),
+            }
+
+        # Validate WHERE/ORDER BY clauses to prevent injection
+        if where and not _SAFE_CLAUSE_PATTERN.match(where):
+            return {"error": "WHERE clause contains invalid characters"}
+        if order_by and not _SAFE_CLAUSE_PATTERN.match(order_by):
+            return {"error": "ORDER BY clause contains invalid characters"}
 
         query = f"SELECT * FROM {entity}"
         if where:

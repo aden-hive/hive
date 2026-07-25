@@ -263,9 +263,7 @@ async def _interactive_shell(verbose: bool = False) -> None:
                 break
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
-                import traceback
-
-                traceback.print_exc()
+                logging.exception("Error occurred")
     finally:
         await agent.stop()
 

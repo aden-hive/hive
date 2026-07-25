@@ -67,13 +67,19 @@ def register_job_tools(mcp: FastMCP) -> None:
         Returns: {job_id, pid, started_at}
         """
         try:
-            # Build argv: for shell=False, naive split is fine for the common case;
+            # Build argv: for shell=False, use shlex.split for proper quoting;
             # the foundational skill steers complex commands toward shell=True.
             argv: list[str] | str
             if shell:
                 argv = command
             else:
-                argv = command.split()
+                import shlex
+                try:
+                    argv = shlex.split(command, posix=True)
+                except ValueError:
+                    # Unbalanced quotes — route through shell
+                    argv = command
+                    shell = True
                 if not argv:
                     return {"error": "command was empty"}
 

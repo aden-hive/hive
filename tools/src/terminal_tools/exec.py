@@ -53,7 +53,15 @@ if TYPE_CHECKING:
 # directly — the alternative is spawning the first program with the rest
 # of the line as junk argv, which either errors or returns fake success
 # (e.g. `echo "..." && ps ...` → echo prints the literal command).
-_SHELL_METACHARS: frozenset[str] = frozenset({"|", "&&", "||", ";", ">", "<", ">>", "<<", "&", "2>", "2>&1", "|&"})
+_SHELL_METACHARS: frozenset[str] = frozenset({
+    "|", "&&", "||", ";", ">", "<", ">>", "<<", "&", "2>", "2>&1", "|&",
+    # Command substitution
+    "$(", "`",
+    # Process substitution
+    "<(", ">(",
+    # Brace expansion
+    "{", "}",
+})
 
 
 def register_exec_tools(mcp: FastMCP) -> None:

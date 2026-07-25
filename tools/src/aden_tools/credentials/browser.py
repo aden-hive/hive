@@ -9,7 +9,23 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import urllib.parse
 import webbrowser
+
+
+def _is_safe_url(url: str) -> bool:
+    """Validate URL is safe (http/https scheme only, no shell metacharacters)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        # Check for shell metacharacters
+        dangerous_chars = set(";&|`$(){}[]!#~")
+        if any(c in url for c in dangerous_chars):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def open_browser(url: str) -> tuple[bool, str]:
@@ -32,6 +48,10 @@ def open_browser(url: str) -> tuple[bool, str]:
         >>> if success:
         ...     print("Browser opened!")
     """
+    # Validate URL to prevent command injection
+    if not _is_safe_url(url):
+        return False, f"Invalid or unsafe URL: {url!r}"
+
     system = platform.system()
 
     try:
