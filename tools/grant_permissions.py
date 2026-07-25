@@ -4,11 +4,16 @@ Grant Permissions to AdenTestDB
 This script grants the necessary permissions to the 'sa' user to access AdenTE testDB.
 """
 
+import os
+
 import pyodbc
 
-SERVER = r"MONSTER\MSSQLSERVERR"
-USERNAME = "sa"
-PASSWORD = "622622aA."
+SERVER = os.getenv("MSSQL_SERVER", r"MONSTER\MSSQLSERVERR")
+USERNAME = os.getenv("MSSQL_USERNAME", "sa")
+PASSWORD = os.getenv("MSSQL_PASSWORD", "")
+if not PASSWORD:
+    raise SystemExit("ERROR: MSSQL_PASSWORD environment variable is required. "
+                     "Set it before running this script.")
 
 
 def grant_permissions():
@@ -77,14 +82,15 @@ def grant_permissions():
 
             # Create login if not exists
             try:
-                cursor.execute(f"""
-                IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = 'sa')
+                cursor.execute("""
+                IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = ?)
                 BEGIN
-                    CREATE LOGIN sa WITH PASSWORD = '{PASSWORD}'
+                    CREATE LOGIN ? WITH PASSWORD = ?
                 END
-                """)
-            except Exception:
-                pass
+                """, (USERNAME, USERNAME, PASSWORD))
+            except pyodbc.Error as e:
+                # Login might already exist, log but continue
+                print(f"Note (login may already exist): {e}")
 
             # Switch to AdenTestDB and grant permissions
             cursor.execute("USE AdenTestDB")
@@ -92,14 +98,15 @@ def grant_permissions():
             # Create user if not exists
             try:
                 cursor.execute("""
-                IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'sa')
+                IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = ?)
                 BEGIN
-                    CREATE USER sa FOR LOGIN sa
+                    CREATE USER ? FOR LOGIN ?
                 END
-                """)
+                """, (USERNAME, USERNAME, USERNAME))
                 print("[OK] Created database user")
-            except Exception:
-                pass
+            except pyodbc.Error as e:
+                # User might already exist, log but continue
+                print(f"Note (user may already exist): {e}")
 
             # Grant permissions
             cursor.execute("ALTER ROLE db_datareader ADD MEMBER sa")

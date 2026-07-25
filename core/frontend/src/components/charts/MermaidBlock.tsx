@@ -18,6 +18,25 @@ interface Props {
 
 let _mermaidInitialized = false;
 
+/**
+ * Sanitize SVG string to prevent XSS attacks.
+ * Removes script tags, event handlers, and dangerous attributes.
+ */
+function sanitizeSvg(svg: string): string {
+  return svg
+    // Remove script tags and their content
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    // Remove event handlers (onclick, onerror, onload, etc.)
+    .replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/\s*on\w+\s*=\s*\S+/gi, "")
+    // Remove javascript: protocol
+    .replace(/javascript\s*:/gi, "")
+    // Remove data: protocol (except safe image types)
+    .replace(/data\s*:\s*(?!image\/)/gi, "")
+    // Remove foreignObject tags (can contain HTML)
+    .replace(/<foreignObject\b[^>]*>[\s\S]*?<\/foreignObject>/gi, "");
+}
+
 export default function MermaidBlock({ source, theme = "light" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +51,7 @@ export default function MermaidBlock({ source, theme = "light" }: Props) {
           mermaid.initialize({
             startOnLoad: false,
             theme: theme === "dark" ? "dark" : "default",
-            securityLevel: "loose",
+            securityLevel: "strict",
             fontFamily:
               "'Inter Tight', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
           });
@@ -44,7 +63,8 @@ export default function MermaidBlock({ source, theme = "light" }: Props) {
         const id = `mmd-${Math.random().toString(36).slice(2, 10)}`;
         const { svg } = await mermaid.render(id, source);
         if (disposed || !ref.current) return;
-        ref.current.innerHTML = svg;
+        // Sanitize SVG before rendering to prevent XSS
+        ref.current.innerHTML = sanitizeSvg(svg);
       } catch (e) {
         if (!disposed) {
           setError(e instanceof Error ? e.message : String(e));

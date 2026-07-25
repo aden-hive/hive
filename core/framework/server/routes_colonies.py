@@ -192,7 +192,9 @@ def _safe_extract_tar(tf: tarfile.TarFile, dest: Path, *, strip_prefix: str) -> 
             return files_extracted, f"unsupported member: {member.name!r}"
         with target.open("wb") as out:
             shutil.copyfileobj(src, out)
-        target.chmod(member.mode & 0o755 if member.mode else 0o644)
+        # Strip SUID/SGID bits for security - only allow standard permissions
+        safe_mode = (member.mode & 0o777) if member.mode else 0o644
+        target.chmod(safe_mode)
         files_extracted += 1
 
     return files_extracted, None

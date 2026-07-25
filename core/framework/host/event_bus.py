@@ -312,6 +312,10 @@ class EventBus:
                 pass
             self._session_log = None
 
+    def __del__(self) -> None:
+        """Ensure file handle is closed on garbage collection."""
+        self.close_session_log()
+
     # Event types that are high-frequency streaming deltas — accumulated rather
     # than written individually to the session log.
     _STREAMING_DELTA_TYPES = frozenset(

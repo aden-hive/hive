@@ -14,8 +14,12 @@ Returns:
 """
 
 import json
+import re
 import sys
 from typing import Dict
+
+# Only allow safe module names (alphanumeric, dots, underscores)
+_SAFE_MODULE_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_.]*$')
 
 
 def check_imports(modules: list[str]) -> Dict[str, str]:
@@ -32,8 +36,11 @@ def check_imports(modules: list[str]) -> Dict[str, str]:
 
     for module_name in modules:
         try:
+            # Validate module name format to prevent import abuse
+            if not _SAFE_MODULE_PATTERN.match(module_name):
+                results[module_name] = "error: invalid module name format"
             # Handle both simple imports and from imports
-            if " " in module_name:
+            elif " " in module_name:
                 # This shouldn't happen with current usage, but handle it safely
                 results[module_name] = "error: invalid module name"
             else:
