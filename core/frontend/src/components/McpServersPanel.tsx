@@ -134,6 +134,7 @@ export default function McpServersPanel() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [busyByName, setBusyByName] = useState<Record<string, boolean>>({});
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -168,7 +169,11 @@ export default function McpServersPanel() {
   };
 
   const handleRemove = async (server: McpServer) => {
-    if (!confirm(`Remove MCP server "${server.name}"?`)) return;
+    if (confirmDelete !== server.name) {
+      setConfirmDelete(server.name);
+      return;
+    }
+    setConfirmDelete(null);
     setBusy(server.name, true);
     try {
       await mcpApi.removeServer(server.name);
@@ -301,6 +306,8 @@ export default function McpServersPanel() {
                   onRemove={() => handleRemove(s)}
                   onHealth={() => handleHealth(s)}
                   isLocal
+                  confirmDelete={confirmDelete === s.name}
+                  onCancelDelete={() => setConfirmDelete(null)}
                 />
               ))}
             </Section>
@@ -564,6 +571,8 @@ function ServerRow({
   onRemove,
   onHealth,
   isLocal,
+  confirmDelete,
+  onCancelDelete,
 }: {
   server: McpServer;
   busy: boolean;
@@ -571,6 +580,8 @@ function ServerRow({
   onRemove: () => void;
   onHealth: () => void;
   isLocal?: boolean;
+  confirmDelete?: boolean;
+  onCancelDelete?: () => void;
 }) {
   // Package-baked servers live in the repo and aren't managed by
   // MCPRegistry, so toggling / removing / health-checking them would
@@ -637,14 +648,32 @@ function ServerRow({
         </>
       )}
       {isLocal && !isBuiltIn && (
-        <button
-          onClick={onRemove}
-          disabled={busy}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 disabled:opacity-50"
-          title="Remove"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        confirmDelete ? (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onRemove}
+              disabled={busy}
+              className="px-2 py-1 rounded-md text-[11px] font-semibold bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={onCancelDelete}
+              className="px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onRemove}
+            disabled={busy}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+            title="Remove"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )
       )}
     </div>
   );

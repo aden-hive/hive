@@ -54,12 +54,20 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
 
   useEffect(() => {
     if (!themeDropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (themeDropdownRef.current && !themeDropdownRef.current.contains(e.target as Node))
+    const handler = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent && e.key === "Escape") {
+        setThemeDropdownOpen(false);
+        return;
+      }
+      if (themeDropdownRef.current && !themeDropdownRef.current.contains((e as MouseEvent).target as Node))
         setThemeDropdownOpen(false);
     };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", handler);
+    };
   }, [themeDropdownOpen]);
 
   useEffect(() => {
@@ -73,7 +81,13 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   if (!open) return null;
 
   const handleSave = () => {
-    setUserProfile({ displayName: displayName.trim(), about: about.trim() });
+    const trimmedName = displayName.trim();
+    const trimmedAbout = about.trim();
+    if (trimmedName === userProfile.displayName && trimmedAbout === userProfile.about) {
+      onClose();
+      return;
+    }
+    setUserProfile({ displayName: trimmedName, about: trimmedAbout });
     onClose();
   };
 
@@ -87,12 +101,15 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
       await configApi.uploadAvatar(compressed);
       bumpUserAvatar();
       setAvatarFailed(false);
-    } catch {}
+    } catch {
+      setAvatarFailed(true);
+    }
     setUploadingAvatar(false);
   };
 
   const clearValidation = (providerId: string) => {
-    setTimeout(() => setValidation((v) => { const next = { ...v }; delete next[providerId]; return next; }), 4000);
+    // Clear validation on next user action instead of timeout
+    setValidation((v) => { const next = { ...v }; delete next[providerId]; return next; });
   };
 
   const handleSaveKey = async (providerId: string) => {
@@ -399,8 +416,9 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                                     type={showKey ? "text" : "password"} value={keyInput}
                                     onChange={(e) => setKeyInput(e.target.value)}
                                     placeholder={`Enter ${provider.name} API key`} autoFocus
+                                    disabled={saving}
                                     onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey(provider.id); if (e.key === "Escape") cancelEditing(); }}
-                                    className="w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 font-mono"
+                                    className="w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 font-mono disabled:opacity-50"
                                   />
                                   <button onClick={() => setShowKey(!showKey)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground">
                                     {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
