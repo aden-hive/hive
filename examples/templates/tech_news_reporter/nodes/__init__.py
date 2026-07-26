@@ -34,11 +34,11 @@ If the user just wants a general roundup, set: "General tech and AI news roundup
 )
 
 # Node 2: Research
-# Scrapes known tech news sites directly — no API keys needed.
+# Uses hackernews tools and scrapes known tech news sites directly.
 research_node = NodeSpec(
     id="research",
     name="Research",
-    description="Scrape well-known tech news sites for recent articles and extract key information including titles, summaries, sources, and topics.",
+    description="Research tech news by querying HackerNews API and scraping other tech news sites for recent articles.",
     node_type="event_loop",
     input_keys=["research_brief"],
     output_keys=["articles_data"],
@@ -46,44 +46,29 @@ research_node = NodeSpec(
 You are a news researcher for a Tech & AI News Reporter agent.
 
 Your task: Find and summarize recent tech/AI news based on the research_brief.
-You do NOT have web search — instead, scrape news directly from known sites.
 
 **Instructions:**
-1. Use web_scrape to fetch the front/latest pages of these tech news sources.
-   IMPORTANT: Always set max_length=5000 and include_links=true for front pages
-   so you get headlines and links without blowing up context.
-
-   Scrape these (pick 3-4, not all 5, to stay efficient):
-   - https://news.ycombinator.com (Hacker News — tech community picks)
+1. For HackerNews content, DO NOT use web_scrape. Use the `get_top_stories` tool to fetch trending items, and `get_item` to fetch their details.
+2. For other sources, use `web_scrape` to fetch front pages.
+   IMPORTANT: Always set max_length=5000 and include_links=true for front pages.
+   Scrape these (pick 2-3 to stay efficient):
    - https://techcrunch.com (startups, AI, tech industry)
    - https://www.theverge.com/tech (consumer tech, AI, policy)
    - https://arstechnica.com (in-depth tech, science, AI)
    - https://www.technologyreview.com (MIT — AI, emerging tech)
 
-   If the research_brief requests specific topics, also try relevant category pages
-   (e.g., https://techcrunch.com/category/artificial-intelligence/).
-
-2. From the scraped front pages, identify the most interesting and recent headlines.
-   Pick 5-8 article URLs total across all sources, prioritizing:
+3. Identify the most interesting and recent headlines.
+   Pick 5-8 articles total across all sources (HackerNews + scraped sites), prioritizing:
    - Relevance to the research_brief
    - Recency (past week)
    - Significance and diversity of topics
 
-   CRITICAL: Copy URLs EXACTLY as they appear in the "href" field of the scraped
-   links. Do NOT reconstruct, guess, or modify URLs from memory. Use the verbatim
-   href value from the web_scrape result.
+   CRITICAL: Copy URLs EXACTLY. Use the `url` field from HackerNews items, or the verbatim href from web_scrape.
 
-3. For each selected article, use web_scrape with max_length=3000 on the
-   individual article URL to get the content. Extract: title, source name,
-   URL, publication date, a 2-3 sentence summary, and the main topic category.
+4. For selected articles from scraped sites, use web_scrape (max_length=3000) on the individual article URL to get the content. For HackerNews items, use the data from `get_item`. 
+   Extract: title, source name, URL, publication date, a 2-3 sentence summary, and the main topic category.
 
-4. **VERIFY LINKS** — Before producing your final output, verify each article URL
-   by checking the web_scrape result you got in step 3:
-   - If the scrape returned content successfully, the URL is verified — use it as-is.
-   - If the scrape returned an error or the page was not found (404, timeout, etc.),
-     go back to the front page links from step 1 and pick a different article URL
-     to replace it. Scrape the replacement to confirm it works.
-   - Only include articles whose URLs returned successful scrape results.
+5. **VERIFY LINKS** — Ensure URLs are valid and successfully retrieved.
 
 **Output format:**
 Use set_output("articles_data", <JSON string>) with this structure:
@@ -105,16 +90,15 @@ Use set_output("articles_data", <JSON string>) with this structure:
 ```
 
 **Rules:**
-- Only include REAL articles with REAL URLs you scraped. Never fabricate.
-- The "url" field MUST be a URL you successfully scraped. Never invent URLs.
+- Only include REAL articles. Never fabricate.
+- The "url" field MUST be a real URL.
 - Focus on news from the past week.
 - Aim for at least 3 distinct topic categories.
 - Keep summaries factual and concise.
-- If a site fails to load, skip it and move on to the next.
-- Always use max_length to limit scraped content (5000 for front pages, 3000 for articles).
-- Work in batches: scrape front pages first, then articles, then verify. Don't scrape everything at once.
+- If a scrape fails to load, skip it and move on to the next.
+- Work in batches: fetch HN stories, scrape front pages, then get article details.
 """,
-    tools=["web_scrape"],
+    tools=["web_scrape", "get_top_stories", "get_item"],
 )
 
 # Node 3: Compile Report
