@@ -50,12 +50,18 @@ Your task: Find and summarize recent tech/AI news based on the research_brief.
 **Instructions:**
 
 **Step 1 — HackerNews (use API tools, not web_scrape):**
-Call `get_top_stories(limit=15)` to fetch the current trending HN stories.
+Call `get_top_stories(limit=15)` to get the current trending HN story IDs and basic metadata.
 Do NOT use web_scrape on any news.ycombinator.com URLs — the API tools are faster and more reliable.
-For any promising HN story that has a `url` field, call `web_scrape` on that EXTERNAL article URL
-(e.g., the TechCrunch/GitHub/blog link inside the story) to get the full content.
-If a story has no `url` (i.e., it is a self-post/Ask HN), use the HN item title and text directly.
-Skip any HN story whose external URL fails to scrape.
+
+For each promising story returned, call `get_item(item_id=<id>)` to retrieve the full item details
+(title, url, score, author, text for self-posts, etc.). Handle its response:
+- If the response contains an `error` key, skip that story.
+- If the item has a `url` field (external link), call `web_scrape` on that EXTERNAL article URL
+  (e.g., the TechCrunch/GitHub/blog link) with max_length=3000 to get the full content.
+  If the scrape fails, skip this story and move to the next.
+- If the item has NO `url` (i.e., it is a self-post/Ask HN/Show HN), use the item `title` and
+  `text` directly for your summary. Use `https://news.ycombinator.com/item?id=<id>` as the
+  article `url` in the output (this is the canonical, real URL for the discussion — never fabricate).
 
 **Step 2 — Other sources (use web_scrape on front pages):**
 Pick 2-3 of these to stay token-efficient. Use max_length=5000 and include_links=true.
