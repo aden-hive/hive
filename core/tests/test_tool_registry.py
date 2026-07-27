@@ -903,3 +903,24 @@ def test_concurrency_safe_allowlist_is_conservative():
         "browser_navigate",
     ):
         assert forbidden not in allowlist, f"{forbidden} must not be concurrency-safe"
+
+
+# ---------------------------------------------------------------------------
+# Tool Typo Suggestion 
+# ---------------------------------------------------------------------------
+
+def test_unknown_tool_suggestion():
+    """Test that a typo in a tool call generates a 'Did you mean' suggestion."""
+    registry = ToolRegistry()
+    registry.register_function(lambda: None, name="search_web", description="Dummy tool")
+    
+    executor = registry.get_executor()
+    
+    bad_call = ToolUse(id="call_1", name="serch_web", input={})
+    result = executor(bad_call)
+    
+    import json
+    content = json.loads(result.content)
+    assert result.is_error is True
+    assert "Unknown tool: serch_web" in content["error"]
+    assert "Did you mean: search_web?" in content["error"]

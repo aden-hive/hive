@@ -2,6 +2,7 @@
 
 import asyncio
 import contextvars
+import difflib
 import importlib.util
 import inspect
 import json
@@ -340,9 +341,13 @@ class ToolRegistry:
             registry_ref.resync_mcp_servers_if_needed()
 
             if tool_use.name not in registry_ref._tools:
+                suggestion = ""
+                matches = difflib.get_close_matches(tool_use.name, registry_ref._tools.keys(), n=3, cutoff=0.6)
+                if matches:
+                    suggestion = f". Did you mean: {', '.join(matches)}?"
                 return ToolResult(
                     tool_use_id=tool_use.id,
-                    content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+                    content=json.dumps({"error": f"Unknown tool: {tool_use.name}{suggestion}"}),
                     is_error=True,
                 )
 

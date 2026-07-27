@@ -20,6 +20,7 @@ so they never block the queen's event loop.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import time
@@ -292,7 +293,17 @@ def _execute_tool(
         logger.debug("reflect: tool delete_memory_file[%s] → %s", scope, filename)
         return f"Deleted {scope}:{filename}."
 
-    return f"ERROR: Unknown tool: {name}"
+    suggestion = ""
+    matches = difflib.get_close_matches(
+        name,
+        ["list_memory_files", "read_memory_file", "write_memory_file", "delete_memory_file"],
+        n=3,
+        cutoff=0.6,
+    )
+    if matches:
+        suggestion = f". Did you mean: {', '.join(matches)}?"
+
+    return f"ERROR: Unknown tool: {name}{suggestion}"
 
 
 # ---------------------------------------------------------------------------
