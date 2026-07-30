@@ -435,6 +435,51 @@
           "supports_vision": true
         }
       ]
+    },
+    "ollama": {
+      "default_model": "qwen2.5:72b",
+      "models": [
+        {
+          "id": "qwen2.5:72b",
+          "label": "Qwen 2.5 72B - Recommended for Hive",
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 131072,
+          "supports_vision": false
+        },
+        {
+          "id": "minimax-m3:cloud",
+          "label": "Minimax M3 (Cloud) - Minimax flagship",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 524288,
+          "supports_vision": true
+        },
+        {
+          "id": "qwen2.5:32b",
+          "label": "Qwen 2.5 32B - Balanced",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 131072,
+          "supports_vision": false
+        },
+        {
+          "id": "qwen3:32b",
+          "label": "Qwen 3 32B - Newer reasoning",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 131072,
+          "supports_vision": false
+        },
+        {
+          "id": "llama3.3:70b",
+          "label": "Llama 3.3 70B - General purpose",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 131072,
+          "supports_vision": false
+        }
+      ]
     }
   },
   "presets": {
@@ -509,8 +554,15 @@
     "ollama_local": {
       "provider": "ollama",
       "max_tokens": 8192,
-      "max_context_tokens": 16384,
+      "max_context_tokens": 131072,
       "api_base": "http://localhost:11434"
+    },
+    "ollama_cloud": {
+      "provider": "ollama",
+      "api_key_env_var": "OLLAMA_API_KEY",
+      "max_tokens": 32768,
+      "max_context_tokens": 131072,
+      "api_base": "https://api.ollama.com"
     }
   }
 }

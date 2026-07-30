@@ -9,6 +9,212 @@
 # 4. Verifies everything works
 #
 
+# ── Sourceable library: catalog loader + accessors ──
+# These functions are defined at the top so the script can be sourced
+# (e.g., by tests/test_quickstart_parsing.sh) to expose the catalog
+# loader without running the interactive setup wizard below.
+
+MODEL_DEFAULT_ROWS=""
+MODEL_CHOICE_ROWS=""
+PRESET_ROWS=""
+PRESET_MODEL_CHOICE_ROWS=""
+
+load_model_catalog_rows() {
+    # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
+    # into simple tab-separated rows once and reuse them for the interactive flow.
+    local catalog_lines=""
+    catalog_lines="$(uv run python -c '
+from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
+
+for provider_id, default_model in sorted(get_default_models().items()):
+    print(f"DEFAULT\t{provider_id}\t{default_model}")
+
+for provider_id, models in sorted(get_models_catalogue().items()):
+    for model in models:
+        print(
+            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
+                provider=provider_id,
+                id=model["id"],
+                label=model["label"],
+                max_tokens=model["max_tokens"],
+                max_context_tokens=model["max_context_tokens"],
+            )
+        )
+
+for preset_id, preset in sorted(get_presets().items()):
+    print(
+        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
+            preset_id=preset_id,
+            provider=preset["provider"],
+            model=preset.get("model", ""),
+            max_tokens=preset["max_tokens"],
+            max_context_tokens=preset["max_context_tokens"],
+            api_key_env_var=preset.get("api_key_env_var", ""),
+            api_base=preset.get("api_base", ""),
+        )
+    )
+    for choice in preset.get("model_choices", []):
+        print(
+            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
+                preset_id=preset_id,
+                id=choice["id"],
+                label=choice["label"],
+                recommended=str(choice["recommended"]).lower(),
+            )
+        )
+' 2>/dev/null)" || return 1
+
+    MODEL_DEFAULT_ROWS=""
+    MODEL_CHOICE_ROWS=""
+    PRESET_ROWS=""
+    PRESET_MODEL_CHOICE_ROWS=""
+
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local row_type="${line%%$'\t'*}"
+        local rest="${line#*$'\t'}"
+        case "$row_type" in
+            DEFAULT)
+                MODEL_DEFAULT_ROWS+="${rest}"$'\n'
+                ;;
+            MODEL)
+                MODEL_CHOICE_ROWS+="${rest}"$'\n'
+                ;;
+            PRESET)
+                PRESET_ROWS+="${rest}"$'\n'
+                ;;
+            PRESET_MODEL)
+                PRESET_MODEL_CHOICE_ROWS+="${rest}"$'\n'
+                ;;
+        esac
+    done <<< "$catalog_lines"
+}
+
+get_default_model() {
+    local provider_id="$1"
+    while IFS=$'\t' read -r row_provider row_model; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            echo "$row_model"
+            return
+        fi
+    done <<< "$MODEL_DEFAULT_ROWS"
+}
+
+get_model_choice_count() {
+    local provider_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_provider _; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_model_choice_field() {
+    local provider_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    max_tokens) echo "$row_max_tokens" ;;
+                    max_context_tokens) echo "$row_max_context_tokens" ;;
+                esac
+                return
+            fi
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+}
+
+get_model_choice_id() {
+    get_model_choice_field "$1" "$2" "id"
+}
+
+get_model_choice_label() {
+    get_model_choice_field "$1" "$2" "label"
+}
+
+get_model_choice_maxtokens() {
+    get_model_choice_field "$1" "$2" "max_tokens"
+}
+
+get_model_choice_maxcontexttokens() {
+    get_model_choice_field "$1" "$2" "max_context_tokens"
+}
+
+get_preset_field() {
+    local preset_id="$1"
+    local field="$2"
+    awk -v pid="$preset_id" -v fld="$field" -F'\t' '
+        $1 == pid {
+            if (fld == "provider") print $2
+            else if (fld == "model") print $3
+            else if (fld == "max_tokens") print $4
+            else if (fld == "max_context_tokens") print $5
+            else if (fld == "api_key_env_var") print $6
+            else if (fld == "api_base") print $7
+            exit
+        }' <<< "$PRESET_ROWS"
+}
+
+apply_preset() {
+    local preset_id="$1"
+    SELECTED_PROVIDER_ID="$(get_preset_field "$preset_id" "provider")"
+    SELECTED_MODEL="$(get_preset_field "$preset_id" "model")"
+    SELECTED_MAX_TOKENS="$(get_preset_field "$preset_id" "max_tokens")"
+    SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "$preset_id" "max_context_tokens")"
+    SELECTED_ENV_VAR="$(get_preset_field "$preset_id" "api_key_env_var")"
+    SELECTED_API_BASE="$(get_preset_field "$preset_id" "api_base")"
+}
+
+get_preset_model_choice_count() {
+    local preset_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id _; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_preset_model_choice_field() {
+    local preset_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    recommended) echo "$row_recommended" ;;
+                esac
+                return
+            fi
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+}
+
+# When this file is sourced (not executed as a script), return after the
+# library is loaded so the interactive wizard below does not run.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
+
 set -e
 
 # Detect Bash version for compatibility
@@ -535,197 +741,6 @@ else
     }
 fi
 
-MODEL_DEFAULT_ROWS=""
-MODEL_CHOICE_ROWS=""
-PRESET_ROWS=""
-PRESET_MODEL_CHOICE_ROWS=""
-
-load_model_catalog_rows() {
-    # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
-    # into simple tab-separated rows once and reuse them for the interactive flow.
-    local catalog_lines=""
-    catalog_lines="$(uv run python -c '
-from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
-
-for provider_id, default_model in sorted(get_default_models().items()):
-    print(f"DEFAULT\t{provider_id}\t{default_model}")
-
-for provider_id, models in sorted(get_models_catalogue().items()):
-    for model in models:
-        print(
-            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
-                provider=provider_id,
-                id=model["id"],
-                label=model["label"],
-                max_tokens=model["max_tokens"],
-                max_context_tokens=model["max_context_tokens"],
-            )
-        )
-
-for preset_id, preset in sorted(get_presets().items()):
-    print(
-        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
-            preset_id=preset_id,
-            provider=preset["provider"],
-            model=preset.get("model", ""),
-            max_tokens=preset["max_tokens"],
-            max_context_tokens=preset["max_context_tokens"],
-            api_key_env_var=preset.get("api_key_env_var", ""),
-            api_base=preset.get("api_base", ""),
-        )
-    )
-    for choice in preset.get("model_choices", []):
-        print(
-            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
-                preset_id=preset_id,
-                id=choice["id"],
-                label=choice["label"],
-                recommended=str(choice["recommended"]).lower(),
-            )
-        )
-' 2>/dev/null)" || return 1
-
-    MODEL_DEFAULT_ROWS=""
-    MODEL_CHOICE_ROWS=""
-    PRESET_ROWS=""
-    PRESET_MODEL_CHOICE_ROWS=""
-
-    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
-        [ -n "$row_type" ] || continue
-        if [ "$row_type" = "DEFAULT" ]; then
-            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
-        elif [ "$row_type" = "MODEL" ]; then
-            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
-        elif [ "$row_type" = "PRESET" ]; then
-            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
-        elif [ "$row_type" = "PRESET_MODEL" ]; then
-            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
-        fi
-    done <<< "$catalog_lines"
-}
-
-get_default_model() {
-    local provider_id="$1"
-    while IFS=$'\t' read -r row_provider row_model; do
-        [ -n "$row_provider" ] || continue
-        if [ "$row_provider" = "$provider_id" ]; then
-            echo "$row_model"
-            return
-        fi
-    done <<< "$MODEL_DEFAULT_ROWS"
-}
-
-get_model_choice_count() {
-    local provider_id="$1"
-    local count=0
-    while IFS=$'\t' read -r row_provider _; do
-        [ -n "$row_provider" ] || continue
-        if [ "$row_provider" = "$provider_id" ]; then
-            count=$((count + 1))
-        fi
-    done <<< "$MODEL_CHOICE_ROWS"
-    echo "$count"
-}
-
-get_model_choice_field() {
-    local provider_id="$1"
-    local idx="$2"
-    local field="$3"
-    local count=0
-    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
-        [ -n "$row_provider" ] || continue
-        if [ "$row_provider" = "$provider_id" ]; then
-            if [ "$count" -eq "$idx" ]; then
-                case "$field" in
-                    id) echo "$row_id" ;;
-                    label) echo "$row_label" ;;
-                    max_tokens) echo "$row_max_tokens" ;;
-                    max_context_tokens) echo "$row_max_context_tokens" ;;
-                esac
-                return
-            fi
-            count=$((count + 1))
-        fi
-    done <<< "$MODEL_CHOICE_ROWS"
-}
-
-get_model_choice_id() {
-    get_model_choice_field "$1" "$2" "id"
-}
-
-get_model_choice_label() {
-    get_model_choice_field "$1" "$2" "label"
-}
-
-get_model_choice_maxtokens() {
-    get_model_choice_field "$1" "$2" "max_tokens"
-}
-
-get_model_choice_maxcontexttokens() {
-    get_model_choice_field "$1" "$2" "max_context_tokens"
-}
-
-get_preset_field() {
-    local preset_id="$1"
-    local field="$2"
-    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
-        [ -n "$row_preset_id" ] || continue
-        if [ "$row_preset_id" = "$preset_id" ]; then
-            case "$field" in
-                provider) echo "$row_provider" ;;
-                model) echo "$row_model" ;;
-                max_tokens) echo "$row_max_tokens" ;;
-                max_context_tokens) echo "$row_max_context_tokens" ;;
-                api_key_env_var) echo "$row_env_var" ;;
-                api_base) echo "$row_api_base" ;;
-            esac
-            return
-        fi
-    done <<< "$PRESET_ROWS"
-}
-
-apply_preset() {
-    local preset_id="$1"
-    SELECTED_PROVIDER_ID="$(get_preset_field "$preset_id" "provider")"
-    SELECTED_MODEL="$(get_preset_field "$preset_id" "model")"
-    SELECTED_MAX_TOKENS="$(get_preset_field "$preset_id" "max_tokens")"
-    SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "$preset_id" "max_context_tokens")"
-    SELECTED_ENV_VAR="$(get_preset_field "$preset_id" "api_key_env_var")"
-    SELECTED_API_BASE="$(get_preset_field "$preset_id" "api_base")"
-}
-
-get_preset_model_choice_count() {
-    local preset_id="$1"
-    local count=0
-    while IFS=$'\t' read -r row_preset_id _; do
-        [ -n "$row_preset_id" ] || continue
-        if [ "$row_preset_id" = "$preset_id" ]; then
-            count=$((count + 1))
-        fi
-    done <<< "$PRESET_MODEL_CHOICE_ROWS"
-    echo "$count"
-}
-
-get_preset_model_choice_field() {
-    local preset_id="$1"
-    local idx="$2"
-    local field="$3"
-    local count=0
-    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
-        [ -n "$row_preset_id" ] || continue
-        if [ "$row_preset_id" = "$preset_id" ]; then
-            if [ "$count" -eq "$idx" ]; then
-                case "$field" in
-                    id) echo "$row_id" ;;
-                    label) echo "$row_label" ;;
-                    recommended) echo "$row_recommended" ;;
-                esac
-                return
-            fi
-            count=$((count + 1))
-        fi
-    done <<< "$PRESET_MODEL_CHOICE_ROWS"
-}
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -963,7 +978,7 @@ save_configuration() {
         "$api_base" \
         "$use_codex_sub" \
         "$use_antigravity_sub" \
-        "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" 2>/dev/null <<'PY'
+        "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" 2>&1 <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1811,7 +1826,7 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
         # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
         # to the local Ollama server instead of trying to reach a remote endpoint.
-        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" || SAVE_OK=false
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     fi
