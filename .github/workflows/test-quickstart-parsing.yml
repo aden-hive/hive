@@ -1,0 +1,88 @@
+name: Test Quickstart Parsing
+
+on:
+  pull_request:
+    paths:
+      - 'quickstart.sh'
+      - 'core/framework/llm/model_catalog.py'
+      - 'model_catalog.json'
+      - 'tests/test_quickstart_parsing.sh'
+      - '.github/workflows/test-quickstart-parsing.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'quickstart.sh'
+      - 'core/framework/llm/model_catalog.py'
+      - 'model_catalog.json'
+      - 'tests/test_quickstart_parsing.sh'
+      - '.github/workflows/test-quickstart-parsing.yml'
+
+jobs:
+  test-bash-32:
+    name: Test on macOS (bash 3.2)
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check bash version
+        run: |
+          echo "Bash version:"
+          bash --version
+          echo "Expected: bash 3.2.x on macOS system bash"
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Python dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f core/framework/llm/requirements.txt ]; then
+            pip install -r core/framework/llm/requirements.txt
+          fi
+      
+      - name: Make test script executable
+        run: chmod +x tests/test_quickstart_parsing.sh
+      
+      - name: Run quickstart parsing tests
+        run: bash tests/test_quickstart_parsing.sh
+  
+  test-bash-5:
+    name: Test on Ubuntu (bash 5.x)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check bash version
+        run: |
+          echo "Bash version:"
+          bash --version
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Python dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f core/framework/llm/requirements.txt ]; then
+            pip install -r core/framework/llm/requirements.txt
+          fi
+      
+      - name: Make test script executable
+        run: chmod +x tests/test_quickstart_parsing.sh
+      
+      - name: Run quickstart parsing tests
+        run: bash tests/test_quickstart_parsing.sh
