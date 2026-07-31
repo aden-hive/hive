@@ -1,0 +1,27 @@
+name: Quickstart Parsing Tests
+
+on:
+  push:
+    paths:
+      - 'quickstart.sh'
+      - 'tests/test_quickstart_parsing.sh'
+  pull_request:
+    paths:
+      - 'quickstart.sh'
+      - 'tests/test_quickstart_parsing.sh'
+
+jobs:
+  test-quickstart-parsing:
+    name: Test quickstart parsing (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run quickstart TSV parsing regression tests
+        run: bash tests/test_quickstart_parsing.sh
+
+      - name: Verify quickstart.sh parses cleanly
+        run: bash -n quickstart.sh
