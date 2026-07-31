@@ -592,11 +592,14 @@ for preset_id, preset in sorted(get_presets().items()):
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        saved_ifs="$IFS"
-        IFS=$'\t'
-        set -- $line
-        IFS="$saved_ifs"
-        row_type="$1"; field1="$2"; field2="$3"; field3="$4"; field4="$5"; field5="$6"; field6="$7"; field7="$8"
+        row_type=$(echo "$line" | cut -f1)
+        field1=$(echo "$line" | cut -f2)
+        field2=$(echo "$line" | cut -f3)
+        field3=$(echo "$line" | cut -f4)
+        field4=$(echo "$line" | cut -f5)
+        field5=$(echo "$line" | cut -f6)
+        field6=$(echo "$line" | cut -f7)
+        field7=$(echo "$line" | cut -f8)
         if [ "$row_type" = "DEFAULT" ]; then
             MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
         elif [ "$row_type" = "MODEL" ]; then
@@ -675,11 +678,13 @@ get_preset_field() {
     local field="$2"
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        saved_ifs="$IFS"
-        IFS=$'\t'
-        set -- $line
-        IFS="$saved_ifs"
-        row_preset_id="$1"; row_provider="$2"; row_model="$3"; row_max_tokens="$4"; row_max_context_tokens="$5"; row_env_var="$6"; row_api_base="$7"
+        row_preset_id=$(echo "$line" | cut -f1)
+        row_provider=$(echo "$line" | cut -f2)
+        row_model=$(echo "$line" | cut -f3)
+        row_max_tokens=$(echo "$line" | cut -f4)
+        row_max_context_tokens=$(echo "$line" | cut -f5)
+        row_env_var=$(echo "$line" | cut -f6)
+        row_api_base=$(echo "$line" | cut -f7)
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             case "$field" in
