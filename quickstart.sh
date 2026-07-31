@@ -590,8 +590,13 @@ for preset_id, preset in sorted(get_presets().items()):
     PRESET_ROWS=""
     PRESET_MODEL_CHOICE_ROWS=""
 
-    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
-        [ -n "$row_type" ] || continue
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        saved_ifs="$IFS"
+        IFS=$'\t'
+        set -- $line
+        IFS="$saved_ifs"
+        row_type="$1"; field1="$2"; field2="$3"; field3="$4"; field4="$5"; field5="$6"; field6="$7"; field7="$8"
         if [ "$row_type" = "DEFAULT" ]; then
             MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
         elif [ "$row_type" = "MODEL" ]; then
@@ -668,7 +673,13 @@ get_model_choice_maxcontexttokens() {
 get_preset_field() {
     local preset_id="$1"
     local field="$2"
-    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        saved_ifs="$IFS"
+        IFS=$'\t'
+        set -- $line
+        IFS="$saved_ifs"
+        row_preset_id="$1"; row_provider="$2"; row_model="$3"; row_max_tokens="$4"; row_max_context_tokens="$5"; row_env_var="$6"; row_api_base="$7"
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             case "$field" in
