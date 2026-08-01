@@ -513,6 +513,30 @@ class GraphSpec(BaseModel):
             if not self.get_node(edge.target):
                 errors.append(f"Edge '{edge.id}' references missing target '{edge.target}'")
 
+        # Check for duplicate edge IDs
+        seen_edge_ids: dict[str, str] = {}
+        for edge in self.edges:
+            if edge.id in seen_edge_ids:
+                errors.append(f"Edge '{edge.id}' has duplicate ID (first seen on '{edge.source}' -> '{edge.target}')")
+            else:
+                seen_edge_ids[edge.id] = edge.source
+
+        # Check for unconditional self-loops
+        unconditional_conditions = {
+            EdgeCondition.ALWAYS,
+            EdgeCondition.ON_SUCCESS,
+            EdgeCondition.ON_FAILURE,
+        }
+        for edge in self.edges:
+            if edge.source == edge.target and edge.condition in unconditional_conditions:
+                errors.append(f"Edge '{edge.id}' is an unconditional self-loop ('{edge.source}' -> '{edge.target}')")
+
+        # CONDITIONAL edges must have a condition_expr
+        for edge in self.edges:
+            if edge.condition == EdgeCondition.CONDITIONAL:
+                if not edge.condition_expr or not edge.condition_expr.strip():
+                    errors.append(f"Edge '{edge.id}' has condition CONDITIONAL but no condition_expr is set")
+
         # Check for unreachable nodes
         # Start with main entry node and all entry points (for pause/resume architecture)
         reachable = set()
