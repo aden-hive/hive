@@ -74,7 +74,7 @@ Add a health checker, fix a bug, or improve an integration.
 
 Build a complete integration from scratch.
 
-1. Follow the [BUILDING_TOOLS.md](../tools/BUILDING_TOOLS.md) guide
+1. Follow the [BUILDING_TOOLS.md](../../tools/BUILDING_TOOLS.md) guide
 2. Create: tool + credential spec + health checker + tests + README
 3. Register in `_register_unverified()` in `tools/__init__.py`
 4. Run `make check && make test`
@@ -162,6 +162,6 @@ A: You'll still get credit in GitHub, but no Lurkr XP or Discord roles. Run `/li
 | README template | [templates/tool-readme-template.md](templates/tool-readme-template.md) |
 | Test report template | [templates/agent-test-report-template.md](templates/agent-test-report-template.md) |
 | Promotion checklist | [promotion-checklist.md](promotion-checklist.md) |
-| Building tools | [BUILDING_TOOLS.md](../tools/BUILDING_TOOLS.md) |
+| Building tools | [BUILDING_TOOLS.md](../../tools/BUILDING_TOOLS.md) |
 | Discord | [Join](https://discord.com/invite/MXE49hrKDk) |
 | Your rank | `/rank` in Discord |

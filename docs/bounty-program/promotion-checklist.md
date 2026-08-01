@@ -6,7 +6,7 @@ Formal criteria for promoting a tool from **unverified** to **verified**. A tool
 
 ### Code Quality (Required)
 
-- [ ] **`register_tools` function** follows the standard signature pattern from [BUILDING_TOOLS.md](../tools/BUILDING_TOOLS.md)
+- [ ] **`register_tools` function** follows the standard signature pattern from [BUILDING_TOOLS.md](../../tools/BUILDING_TOOLS.md)
 - [ ] **Error handling** — all tools return `{"error": ...}` dicts instead of raising exceptions
 - [ ] **Credential handling** — graceful fallback when credentials are missing, with actionable `"help"` message
 - [ ] **Input validation** — parameters are validated before making API calls
