@@ -1330,7 +1330,7 @@ async def fork_session_into_colony(
         "You are a focused worker agent spawned by the queen to carry out "
         "one specific task. Read the goal carefully, use your available "
         "tools to make progress, and call set_output when complete. "
-        "If you get stuck or need human judgement, call escalate to hand "
+        "If you get stuck or need human judgment, call escalate to hand "
         "the question back to the queen.\n\n"
         f"Task: {worker_task}"
     )
