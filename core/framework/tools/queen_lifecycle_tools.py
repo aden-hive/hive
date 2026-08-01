@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # tracking, failure handling, credentials) live ongoingly inside
 # ``_queen_tools_incubating`` so the queen sees them every turn — this
 # constant is the single-shot version that lands as the tool result.
-# Phrasing intentionally invites the queen's judgement; do NOT turn this
+# Phrasing intentionally invites the queen's judgment; do NOT turn this
 # into a hard checklist.
 _INCUBATING_APPROVAL_GUIDANCE = (
     "Approved to incubate colony '{colony_name}'.\n\n"

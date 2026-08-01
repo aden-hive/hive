@@ -154,7 +154,7 @@ Before you call ``create_colony``, sort out the operational details that \
 conversation tends to skip. The "Approved → operational checklist" block \
 in your tools doc lists the kinds of things to think about (concurrency, \
 schedule, result-tracking, failure handling, credentials). Treat that \
-list as prompts for YOUR judgement — only ask the user about the items \
+list as prompts for YOUR judgment — only ask the user about the items \
 that actually matter for THIS colony and that the conversation hasn't \
 already settled. Use ``ask_user`` (pass a ``questions`` array — batch \
 several entries for multi-question turns) for the gaps; plain prose for \
@@ -273,7 +273,7 @@ you commit (e.g. peek at an existing skill in ~/.hive/skills/, sanity-check \
 an API URL). search_files covers both grep (target='content') and ls/find \
 (target='files', glob like '*.py').
 
-## Approved → operational checklist (use your judgement, ask only what's missing)
+## Approved → operational checklist (use your judgment, ask only what's missing)
 The conversation that got you here probably did NOT cover all of:
 - Concurrency: how many tasks should run in parallel? Single-fire?
 - Schedule: cron expression, interval (every N minutes), webhook, \
@@ -285,7 +285,7 @@ The conversation that got you here probably did NOT cover all of:
   haven't discussed (API keys, OAuth, browser profile)?
 - Skills the worker needs beyond the one you'll write inline.
 
-These are PROMPTS for your judgement, not a required checklist. Cover \
+These are PROMPTS for your judgment, not a required checklist. Cover \
 the items that actually matter for THIS colony, and only the ones the \
 user hasn't already implied. Use ``ask_user`` (batch several questions \
 into one call when you have multiple gaps) for answers you need; skip \
