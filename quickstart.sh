@@ -590,17 +590,43 @@ for preset_id, preset in sorted(get_presets().items()):
     PRESET_ROWS=""
     PRESET_MODEL_CHOICE_ROWS=""
 
-    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
-        [ -n "$row_type" ] || continue
-        if [ "$row_type" = "DEFAULT" ]; then
-            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
-        elif [ "$row_type" = "MODEL" ]; then
-            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
-        elif [ "$row_type" = "PRESET" ]; then
-            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
-        elif [ "$row_type" = "PRESET_MODEL" ]; then
-            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
-        fi
+    # Use IFS= read + cut to avoid bash 3.2 empty-field collapse
+    # (bash 3.2 IFS=$'\t' read -r a b c collapses consecutive tabs)
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        row_type="$(printf '%s' "$line" | cut -f1)"
+        case "$row_type" in
+            DEFAULT)
+                field1="$(printf '%s' "$line" | cut -f2)"
+                field2="$(printf '%s' "$line" | cut -f3)"
+                MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
+                ;;
+            MODEL)
+                field1="$(printf '%s' "$line" | cut -f2)"
+                field2="$(printf '%s' "$line" | cut -f3)"
+                field3="$(printf '%s' "$line" | cut -f4)"
+                field4="$(printf '%s' "$line" | cut -f5)"
+                field5="$(printf '%s' "$line" | cut -f6)"
+                MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
+                ;;
+            PRESET)
+                field1="$(printf '%s' "$line" | cut -f2)"
+                field2="$(printf '%s' "$line" | cut -f3)"
+                field3="$(printf '%s' "$line" | cut -f4)"
+                field4="$(printf '%s' "$line" | cut -f5)"
+                field5="$(printf '%s' "$line" | cut -f6)"
+                field6="$(printf '%s' "$line" | cut -f7)"
+                field7="$(printf '%s' "$line" | cut -f8)"
+                PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
+                ;;
+            PRESET_MODEL)
+                field1="$(printf '%s' "$line" | cut -f2)"
+                field2="$(printf '%s' "$line" | cut -f3)"
+                field3="$(printf '%s' "$line" | cut -f4)"
+                field4="$(printf '%s' "$line" | cut -f5)"
+                PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
+                ;;
+        esac
     done <<< "$catalog_lines"
 }
 
@@ -668,19 +694,20 @@ get_model_choice_maxcontexttokens() {
 get_preset_field() {
     local preset_id="$1"
     local field="$2"
-    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
-        [ -n "$row_preset_id" ] || continue
-        if [ "$row_preset_id" = "$preset_id" ]; then
-            case "$field" in
-                provider) echo "$row_provider" ;;
-                model) echo "$row_model" ;;
-                max_tokens) echo "$row_max_tokens" ;;
-                max_context_tokens) echo "$row_max_context_tokens" ;;
-                api_key_env_var) echo "$row_env_var" ;;
-                api_base) echo "$row_api_base" ;;
-            esac
-            return
-        fi
+    # Use IFS= read + cut to avoid bash 3.2 empty-field collapse
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        row_preset_id="$(printf '%s' "$line" | cut -f1)"
+        [ "$row_preset_id" = "$preset_id" ] || continue
+        case "$field" in
+            provider) printf '%s' "$line" | cut -f2 ;;
+            model) printf '%s' "$line" | cut -f3 ;;
+            max_tokens) printf '%s' "$line" | cut -f4 ;;
+            max_context_tokens) printf '%s' "$line" | cut -f5 ;;
+            api_key_env_var) printf '%s' "$line" | cut -f6 ;;
+            api_base) printf '%s' "$line" | cut -f7 ;;
+        esac
+        return
     done <<< "$PRESET_ROWS"
 }
 
