@@ -1,0 +1,29 @@
+name: Bash Parsing Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bash-parsing-test:
+    name: Quickstart TSV Parsing (bash ${{ matrix.bash-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            bash-version: "3.2"
+            bash-path: /bin/bash
+          - os: ubuntu-latest
+            bash-version: "5.x"
+            bash-path: /usr/bin/bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run quickstart parsing tests
+        run: ${{ matrix.bash-path }} tests/test_quickstart_parsing.sh
+
+      - name: Verify bash version
+        run: ${{ matrix.bash-path }} --version | head -1
