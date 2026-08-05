@@ -74,6 +74,7 @@ from .http_headers_scanner import register_tools as register_http_headers_scanne
 from .hubspot_tool import register_tools as register_hubspot
 from .huggingface_tool import register_tools as register_huggingface
 from .intercom_tool import register_tools as register_intercom
+from .ipinfo_tool import register_tools as register_ipinfo
 from .jira_tool import register_tools as register_jira
 from .kafka_tool import register_tools as register_kafka
 from .langfuse_tool import register_tools as register_langfuse
@@ -258,6 +259,7 @@ def _register_unverified(
     register_aws_s3(mcp, credentials=credentials)
     register_azure_sql(mcp, credentials=credentials)
     register_intercom(mcp, credentials=credentials)
+    register_ipinfo(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
