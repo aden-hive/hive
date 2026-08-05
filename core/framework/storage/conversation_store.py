@@ -31,13 +31,37 @@ from typing import Any
 
 from framework.utils.io import atomic_write
 
+# Per-directory locks shared across every FileConversationStore instance
+# pointing at the same base_path. Two independent instances are commonly
+# created for the same session (e.g. the queen loop's own store and a
+# fresh one built by reflection_agent._read_conversation_parts), and on
+# Windows a delete/replace of a parts/*.json file that races an open() of
+# that same file elsewhere raises PermissionError [WinError 32] (see
+# issue #7239). Serializing all disk-touching calls per directory closes
+# that window; keyed by the raw path string (no resolve()) since every
+# call site in this codebase derives the path the same way for a given
+# session, so a syscall isn't needed just to normalize the key.
+_dir_locks: dict[str, asyncio.Lock] = {}
+
+
+def _lock_for(base_path: Path) -> asyncio.Lock:
+    key = str(base_path)
+    lock = _dir_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _dir_locks[key] = lock
+    return lock
+
 
 class FileConversationStore:
     """File-per-part ConversationStore.
 
     Uses one JSON file per message part, with ``pathlib.Path`` for
     cross-platform path handling and ``asyncio.to_thread`` for
-    non-blocking I/O.
+    non-blocking I/O. All disk-touching operations are serialized per
+    base_path via a shared ``asyncio.Lock`` so concurrent readers/writers
+    (e.g. queen loop compaction vs. the reflection background task) never
+    race on the same files.
     """
 
     def __init__(self, base_path: str | Path) -> None:
@@ -47,6 +71,7 @@ class FileConversationStore:
         # stream event, deleted atomically when the final part lands. Kept
         # in a sibling dir so the parts/ glob doesn't pick them up.
         self._partials_dir = self._base / "partials"
+        self._lock = _lock_for(self._base)
 
     # --- sync helpers --------------------------------------------------------
 
@@ -75,7 +100,8 @@ class FileConversationStore:
 
     async def write_part(self, seq: int, data: dict[str, Any]) -> None:
         path = self._parts_dir / f"{seq:010d}.json"
-        await self._run(self._write_json, path, data)
+        async with self._lock:
+            await self._run(self._write_json, path, data)
 
     async def read_parts(self) -> list[dict[str, Any]]:
         def _read_all() -> list[dict[str, Any]]:
@@ -89,19 +115,24 @@ class FileConversationStore:
                     parts.append(data)
             return parts
 
-        return await self._run(_read_all)
+        async with self._lock:
+            return await self._run(_read_all)
 
     async def write_meta(self, data: dict[str, Any]) -> None:
-        await self._run(self._write_json, self._base / "meta.json", data)
+        async with self._lock:
+            await self._run(self._write_json, self._base / "meta.json", data)
 
     async def read_meta(self) -> dict[str, Any] | None:
-        return await self._run(self._read_json, self._base / "meta.json")
+        async with self._lock:
+            return await self._run(self._read_json, self._base / "meta.json")
 
     async def write_cursor(self, data: dict[str, Any]) -> None:
-        await self._run(self._write_json, self._base / "cursor.json", data)
+        async with self._lock:
+            await self._run(self._write_json, self._base / "cursor.json", data)
 
     async def read_cursor(self) -> dict[str, Any] | None:
-        return await self._run(self._read_json, self._base / "cursor.json")
+        async with self._lock:
+            return await self._run(self._read_json, self._base / "cursor.json")
 
     async def write_partial(self, seq: int, data: dict[str, Any]) -> None:
         """Checkpoint an in-flight assistant turn. Overwrites any prior partial
@@ -109,11 +140,13 @@ class FileConversationStore:
         part is written via write_part().
         """
         path = self._partials_dir / f"{seq:010d}.json"
-        await self._run(self._write_json, path, data)
+        async with self._lock:
+            await self._run(self._write_json, path, data)
 
     async def read_partial(self, seq: int) -> dict[str, Any] | None:
         path = self._partials_dir / f"{seq:010d}.json"
-        return await self._run(self._read_json, path)
+        async with self._lock:
+            return await self._run(self._read_json, path)
 
     async def read_all_partials(self) -> list[dict[str, Any]]:
         """Return all partial checkpoints, sorted by seq. Used during restore
@@ -131,7 +164,8 @@ class FileConversationStore:
                     partials.append(data)
             return partials
 
-        return await self._run(_read_all)
+        async with self._lock:
+            return await self._run(_read_all)
 
     async def clear_partial(self, seq: int) -> None:
         def _clear() -> None:
@@ -139,7 +173,8 @@ class FileConversationStore:
             if path.exists():
                 path.unlink()
 
-        await self._run(_clear)
+        async with self._lock:
+            await self._run(_clear)
 
     async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
@@ -150,7 +185,8 @@ class FileConversationStore:
                 if file_seq < seq:
                     f.unlink()
 
-        await self._run(_delete)
+        async with self._lock:
+            await self._run(_delete)
 
     async def close(self) -> None:
         """No-op — no persistent handles for file-per-part storage."""
@@ -180,7 +216,8 @@ class FileConversationStore:
             if meta_path.exists():
                 meta_path.unlink()
 
-        await self._run(_clear)
+        async with self._lock:
+            await self._run(_clear)
 
     async def destroy(self) -> None:
         """Delete the entire base directory and all persisted data."""
@@ -189,4 +226,5 @@ class FileConversationStore:
             if self._base.exists():
                 shutil.rmtree(self._base)
 
-        await self._run(_destroy)
+        async with self._lock:
+            await self._run(_destroy)
