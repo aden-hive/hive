@@ -1374,6 +1374,91 @@ class CloudflareHealthChecker(BaseHttpHealthChecker):
     SERVICE_NAME = "Cloudflare"
 
 
+class MattermostHealthChecker:
+    """Health checker for Mattermost personal access tokens.
+
+    Mattermost is self-hosted, so the server URL is a separate credential.
+    The checker resolves it from the credential store or MATTERMOST_URL env var,
+    mirroring mattermost_tool.py._get_url().
+    """
+
+    TIMEOUT = 10.0
+
+    def _resolve_url(self) -> str | None:
+        """Resolve Mattermost server URL.
+
+        The health checker is invoked with only the token, so the server URL is
+        read from the MATTERMOST_URL env var (mirroring mattermost_tool.py
+        _get_url(), which falls back to os.getenv("MATTERMOST_URL") when no
+        credential-store handle is in scope).
+        """
+        return os.getenv("MATTERMOST_URL")
+
+    def check(self, token: str) -> HealthCheckResult:
+        """Validate Mattermost token by hitting /api/v4/users/me."""
+        base_url = self._resolve_url()
+        if not base_url:
+            return HealthCheckResult(
+                valid=False,
+                message=("Mattermost server URL not configured (set MATTERMOST_URL or mattermost_url credential)"),
+                details={"missing": "url"},
+            )
+
+        base_url = base_url.rstrip("/")
+        if not base_url.endswith("/api/v4"):
+            base_url += "/api/v4"
+        url = f"{base_url}/users/me"
+
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    username = data.get("username", "unknown")
+                    return HealthCheckResult(
+                        valid=True,
+                        message=f"Mattermost credentials valid (user: {username})",
+                        details={"username": username},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Mattermost token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Mattermost token lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Mattermost API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Mattermost API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Mattermost: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "apify": ApifyHealthChecker(),
@@ -1401,6 +1486,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "intercom": IntercomHealthChecker(),
     "linear": LinearHealthChecker(),
     "lusha_api_key": LushaHealthChecker(),
+    "mattermost": MattermostHealthChecker(),
     "microsoft_graph": MicrosoftGraphHealthChecker(),
     "newsdata": NewsdataHealthChecker(),
     "notion": NotionHealthChecker(),

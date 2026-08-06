@@ -12,6 +12,7 @@ from aden_tools.credentials.health_check import (
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     LushaHealthChecker,
+    MattermostHealthChecker,
     ResendHealthChecker,
     check_credential_health,
 )
@@ -83,6 +84,7 @@ class TestHealthCheckerRegistry:
             "intercom",
             "linear",
             "lusha_api_key",
+            "mattermost",
             "microsoft_graph",
             "newsdata",
             "notion",
@@ -597,3 +599,106 @@ class TestGoogleHealthChecker:
 
         assert not result.valid
         assert "Connection refused" in result.message
+
+
+class TestMattermostHealthChecker:
+    """Tests for MattermostHealthChecker."""
+
+    def _mock_response(self, status_code, json_data=None):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        if json_data:
+            response.json.return_value = json_data
+        return response
+
+    def test_registered_in_health_checkers(self):
+        """MattermostHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "mattermost" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["mattermost"], MattermostHealthChecker)
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_valid_token_200(self, mock_client_cls, mock_getenv):
+        mock_getenv.return_value = "https://mattermost.example.com"
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200, {"username": "admin", "id": "abc123"})
+
+        checker = MattermostHealthChecker()
+        result = checker.check("mm_test-token")
+
+        assert result.valid is True
+        assert "admin" in result.message
+        assert result.details["username"] == "admin"
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_invalid_token_401(self, mock_client_cls, mock_getenv):
+        mock_getenv.return_value = "https://mattermost.example.com"
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(401)
+
+        checker = MattermostHealthChecker()
+        result = checker.check("invalid-token")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 401
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    def test_missing_url_returns_invalid(self, mock_getenv):
+        mock_getenv.return_value = None
+
+        checker = MattermostHealthChecker()
+        result = checker.check("some-token")
+
+        assert result.valid is False
+        assert result.details["missing"] == "url"
+        assert "not configured" in result.message.lower()
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_timeout(self, mock_client_cls, mock_getenv):
+        mock_getenv.return_value = "https://mattermost.example.com"
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = httpx.TimeoutException("timed out")
+
+        checker = MattermostHealthChecker()
+        result = checker.check("mm_test-token")
+
+        assert result.valid is False
+        assert result.details["error"] == "timeout"
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_url_appends_api_v4(self, mock_client_cls, mock_getenv):
+        mock_getenv.return_value = "https://mattermost.example.com"
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200, {"username": "user"})
+
+        checker = MattermostHealthChecker()
+        checker.check("mm_test-token")
+
+        call_url = mock_client.get.call_args[0][0]
+        assert call_url == "https://mattermost.example.com/api/v4/users/me"
+
+    @patch("aden_tools.credentials.health_check.os.getenv")
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_url_not_duplicated_when_already_has_api_v4(self, mock_client_cls, mock_getenv):
+        mock_getenv.return_value = "https://mattermost.example.com/api/v4"
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200, {"username": "user"})
+
+        checker = MattermostHealthChecker()
+        checker.check("mm_test-token")
+
+        call_url = mock_client.get.call_args[0][0]
+        assert call_url == "https://mattermost.example.com/api/v4/users/me"
