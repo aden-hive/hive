@@ -39,6 +39,7 @@ from framework.agents.queen.queen_memory_v2 import (
 )
 from framework.llm.provider import LLMResponse, Tool
 from framework.tracker.llm_debug_logger import log_llm_turn
+from framework.utils.tool_suggestions import format_unknown_tool_error
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,8 @@ _REFLECTION_TOOLS: list[Tool] = [
         },
     ),
 ]
+
+_REFLECTION_TOOL_NAMES: tuple[str, ...] = tuple(tool.name for tool in _REFLECTION_TOOLS)
 
 
 def _normalize_memory_dirs(
@@ -292,7 +295,7 @@ def _execute_tool(
         logger.debug("reflect: tool delete_memory_file[%s] → %s", scope, filename)
         return f"Deleted {scope}:{filename}."
 
-    return f"ERROR: Unknown tool: {name}"
+    return f"ERROR: {format_unknown_tool_error(name, _REFLECTION_TOOL_NAMES)}"
 
 
 # ---------------------------------------------------------------------------

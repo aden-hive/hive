@@ -419,6 +419,17 @@ async def test_queen_short_reflection_writes_only_queen_scope(tmp_path: Path):
     assert list(global_dir.glob("*.md")) == []
 
 
+def test_reflection_unknown_tool_suggests_closest_memory_tool_name(tmp_path: Path):
+    """Reflection unknown-tool error hints at the closest memory tool name."""
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    result = _execute_tool("read_memry_fil", {}, tmp_path)
+
+    assert result.startswith("ERROR: Unknown tool: read_memry_fil")
+    assert "Did you mean" in result
+    assert "read_memory_file" in result
+
+
 @pytest.mark.asyncio
 async def test_unified_short_reflection_can_write_both_scopes_in_one_loop(tmp_path: Path):
     """Unified short reflection can place memories in both scopes in one pass."""

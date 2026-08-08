@@ -365,6 +365,32 @@ def test_unknown_tool_error_returns_proper_result():
     assert "nonexistent_tool" in result.content
 
 
+def test_unknown_tool_error_suggests_closest_registered_tool():
+    """Unknown tool error should hint at the closest registered tool name."""
+    registry = ToolRegistry()
+    for name in ("web_search", "exa_search"):
+        tool = Tool(
+            name=name,
+            description="Search the web",
+            parameters={"type": "object", "properties": {}},
+        )
+        registry.register(name, tool, lambda inputs, _name=name: {"ok": _name})
+
+    tool_use = ToolUse(
+        id="typo_call",
+        name="web_seach",
+        input={},
+    )
+
+    executor = registry.get_executor()
+    result = executor(tool_use)
+
+    assert result.is_error is True
+    assert "Unknown tool: web_seach" in result.content
+    assert "web_search" in result.content
+    assert "Did you mean" in result.content
+
+
 def test_tool_execution_error_truncates_large_inputs(caplog):
     """ToolRegistry should truncate large inputs in error logs."""
     registry = ToolRegistry()

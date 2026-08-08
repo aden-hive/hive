@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
+from framework.utils.tool_suggestions import format_unknown_tool_error
 
 logger = logging.getLogger(__name__)
 
@@ -340,9 +341,10 @@ class ToolRegistry:
             registry_ref.resync_mcp_servers_if_needed()
 
             if tool_use.name not in registry_ref._tools:
+                error_msg = format_unknown_tool_error(tool_use.name, registry_ref._tools.keys())
                 return ToolResult(
                     tool_use_id=tool_use.id,
-                    content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+                    content=json.dumps({"error": error_msg}),
                     is_error=True,
                 )
 
