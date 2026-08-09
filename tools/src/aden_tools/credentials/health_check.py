@@ -1107,6 +1107,16 @@ class ExaSearchHealthChecker(BaseHttpHealthChecker):
         return {"query": "test", "numResults": 1}
 
 
+class Judge0HealthChecker(BaseHttpHealthChecker):
+    """Health checker for Judge0 CE API key (RapidAPI)."""
+
+    ENDPOINT = "https://judge0-ce.p.rapidapi.com/languages"
+    SERVICE_NAME = "Judge0"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_HEADER
+    AUTH_HEADER_NAME = "X-RapidAPI-Key"
+    AUTH_HEADER_TEMPLATE = "{token}"
+
+
 class CalcomHealthChecker(BaseHttpHealthChecker):
     """Health checker for Cal.com API key."""
 
@@ -1399,6 +1409,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "huggingface": HuggingFaceHealthChecker(),
     "intercom": IntercomHealthChecker(),
+    "judge0": Judge0HealthChecker(),
     "linear": LinearHealthChecker(),
     "lusha_api_key": LushaHealthChecker(),
     "microsoft_graph": MicrosoftGraphHealthChecker(),

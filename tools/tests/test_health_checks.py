@@ -81,6 +81,7 @@ class TestHealthCheckerRegistry:
             "hubspot",
             "huggingface",
             "intercom",
+            "judge0",
             "linear",
             "lusha_api_key",
             "microsoft_graph",
