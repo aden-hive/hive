@@ -791,7 +791,12 @@ class NodeWorker:
                     )
                     continue
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to spill buffer key %r to %s",
+                        key,
+                        file_path,
+                        exc_info=True,
+                    )
 
             buffer_items[key] = val_str[:300] + "..." if len(val_str) > 300 else val_str
 
