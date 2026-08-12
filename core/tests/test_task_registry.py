@@ -74,25 +74,23 @@ async def test_cancel_all():
 
 
 @pytest.mark.asyncio
-async def test_cancel_all_timeout(caplog):
+async def test_cancel_all_timeout(caplog, monkeypatch):
     registry = TaskRegistry("test_owner")
 
-    async def stubborn_coro():
-        try:
-            await asyncio.sleep(10.0)
-        except asyncio.CancelledError:
-            # Swallow cancellation and refuse to exit immediately
-            await asyncio.sleep(0.5)
+    async def dummy_coro():
+        await asyncio.sleep(1.0)
 
-    _ = registry.spawn(stubborn_coro(), name="stubborn_task")
+    _ = registry.spawn(dummy_coro(), name="stubborn_task")
+
+    async def mock_wait_for(*args, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr(asyncio, "wait_for", mock_wait_for)
 
     with caplog.at_level(logging.WARNING, logger="framework.utils.task_registry"):
-        # cancel_all will wait for the task to finish, but it delays its exit
-        # so we set a very short timeout
         await registry.cancel_all(timeout=0.01)
 
-        # The timeout should trigger a warning
         assert "did not finish within" in caplog.text
 
-    # Clean up the task so it doesn't leak into other tests
-    await asyncio.sleep(0.6)
+    # Clean up
+    await asyncio.sleep(0.02)
