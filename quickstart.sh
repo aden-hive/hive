@@ -189,6 +189,27 @@ fi
 
 UV_VERSION=$(uv --version)
 echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
+
+# Check uv version >= 0.4.0 (workspace support requirement)
+UV_NUM=$(echo "$UV_VERSION" | grep -oP '\d+\.\d+\.\d+' | head -1)
+UV_MAJOR=$(echo "$UV_NUM" | cut -d. -f1)
+UV_MINOR=$(echo "$UV_NUM" | cut -d. -f2)
+
+if [ "$UV_MAJOR" -lt 0 ] || ([ "$UV_MAJOR" -eq 0 ] && [ "$UV_MINOR" -lt 4 ]); then
+    echo -e "${YELLOW}  ⚠ uv $UV_NUM is too old (>= 0.4.0 required for workspace support)${NC}"
+    echo -e "${YELLOW}  Upgrading uv...${NC}"
+    curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
+    export PATH="$HOME/.local/bin:$PATH"
+    UV_VERSION=$(uv --version 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}  ✓ uv upgraded to $UV_VERSION${NC}"
+    else
+        echo -e "${RED}  Failed to upgrade uv. Please install uv >= 0.4.0 manually${NC}"
+        echo "  Visit: https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
+    fi
+fi
+
 echo ""
 
 # Check for Node.js (needed for frontend dashboard)
