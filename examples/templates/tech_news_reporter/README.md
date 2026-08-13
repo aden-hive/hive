@@ -87,19 +87,24 @@ intake → research → compile-report
 ### Basic Usage
 
 ```python
+import asyncio
 from examples.templates.tech_news_reporter.agent import TechNewsReporterAgent
 
-# Load the agent
-agent = TechNewsReporterAgent()
+async def main():
+    # Load the agent
+    agent = TechNewsReporterAgent()
+    
+    # Run with an initial topic
+    result = await agent.run({
+        "user_message": "Find me the latest news about AI startups"
+    })
+    
+    # Access results
+    print(result.output)
+    print(result.success)
 
-# Run with an initial topic
-result = await agent.run({
-    "user_message": "Find me the latest news about AI startups"
-})
-
-# Access results
-print(result.output)
-print(result.success)
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Input Schema
