@@ -1028,7 +1028,25 @@ class Orchestrator:
                         )
 
                     self.logger.info(f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})")
-                    result = await node_impl.execute(ctx)
+                    
+                    try:
+                        result = await node_impl.execute(ctx)
+                    except asyncio.CancelledError:
+                        # Re-raise to preserve system responsiveness and lifecycle interrupts
+                        raise
+                    except Exception as e:
+                        # Catch raw exceptions and route them to the standard retry loop
+                        import traceback
+                        stack_trace = traceback.format_exc()
+                        self.logger.error(
+                            f"      ✗ Branch {node_spec.name}: unhandled system exception during execution:\n{stack_trace}"
+                        )
+                        result = NodeResult(
+                            success=False,
+                            output={},
+                            error=f"Unhandled system exception: {str(e)}"
+                        )
+
                     last_result = result
 
                     # Ensure L2 entry for this branch node
