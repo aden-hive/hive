@@ -13,7 +13,7 @@ with open("tmp_funcs.sh", "w", encoding="utf-8", newline="\n") as f:
         f.write(func + "\n\n")
     if vision:
         f.write("get_vision_candidates() {\n")
-        f.write("  " + vision.group(1).replace("\n", "\n  ") + "\n")
+        f.write(vision.group(1) + "\n")
         f.write("  echo \"$VISION_CANDIDATES_TSV\"\n")
         f.write("}\n")
 '
