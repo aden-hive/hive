@@ -335,10 +335,9 @@ class TestReportToParent:
             worker = colony.get_worker(ids[0])
 
             deadline = asyncio.get_event_loop().time() + 5.0
-            while worker.is_active and asyncio.get_event_loop().time() < deadline:
+            while len(reports) == 0 and asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(0.05)
             assert not worker.is_active
-
             assert len(reports) >= 1
             r = reports[0]
             assert r.data["worker_id"] == ids[0]
