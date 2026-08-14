@@ -36,21 +36,27 @@ from framework.llm.stream_events import (
 
 logger = logging.getLogger(__name__)
 
+
 class AntigravityError(RuntimeError):
     """Base exception for all Antigravity provider errors."""
+
 
 class AntigravityConfigurationError(AntigravityError):
     """Raised when credentials or configuration are missing or invalid."""
 
+
 class AntigravityOAuthError(AntigravityError):
     """Raised for specific OAuth protocol failures (e.g. invalid_grant)."""
+
     def __init__(self, message: str, error_code: str, error_description: str):
         super().__init__(message)
         self.error_code = error_code
         self.error_description = error_description
 
+
 class AntigravityNetworkError(AntigravityError):
     """Raised for network timeouts, DNS issues, or 5xx server errors."""
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -252,6 +258,8 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float]:
     except urllib.error.HTTPError as exc:
         try:
             err_payload = json.loads(exc.read())
+            if not isinstance(err_payload, dict):
+                raise AntigravityNetworkError(f"OAuth HTTP {exc.code} with non-dict payload") from exc
             error_code = err_payload.get("error", "unknown_error")
             error_desc = err_payload.get("error_description", "(no description)")
             raise AntigravityOAuthError(f"OAuth refresh failed: {error_code} - {error_desc}", error_code, error_desc) from exc
@@ -629,7 +637,7 @@ class AntigravityProvider(LLMProvider):
                     req2 = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
                     try:
                         return urllib.request.urlopen(req2, timeout=120)  # noqa: S310
-                    except urllib.error.HTTPError as exc2:
+                    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc2:
                         last_exc = exc2
                         continue
                 elif exc.code >= 500:
