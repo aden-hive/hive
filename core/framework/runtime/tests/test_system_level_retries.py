@@ -29,7 +29,6 @@ class CancelledNode(NodeProtocol):
 async def test_worker_catches_raw_exception_and_retries():
     """Verify that a raw exception is caught and triggers the retry loop."""
     
-    # 1. Setup minimal mock context
     node_spec = NodeSpec(
         id="test_flaky_node", 
         name="Flaky Node", 
@@ -37,7 +36,6 @@ async def test_worker_catches_raw_exception_and_retries():
         max_retries=3
     )
     
-    # Added goal_id="test_goal" to satisfy Pydantic
     mock_graph = GraphSpec(id="test_graph", goal_id="test_goal", entry_node="test_flaky_node", nodes=[node_spec], edges=[])
     
     # Mocking GraphContext to bypass deep instantiation
@@ -51,8 +49,8 @@ async def test_worker_catches_raw_exception_and_retries():
     mock_gc.node_visit_counts = {}
     mock_gc.path = []
     mock_gc.buffer = MagicMock(spec=DataBuffer)
+    mock_gc.event_bus = None
     
-    # 2. Initialize worker and inject our custom flaking node
     worker = NodeWorker(node_spec=node_spec, graph_context=mock_gc)
     worker._node_impl = FlakySystemNode()
     
@@ -62,10 +60,8 @@ async def test_worker_catches_raw_exception_and_retries():
     worker._publish_completion = AsyncMock()
     worker._publish_failure = AsyncMock()
     
-    # 3. Execute
     await worker._execute_self()
     
-    # 4. Assertions
     assert worker.lifecycle == WorkerLifecycle.COMPLETED
     assert worker._node_impl.attempts == 3
     assert mock_gc.retry_counts["test_flaky_node"] == 2
@@ -91,6 +87,7 @@ async def test_worker_respects_asyncio_cancelled_error():
     mock_gc.node_visit_counts = {}
     mock_gc.path = []
     mock_gc.buffer = MagicMock(spec=DataBuffer)
+    mock_gc.event_bus = None
     
     worker = NodeWorker(node_spec=node_spec, graph_context=mock_gc)
     worker._node_impl = CancelledNode()

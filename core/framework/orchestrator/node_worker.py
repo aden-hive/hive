@@ -380,7 +380,8 @@ class NodeWorker:
                 if attempt + 1 < total_attempts:
                     gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
-                    delay = 1.0 * (2**attempt)
+                    import random
+                    delay = (1.0 * (2**attempt)) + random.uniform(0.1, 0.5)
                     logger.warning(
                         "Worker %s failed (attempt %d/%d), retrying in %.1fs: %s",
                         self.node_spec.id,
@@ -413,7 +414,8 @@ class NodeWorker:
                 if attempt + 1 < total_attempts:
                     gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
-                    delay = 1.0 * (2**attempt)
+                    import random
+                    delay = (1.0 * (2**attempt)) + random.uniform(0.1, 0.5)
                     logger.warning(
                         "Worker %s raised %s (attempt %d/%d), retrying in %.1fs",
                         self.node_spec.id,

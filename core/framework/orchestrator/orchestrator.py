@@ -1032,10 +1032,8 @@ class Orchestrator:
                     try:
                         result = await node_impl.execute(ctx)
                     except asyncio.CancelledError:
-                        # Re-raise to preserve system responsiveness and lifecycle interrupts
                         raise
                     except Exception as e:
-                        # Catch raw exceptions and route them to the standard retry loop
                         import traceback
                         stack_trace = traceback.format_exc()
                         self.logger.error(
@@ -1097,7 +1095,12 @@ class Orchestrator:
                         self.logger.info(f"      ✓ Branch {node_spec.name}: success (tokens: {result.tokens_used}, latency: {result.latency_ms}ms)")
                         return branch, result
 
-                    self.logger.warning(f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{effective_max_retries}")
+                    if attempt + 1 < effective_max_retries:
+                        import random
+                        # Exponential backoff with up to 500ms of random jitter
+                        delay = (1.0 * (2 ** attempt)) + random.uniform(0.1, 0.5)
+                        self.logger.warning(f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{effective_max_retries} in {delay:.2f}s")
+                        await asyncio.sleep(delay)
 
                 # All retries exhausted
                 branch.status = "failed"
@@ -1140,6 +1143,9 @@ class Orchestrator:
         failed_branches: list[ParallelBranch] = []
 
         for i, result in enumerate(results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+
             branch = branch_list[i]
 
             if isinstance(result, asyncio.TimeoutError):
@@ -1562,12 +1568,7 @@ class Orchestrator:
                         worker = workers[wid]
 
                         if task.cancelled():
-                            error = "Worker task was cancelled unexpectedly"
-                            failed_workers[wid] = error
-                            self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
-                            if wid in terminal_worker_ids:
-                                completed_terminals.add(wid)
-                            continue
+                            raise asyncio.CancelledError(f"Worker task {wid} was cancelled")
 
                         task_error = None
                         try:
