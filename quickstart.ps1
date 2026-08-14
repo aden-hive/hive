@@ -1152,6 +1152,7 @@ if (-not (Initialize-ModelCatalog)) {
 $PrevProvider = ""
 $PrevModel = ""
 $PrevEnvVar = ""
+$PrevApiBase = ""
 $PrevSubMode = ""
 if (Test-Path $HiveConfigFile) {
     try {
@@ -1161,6 +1162,7 @@ if (Test-Path $HiveConfigFile) {
             $PrevProvider = if ($prevLlm.provider) { $prevLlm.provider } else { "" }
             $PrevModel = if ($prevLlm.model) { $prevLlm.model } else { "" }
             $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
+            $PrevApiBase = if ($prevLlm.api_base) { $prevLlm.api_base } else { "" }
             if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
@@ -1643,7 +1645,11 @@ switch ($num) {
         $localPreset = Get-PresetConfig "local_openai"
         $SelectedMaxTokens = [int]$localPreset.max_tokens
         $SelectedMaxContextTokens = [int]$localPreset.max_context_tokens
-        $DefaultBase = [string]$localPreset.api_base
+        $DefaultBase = if ($PrevSubMode -eq "local_openai" -and $PrevApiBase) {
+            $PrevApiBase
+        } else {
+            [string]$localPreset.api_base
+        }
 
         Write-Host ""
         $SelectedApiBase = Read-Host "  Enter API Base URL [$DefaultBase]"
@@ -1700,8 +1706,17 @@ switch ($num) {
         Write-Host ""
         Write-Host "  Select a model:" -ForegroundColor White
         Write-Host ""
+        Write-Host ""
         $defaultIdx = "1"
+        $previousLocalModel = if ($PrevSubMode -eq "local_openai") {
+            $PrevModel -replace '^(?i:openai/)', ''
+        } else {
+            ""
+        }
         for ($i = 0; $i -lt $localModels.Count; $i++) {
+            if ($localModels[$i] -eq $previousLocalModel) {
+                $defaultIdx = [string]($i + 1)
+            }
             Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
             Write-Host ") $($localModels[$i])"
         }

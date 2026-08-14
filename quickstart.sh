@@ -1694,7 +1694,11 @@ case $choice in
         SELECTED_ENV_VAR=""
         SELECTED_MAX_TOKENS="$(get_preset_field "local_openai" "max_tokens")"
         SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "local_openai" "max_context_tokens")"
-        DEFAULT_BASE="$(get_preset_field "local_openai" "api_base")"
+        if [ "$PREV_SUB_MODE" = "local_openai" ] && [ -n "$PREV_API_BASE" ]; then
+            DEFAULT_BASE="$PREV_API_BASE"
+        else
+            DEFAULT_BASE="$(get_preset_field "local_openai" "api_base")"
+        fi
         
         echo ""
         read -r -p "  Enter API Base URL [$DEFAULT_BASE]: " SELECTED_API_BASE
@@ -1748,13 +1752,22 @@ except Exception:
             echo ""
             echo -e "${BOLD}Select a model:${NC}"
             echo ""
+            DEFAULT_IDX=1
+            PREV_LOCAL_MODEL=""
+            if [ "$PREV_SUB_MODE" = "local_openai" ]; then
+                PREV_LOCAL_MODEL="${PREV_MODEL#openai/}"
+            fi
             for idx in "${!LOCAL_MODELS[@]}"; do
                 num=$((idx + 1))
+                if [ "${LOCAL_MODELS[$idx]}" = "$PREV_LOCAL_MODEL" ]; then
+                    DEFAULT_IDX=$num
+                fi
                 echo -e "  ${CYAN}$num)${NC} ${LOCAL_MODELS[$idx]}"
             done
             echo ""
             while true; do
-                read -r -p "Enter choice (1-${#LOCAL_MODELS[@]}): " model_choice
+                read -r -p "Enter choice (1-${#LOCAL_MODELS[@]}) [$DEFAULT_IDX]: " model_choice
+                model_choice="${model_choice:-$DEFAULT_IDX}"
                 if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#LOCAL_MODELS[@]} ]; then
                     SELECTED_MODEL="openai/${LOCAL_MODELS[$((model_choice - 1))]}"
                     break
