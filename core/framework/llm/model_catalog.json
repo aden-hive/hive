@@ -657,6 +657,12 @@
       "max_tokens": 8192,
       "max_context_tokens": 16384,
       "api_base": "http://localhost:11434"
+    },
+    "local_openai": {
+      "provider": "openai",
+      "max_tokens": 4096,
+      "max_context_tokens": 8192,
+      "api_base": "http://localhost:1234/v1"
     }
   }
 }
