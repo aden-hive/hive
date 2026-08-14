@@ -1699,9 +1699,28 @@ case $choice in
         echo ""
         read -r -p "  Enter API Base URL [$DEFAULT_BASE]: " SELECTED_API_BASE
         SELECTED_API_BASE="${SELECTED_API_BASE:-$DEFAULT_BASE}"
-        
-        echo ""
-        read -r -p "  Enter API Key (optional) [none]: " LOCAL_OPENAI_KEY
+
+        EXISTING_LOCAL="${LOCAL_OPENAI_API_KEY:-}"
+        if [ -n "$EXISTING_LOCAL" ]; then
+            len=${#EXISTING_LOCAL}
+            if [ "$len" -le 8 ]; then
+                masked="..."
+            else
+                masked="${EXISTING_LOCAL:0:4}...${EXISTING_LOCAL: -4}"
+            fi
+            echo ""
+            read -r -p "  Enter API Key (press Enter to keep $masked): " LOCAL_OPENAI_KEY
+        else
+            echo ""
+            read -r -p "  Enter API Key (optional) [none]: " LOCAL_OPENAI_KEY
+        fi
+
+        EFFECTIVE_KEY=""
+        if [ -n "$LOCAL_OPENAI_KEY" ]; then
+            EFFECTIVE_KEY="$LOCAL_OPENAI_KEY"
+        elif [ -n "$EXISTING_LOCAL" ]; then
+            EFFECTIVE_KEY="$EXISTING_LOCAL"
+        fi
         
         echo ""
         echo -e "${CYAN}  Fetching available models from ${SELECTED_API_BASE}/models...${NC}"
@@ -1710,17 +1729,20 @@ case $choice in
         while IFS= read -r line; do
             [ -n "$line" ] && LOCAL_MODELS+=("$line")
         done < <(uv run python -c "
-import urllib.request, json
+import urllib.request, json, sys
+api_base = sys.argv[1]
+api_key = sys.argv[2] if len(sys.argv) > 2 else ''
 try:
-    req = urllib.request.Request('${SELECTED_API_BASE}/models')
-    if '${LOCAL_OPENAI_KEY}': req.add_header('Authorization', 'Bearer ${LOCAL_OPENAI_KEY}')
+    req = urllib.request.Request(f'{api_base}/models')
+    if api_key:
+        req.add_header('Authorization', f'Bearer {api_key}')
     with urllib.request.urlopen(req, timeout=3) as res:
         data = json.load(res)
         for m in data.get('data', []):
             print(m.get('id', ''))
 except Exception:
     pass
-" 2>/dev/null)
+" "$SELECTED_API_BASE" "$EFFECTIVE_KEY" 2>/dev/null)
 
         if [ ${#LOCAL_MODELS[@]} -gt 0 ]; then
             echo ""
@@ -1757,7 +1779,10 @@ except Exception:
             sed -i.bak "/^export LOCAL_OPENAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
             echo "" >> "$SHELL_RC_FILE"
             echo "# Hive Agent Framework - Local OpenAI API key" >> "$SHELL_RC_FILE"
-            echo "export LOCAL_OPENAI_API_KEY=\"$LOCAL_OPENAI_KEY\"" >> "$SHELL_RC_FILE"
+            escaped_key=$(printf '%q' "$LOCAL_OPENAI_KEY")
+            echo "export LOCAL_OPENAI_API_KEY=$escaped_key" >> "$SHELL_RC_FILE"
+        elif [ -n "$EXISTING_LOCAL" ] || [ "$PREV_ENV_VAR" = "LOCAL_OPENAI_API_KEY" ]; then
+            SELECTED_ENV_VAR="LOCAL_OPENAI_API_KEY"
         fi
         ;;
     "$SKIP_CHOICE")

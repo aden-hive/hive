@@ -1651,8 +1651,23 @@ switch ($num) {
             $SelectedApiBase = $DefaultBase
         }
 
+        $existingLocal = [System.Environment]::GetEnvironmentVariable("LOCAL_OPENAI_API_KEY", "User")
+        if (-not $existingLocal) { $existingLocal = $env:LOCAL_OPENAI_API_KEY }
+
         Write-Host ""
-        $LocalOpenAIKey = Read-Host "  Enter API Key (optional) [none]"
+        if ($existingLocal) {
+            $masked = $existingLocal.Substring(0, [Math]::Min(4, $existingLocal.Length)) + "..." + $existingLocal.Substring([Math]::Max(0, $existingLocal.Length - 4))
+            $LocalOpenAIKey = Read-Host "  Enter API Key (press Enter to keep $masked)"
+        } else {
+            $LocalOpenAIKey = Read-Host "  Enter API Key (optional) [none]"
+        }
+
+        $effectiveKey = ""
+        if (-not [string]::IsNullOrWhiteSpace($LocalOpenAIKey)) {
+            $effectiveKey = $LocalOpenAIKey
+        } elseif ($existingLocal) {
+            $effectiveKey = $existingLocal
+        }
 
         Write-Host ""
         Write-Color -Text "  Fetching available models from $SelectedApiBase/models..." -Color Cyan
@@ -1660,8 +1675,8 @@ switch ($num) {
         $localModels = @()
         try {
             $headers = @{}
-            if (-not [string]::IsNullOrWhiteSpace($LocalOpenAIKey)) {
-                $headers["Authorization"] = "Bearer $LocalOpenAIKey"
+            if (-not [string]::IsNullOrWhiteSpace($effectiveKey)) {
+                $headers["Authorization"] = "Bearer $effectiveKey"
             }
             $response = Invoke-RestMethod -Uri "$SelectedApiBase/models" -Headers $headers -TimeoutSec 3 -ErrorAction Stop
             if ($response.data) {
@@ -1669,7 +1684,9 @@ switch ($num) {
                     if ($m.id) { $localModels += $m.id }
                 }
             }
-        } catch { }
+        } catch {
+            Write-Host "  Failed to query models from $SelectedApiBase" -ForegroundColor Yellow
+        }
 
         if ($localModels.Count -eq 0) {
             Write-Host ""
@@ -1708,6 +1725,8 @@ switch ($num) {
             $SelectedEnvVar = "LOCAL_OPENAI_API_KEY"
             [System.Environment]::SetEnvironmentVariable("LOCAL_OPENAI_API_KEY", $LocalOpenAIKey, "User")
             $env:LOCAL_OPENAI_API_KEY = $LocalOpenAIKey
+        } elseif ($existingLocal -or $PrevEnvVar -eq "LOCAL_OPENAI_API_KEY") {
+            $SelectedEnvVar = "LOCAL_OPENAI_API_KEY"
         }
     }
     { $_ -eq $SkipChoice } {

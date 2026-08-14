@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import sqlite3
 import threading
 import time
@@ -258,15 +259,21 @@ def test_claim_by_id_does_not_steal_unrelated_rows(tmp_path: Path) -> None:
 
 
 def test_seed_tasks_bulk_10k(tmp_path: Path) -> None:
-    """10k rows in one transaction should finish under a second on local disk."""
+    """10k rows in one transaction should finish under a second on local disk.
+    
+    Uses a 20-second elapsed-time ceiling on Windows and 3 seconds on non-Windows platforms.
+    """
     db = ensure_progress_db(tmp_path / "c")
     tasks = [{"goal": f"task {i}", "seq": i} for i in range(10_000)]
     start = time.perf_counter()
     ids = seed_tasks(db, tasks)
     elapsed = time.perf_counter() - start
     assert len(ids) == 10_000
-    # Generous ceiling — on Windows CI with slow disk we've seen ~14s.
-    assert elapsed < 20.0, f"bulk seed too slow: {elapsed:.2f}s"
+    if platform.system() == "Windows":
+        # Generous ceiling — on Windows CI with slow disk we've seen ~14s.
+        assert elapsed < 20.0, f"bulk seed too slow: {elapsed:.2f}s"
+    else:
+        assert elapsed < 3.0, f"bulk seed too slow: {elapsed:.2f}s"
 
 
 # ----------------------------------------------------------------------
