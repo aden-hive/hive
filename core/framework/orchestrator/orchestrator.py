@@ -964,7 +964,8 @@ class Orchestrator:
             # Get node implementation to check its type
             branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
-            effective_max_retries = node_spec.max_retries
+            # Normalize to at least 1 attempt, so max_retries=0 still executes once
+            effective_max_retries = max(1, node_spec.max_retries)
             # Only override for actual AgentLoop instances, not custom NodeProtocol impls
             from framework.agent_loop.agent_loop import AgentLoop as _AgentLoop  # noqa: F811
 
@@ -1757,6 +1758,21 @@ class Orchestrator:
             )
 
         finally:
+            # Cancel and await all outstanding worker and timeout tasks
+            tasks_to_cancel = []
+            for w in workers.values():
+                if w._task is not None and not w._task.done():
+                    w._task.cancel()
+                    tasks_to_cancel.append(w._task)
+            
+            for task in _fanout_branch_tasks.values():
+                if task is not None and not task.done():
+                    task.cancel()
+                    tasks_to_cancel.append(task)
+            
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+
             if has_event_subscription and self._event_bus:
                 if sub_completed:
                     self._event_bus.unsubscribe(sub_completed)

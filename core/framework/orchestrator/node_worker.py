@@ -424,6 +424,15 @@ class NodeWorker:
                         max(1, max_retries),
                         delay,
                     )
+                    # Emit retry event for raw exceptions
+                    if gc.event_bus:
+                        await gc.event_bus.emit_node_retry(
+                            stream_id=gc.stream_id,
+                            node_id=self.node_spec.id,
+                            attempt=attempt + 1,
+                            max_retries=max_retries,
+                            execution_id=gc.execution_id,
+                        )
                     await asyncio.sleep(delay)
                     continue
                 return NodeResult(

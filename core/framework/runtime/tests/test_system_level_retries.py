@@ -49,7 +49,9 @@ async def test_worker_catches_raw_exception_and_retries():
     mock_gc.node_visit_counts = {}
     mock_gc.path = []
     mock_gc.buffer = MagicMock(spec=DataBuffer)
-    mock_gc.event_bus = None
+    mock_gc.event_bus = AsyncMock()
+    mock_gc.stream_id = "test_stream"
+    mock_gc.execution_id = "test_exec"
     
     worker = NodeWorker(node_spec=node_spec, graph_context=mock_gc)
     worker._node_impl = FlakySystemNode()
@@ -68,6 +70,16 @@ async def test_worker_catches_raw_exception_and_retries():
     assert worker._last_result is not None
     assert worker._last_result.success is True
 
+    # Regression assertion verifying the retry event is emitted on exception
+    assert mock_gc.event_bus.emit_node_retry.call_count == 2
+    mock_gc.event_bus.emit_node_retry.assert_called_with(
+        stream_id="test_stream",
+        node_id="test_flaky_node",
+        attempt=2,
+        max_retries=3,
+        execution_id="test_exec",
+    )
+
 @pytest.mark.asyncio
 async def test_worker_respects_asyncio_cancelled_error():
     """Verify that asyncio.CancelledError is NOT swallowed by the broad exception handler."""
@@ -80,7 +92,6 @@ async def test_worker_respects_asyncio_cancelled_error():
     )
     
     mock_gc = MagicMock(spec=GraphContext)
-    # Added goal_id="test_goal" to satisfy Pydantic
     mock_gc.graph = GraphSpec(id="test_graph", goal_id="test_goal", entry_node="test_cancel_node", nodes=[node_spec], edges=[])
     mock_gc._visits_lock = asyncio.Lock()
     mock_gc._path_lock = asyncio.Lock()
