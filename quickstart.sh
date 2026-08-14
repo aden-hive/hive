@@ -1241,6 +1241,7 @@ try:
     print(f"PREV_PROVIDER='{prov}'")
     print(f"PREV_MODEL='{mod}'")
     print(f"PREV_ENV_VAR='{env}'")
+    print(f"PREV_API_BASE='{llm.get('api_base', '')}'")
     sub = ""
     if llm.get("use_claude_code_subscription"):
         sub = "claude_code"
@@ -1256,12 +1257,20 @@ try:
         sub = "hive_llm"
     elif "api.z.ai" in llm.get("api_base", ""):
         sub = "zai_code"
+    elif prov == "openai" and llm.get("api_base", ""):
+        sub = "local_openai"
     print(f"PREV_SUB_MODE={sub}")
 except Exception:
     pass
 PY
 )" || true
 fi
+
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family")
+OLLAMA_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
+LOCAL_OPENAI_CHOICE=$((OLLAMA_CHOICE + 1))
+SKIP_CHOICE=$((LOCAL_OPENAI_CHOICE + 1))
 
 # Compute default menu number from previous config (only if credential is still valid)
 DEFAULT_CHOICE=""
@@ -1274,6 +1283,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        local_openai) PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set; ollama uses local runtime detection
             if [ "$PREV_PROVIDER" = "ollama" ]; then
@@ -1295,6 +1305,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             kimi_code)   DEFAULT_CHOICE=5 ;;
             hive_llm)    DEFAULT_CHOICE=6 ;;
             antigravity) DEFAULT_CHOICE=7 ;;
+            local_openai) DEFAULT_CHOICE=$LOCAL_OPENAI_CHOICE ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
@@ -1304,7 +1315,8 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 groq)      DEFAULT_CHOICE=11 ;;
                 cerebras)  DEFAULT_CHOICE=12 ;;
                 openrouter) DEFAULT_CHOICE=13 ;;
-                ollama)    DEFAULT_CHOICE=14 ;;
+                deepseek)  DEFAULT_CHOICE=14 ;;
+                ollama)    DEFAULT_CHOICE=$OLLAMA_CHOICE ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -1396,8 +1408,6 @@ echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 # 8-N) API key providers — show (credential detected) if key already set.
 # Order is reflected directly in the menu numbering; the case dispatcher
 # below resolves choice numbers via $((8 + index_in_arrays)).
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
@@ -1410,14 +1420,14 @@ done
 
 # Local (Ollama) — slot computed from the provider list so adding/removing
 # API-key providers above doesn't require renumbering by hand.
-OLLAMA_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
 if [ "$OLLAMA_DETECTED" = true ]; then
     echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
 else
     echo -e "  ${CYAN}$OLLAMA_CHOICE)${NC} Local (Ollama) - No API key needed"
 fi
 
-SKIP_CHOICE=$((OLLAMA_CHOICE + 1))
+echo -e "  ${CYAN}$LOCAL_OPENAI_CHOICE)${NC} Local (OpenAI-compatible) - LM Studio, vLLM, etc."
+
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1679,6 +1689,115 @@ case $choice in
             exit 1
         fi
         ;;
+    "$LOCAL_OPENAI_CHOICE")
+        SELECTED_PROVIDER_ID="local_openai"
+        SELECTED_ENV_VAR=""
+        SELECTED_MAX_TOKENS="$(get_preset_field "local_openai" "max_tokens")"
+        SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "local_openai" "max_context_tokens")"
+        if [ "$PREV_SUB_MODE" = "local_openai" ] && [ -n "$PREV_API_BASE" ]; then
+            DEFAULT_BASE="$PREV_API_BASE"
+        else
+            DEFAULT_BASE="$(get_preset_field "local_openai" "api_base")"
+        fi
+        
+        echo ""
+        read -r -p "  Enter API Base URL [$DEFAULT_BASE]: " SELECTED_API_BASE
+        SELECTED_API_BASE="${SELECTED_API_BASE:-$DEFAULT_BASE}"
+
+        EXISTING_LOCAL="${LOCAL_OPENAI_API_KEY:-}"
+        if [ -n "$EXISTING_LOCAL" ]; then
+            len=${#EXISTING_LOCAL}
+            if [ "$len" -le 8 ]; then
+                masked="..."
+            else
+                masked="${EXISTING_LOCAL:0:4}...${EXISTING_LOCAL: -4}"
+            fi
+            echo ""
+            read -r -p "  Enter API Key (press Enter to keep $masked): " LOCAL_OPENAI_KEY
+        else
+            echo ""
+            read -r -p "  Enter API Key (optional) [none]: " LOCAL_OPENAI_KEY
+        fi
+
+        EFFECTIVE_KEY=""
+        if [ -n "$LOCAL_OPENAI_KEY" ]; then
+            EFFECTIVE_KEY="$LOCAL_OPENAI_KEY"
+        elif [ -n "$EXISTING_LOCAL" ]; then
+            EFFECTIVE_KEY="$EXISTING_LOCAL"
+        fi
+        
+        echo ""
+        echo -e "${CYAN}  Fetching available models from ${SELECTED_API_BASE}/models...${NC}"
+        
+        LOCAL_MODELS=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && LOCAL_MODELS+=("$line")
+        done < <(uv run python -c "
+import urllib.request, json, sys
+api_base = sys.argv[1]
+api_key = sys.argv[2] if len(sys.argv) > 2 else ''
+try:
+    req = urllib.request.Request(f'{api_base}/models')
+    if api_key:
+        req.add_header('Authorization', f'Bearer {api_key}')
+    with urllib.request.urlopen(req, timeout=3) as res:
+        data = json.load(res)
+        for m in data.get('data', []):
+            print(m.get('id', ''))
+except Exception:
+    pass
+" "$SELECTED_API_BASE" "$EFFECTIVE_KEY" 2>/dev/null)
+
+        if [ ${#LOCAL_MODELS[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${BOLD}Select a model:${NC}"
+            echo ""
+            DEFAULT_IDX=1
+            PREV_LOCAL_MODEL=""
+            if [ "$PREV_SUB_MODE" = "local_openai" ]; then
+                PREV_LOCAL_MODEL="${PREV_MODEL#openai/}"
+            fi
+            for idx in "${!LOCAL_MODELS[@]}"; do
+                num=$((idx + 1))
+                if [ "${LOCAL_MODELS[$idx]}" = "$PREV_LOCAL_MODEL" ]; then
+                    DEFAULT_IDX=$num
+                fi
+                echo -e "  ${CYAN}$num)${NC} ${LOCAL_MODELS[$idx]}"
+            done
+            echo ""
+            while true; do
+                read -r -p "Enter choice (1-${#LOCAL_MODELS[@]}) [$DEFAULT_IDX]: " model_choice
+                model_choice="${model_choice:-$DEFAULT_IDX}"
+                if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#LOCAL_MODELS[@]} ]; then
+                    SELECTED_MODEL="openai/${LOCAL_MODELS[$((model_choice - 1))]}"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-${#LOCAL_MODELS[@]}${NC}"
+            done
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Local (OpenAI-compatible) with model ${DIM}$SELECTED_MODEL${NC}"
+            echo ""
+        else
+            echo ""
+            echo -e "${RED}No models found or connection failed.${NC}"
+            echo -e "  Please ensure your local server is running and accessible at ${SELECTED_API_BASE},"
+            echo -e "  and then run this quickstart again."
+            echo ""
+            exit 1
+        fi
+        
+        if [ -n "$LOCAL_OPENAI_KEY" ]; then
+            SELECTED_ENV_VAR="LOCAL_OPENAI_API_KEY"
+            export LOCAL_OPENAI_API_KEY="$LOCAL_OPENAI_KEY"
+            sed -i.bak "/^export LOCAL_OPENAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - Local OpenAI API key" >> "$SHELL_RC_FILE"
+            escaped_key=$(printf '%q' "$LOCAL_OPENAI_KEY")
+            echo "export LOCAL_OPENAI_API_KEY=$escaped_key" >> "$SHELL_RC_FILE"
+        elif [ -n "$EXISTING_LOCAL" ] || [ "$PREV_ENV_VAR" = "LOCAL_OPENAI_API_KEY" ]; then
+            SELECTED_ENV_VAR="LOCAL_OPENAI_API_KEY"
+        fi
+        ;;
     "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
@@ -1853,6 +1972,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
         # to the local Ollama server instead of trying to reach a remote endpoint.
         save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "local_openai" ]; then
+        save_configuration "openai" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     fi
