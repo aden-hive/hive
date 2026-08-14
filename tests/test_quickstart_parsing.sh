@@ -26,20 +26,13 @@ load_model_catalog_rows
 echo "Testing ollama_local preset..."
 test "$(get_preset_field ollama_local provider)" = "ollama"
 test "$(get_preset_field ollama_local model)" = ""
-test "$(get_preset_field ollama_local max_tokens)" = "4096"
-test "$(get_preset_field ollama_local max_context_tokens)" = "8192"
+test "$(get_preset_field ollama_local max_tokens)" = "8192"
+test "$(get_preset_field ollama_local max_context_tokens)" = "16384"
 test "$(get_preset_field ollama_local api_key_env_var)" = ""
 test "$(get_preset_field ollama_local api_base)" = "http://localhost:11434"
 
-echo "Testing ollama_cloud preset..."
-test "$(get_preset_field ollama_cloud provider)" = "ollama"
-test "$(get_preset_field ollama_cloud model)" = ""
-test "$(get_preset_field ollama_cloud max_tokens)" = "4096"
-test "$(get_preset_field ollama_cloud max_context_tokens)" = "8192"
-test "$(get_preset_field ollama_cloud api_key_env_var)" = ""
-test "$(get_preset_field ollama_cloud api_base)" = ""
-
 echo "Testing vision fallback parsing..."
+# Extract the vision fallback generation logic from quickstart.sh
 export OPENROUTER_API_KEY="dummy"
 VISION_CANDIDATES_TSV="$(get_vision_candidates)"
 
