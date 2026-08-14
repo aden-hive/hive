@@ -96,11 +96,33 @@ jobs:
   test-quickstart:
     name: Test Quickstart Bash
     runs-on: macos-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        working-directory: core
+        run: uv sync
 
       - name: Run Bash Parsing Tests
-        run: bash tests/test_quickstart_parsing.sh
+        run: |
+          test "$(/bin/bash -c 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"')" = "3.2"
+          # quickstart.sh temporarily overrides PYTHONPATH when running locally
+          export PYTHONPATH="$(pwd)/core:$PYTHONPATH"
+          /bin/bash tests/test_quickstart_parsing.sh
 
   validate:
     name: Validate Agent Exports
