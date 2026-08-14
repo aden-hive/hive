@@ -1131,6 +1131,10 @@ $ProviderMenuUrls     = @(
     "https://openrouter.ai/keys"
 )
 
+$OllamaChoice = 8 + $ProviderMenuEnvVars.Count
+$LocalOpenAIChoice = $OllamaChoice + 1
+$SkipChoice = $LocalOpenAIChoice + 1
+
 $OllamaDetected = $false
 try {
     $null = & ollama list 2>$null
@@ -1165,6 +1169,7 @@ if (Test-Path $HiveConfigFile) {
             elseif ($prevLlm.provider -eq "minimax" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*api.minimax.io*")) { $PrevSubMode = "minimax_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*adenhq.com*")) { $PrevSubMode = "hive_llm" }
+            elseif ($prevLlm.provider -eq "openai" -and $prevLlm.api_base) { $PrevSubMode = "local_openai" }
         }
     } catch { }
 }
@@ -1181,6 +1186,7 @@ if ($PrevSubMode -or $PrevProvider) {
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
         "antigravity" { if ($AntigravityCredDetected) { $prevCredValid = $true } }
+        "local_openai" { $prevCredValid = $true }
         default {
             if ($PrevProvider -eq "ollama") {
                 $prevCredValid = $true
@@ -1200,6 +1206,7 @@ if ($PrevSubMode -or $PrevProvider) {
             "kimi_code"   { $DefaultChoice = "5" }
             "hive_llm"    { $DefaultChoice = "6" }
             "antigravity" { $DefaultChoice = "7" }
+            "local_openai" { $DefaultChoice = [string]$LocalOpenAIChoice }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
@@ -1209,7 +1216,7 @@ if ($PrevSubMode -or $PrevProvider) {
                 "groq"      { $DefaultChoice = "11" }
                 "cerebras"  { $DefaultChoice = "12" }
                 "openrouter" { $DefaultChoice = "13" }
-                "ollama"     { $DefaultChoice = "14" }
+                "ollama"     { $DefaultChoice = [string]$OllamaChoice }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
                 "hive"      { $DefaultChoice = "6" }
@@ -1299,9 +1306,9 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-# 14) Local (Ollama) - no API key needed
+# Local (Ollama) - no API key needed
 Write-Host "  " -NoNewline
-Write-Color -Text "14" -Color Cyan -NoNewline
+Write-Color -Text "$OllamaChoice" -Color Cyan -NoNewline
 if ($OllamaDetected) {
     Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
     Write-Color -Text "(ollama detected)" -Color Green
@@ -1309,7 +1316,9 @@ if ($OllamaDetected) {
     Write-Host ") Local (Ollama) - No API key needed"
 }
 
-$SkipChoice = 8 + $ProviderMenuEnvVars.Count + 1
+Write-Host "  " -NoNewline
+Write-Color -Text "$LocalOpenAIChoice" -Color Cyan -NoNewline
+Write-Host ") Local (OpenAI-compatible) - LM Studio, vLLM, etc."
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -1627,6 +1636,78 @@ switch ($num) {
                 }
             }
             Write-Color -Text "Invalid choice. Please enter 1-$($ollamaModels.Count)" -Color Red
+        }
+    }
+    { $_ -eq $LocalOpenAIChoice } {
+        $SelectedProviderId = "local_openai"
+        $localPreset = Get-PresetConfig "local_openai"
+        $SelectedMaxTokens = [int]$localPreset.max_tokens
+        $SelectedMaxContextTokens = [int]$localPreset.max_context_tokens
+        $DefaultBase = [string]$localPreset.api_base
+
+        Write-Host ""
+        $SelectedApiBase = Read-Host "  Enter API Base URL [$DefaultBase]"
+        if ([string]::IsNullOrWhiteSpace($SelectedApiBase)) {
+            $SelectedApiBase = $DefaultBase
+        }
+
+        Write-Host ""
+        $LocalOpenAIKey = Read-Host "  Enter API Key (optional) [none]"
+
+        Write-Host ""
+        Write-Color -Text "  Fetching available models from $SelectedApiBase/models..." -Color Cyan
+
+        $localModels = @()
+        try {
+            $headers = @{}
+            if (-not [string]::IsNullOrWhiteSpace($LocalOpenAIKey)) {
+                $headers["Authorization"] = "Bearer $LocalOpenAIKey"
+            }
+            $response = Invoke-RestMethod -Uri "$SelectedApiBase/models" -Headers $headers -TimeoutSec 3 -ErrorAction Stop
+            if ($response.data) {
+                foreach ($m in $response.data) {
+                    if ($m.id) { $localModels += $m.id }
+                }
+            }
+        } catch { }
+
+        if ($localModels.Count -eq 0) {
+            Write-Host ""
+            Write-Color -Text "No models found or connection failed." -Color Red
+            Write-Host "  Please ensure your local server is running and accessible at $SelectedApiBase,"
+            Write-Host "  and then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+
+        Write-Host ""
+        Write-Host "  Select a model:" -ForegroundColor White
+        Write-Host ""
+        $defaultIdx = "1"
+        for ($i = 0; $i -lt $localModels.Count; $i++) {
+            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
+            Write-Host ") $($localModels[$i])"
+        }
+        Write-Host ""
+        while ($true) {
+            $raw = Read-Host "Enter choice (1-$($localModels.Count)) [$defaultIdx]"
+            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
+            if ($raw -match '^\d+$') {
+                $num = [int]$raw
+                if ($num -ge 1 -and $num -le $localModels.Count) {
+                    $SelectedModel = "openai/" + $localModels[$num - 1]
+                    Write-Host ""
+                    Write-Ok "Using Local (OpenAI-compatible) with model $SelectedModel"
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($localModels.Count)" -Color Red
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($LocalOpenAIKey)) {
+            $SelectedEnvVar = "LOCAL_OPENAI_API_KEY"
+            [System.Environment]::SetEnvironmentVariable("LOCAL_OPENAI_API_KEY", $LocalOpenAIKey, "User")
+            $env:LOCAL_OPENAI_API_KEY = $LocalOpenAIKey
         }
     }
     { $_ -eq $SkipChoice } {
@@ -1953,6 +2034,14 @@ if ($SelectedProviderId) {
     } elseif ($SelectedProviderId -eq "ollama") {
         $config.llm["api_base"] = $SelectedApiBase
         $config.llm.Remove("api_key_env_var")
+    } elseif ($SelectedProviderId -eq "local_openai") {
+        $config.llm["provider"] = "openai"
+        $config.llm["api_base"] = $SelectedApiBase
+        if ($SelectedEnvVar) {
+            $config.llm["api_key_env_var"] = $SelectedEnvVar
+        } else {
+            $config.llm.Remove("api_key_env_var")
+        }
     } elseif ($SelectedEnvVar) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
