@@ -589,12 +589,12 @@ load_model_catalog_rows() {
 from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
 
 for provider_id, default_model in sorted(get_default_models().items()):
-    print(f"DEFAULT\t{provider_id}\t{default_model}")
+    print(f"DEFAULT\x1f{provider_id}\x1f{default_model}")
 
 for provider_id, models in sorted(get_models_catalogue().items()):
     for model in models:
         print(
-            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
+            "MODEL\x1f{provider}\x1f{id}\x1f{label}\x1f{max_tokens}\x1f{max_context_tokens}".format(
                 provider=provider_id,
                 id=model["id"],
                 label=model["label"],
@@ -605,7 +605,7 @@ for provider_id, models in sorted(get_models_catalogue().items()):
 
 for preset_id, preset in sorted(get_presets().items()):
     print(
-        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
+        "PRESET\x1f{preset_id}\x1f{provider}\x1f{model}\x1f{max_tokens}\x1f{max_context_tokens}\x1f{api_key_env_var}\x1f{api_base}".format(
             preset_id=preset_id,
             provider=preset["provider"],
             model=preset.get("model", ""),
@@ -617,7 +617,7 @@ for preset_id, preset in sorted(get_presets().items()):
     )
     for choice in preset.get("model_choices", []):
         print(
-            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
+            "PRESET_MODEL\x1f{preset_id}\x1f{id}\x1f{label}\x1f{recommended}".format(
                 preset_id=preset_id,
                 id=choice["id"],
                 label=choice["label"],
@@ -631,23 +631,23 @@ for preset_id, preset in sorted(get_presets().items()):
     PRESET_ROWS=""
     PRESET_MODEL_CHOICE_ROWS=""
 
-    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
+    while IFS=$'\x1f' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
         [ -n "$row_type" ] || continue
         if [ "$row_type" = "DEFAULT" ]; then
-            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
+            MODEL_DEFAULT_ROWS+="${field1}"$'\x1f'"${field2}"$'\n'
         elif [ "$row_type" = "MODEL" ]; then
-            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
+            MODEL_CHOICE_ROWS+="${field1}"$'\x1f'"${field2}"$'\x1f'"${field3}"$'\x1f'"${field4}"$'\x1f'"${field5}"$'\n'
         elif [ "$row_type" = "PRESET" ]; then
-            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
+            PRESET_ROWS+="${field1}"$'\x1f'"${field2}"$'\x1f'"${field3}"$'\x1f'"${field4}"$'\x1f'"${field5}"$'\x1f'"${field6}"$'\x1f'"${field7}"$'\n'
         elif [ "$row_type" = "PRESET_MODEL" ]; then
-            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
+            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\x1f'"${field2}"$'\x1f'"${field3}"$'\x1f'"${field4}"$'\n'
         fi
     done <<< "$catalog_lines"
 }
 
 get_default_model() {
     local provider_id="$1"
-    while IFS=$'\t' read -r row_provider row_model; do
+    while IFS=$'\x1f' read -r row_provider row_model; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             echo "$row_model"
@@ -659,7 +659,7 @@ get_default_model() {
 get_model_choice_count() {
     local provider_id="$1"
     local count=0
-    while IFS=$'\t' read -r row_provider _; do
+    while IFS=$'\x1f' read -r row_provider _; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             count=$((count + 1))
@@ -673,7 +673,7 @@ get_model_choice_field() {
     local idx="$2"
     local field="$3"
     local count=0
-    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
+    while IFS=$'\x1f' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
         [ -n "$row_provider" ] || continue
         if [ "$row_provider" = "$provider_id" ]; then
             if [ "$count" -eq "$idx" ]; then
@@ -709,7 +709,7 @@ get_model_choice_maxcontexttokens() {
 get_preset_field() {
     local preset_id="$1"
     local field="$2"
-    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
+    while IFS=$'\x1f' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             case "$field" in
@@ -738,7 +738,7 @@ apply_preset() {
 get_preset_model_choice_count() {
     local preset_id="$1"
     local count=0
-    while IFS=$'\t' read -r row_preset_id _; do
+    while IFS=$'\x1f' read -r row_preset_id _; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             count=$((count + 1))
@@ -752,7 +752,7 @@ get_preset_model_choice_field() {
     local idx="$2"
     local field="$3"
     local count=0
-    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
+    while IFS=$'\x1f' read -r row_preset_id row_id row_label row_recommended; do
         [ -n "$row_preset_id" ] || continue
         if [ "$row_preset_id" = "$preset_id" ]; then
             if [ "$count" -eq "$idx" ]; then
@@ -1970,7 +1970,7 @@ for provider_id, default_model in sorted(defaults.items()):
         continue
     # Display name: provider/model from the catalogue verbatim
     display = f"{provider_id}/{chosen}"
-    print(f"{provider_id}\t{chosen}\t{env}\t{display}")
+    print(f"{provider_id}\x1f{chosen}\x1f{env}\x1f{display}")
 PY
 )
 
@@ -1989,7 +1989,7 @@ PY
         echo -e "    ${DIM}0)${NC} (skip — don't configure vision fallback)"
         idx=1
         for entry in "${VISION_CANDIDATES[@]}"; do
-            IFS=$'\t' read -r _vp _vm _vk _vd <<< "$entry"
+            IFS=$'\x1f' read -r _vp _vm _vk _vd <<< "$entry"
             echo -e "    ${DIM}${idx})${NC} ${_vd} ${DIM}[\$${_vk}]${NC}"
             idx=$((idx + 1))
         done
@@ -2012,7 +2012,7 @@ PY
             echo -e "  ${DIM}skipped — no vision_fallback block written${NC}"
         else
             chosen="${VISION_CANDIDATES[$((VISION_CHOICE - 1))]}"
-            IFS=$'\t' read -r vf_provider vf_model vf_env vf_display <<< "$chosen"
+            IFS=$'\x1f' read -r vf_provider vf_model vf_env vf_display <<< "$chosen"
             echo -n "  Saving vision_fallback... "
             if save_vision_fallback "$vf_provider" "$vf_model" "$vf_env" "" > /dev/null; then
                 echo -e "${GREEN}⬢${NC}"
