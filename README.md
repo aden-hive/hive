@@ -20,6 +20,7 @@
   <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Twitter Follow" /></a>
   <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <a href="https://hvtracker.net/agents/hive/"><img src="https://hvtracker.net/badge/hive.svg" alt="HVTrust" /></a>
 </p>
 
 <p align="center">
