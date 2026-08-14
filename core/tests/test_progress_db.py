@@ -265,8 +265,8 @@ def test_seed_tasks_bulk_10k(tmp_path: Path) -> None:
     ids = seed_tasks(db, tasks)
     elapsed = time.perf_counter() - start
     assert len(ids) == 10_000
-    # Generous ceiling — on CI with slow disk we've seen ~300ms.
-    assert elapsed < 3.0, f"bulk seed too slow: {elapsed:.2f}s"
+    # Generous ceiling — on Windows CI with slow disk we've seen ~14s.
+    assert elapsed < 20.0, f"bulk seed too slow: {elapsed:.2f}s"
 
 
 # ----------------------------------------------------------------------
