@@ -93,10 +93,19 @@ jobs:
           uv run playwright install chromium
           uv run pytest tests/ -v
 
+  test-quickstart:
+    name: Test Quickstart Bash
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bash Parsing Tests
+        run: bash tests/test_quickstart_parsing.sh
+
   validate:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
-    needs: [lint, test, test-tools]
+    needs: [lint, test, test-tools, test-quickstart]
     steps:
       - uses: actions/checkout@v4
 

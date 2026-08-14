@@ -583,7 +583,7 @@ PRESET_MODEL_CHOICE_ROWS=""
 
 load_model_catalog_rows() {
     # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
-    # into simple tab-separated rows once and reuse them for the interactive flow.
+    # into simple ASCII Unit Separator-delimited rows once and reuse them for the interactive flow.
     local catalog_lines=""
     catalog_lines="$(uv run python -c '
 from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
