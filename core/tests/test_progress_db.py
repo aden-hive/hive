@@ -260,7 +260,7 @@ def test_claim_by_id_does_not_steal_unrelated_rows(tmp_path: Path) -> None:
 
 def test_seed_tasks_bulk_10k(tmp_path: Path) -> None:
     """10k rows in one transaction should finish under a second on local disk.
-    
+
     Uses a 20-second elapsed-time ceiling on Windows and 3 seconds on non-Windows platforms.
     """
     db = ensure_progress_db(tmp_path / "c")
