@@ -57,7 +57,13 @@ from fastmcp import FastMCP  # noqa: E402
 from aden_tools.file_ops import register_file_tools  # noqa: E402
 
 mcp = FastMCP("files-tools")
-register_file_tools(mcp)
+# HIVE_MCP_SERVER_CWD carries the intended working directory when the
+# launcher couldn't pass it as the real subprocess cwd (Windows: cwd=None
+# is used to avoid WinError 267). Without this, home falls back to
+# os.getcwd(), which on Windows is the *launching* Hive process's cwd
+# (often the project root) instead of the resolved tools/session dir every
+# other platform gets for free via a real cwd.
+register_file_tools(mcp, home=os.environ.get("HIVE_MCP_SERVER_CWD"))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────

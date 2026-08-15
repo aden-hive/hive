@@ -7,6 +7,7 @@ could cause a json.JSONDecodeError and crash execution.
 """
 
 import logging
+import os
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
@@ -923,6 +924,65 @@ def test_load_mcp_config_handles_invalid_json(tmp_path, caplog):
 # ---------------------------------------------------------------------------
 # resync_mcp_servers_if_needed — no-op when nothing changed
 # ---------------------------------------------------------------------------
+
+
+def test_resolve_mcp_server_config_windows_preserves_cwd_via_env(tmp_path, monkeypatch):
+    """On Windows, cwd=None (the WinError 267 workaround) must not silently
+    drop the resolved directory.
+
+    Regression for agent-generated files landing in the project root: a
+    stdio server script that falls back to os.getcwd() for relative paths
+    (e.g. files_server.py) previously inherited the *launching* process's
+    cwd instead of the directory this method resolved. It must now be
+    handed over via HIVE_MCP_SERVER_CWD so Windows matches every other
+    platform, which gets the same directory for free via a real cwd.
+    """
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "files_server.py").write_text("# stub")
+
+    monkeypatch.setattr(os, "name", "nt")
+
+    registry = ToolRegistry()
+    config = registry._resolve_mcp_server_config(
+        {
+            "name": "files-tools",
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "files_server.py", "--stdio"],
+            "cwd": "tools",
+        },
+        tmp_path,
+    )
+
+    assert config["cwd"] is None
+    assert config["env"]["HIVE_MCP_SERVER_CWD"] == str(tools_dir.resolve())
+    assert config["args"][2] == str((tools_dir / "files_server.py").resolve())
+
+
+def test_resolve_mcp_server_config_windows_preserves_existing_env(tmp_path, monkeypatch):
+    """The env injection must merge with, not clobber, a server's own env."""
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "files_server.py").write_text("# stub")
+
+    monkeypatch.setattr(os, "name", "nt")
+
+    registry = ToolRegistry()
+    config = registry._resolve_mcp_server_config(
+        {
+            "name": "files-tools",
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "files_server.py", "--stdio"],
+            "cwd": "tools",
+            "env": {"SOME_OTHER_VAR": "1"},
+        },
+        tmp_path,
+    )
+
+    assert config["env"]["SOME_OTHER_VAR"] == "1"
+    assert config["env"]["HIVE_MCP_SERVER_CWD"] == str(tools_dir.resolve())
 
 
 def test_resync_returns_false_when_no_clients():
