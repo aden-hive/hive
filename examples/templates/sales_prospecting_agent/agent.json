@@ -1,0 +1,237 @@
+{
+    "agent": {
+        "id": "sales_prospecting",
+        "name": "B2B Sales Prospecting & Outreach",
+        "version": "1.0.0",
+        "description": "Automate the B2B sales workflow: intake target audience, find leads via Apollo, research companies, draft personalized emails, and send after human approval."
+    },
+    "graph": {
+        "id": "sales-prospecting-graph",
+        "goal_id": "sales-prospecting",
+        "version": "1.0.0",
+        "entry_node": "intake",
+        "entry_points": {},
+        "pause_nodes": [],
+        "terminal_nodes": [
+            "send_email"
+        ],
+        "nodes": [
+            {
+                "id": "intake",
+                "name": "Intake",
+                "description": "Collect target audience, value proposition, and outreach goals from the user",
+                "node_type": "event_loop",
+                "input_keys": [],
+                "output_keys": [
+                    "target_audience",
+                    "value_proposition",
+                    "outreach_goals"
+                ],
+                "system_prompt": "You are a B2B Sales Intake assistant. Your goal is to gather the necessary information to start a prospecting campaign.\n\n**STEP 1 \u2014 Respond to the user (text only, NO tool calls):**\nAsk the user for the following information:\n1. **Target Audience**: Who are we looking for? (e.g., \"CTOs at Series A SaaS companies in San Francisco\")\n2. **Value Proposition**: What are we offering? Why should they care?\n3. **Outreach Goals**: What is the desired outcome? (e.g., \"Book a discovery call\", \"Request a demo\")\n\nBe professional and helpful. If the user provides partial info, ask for the missing pieces.\n\n**STEP 2 \u2014 After the user provides the information, call set_output:**\n- set_output(\"target_audience\", \"<detailed target audience>\")\n- set_output(\"value_proposition\", \"<clear value proposition>\")\n- set_output(\"outreach_goals\", \"<specific goals>\")",
+                "tools": [],
+                "client_facing": true
+            },
+            {
+                "id": "lead_search",
+                "name": "Lead Search",
+                "description": "Search for B2B leads using Apollo based on the target audience",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "target_audience"
+                ],
+                "output_keys": [
+                    "leads_list"
+                ],
+                "system_prompt": "You are a Lead Generation Specialist. Your task is to find high-quality B2B leads.\n\n1. Use the `apollo_search_people` tool to find individuals matching the target audience.\n2. Consider factors like job title, company size, industry, and location if specified.\n3. Extract name, title, company, and contact info (if available) for up to 5 leads.\n4. Compile the leads into a structured list.\n\nUse set_output(\"leads_list\", <JSON string or detailed list of leads>) to store your findings.",
+                "tools": [
+                    "apollo_search_people"
+                ],
+                "client_facing": false
+            },
+            {
+                "id": "company_research",
+                "name": "Company Research",
+                "description": "Research the companies of the identified leads to personalize outreach",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "leads_list"
+                ],
+                "output_keys": [
+                    "company_research_data"
+                ],
+                "system_prompt": "You are a Business Researcher. Your task is to find \"hooks\" for personalization.\n\nFor each company in the `leads_list`:\n1. Use `web_scrape` to visit their website and understand their product, mission, and recent news.\n2. Use `apollo_enrich_company` to get firmographic data (size, industry, funding, etc.).\n3. Identify specific challenges they might be facing that relate to our `value_proposition`.\n\nCompile a summary of research for each lead/company.\n\nUse set_output(\"company_research_data\", <detailed research summary>) to store your findings.",
+                "tools": [
+                    "web_scrape",
+                    "apollo_enrich_company"
+                ],
+                "client_facing": false
+            },
+            {
+                "id": "draft_email",
+                "name": "Draft Email",
+                "description": "Draft personalized outreach emails for each lead",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "leads_list",
+                    "company_research_data",
+                    "value_proposition",
+                    "outreach_goals"
+                ],
+                "output_keys": [
+                    "email_drafts"
+                ],
+                "system_prompt": "You are an expert Sales Copywriter. Your task is to write highly personalized, non-spammy outreach emails.\n\nFor each lead:\n1. Use the `company_research_data` to create a personalized opening.\n2. Clearly articulate the `value_proposition` in a way that resonates with their specific company context.\n3. Include a clear call-to-action (CTA) based on the `outreach_goals`.\n4. Keep the email concise, professional, and authentic.\n\nDraft a complete email for each lead, including a compelling subject line.\n\nUse set_output(\"email_drafts\", <JSON list of email drafts>) to store the results.",
+                "tools": [],
+                "client_facing": false
+            },
+            {
+                "id": "human_approval",
+                "name": "Human Approval",
+                "description": "Present email drafts to the user for approval or feedback",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "email_drafts"
+                ],
+                "output_keys": [
+                    "approved_emails"
+                ],
+                "system_prompt": "You are a Sales Coordinator. Your task is to ensure the user is happy with the drafted emails before they are sent.\n\n**STEP 1 \u2014 Present drafts to the user (text only, NO tool calls):**\nDisplay the drafted emails to the user. Ask: \"Please review these email drafts. Would you like me to send them all, or are there specific changes you'd like to make?\"\n\n**STEP 2 \u2014 Iterate based on feedback:**\nIf the user wants changes, update the drafts based on their instructions.\n\n**STEP 3 \u2014 After approval, call set_output:**\nOnce the user approves one or more emails, use set_output(\"approved_emails\", <list of final approved emails>).",
+                "tools": [],
+                "client_facing": true
+            },
+            {
+                "id": "send_email",
+                "name": "Send Email",
+                "description": "Send the approved outreach emails",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "approved_emails"
+                ],
+                "output_keys": [
+                    "send_results"
+                ],
+                "system_prompt": "You are responsible for the final delivery of sales emails.\n\nFor each approved email:\n1. Use the `send_email` tool to send it to the lead's email address.\n2. Ensure the recipient, subject, and body are correctly mapped.\n\nTrack the status of each send operation.\n\nUse set_output(\"send_results\", <summary of delivery statuses>) to store the results.",
+                "tools": [
+                    "send_email"
+                ],
+                "client_facing": false
+            }
+        ],
+        "edges": [
+            {
+                "id": "intake-to-search",
+                "source": "intake",
+                "target": "lead_search",
+                "condition": "on_success",
+                "priority": 1
+            },
+            {
+                "id": "search-to-research",
+                "source": "lead_search",
+                "target": "company_research",
+                "condition": "on_success",
+                "priority": 1
+            },
+            {
+                "id": "research-to-draft",
+                "source": "company_research",
+                "target": "draft_email",
+                "condition": "on_success",
+                "priority": 1
+            },
+            {
+                "id": "draft-to-approval",
+                "source": "draft_email",
+                "target": "human_approval",
+                "condition": "on_success",
+                "priority": 1
+            },
+            {
+                "id": "approval-to-send",
+                "source": "human_approval",
+                "target": "send_email",
+                "condition": "on_success",
+                "priority": 1
+            }
+        ],
+        "max_steps": 100,
+        "max_retries_per_node": 3,
+        "loop_config": {
+            "max_iterations": 50,
+            "max_tool_calls_per_turn": 10
+        }
+    },
+    "goal": {
+        "id": "sales-prospecting",
+        "name": "B2B Sales Prospecting & Outreach",
+        "description": "Automate the B2B sales workflow: intake target audience, find leads via Apollo, research companies, draft personalized emails, and send after human approval.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "lead-generation",
+                "description": "Agent finds relevant leads matching the target audience using Apollo",
+                "metric": "lead_relevance",
+                "target": "Finds at least 3 relevant leads",
+                "weight": 0.2
+            },
+            {
+                "id": "company-research",
+                "description": "Agent gathers firmographic and business context for each lead",
+                "metric": "research_depth",
+                "target": "Identifies key business 'hooks' for personalization",
+                "weight": 0.2
+            },
+            {
+                "id": "email-personalization",
+                "description": "Drafts reflect company research and specific value proposition",
+                "metric": "personalization_quality",
+                "target": "Unique opening and context-aware messaging",
+                "weight": 0.2
+            },
+            {
+                "id": "human-oversight",
+                "description": "All emails are reviewed and approved by a human before sending",
+                "metric": "approval_rate",
+                "target": "100% human approval for sent emails",
+                "weight": 0.2
+            },
+            {
+                "id": "delivery",
+                "description": "Emails are successfully handed off to the email delivery tool",
+                "metric": "send_success",
+                "target": "Successful send status for all approved emails",
+                "weight": 0.2
+            }
+        ],
+        "constraints": [
+            {
+                "id": "privacy",
+                "description": "Do not use non-public personal information",
+                "constraint_type": "safety",
+                "category": "ethics"
+            },
+            {
+                "id": "anti-spam",
+                "description": "Avoid generic, mass-blast templates; prioritize personalization",
+                "constraint_type": "quality",
+                "category": "content"
+            },
+            {
+                "id": "approval-gate",
+                "description": "Strictly require human approval for email sending",
+                "constraint_type": "safety",
+                "category": "process"
+            }
+        ]
+    },
+    "required_tools": [
+        "apollo_search_people",
+        "web_scrape",
+        "apollo_enrich_company",
+        "send_email"
+    ],
+    "metadata": {
+        "node_count": 6,
+        "edge_count": 5
+    }
+}
