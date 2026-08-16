@@ -52,6 +52,8 @@ exports/ directory. Until an agent exists, agent validation and run
 commands will fail.
 
 ### Option 1: Using Claude Code Skills (Recommended)
+Claude Code provides an interactive development experience for building agents faster. 
+If you prefer manual setup or scripting workflows, you can use the alternative setup options below.
 
 This is the recommended way to create your first agent.
 
