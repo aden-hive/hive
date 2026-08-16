@@ -265,7 +265,7 @@ if [ -f "pyproject.toml" ]; then
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
         echo ""
-        echo -e "${DIM}${UV_SYNC_OUTPUT}${NC}"
+        printf '%b%s%b\n' "$DIM" "$UV_SYNC_OUTPUT" "$NC"
         exit 1
     fi
 else
