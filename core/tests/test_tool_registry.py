@@ -7,7 +7,6 @@ could cause a json.JSONDecodeError and crash execution.
 """
 
 import logging
-import os
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
@@ -941,7 +940,11 @@ def test_resolve_mcp_server_config_windows_preserves_cwd_via_env(tmp_path, monke
     tools_dir.mkdir()
     (tools_dir / "files_server.py").write_text("# stub")
 
-    monkeypatch.setattr(os, "name", "nt")
+    # Simulate the Windows branch via the module's own indirection, not the
+    # real os.name — monkeypatching os.name globally makes pathlib construct
+    # WindowsPath objects on this (POSIX) CI runner, which breaks unrelated
+    # to what's being tested here.
+    monkeypatch.setattr("framework.loader.tool_registry._is_windows", lambda: True)
 
     registry = ToolRegistry()
     config = registry._resolve_mcp_server_config(
@@ -966,7 +969,11 @@ def test_resolve_mcp_server_config_windows_preserves_existing_env(tmp_path, monk
     tools_dir.mkdir()
     (tools_dir / "files_server.py").write_text("# stub")
 
-    monkeypatch.setattr(os, "name", "nt")
+    # Simulate the Windows branch via the module's own indirection, not the
+    # real os.name — monkeypatching os.name globally makes pathlib construct
+    # WindowsPath objects on this (POSIX) CI runner, which breaks unrelated
+    # to what's being tested here.
+    monkeypatch.setattr("framework.loader.tool_registry._is_windows", lambda: True)
 
     registry = ToolRegistry()
     config = registry._resolve_mcp_server_config(
