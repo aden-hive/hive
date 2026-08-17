@@ -8,6 +8,11 @@ from framework.utils.io import atomic_write
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PermissionError lock scenario is Windows-specific")
 def test_atomic_write_concurrent_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test that atomic_write retries file replacement on Windows if a PermissionError is raised.
+
+    This deterministic test mocks pathlib.Path.replace to raise a PermissionError on the
+    first attempt and succeed on the second attempt, mirroring transient Windows file locks.
+    """
     target = tmp_path / "checkpoint.json"
     target.write_text("original", encoding="utf-8")
 
