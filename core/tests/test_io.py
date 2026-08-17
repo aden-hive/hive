@@ -20,6 +20,7 @@ def test_atomic_write_concurrent_reader(tmp_path: Path, monkeypatch: pytest.Monk
     original_replace = type(target).replace
 
     def mocked_replace(self, *args, **kwargs):
+        """Mock replacement that throws PermissionError once, then succeeds."""
         call_count[0] += 1
         if call_count[0] == 1:
             raise PermissionError(13, "Access is denied")
