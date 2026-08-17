@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -11,7 +12,17 @@ def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8"):
             yield f
             f.flush()
             os.fsync(f.fileno())
-        tmp_path.replace(path)
+
+        max_retries = 10 if os.name == "nt" else 1
+        for attempt in range(max_retries):
+            try:
+                tmp_path.replace(path)
+                break
+            except PermissionError:
+                if attempt < max_retries - 1:
+                    time.sleep(0.01)
+                else:
+                    raise
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
