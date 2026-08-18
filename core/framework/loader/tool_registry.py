@@ -602,8 +602,6 @@ class ToolRegistry:
                 script_idx = i
                 break
 
-
-
         # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
         # try fallback
         tools_fallback = Path.cwd() / "tools"
