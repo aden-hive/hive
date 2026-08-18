@@ -584,8 +584,6 @@ class ToolRegistry:
 
         cwd = config.get("cwd")
         args = list(config.get("args", []))
-        if not cwd and not args:
-            return config
 
         # Resolve cwd relative to base_dir
         if cwd:

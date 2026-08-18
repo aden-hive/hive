@@ -933,6 +933,16 @@ def test_resolve_mcp_server_config_without_cwd(tmp_path):
     assert resolved["args"][0] == str((tmp_path / "server.py").resolve())
 
 
+def test_resolve_mcp_server_config_without_cwd_or_args(tmp_path):
+    """Ensure missing cwd and args defaults cwd to base_dir."""
+    registry = ToolRegistry()
+    config = {"transport": "stdio", "command": "node"}
+
+    resolved = registry._resolve_mcp_server_config(config, tmp_path)
+    assert resolved["cwd"] == str(tmp_path.resolve())
+    assert "args" not in resolved
+
+
 def test_resolve_mcp_server_config_fallback(tmp_path, monkeypatch):
     """Ensure fallback tools dir is used when script is not in base_dir."""
     registry = ToolRegistry()
