@@ -371,7 +371,36 @@ class NodeWorker:
                 result.latency_ms = int((time.monotonic() - start) * 1000)
 
                 if result.success:
-                    return result
+                    from framework.orchestrator.validator import OutputValidator
+
+                    validator = OutputValidator()
+
+                    val_res = validator.validate_all(
+                        output=result.output or {},
+                        expected_keys=self.node_spec.output_keys,
+                        nullable_keys=self.node_spec.nullable_output_keys,
+                        check_hallucination=True,
+                    )
+
+                    if val_res.success:
+                        return result
+
+                    # Validation failed
+                    result.success = False
+                    result.error = f"Validation failed: {val_res.error}"
+
+                    if attempt + 1 < total_attempts:
+                        feedback = validator.format_validation_feedback(
+                            validation_result=val_res,
+                            expected_keys=self.node_spec.output_keys,
+                        )
+                        if getattr(ctx, "conversation", None):
+                            await ctx.conversation.add_user_message(
+                                content=feedback,
+                                is_system_reminder=True,
+                            )
+                    else:
+                        return result
 
                 # Failure
                 if attempt + 1 < total_attempts:
