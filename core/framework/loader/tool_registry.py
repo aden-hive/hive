@@ -630,20 +630,14 @@ class ToolRegistry:
                 config["cwd"] = str(resolved_cwd)
                 return config
 
-        if not script_name:
-            # No .py script (e.g. GCU uses -m gcu.server); just set cwd
-            config["cwd"] = str(resolved_cwd)
-            return config
+        config["cwd"] = str(resolved_cwd.resolve())
 
-        if os.name == "nt":
-            # Windows: cwd=None avoids WinError 267; use absolute script path
-            config["cwd"] = None
+        if script_name:
             abs_script = str((resolved_cwd / script_name).resolve())
             args = list(config["args"])
             args[script_idx] = abs_script
             config["args"] = args
-        else:
-            config["cwd"] = str(resolved_cwd)
+
         return config
 
     def load_mcp_config(self, config_path: Path) -> None:
