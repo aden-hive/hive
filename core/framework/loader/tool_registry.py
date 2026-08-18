@@ -588,12 +588,13 @@ class ToolRegistry:
             return config
 
         # Resolve cwd relative to base_dir
-        resolved_cwd: Path | None = None
         if cwd:
             if Path(cwd).is_absolute():
-                resolved_cwd = Path(cwd)
+                resolved_cwd = Path(cwd).resolve()
             else:
                 resolved_cwd = (base_dir / cwd).resolve()
+        else:
+            resolved_cwd = base_dir.resolve()
 
         # Find .py script in args (e.g. files_server.py)
         script_name = None
@@ -603,8 +604,7 @@ class ToolRegistry:
                 script_idx = i
                 break
 
-        if resolved_cwd is None:
-            return config
+
 
         # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
         # try fallback

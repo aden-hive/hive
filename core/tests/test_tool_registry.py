@@ -920,6 +920,36 @@ def test_load_mcp_config_handles_invalid_json(tmp_path, caplog):
     assert any("Failed to load MCP config" in r.message for r in caplog.records)
 
 
+def test_resolve_mcp_server_config_without_cwd(tmp_path):
+    """Ensure missing cwd defaults to base_dir and script paths are absolutized."""
+    registry = ToolRegistry()
+    config = {"transport": "stdio", "command": "python", "args": ["server.py"]}
+
+    # Create the script in tmp_path so it doesn't fallback
+    (tmp_path / "server.py").touch()
+
+    resolved = registry._resolve_mcp_server_config(config, tmp_path)
+    assert resolved["cwd"] == str(tmp_path.resolve())
+    assert resolved["args"][0] == str((tmp_path / "server.py").resolve())
+
+
+def test_resolve_mcp_server_config_fallback(tmp_path, monkeypatch):
+    """Ensure fallback tools dir is used when script is not in base_dir."""
+    registry = ToolRegistry()
+    config = {"transport": "stdio", "command": "python", "args": ["server.py"]}
+
+    # Mock Path.cwd to return tmp_path, so tools_fallback = tmp_path / "tools"
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "server.py").touch()
+
+    resolved = registry._resolve_mcp_server_config(config, tmp_path / "nonexistent")
+    assert resolved["cwd"] == str(tools_dir.resolve())
+    assert resolved["args"][0] == str((tools_dir / "server.py").resolve())
+
+
 # ---------------------------------------------------------------------------
 # resync_mcp_servers_if_needed — no-op when nothing changed
 # ---------------------------------------------------------------------------
