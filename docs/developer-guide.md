@@ -84,14 +84,10 @@ hive/                                    # Repository root
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
 │   │   ├── agents/                      # Agent definitions and helpers
-│   │   ├── builder/                     # Agent builder utilities
 │   │   ├── credentials/                 # Credential management
 │   │   ├── debugger/                    # Debugging tools
-│   │   ├── graph/                       # GraphExecutor - executes node graphs
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
-│   │   ├── mcp/                         # MCP server integration
 │   │   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
-│   │   ├── runner/                      # AgentRunner - loads and runs agents
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── server/                      # HTTP API server
@@ -129,7 +125,6 @@ hive/                                    # Repository root
 │   ├── configuration.md                 # Configuration reference
 │   ├── architecture/                    # System architecture
 │   ├── articles/                        # Technical articles
-│   ├── quizzes/                         # Developer quizzes
 │   └── i18n/                            # Translations
 │
 ├── scripts/                             # Utility scripts
