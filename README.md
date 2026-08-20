@@ -10,7 +10,8 @@
   <a href="docs/i18n/pt.md">Português</a> |
   <a href="docs/i18n/ja.md">日本語</a> |
   <a href="docs/i18n/ru.md">Русский</a> |
-  <a href="docs/i18n/ko.md">한국어</a>
+  <a href="docs/i18n/ko.md">한국어</a> |
+  <a href="docs/i18n/id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center">
