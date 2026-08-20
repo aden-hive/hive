@@ -359,7 +359,10 @@ class NodeWorker:
             max_retries = self.retry_state.max_retries
 
         total_attempts = max(1, max_retries)
-        for attempt in range(total_attempts):
+        validation_retries = 1
+        attempt = 0
+
+        while attempt < total_attempts:
             # Check pause
             await self._run_gate.wait()
 
@@ -371,7 +374,40 @@ class NodeWorker:
                 result.latency_ms = int((time.monotonic() - start) * 1000)
 
                 if result.success:
-                    return result
+                    from framework.orchestrator.validator import OutputValidator
+
+                    validator = OutputValidator()
+
+                    val_res = validator.validate_all(
+                        output=result.output or {},
+                        expected_keys=self.node_spec.output_keys,
+                        nullable_keys=self.node_spec.nullable_output_keys,
+                        check_hallucination=True,
+                    )
+
+                    if val_res.success:
+                        return result
+
+                    # Validation failed
+                    result.success = False
+                    result.error = f"Validation failed: {val_res.error}"
+
+                    if validation_retries > 0:
+                        validation_retries -= 1
+                        if attempt + 1 >= total_attempts:
+                            total_attempts += 1
+
+                        feedback = validator.format_validation_feedback(
+                            validation_result=val_res,
+                            expected_keys=self.node_spec.output_keys,
+                        )
+                        if getattr(ctx, "conversation", None):
+                            await ctx.conversation.add_user_message(
+                                content=feedback,
+                                is_system_reminder=True,
+                            )
+                    else:
+                        return result
 
                 # Failure
                 if attempt + 1 < total_attempts:
@@ -396,6 +432,7 @@ class NodeWorker:
                             execution_id=gc.execution_id,
                         )
                     await asyncio.sleep(delay)
+                    attempt += 1
                     continue
                 else:
                     return NodeResult(
@@ -417,6 +454,7 @@ class NodeWorker:
                         delay,
                     )
                     await asyncio.sleep(delay)
+                    attempt += 1
                     continue
                 return NodeResult(
                     success=False,
