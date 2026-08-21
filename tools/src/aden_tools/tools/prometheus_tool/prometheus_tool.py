@@ -64,19 +64,34 @@ def _missing_prometheus_credential_response() -> dict:
     }
 
 
-def _get_auth() -> tuple[dict[str, str], httpx.BasicAuth | None]:
+def _get_auth(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[dict[str, str], httpx.BasicAuth | None]:
+    """
+    Resolve authentication for Prometheus requests.
+
+    Uses credential store first, then environment variables.
+    Supports Bearer token, Basic Auth or no auth.
+
+    Returns:
+        (headers, auth) tuple for httpx requests
+    """
+
     headers: dict[str, str] = {}
-    auth = None
+    auth: httpx.BasicAuth | None = None
 
     # Bearer token
-    token = os.getenv("PROMETHEUS_TOKEN")
+    token = (credentials.get("prometheus_token") if credentials else None) or os.getenv("PROMETHEUS_TOKEN")
+
     if token:
         headers["Authorization"] = f"Bearer {token}"
         return headers, None
 
     # Basic auth
-    username = os.getenv("PROMETHEUS_USERNAME")
-    password = os.getenv("PROMETHEUS_PASSWORD")
+    username = (credentials.get("prometheus_username") if credentials else None) or os.getenv("PROMETHEUS_USERNAME")
+
+    password = (credentials.get("prometheus_password") if credentials else None) or os.getenv("PROMETHEUS_PASSWORD")
+
     if username and password:
         auth = httpx.BasicAuth(username, password)
 
@@ -121,7 +136,7 @@ def register_tools(
 
         url = f"{base_url.rstrip('/')}/api/v1/query"
 
-        headers, auth = _get_auth()
+        headers, auth = _get_auth(credentials)
 
         try:
             response = httpx.get(
@@ -207,7 +222,7 @@ def register_tools(
 
         url = f"{base_url.rstrip('/')}/api/v1/query_range"
 
-        headers, auth = _get_auth()
+        headers, auth = _get_auth(credentials)
 
         try:
             response = httpx.get(
