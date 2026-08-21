@@ -1,0 +1,54 @@
+{
+  "original_draft": {
+    "agent_name": "qa_engineer_agent",
+    "goal": "Execute full-project QA testing including automated script execution and exploratory browser testing.",
+    "nodes": [
+      {
+        "id": "planning",
+        "name": "Test Planning",
+        "node_type": "event_loop",
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "test_execution",
+        "name": "Test Execution",
+        "node_type": "event_loop",
+        "sub_agents": ["ui_testing"],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "ui_testing",
+        "name": "UI/Browser Subagent",
+        "node_type": "gcu",
+        "flowchart_type": "browser",
+        "flowchart_shape": "hexagon",
+        "flowchart_color": "#cc8850"
+      },
+      {
+        "id": "reporting",
+        "name": "QA Report",
+        "node_type": "event_loop",
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      { "source": "planning", "target": "test_execution", "condition": "on_success" },
+      { "source": "test_execution", "target": "reporting", "condition": "on_success" },
+      { "source": "reporting", "target": "planning", "condition": "conditional" }
+    ],
+    "entry_node": "planning",
+    "terminal_nodes": ["reporting"]
+  },
+  "flowchart_map": {
+    "planning": ["planning"],
+    "test_execution": ["test_execution"],
+    "ui_testing": ["ui_testing"],
+    "reporting": ["reporting"]
+  }
+}
