@@ -84,6 +84,11 @@ def main() -> None:
 
     register_janitor_commands(subparsers)
 
+    # Register doctor command (diagnostic checks)
+    from framework.doctor import register_doctor_command
+
+    register_doctor_command(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
