@@ -29,24 +29,31 @@ Get a token at: [GitLab Access Tokens](https://gitlab.com/-/user_settings/person
 
 Required scopes: `api` (full API access) or `read_api` + `read_repository` for read-only.
 
+Alternatively, configure credentials in the Aden credential store:
+- `gitlab_token`
+
 ## Usage Examples
 
 ### List your projects
+
 ```python
 gitlab_list_projects(membership=True, per_page=10)
 ```
 
 ### Search for issues
+
 ```python
 gitlab_list_issues(project_id="12345", state="opened", labels="bug")
 ```
 
 ### Create an issue
+
 ```python
 gitlab_create_issue(project_id="12345", title="Fix login bug", description="Steps to reproduce...")
 ```
 
 ### Add a comment to a merge request
+
 ```python
 gitlab_create_merge_request_note(project_id="12345", merge_request_iid=42, body="LGTM!")
 ```
@@ -54,6 +61,7 @@ gitlab_create_merge_request_note(project_id="12345", merge_request_iid=42, body=
 ## Error Handling
 
 All tools return error dicts on failure:
+
 ```python
 {"error": "GITLAB_TOKEN not set", "help": "Create a personal access token at https://gitlab.com/-/user_settings/personal_access_tokens"}
 {"error": "Unauthorized. Check your GitLab token."}
