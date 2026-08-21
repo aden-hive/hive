@@ -167,6 +167,11 @@ fi
 echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
 echo ""
 
+# Keep uv on the interpreter we just validated (3.11+).
+# Resolve to absolute path so it stays deterministic even if PATH mutates later.
+PYTHON_CMD_ABS="$(command -v "$PYTHON_CMD")"
+export UV_PYTHON="$PYTHON_CMD_ABS"
+
 # Check for uv (install automatically if missing)
 if ! command -v uv &> /dev/null; then
     echo -e "${YELLOW}  uv not found. Installing...${NC}"
@@ -264,6 +269,7 @@ if [ -f "pyproject.toml" ]; then
         echo -e "${GREEN}  ✓ workspace packages installed${NC}"
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
+        echo -e "${DIM}    uv used: $UV_PYTHON${NC}"
         exit 1
     fi
 else
