@@ -200,7 +200,6 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 ### ModuleNotFoundError: No module named 'framework'
 
 ```bash
-# Reinstall framework package
 cd core
 uv pip install -e .
 ```
@@ -208,9 +207,25 @@ uv pip install -e .
 ### ModuleNotFoundError: No module named 'aden_tools'
 
 ```bash
-# Reinstall tools package
 cd tools
 uv pip install -e .
+```
+
+### No module named 'my_agent' when validating or testing
+
+```bash
+PYTHONPATH=exports uv run python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent test
+```
+
+### hive: command not found
+
+```bash
+# Re-run setup from repository root
+./quickstart.sh
+
+# Then open a new shell and verify
+hive --help
 ```
 
 ### LLM API Errors
@@ -221,12 +236,14 @@ echo $ANTHROPIC_API_KEY
 echo $OPENROUTER_API_KEY
 echo $HIVE_API_KEY
 
+# Set it for current session if missing
+export ANTHROPIC_API_KEY="your-key-here"
 ```
 
 ### Package Installation Issues
 
 ```bash
-# Remove and reinstall
+# Remove and reinstall from repo root
 pip uninstall -y framework tools
 ./quickstart.sh
 ```
