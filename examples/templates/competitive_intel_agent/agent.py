@@ -219,7 +219,7 @@ class CompetitiveIntelAgent:
             },
         )
 
-    def _setup(self) -> Orchestrator:
+    def _setup(self, mock_mode: bool = False) -> Orchestrator:
         """
         Set up the executor with all components (runtime, LLM, tools).
 
@@ -238,11 +238,16 @@ class CompetitiveIntelAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = LiteLLMProvider(
-            model=self.config.model,
-            api_key=self.config.api_key,
-            api_base=self.config.api_base,
-        )
+        if mock_mode:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=self.config.model,
+                api_key=self.config.api_key,
+                api_base=self.config.api_base,
+            )
 
         tool_executor = self._tool_registry.get_executor()
         tools = list(self._tool_registry.get_tools().values())
@@ -262,10 +267,10 @@ class CompetitiveIntelAgent:
 
         return self._executor
 
-    async def start(self) -> None:
+    async def start(self, mock_mode: bool = False) -> None:
         """Set up the agent (initialize executor and tools)."""
         if self._executor is None:
-            self._setup()
+            self._setup(mock_mode=mock_mode)
 
     async def stop(self) -> None:
         """Clean up resources."""
@@ -303,7 +308,9 @@ class CompetitiveIntelAgent:
             session_state=session_state,
         )
 
-    async def run(self, context: dict[str, Any], session_state: dict[str, Any] | None = None) -> ExecutionResult:
+    async def run(
+        self, context: dict[str, Any], mock_mode: bool = False, session_state: dict[str, Any] | None = None
+    ) -> ExecutionResult:
         """
         Run the agent (convenience method for single execution).
 
@@ -314,7 +321,7 @@ class CompetitiveIntelAgent:
         Returns:
             The final execution result.
         """
-        await self.start()
+        await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait("start", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")

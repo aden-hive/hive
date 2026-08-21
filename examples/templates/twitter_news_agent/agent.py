@@ -134,18 +134,23 @@ class TwitterNewsAgent:
             identity_prompt=identity_prompt,
         )
 
-    def _setup(self):
+    def _setup(self, mock_mode: bool = False):
         self._storage_path = Path.home() / ".hive" / "agents" / "twitter_news_agent"
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._tool_registry = ToolRegistry()
         mcp_config = Path(__file__).parent / "mcp_servers.json"
         if mcp_config.exists():
             self._tool_registry.load_mcp_config(mcp_config)
-        llm = LiteLLMProvider(
-            model=self.config.model,
-            api_key=self.config.api_key,
-            api_base=self.config.api_base,
-        )
+        if mock_mode:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=self.config.model,
+                api_key=self.config.api_key,
+                api_base=self.config.api_base,
+            )
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
@@ -153,15 +158,6 @@ class TwitterNewsAgent:
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="default",
-                    name="Default",
-                    entry_node=self.entry_node,
-                    trigger_type="manual",
-                    isolation_level="shared",
-                )
-            ],
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
@@ -172,10 +168,19 @@ class TwitterNewsAgent:
                 async_checkpoint=True,
             ),
         )
+        self._agent_runtime.register_entry_point(
+            EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=self.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            )
+        )
 
-    async def start(self):
+    async def start(self, mock_mode: bool = False):
         if self._agent_runtime is None:
-            self._setup()
+            self._setup(mock_mode=mock_mode)
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
@@ -193,8 +198,8 @@ class TwitterNewsAgent:
             session_state=session_state,
         )
 
-    async def run(self, context, session_state=None):
-        await self.start()
+    async def run(self, context, mock_mode: bool = False, session_state=None):
+        await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")

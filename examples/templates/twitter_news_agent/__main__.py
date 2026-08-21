@@ -38,10 +38,11 @@ def cli():
     default=None,
     help="Comma-separated Twitter handles to monitor",
 )
+@click.option("--mock", is_flag=True, help="Run in mock mode without making LLM calls")
 @click.option("--quiet", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(handles, quiet, verbose, debug):
+def run(handles, mock, quiet, verbose, debug):
     """Fetch and summarize tech news from Twitter."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
@@ -50,7 +51,7 @@ def run(handles, quiet, verbose, debug):
     if handles:
         context["twitter_handles"] = [h.strip() for h in handles.split(",")]
 
-    result = asyncio.run(default_agent.run(context))
+    result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data = {
         "success": result.success,

@@ -106,8 +106,11 @@ def tui(mock, verbose, debug):
         if tools_path.exists():
             agent._tool_registry.discover_from_module(tools_path)
 
-        llm = None
-        if not mock:
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=agent.config.model,
                 api_key=agent.config.api_key,
@@ -119,21 +122,16 @@ def tui(mock, verbose, debug):
         graph = agent._build_graph()
 
         runtime = AgentHost(
-            graph=graph,
-            goal=agent.goal,
-            storage_path=storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="start",
-                    name="Start Inbox Triage",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
+            graph=graph, goal=agent.goal, storage_path=storage_path, llm=llm, tools=tools, tool_executor=tool_executor
+        )
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start Inbox Triage",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
         )
 
         await runtime.start()

@@ -56,6 +56,7 @@ def cli() -> None:
     default="weekly",
     help="Report frequency (default: weekly)",
 )
+@click.option("--mock", is_flag=True, help="Run in mock mode without making LLM calls")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
@@ -63,6 +64,7 @@ def run(
     competitors: str,
     focus_areas: str,
     frequency: str,
+    mock: bool,
     quiet: bool,
     verbose: bool,
     debug: bool,
@@ -93,7 +95,7 @@ def run(
         )
     }
 
-    result = asyncio.run(default_agent.run(context))
+    result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data: dict[str, Any] = {
         "success": result.success,
@@ -108,9 +110,10 @@ def run(
 
 
 @cli.command()
+@click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def tui(verbose: bool, debug: bool) -> None:
+def tui(mock: bool, verbose: bool, debug: bool) -> None:
     """Launch the TUI dashboard for interactive competitive intelligence."""
     setup_logging(verbose=verbose, debug=debug)
 
@@ -140,32 +143,32 @@ def tui(verbose: bool, debug: bool) -> None:
         if mcp_config_path.exists():
             agent._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = LiteLLMProvider(
-            model=agent.config.model,
-            api_key=agent.config.api_key,
-            api_base=agent.config.api_base,
-        )
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=agent.config.model,
+                api_key=agent.config.api_key,
+                api_base=agent.config.api_base,
+            )
 
         tools = list(agent._tool_registry.get_tools().values())
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
         runtime = AgentHost(
-            graph=graph,
-            goal=agent.goal,
-            storage_path=storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="start",
-                    name="Start Competitive Analysis",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
+            graph=graph, goal=agent.goal, storage_path=storage_path, llm=llm, tools=tools, tool_executor=tool_executor
+        )
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start Competitive Analysis",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
         )
 
         await runtime.start()
