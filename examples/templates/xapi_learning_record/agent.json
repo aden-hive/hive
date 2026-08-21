@@ -1,0 +1,257 @@
+{
+    "agent": {
+        "id": "xapi_learning_record",
+        "name": "xAPI Learning Record Agent",
+        "version": "0.1.0",
+        "description": "A deterministic 5-node pipeline that captures learning events, builds valid xAPI 1.0.3 statements, validates structure, dispatches to an LRS via HTTP Basic auth, and returns a confirmation with statement_id and timestamp. No LLM required for statement building, validation, or dispatch."
+    },
+    "graph": {
+        "id": "xapi-learning-record-graph",
+        "goal_id": "xapi-learning-record",
+        "version": "0.1.0",
+        "entry_node": "event-capture",
+        "entry_points": {
+            "start": "event-capture"
+        },
+        "pause_nodes": [],
+        "terminal_nodes": [],
+        "conversation_mode": "continuous",
+        "identity_prompt": "You are an xAPI Learning Record Agent. You capture learning events, build valid xAPI 1.0.3 statements, validate their structure, dispatch them to an LRS, and confirm success. The pipeline is deterministic — statement building, validation, and LRS dispatch are handled by pure-function tools, not LLM reasoning.",
+        "nodes": [
+            {
+                "id": "event-capture",
+                "name": "Event Capture",
+                "description": "Receive and normalize a learning event from the user. Collects actor (name, mbox), verb (id, display), object (id, name), and optional result fields.",
+                "node_type": "event_loop",
+                "input_keys": [],
+                "output_keys": ["learning_event"],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "A valid learning event dict has been collected and stored. learning_event must contain actor.name, actor.mbox, verb.id, verb.display, object.id, and object.name.",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            },
+            {
+                "id": "statement-builder",
+                "name": "Statement Builder",
+                "description": "Build a valid xAPI 1.0.3 JSON statement from the normalized learning event using build_xapi_statement tool.",
+                "node_type": "event_loop",
+                "input_keys": ["learning_event"],
+                "output_keys": ["xapi_statement"],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "A complete xAPI 1.0.3 statement dict has been built with a generated UUID id and ISO 8601 timestamp. xapi_statement is set via set_output.",
+                "tools": ["build_xapi_statement"],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "validator",
+                "name": "Validator",
+                "description": "Validate the xAPI statement for required fields, IRI format, mbox format, and score.scaled range [0.0, 1.0].",
+                "node_type": "event_loop",
+                "input_keys": ["xapi_statement"],
+                "output_keys": ["validated_statement", "validation_result"],
+                "nullable_output_keys": ["validated_statement"],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Statement validated. If valid, validated_statement is set. If invalid, validation_result contains errors list.",
+                "tools": ["validate_statement"],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "lrs-dispatch",
+                "name": "LRS Dispatch",
+                "description": "POST the validated xAPI statement to the LRS endpoint via HTTP Basic auth. Handles 200/204 success, retries once on 5xx.",
+                "node_type": "event_loop",
+                "input_keys": ["validated_statement"],
+                "output_keys": ["dispatch_result"],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Statement POSTed to LRS. dispatch_result set with statement_id, success, error.",
+                "tools": ["post_to_lrs"],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "confirmation",
+                "name": "Confirmation",
+                "description": "Return statement_id, timestamp, and success/error status to the user. Surfaces validation and dispatch errors in human-readable format.",
+                "node_type": "event_loop",
+                "input_keys": ["dispatch_result", "validation_result", "xapi_statement"],
+                "output_keys": ["confirmation"],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Confirmation presented to user with statement_id, timestamp, success status, and any errors.",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            }
+        ],
+        "edges": [
+            {
+                "id": "capture-to-builder",
+                "source": "event-capture",
+                "target": "statement-builder",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "builder-to-validator",
+                "source": "statement-builder",
+                "target": "validator",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "validator-to-dispatch",
+                "source": "validator",
+                "target": "lrs-dispatch",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "dispatch-to-confirmation",
+                "source": "lrs-dispatch",
+                "target": "confirmation",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "confirmation-to-capture",
+                "source": "confirmation",
+                "target": "event-capture",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            }
+        ],
+        "max_steps": 50,
+        "max_retries_per_node": 3,
+        "description": "Deterministic pipeline: capture learning event, build xAPI statement, validate, dispatch to LRS, confirm."
+    },
+    "goal": {
+        "id": "xapi-learning-record",
+        "name": "xAPI Learning Record",
+        "description": "Capture a learning event, build a valid xAPI 1.0.3 statement, validate its structure, dispatch it to an LRS, and confirm success.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "valid-statement",
+                "description": "xAPI 1.0.3 statement passes all structural validation checks",
+                "metric": "statement_valid",
+                "target": "true",
+                "weight": 0.35,
+                "met": false
+            },
+            {
+                "id": "lrs-accepted",
+                "description": "LRS returns HTTP 200 or 204 accepting the statement",
+                "metric": "lrs_accepted",
+                "target": "true",
+                "weight": 0.50,
+                "met": false
+            },
+            {
+                "id": "confirmation-returned",
+                "description": "statement_id and timestamp returned to the caller",
+                "metric": "confirmation_complete",
+                "target": "true",
+                "weight": 0.15,
+                "met": false
+            }
+        ],
+        "constraints": [
+            {
+                "id": "xapi-1.0.3",
+                "description": "All statements must conform to xAPI specification version 1.0.3",
+                "constraint_type": "hard",
+                "category": "compliance",
+                "check": ""
+            },
+            {
+                "id": "no-fabrication",
+                "description": "The agent must never invent or infer actor, verb, or object fields. Missing required fields must produce explicit validation errors.",
+                "constraint_type": "hard",
+                "category": "data-integrity",
+                "check": ""
+            },
+            {
+                "id": "no-auto-retry-on-4xx",
+                "description": "4xx LRS errors must be reported immediately without retry.",
+                "constraint_type": "hard",
+                "category": "operational",
+                "check": ""
+            }
+        ],
+        "context": {},
+        "required_capabilities": [],
+        "input_schema": {},
+        "output_schema": {},
+        "version": "0.1.0",
+        "parent_version": null,
+        "evolution_reason": null,
+        "created_at": "2026-03-18T00:00:00.000000",
+        "updated_at": "2026-03-18T00:00:00.000000"
+    },
+    "required_tools": [
+        "build_xapi_statement",
+        "validate_statement",
+        "post_to_lrs"
+    ],
+    "metadata": {
+        "created_at": "2026-03-18T00:00:00.000000",
+        "node_count": 5,
+        "edge_count": 5
+    }
+}
