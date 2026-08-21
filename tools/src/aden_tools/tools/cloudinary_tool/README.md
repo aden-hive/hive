@@ -27,24 +27,33 @@ Set the following environment variables:
 
 Get credentials at: [Cloudinary Console](https://console.cloudinary.com/)
 
+Alternatively, configure credentials in the Aden credential store:
+- `cloudinary_cloud_name`
+- `cloudinary_key`
+- `cloudinary_secret`
+
 ## Usage Examples
 
 ### Upload an image
+
 ```python
 cloudinary_upload(file_url="https://example.com/photo.jpg", public_id="my-photo")
 ```
 
 ### Search for resources
+
 ```python
 cloudinary_search(expression="cat AND format:jpg", max_results=10)
 ```
 
 ### Get account usage
+
 ```python
 cloudinary_get_usage()
 ```
 
 ### Delete a resource
+
 ```python
 cloudinary_delete_resource(public_id="my-photo")
 ```
@@ -52,6 +61,7 @@ cloudinary_delete_resource(public_id="my-photo")
 ## Error Handling
 
 All tools return error dicts on failure:
+
 ```python
 {"error": "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET not set", "help": "Get credentials from your Cloudinary dashboard at https://console.cloudinary.com/"}
 {"error": "Cloudinary API error (HTTP 404): Resource not found"}
