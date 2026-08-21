@@ -84,30 +84,69 @@ intake → research → compile-report
 
 ## Usage
 
-### Basic Usage
+Run the agent from the `examples/templates` directory:
 
-```python
-from framework.runner import AgentRunner
+```bash
+cd examples/templates
 
-# Load the agent
-runner = AgentRunner.load("examples/templates/tech_news_reporter")
+# Interactive session (recommended) — the agent asks which news you want
+uv run python -m tech_news_reporter shell
 
-# Run with input
-result = await runner.run({"input_key": "value"})
+# One-shot run — prints the result as JSON
+uv run python -m tech_news_reporter run
 
-# Access results
-print(result.output)
-print(result.status)
+# Other commands
+uv run python -m tech_news_reporter info       # show agent details
+uv run python -m tech_news_reporter validate   # validate agent structure
+uv run python -m tech_news_reporter tui        # launch the TUI dashboard
 ```
+
+### Example
+
+This agent is interactive: the `intake` node greets you and asks which tech/AI
+topics to cover, so you provide your request at the prompt rather than as a
+JSON payload.
+
+**Sample input** (your answer when the agent asks what to cover):
+
+```text
+Latest large language model and semiconductor news from the past week
+```
+
+**Sample output** (`run` command, abbreviated):
+
+```json
+{
+  "success": true,
+  "steps_executed": 3,
+  "output": {
+    "report_file": "tech_news_report.html"
+  }
+}
+```
+
+The agent saves a structured HTML report (`tech_news_report.html`) and opens it
+in your default browser. The report groups the sourced articles by topic, with
+a short summary and a source link for each story.
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
-
+The entry node `intake` takes no structured input (`input_keys: []`). Instead it
+prompts you interactively for the topics you want covered and derives an internal
+`research_brief` from your answer. To get the default general tech & AI roundup,
+just press Enter without specifying a topic.
 
 ### Output Schema
 
-Terminal nodes: `compile-report`
+The terminal node `compile-report` produces `report_file`, the filename of the
+generated HTML report. The CLI wraps this in an `ExecutionResult`:
+
+| Field                | Type | Description                                  |
+| -------------------- | ---- | -------------------------------------------- |
+| `success`            | bool | Whether the run met its goal criteria        |
+| `steps_executed`     | int  | Number of nodes executed                     |
+| `output.report_file` | str  | Filename of the saved HTML report            |
+| `error`              | str  | Present only if the run failed               |
 
 ## Version History
 
