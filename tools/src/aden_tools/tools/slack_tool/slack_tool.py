@@ -1270,7 +1270,10 @@ def register_tools(
     def _get_user_token() -> str | None:
         """Get Slack user token for search API."""
         if credentials is not None:
-            return credentials.get("slack_user")
+            try:
+                return credentials.get("slack_user")
+            except KeyError:
+                return os.getenv("SLACK_USER_TOKEN")
         return os.getenv("SLACK_USER_TOKEN")
 
     def _get_client(account: str = "") -> _SlackClient | dict[str, str]:
