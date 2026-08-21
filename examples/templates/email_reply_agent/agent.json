@@ -1,0 +1,182 @@
+{
+  "agent": {
+    "id": "email_reply_agent",
+    "name": "Email Reply Agent",
+    "version": "1.0.0",
+    "description": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies."
+  },
+  "goal": {
+    "id": "email-reply-goal",
+    "name": "Email Reply Agent",
+    "description": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies.",
+    "success_criteria": [
+      {
+        "id": "sc-filter",
+        "description": "Accurately finds unreplied emails matching user criteria",
+        "metric": "Precision of email filtering",
+        "target": "90%",
+        "weight": 0.35
+      },
+      {
+        "id": "sc-confirm",
+        "description": "User confirms recipient list before sending",
+        "metric": "Confirmation rate",
+        "target": "100%",
+        "weight": 0.25
+      },
+      {
+        "id": "sc-personalize",
+        "description": "Replies are personalized based on email content and tone guidance",
+        "metric": "User satisfaction with reply relevance",
+        "target": "85%",
+        "weight": 0.40
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-privacy",
+        "description": "Never send emails without explicit user confirmation; always present recipient list and get approval first",
+        "constraint_type": "hard",
+        "category": "functional"
+      },
+      {
+        "id": "c-batch",
+        "description": "Process up to 50 emails per batch",
+        "constraint_type": "hard",
+        "category": "functional"
+      }
+    ]
+  },
+  "graph": {
+    "id": "email-reply-graph",
+    "goal_id": "email-reply-goal",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are a helpful email reply assistant that filters unreplied emails and sends personalized responses.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Gather email filter criteria from user",
+        "node_type": "event_loop",
+        "input_keys": ["batch_complete", "restart"],
+        "output_keys": ["filter_criteria"],
+        "nullable_output_keys": ["batch_complete", "restart"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an intake specialist for email replies. Your ONLY job is to gather filter criteria and call set_output. If the user has already provided criteria in their message, IMMEDIATELY call set_output(\"filter_criteria\", {...}). DO NOT ask for confirmation if criteria are already provided.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "search",
+        "name": "Search Emails",
+        "description": "Search Gmail for unreplied emails matching filter criteria",
+        "node_type": "event_loop",
+        "input_keys": ["filter_criteria"],
+        "output_keys": ["email_list"],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a Gmail search agent. Find unreplied emails matching the user's filter criteria. Build a Gmail search query from filter_criteria, call gmail_list_messages, and retrieve full details for each message using gmail_get_message or gmail_batch_get_messages. Return a structured list of emails with message_id, sender, subject, snippet, and received_date.",
+        "tools": ["gmail_list_messages", "gmail_get_message", "gmail_batch_get_messages"],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": null
+      },
+      {
+        "id": "confirm_draft",
+        "name": "Confirm & Reply",
+        "description": "Present emails for confirmation, send personalized replies",
+        "node_type": "event_loop",
+        "input_keys": ["email_list", "filter_criteria"],
+        "output_keys": ["batch_complete", "restart"],
+        "nullable_output_keys": ["batch_complete", "restart"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a Gmail reply assistant. Present emails for confirmation in a readable format with sender, subject, and snippet. Ask the user to confirm before proceeding. After confirmation, generate personalized replies based on email content and tone guidance, then call gmail_reply_email to send each reply.",
+        "tools": ["gmail_reply_email"],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-search",
+        "source": "intake",
+        "target": "search",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "search-to-confirm",
+        "source": "search",
+        "target": "confirm_draft",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "confirm-to-intake-on-restart",
+        "source": "confirm_draft",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "restart == True",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "confirm-to-intake-on-complete",
+        "source": "confirm_draft",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "batch_complete == True",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ]
+  },
+  "required_tools": [
+    "gmail_list_messages",
+    "gmail_get_message",
+    "gmail_batch_get_messages",
+    "gmail_reply_email"
+  ],
+  "metadata": {
+    "node_count": 3,
+    "edge_count": 4
+  }
+}
