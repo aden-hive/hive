@@ -1,4 +1,128 @@
 @import "tailwindcss";
+/* HIVE ADENHQ: ADAPTIVE GLASSMORPHISM SYSTEM
+   Balances: GPT Intuition, Gemini Precision, Claude Servability
+*/
+
+:root {
+  /* Default Base: Claude Servability (Indigo/Dark) */
+  --primary-accent: #6366f1; 
+  --bg-gradient: radial-gradient(circle at top left, #1e293b, #0f172a);
+  --card-glass: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --glow-intensity: rgba(99, 102, 241, 0.2);
+}
+
+/* Interest-Based Adaptive Overrides (Triggered by Cookies) */
+
+/* Mode: Research & Calculus (Gemini Precision) */
+body.interest-precision {
+  --primary-accent: #3b82f6;
+  --glow-intensity: rgba(59, 130, 246, 0.3);
+  --bg-gradient: radial-gradient(circle at top left, #0f172a, #020617);
+}
+
+/* Mode: Creative & Conversational (GPT Intuition) */
+body.interest-intuition {
+  --primary-accent: #10a37f;
+  --glow-intensity: rgba(16, 163, 127, 0.3);
+}
+
+/* --- Core Styles --- */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+body {
+  background: var(--bg-gradient);
+  color: var(--text-main);
+  min-height: 100vh;
+  transition: all 0.5s ease; /* Smooth transition when cookie changes */
+}
+
+/* AdenHQ Logo Container */
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 1.5rem;
+}
+
+.hive-logo {
+  width: 40px;
+  height: 40px;
+  background: var(--primary-accent);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  box-shadow: 0 0 20px var(--glow-intensity);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+}
+
+/* Glassmorphism Card System */
+.card {
+  background: var(--card-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 1.5rem;
+  transition: transform 0.3s ease, border-color 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.card:hover {
+  transform: translateY(-8px);
+  border-color: var(--primary-accent);
+  box-shadow: 0 20px 40px -15px var(--glow-intensity);
+}
+
+/* Precision Geometry (The Gemini Touch) */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, transparent, var(--glow-intensity));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+/* Responsive Grid */
+.kanban-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 2rem;
+  padding: 2rem;
+}
+
+/* Adaptive Button (The Servability Factor) */
+.btn-action {
+  background: var(--primary-accent);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.2s ease;
+}
+
+.btn-action:hover {
+  filter: brightness(1.2);
+}
 
 @custom-variant dark (&:is(.dark *));
 
