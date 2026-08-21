@@ -38,6 +38,9 @@ export LINEAR_API_KEY="lin_api_your_api_key"
 
 > Get your API key at https://linear.app/settings/api
 
+Alternatively, configure credentials in the Aden credential store:
+- `linear`
+
 ## Usage Examples
 
 ### Create an issue
