@@ -194,7 +194,7 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 - [Promotion Checklist](promotion-checklist.md) — Criteria for unverified → verified
 - [Tool README Template](templates/tool-readme-template.md)
 - [Agent Test Report Template](templates/agent-test-report-template.md)
-- [Building Tools Guide](../tools/BUILDING_TOOLS.md)
+- [Building Tools Guide](../../tools/BUILDING_TOOLS.md)
 - [Lurkr API Docs](https://lurkr.gg/docs/api)
 
 ### Automation Files
