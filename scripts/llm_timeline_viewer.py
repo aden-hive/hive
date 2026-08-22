@@ -179,7 +179,9 @@ def _classify_session(streams: list[str], nodes: list[str]) -> str:
 def _is_test_session(execution_id: str, records: list[dict[str, Any]]) -> bool:
     if execution_id.startswith("<MagicMock"):
         return True
-    models = {str(r.get("token_counts", {}).get("model", "")) for r in records if isinstance(r.get("token_counts"), dict)}
+    models = {
+        str(r.get("token_counts", {}).get("model", "")) for r in records if isinstance(r.get("token_counts"), dict)
+    }
     models.discard("")
     if models and models <= {"mock"}:
         return True

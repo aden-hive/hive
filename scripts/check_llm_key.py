@@ -268,9 +268,7 @@ def check_anthropic_compatible(
     ``bearer_auth`` sends ``Authorization: Bearer`` instead of ``x-api-key``
     (the Hive LLM proxy only accepts the former).
     """
-    auth_header = (
-        {"Authorization": f"Bearer {api_key}"} if bearer_auth else {"x-api-key": api_key}
-    )
+    auth_header = {"Authorization": f"Bearer {api_key}"} if bearer_auth else {"x-api-key": api_key}
     with httpx.Client(timeout=TIMEOUT) as client:
         r = client.post(
             endpoint,
