@@ -803,9 +803,7 @@ async def handle_browser_status(request: web.Request) -> web.Response:
     sockets; the stream endpoint remains for the desktop shell, whose SSE
     rides IPC and is exempt from that cap).
     """
-    return web.json_response(
-        await _browser_status_payload(request.query.get("session_id"))
-    )
+    return web.json_response(await _browser_status_payload(request.query.get("session_id")))
 
 
 async def handle_browser_status_stream(request: web.Request) -> web.StreamResponse:

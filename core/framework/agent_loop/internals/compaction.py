@@ -41,6 +41,8 @@ def llm_compact_char_limit(max_context_tokens: int) -> int:
     keeps tiny windows from splitting into confetti.
     """
     return max(20_000, (max_context_tokens * 4) // 3)
+
+
 # Max output tokens for a single compaction summary call. A summary must be a
 # small fraction of the window — using ``max_context_tokens // 2`` (e.g. 90k on a
 # 180k window) lets the model emit a "summary" nearly as large as the input, which

@@ -326,10 +326,7 @@ async def caption_tool_image(
     kwargs: dict[str, Any] = {
         "model": rewritten_model,
         "messages": messages,
-        "max_tokens": int(
-            get_hive_config().get("vision_fallback", {}).get("max_tokens")
-            or get_aux_max_tokens()
-        ),
+        "max_tokens": int(get_hive_config().get("vision_fallback", {}).get("max_tokens") or get_aux_max_tokens()),
         "timeout": timeout_s,
     }
     # Always pass api_key when we have one, even alongside proxy-rewritten

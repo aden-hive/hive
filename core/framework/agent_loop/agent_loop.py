@@ -2032,9 +2032,7 @@ class AgentLoop(AgentProtocol):
             # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct(
-                fallback=self._config.max_context_tokens
-            )
+            conversation._max_context_tokens = _live_mct(fallback=self._config.max_context_tokens)
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 
@@ -6198,11 +6196,10 @@ class AgentLoop(AgentProtocol):
         output_keys: list[str] | None,
         nullable_keys: list[str] | None = None,
     ) -> list[str]:
-        """Return output keys that have not been set yet (excluding nullable keys)."""
+        """Return output keys that have not been set yet."""
         if not output_keys:
             return []
-        skip = set(nullable_keys) if nullable_keys else set()
-        return [k for k in output_keys if k not in skip and accumulator.get(k) is None]
+        return [k for k in output_keys if accumulator.get(k) is None]
 
     @staticmethod
     def _ngram_similarity(s1: str, s2: str, n: int = 2) -> float:
@@ -6575,7 +6572,7 @@ class AgentLoop(AgentProtocol):
                 # shield: a grace-window timeout must not cancel the in-flight
                 # work — it still has the full `timeout` budget to finish in.
                 result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # genuinely slow — fall through and hand back the handle
             except Exception:
                 # Failed fast. Let collect_result surface it rather than

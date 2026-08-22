@@ -115,13 +115,14 @@ async def judge_turn(
     nullable_keys = set(ctx.agent_spec.nullable_output_keys or [])
 
     # All-nullable with nothing set → node produced nothing useful.
-    all_nullable = output_keys and nullable_keys >= set(output_keys)
-    none_set = not any(accumulator.get(k) is not None for k in output_keys)
-    if all_nullable and none_set:
-        return JudgeVerdict(
-            action="RETRY",
-            feedback=(f"No output keys have been set yet. Use set_output to set at least one of: {output_keys}"),
-        )
+    all_nullable = not output_keys and nullable_keys
+    if all_nullable:
+        none_set = not any(accumulator.get(k) is not None for k in nullable_keys)
+        if none_set:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(f"No output keys have been set yet. Use set_output to set at least one of: {list(nullable_keys)}"),
+            )
 
     # Level 2b: conversation-aware quality check (if success_criteria set)
     if ctx.agent_spec.success_criteria and ctx.llm:

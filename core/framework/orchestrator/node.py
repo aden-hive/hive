@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from framework.llm.provider import LLMProvider, Tool
 from framework.tracker.decision_tracker import DecisionTracker
@@ -185,6 +185,27 @@ class NodeSpec(BaseModel):
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
+
+    @model_validator(mode="after")
+    def _validate_output_keys(self) -> "NodeSpec":
+        out_keys = self.output_keys or []
+        null_keys = self.nullable_output_keys or []
+
+        if len(out_keys) != len(set(out_keys)):
+            raise ValueError(f"Duplicate keys found in output_keys: {out_keys}")
+
+        if len(null_keys) != len(set(null_keys)):
+            raise ValueError(f"Duplicate keys found in nullable_output_keys: {null_keys}")
+
+        overlap = set(out_keys).intersection(set(null_keys))
+        if overlap:
+            raise ValueError(f"Overlap detected between output_keys and nullable_output_keys: {overlap}")
+
+        all_keys = out_keys + null_keys
+        if any(not k or not k.strip() for k in all_keys):
+            raise ValueError("Output keys cannot be empty strings")
+
+        return self
 
     def is_queen_node(self) -> bool:
         """Return True when this spec is the queen conversational node."""

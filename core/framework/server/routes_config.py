@@ -23,7 +23,6 @@ from framework.agents.queen.queen_memory_v2 import (
 from framework.config import (
     _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
-    HIVE_HOME,
     OPENROUTER_API_BASE,
     get_hive_config,
 )
@@ -469,16 +468,9 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
             return web.json_response({"error": "'model' is required"}, status=400)
         config = get_hive_config()
         llm_section = config.setdefault("llm", {})
-        provider = str(
-            body.get("provider") or llm_section.get("provider") or "openai"
-        )
-        api_base = (
-            str(body.get("api_base") or llm_section.get("api_base") or "").strip()
-            or None
-        )
-        env_var = str(
-            body.get("api_key_env_var") or llm_section.get("api_key_env_var") or ""
-        ).strip()
+        provider = str(body.get("provider") or llm_section.get("provider") or "openai")
+        api_base = str(body.get("api_base") or llm_section.get("api_base") or "").strip() or None
+        env_var = str(body.get("api_key_env_var") or llm_section.get("api_key_env_var") or "").strip()
         api_key = os.environ.get(env_var) if env_var else None
         if api_key is None:
             api_key = _resolve_api_key(provider, request)
@@ -498,12 +490,9 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         _write_config_atomic(config)
 
         full_model = f"{provider}/{model}"
-        swapped = _hot_swap_sessions(
-            request, full_model, api_key=api_key, api_base=api_base
-        )
+        swapped = _hot_swap_sessions(request, full_model, api_key=api_key, api_base=api_base)
         logger.info(
-            "LLM config updated (custom endpoint): provider=%s model=%s base=%s, "
-            "hot-swapped %d session(s)",
+            "LLM config updated (custom endpoint): provider=%s model=%s base=%s, hot-swapped %d session(s)",
             provider,
             model,
             api_base,
@@ -1155,14 +1144,10 @@ _ROLE_SECTIONS = ("llm", "worker_llm", "vision_fallback")
 async def handle_get_llm_sections(request: web.Request) -> web.Response:
     """GET /api/config/llm-sections — the three provider slots, verbatim."""
     cfg = get_hive_config()
-    return web.json_response(
-        {role: (cfg.get(role) or None) for role in _ROLE_SECTIONS}
-    )
+    return web.json_response({role: (cfg.get(role) or None) for role in _ROLE_SECTIONS})
 
 
-async def _write_role_section(
-    request: web.Request, role: str, section: dict, validate: bool
-) -> web.Response:
+async def _write_role_section(request: web.Request, role: str, section: dict, validate: bool) -> web.Response:
     """Validate + commit one provider section into a slot, verbatim.
 
     Shared by the direct slot editor (PUT /llm-sections) and the library
@@ -1181,13 +1166,10 @@ async def _write_role_section(
             api_key = os.environ.get(str(env_var), "")
 
     if validate and api_key and api_base:
-        check = await _validate_provider_key(
-            provider, api_key, api_base=api_base, model=str(section["model"])
-        )
+        check = await _validate_provider_key(provider, api_key, api_base=api_base, model=str(section["model"]))
         if check.get("valid") is False:
             return web.json_response(
-                {"error": f"Key check failed against {api_base}: "
-                          f"{check.get('message', 'unknown error')}"},
+                {"error": f"Key check failed against {api_base}: {check.get('message', 'unknown error')}"},
                 status=400,
             )
 
@@ -1198,9 +1180,7 @@ async def _write_role_section(
     swapped = 0
     if role == "llm":
         full_model = f"{provider}/{section['model']}"
-        swapped = _hot_swap_sessions(
-            request, full_model, api_key=api_key or None, api_base=api_base
-        )
+        swapped = _hot_swap_sessions(request, full_model, api_key=api_key or None, api_base=api_base)
     logger.info(
         "Provider slot %s written: %s/%s @ %s, hot-swapped %d session(s)",
         role,
@@ -1209,9 +1189,7 @@ async def _write_role_section(
         api_base,
         swapped,
     )
-    return web.json_response(
-        {"role": role, "section": section, "sessions_swapped": swapped}
-    )
+    return web.json_response({"role": role, "section": section, "sessions_swapped": swapped})
 
 
 async def handle_put_llm_section(request: web.Request) -> web.Response:
@@ -1239,8 +1217,7 @@ async def handle_put_llm_section(request: web.Request) -> web.Response:
     if section is None:
         if role == "llm":
             return web.json_response(
-                {"error": "The llm slot cannot be cleared - the runtime "
-                          "always needs a main model."},
+                {"error": "The llm slot cannot be cleared - the runtime always needs a main model."},
                 status=400,
             )
         config = get_hive_config()
@@ -1251,12 +1228,8 @@ async def handle_put_llm_section(request: web.Request) -> web.Response:
         return web.json_response({"role": role, "section": None})
 
     if not isinstance(section, dict):
-        return web.json_response(
-            {"error": "'section' must be a JSON object or null"}, status=400
-        )
-    return await _write_role_section(
-        request, role, section, validate=bool(body.get("validate", True))
-    )
+        return web.json_response({"error": "'section' must be a JSON object or null"}, status=400)
+    return await _write_role_section(request, role, section, validate=bool(body.get("validate", True)))
 
 
 # ---------------------------------------------------------------------------
@@ -1312,9 +1285,7 @@ async def handle_put_provider_library(request: web.Request) -> web.Response:
         return web.json_response({"name": name, "section": None})
 
     if not isinstance(section, dict):
-        return web.json_response(
-            {"error": "'section' must be a JSON object or null"}, status=400
-        )
+        return web.json_response({"error": "'section' must be a JSON object or null"}, status=400)
     if not str(section.get("model") or "").strip():
         return web.json_response({"error": "'model' is required"}, status=400)
 
@@ -1351,12 +1322,8 @@ async def handle_apply_provider_library(request: web.Request) -> web.Response:
     name = str(body.get("name") or "").strip()
     section = _get_provider_library().get(name)
     if section is None:
-        return web.json_response(
-            {"error": f"No provider library entry named '{name}'"}, status=404
-        )
-    return await _write_role_section(
-        request, role, section, validate=bool(body.get("validate", True))
-    )
+        return web.json_response({"error": f"No provider library entry named '{name}'"}, status=404)
+    return await _write_role_section(request, role, section, validate=bool(body.get("validate", True)))
 
 
 # ---------------------------------------------------------------------------
@@ -1378,9 +1345,7 @@ def _resolve_external_skills(paths: list) -> list[dict]:
             ext = Path(os.path.expandvars(str(raw))).expanduser()
             entry["resolved"] = str(ext)
             entry["exists"] = ext.is_dir()
-            entry["skills"] = (
-                len(d._scan_scope(ext, "user")) if ext.is_dir() else 0
-            )
+            entry["skills"] = len(d._scan_scope(ext, "user")) if ext.is_dir() else 0
         except Exception as exc:
             entry["exists"] = False
             entry["skills"] = 0
@@ -1394,16 +1359,17 @@ def _resolve_external_skills(paths: list) -> list[dict]:
 # AND contain at least one parseable skill are surfaced. ~/.agents/skills
 # is absent on purpose — Hive scans it natively already.
 _KNOWN_AGENT_SKILL_DIRS = (
-    "~/.claude/skills",     # Claude Code
-    "~/.codex/skills",      # OpenAI Codex CLI
-    "~/.cursor/skills",     # Cursor
-    "~/.openclaw/skills",   # OpenClaw
-    "~/.gemini/skills",     # Gemini CLI
+    "~/.claude/skills",  # Claude Code
+    "~/.codex/skills",  # OpenAI Codex CLI
+    "~/.cursor/skills",  # Cursor
+    "~/.openclaw/skills",  # OpenClaw
+    "~/.gemini/skills",  # Gemini CLI
 )
 
 
 def _suggest_external_skills(configured: list[str]) -> list[dict]:
     """Probe known agent skill dirs not yet configured; keep real finds only."""
+
     def _norm(raw: str) -> str:
         try:
             return str(Path(os.path.expandvars(raw)).expanduser().resolve())
@@ -1430,9 +1396,7 @@ async def handle_get_external_skills(request: web.Request) -> web.Response:
     # parses (up to ~10 roots including the auto-discovery probes).
     resolved = await asyncio.to_thread(_resolve_external_skills, paths)
     suggestions = await asyncio.to_thread(_suggest_external_skills, paths)
-    return web.json_response(
-        {"paths": paths, "resolved": resolved, "suggestions": suggestions}
-    )
+    return web.json_response({"paths": paths, "resolved": resolved, "suggestions": suggestions})
 
 
 async def handle_put_external_skills(request: web.Request) -> web.Response:
@@ -1447,9 +1411,7 @@ async def handle_put_external_skills(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     paths = body.get("paths")
     if not isinstance(paths, list) or not all(isinstance(x, str) for x in paths):
-        return web.json_response(
-            {"error": "'paths' must be a list of strings"}, status=400
-        )
+        return web.json_response({"error": "'paths' must be a list of strings"}, status=400)
     paths = [x.strip() for x in paths if x.strip()]
     config = get_hive_config()
     if paths:
