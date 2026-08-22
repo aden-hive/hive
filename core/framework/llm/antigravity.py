@@ -36,6 +36,28 @@ from framework.llm.stream_events import (
 
 logger = logging.getLogger(__name__)
 
+
+class AntigravityError(RuntimeError):
+    """Base exception for all Antigravity provider errors."""
+
+
+class AntigravityConfigurationError(AntigravityError):
+    """Raised when credentials or configuration are missing or invalid."""
+
+
+class AntigravityOAuthError(AntigravityError):
+    """Raised for specific OAuth protocol failures (e.g. invalid_grant)."""
+
+    def __init__(self, message: str, error_code: str, error_description: str):
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_description = error_description
+
+
+class AntigravityNetworkError(AntigravityError):
+    """Raised for network timeouts, DNS issues, or 5xx server errors."""
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -187,7 +209,7 @@ def _load_from_ide_db() -> tuple[str | None, str | None, float]:
     return None, None, 0.0
 
 
-def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
+def _do_token_refresh(refresh_token: str) -> tuple[str, float]:
     """POST to Google OAuth endpoint and return ``(new_access_token, expires_at)``.
 
     The client secret is sourced via ``get_antigravity_client_secret()`` (env var,
@@ -195,7 +217,7 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
     without it — Google will reject it for web-app clients, but the npm fallback in
     ``get_antigravity_client_secret()`` should ensure the secret is found at runtime.
 
-    Returns None when the HTTP request fails.
+    Raises AntigravityOAuthError or AntigravityNetworkError when the HTTP request fails.
     """
     from framework.config import get_antigravity_client_secret  # noqa: PLC0415
 
@@ -233,9 +255,18 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
         expires_in: int = payload.get("expires_in", 3600)
         logger.debug("Antigravity token refreshed successfully")
         return access_token, time.time() + expires_in
+    except urllib.error.HTTPError as exc:
+        try:
+            err_payload = json.loads(exc.read())
+            if not isinstance(err_payload, dict):
+                raise AntigravityNetworkError(f"OAuth HTTP {exc.code} with non-dict payload") from exc
+            error_code = err_payload.get("error", "unknown_error")
+            error_desc = err_payload.get("error_description", "(no description)")
+            raise AntigravityOAuthError(f"OAuth refresh failed: {error_code} - {error_desc}", error_code, error_desc) from exc
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise AntigravityNetworkError(f"OAuth HTTP {exc.code} with unparseable response") from exc
     except Exception as exc:
-        logger.debug("Antigravity token refresh failed: %s", exc)
-        return None
+        raise AntigravityNetworkError(f"OAuth request failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -512,16 +543,19 @@ class AntigravityProvider(LLMProvider):
             return self._access_token
 
         if self._refresh_token:
-            result = _do_token_refresh(self._refresh_token)
-            if result:
-                self._access_token, self._token_expires_at = result
+            try:
+                self._access_token, self._token_expires_at = _do_token_refresh(self._refresh_token)
                 return self._access_token
+            except AntigravityOAuthError as exc:
+                logger.warning("Failed to refresh token: %s. Trying to proceed with stale token if available.", exc)
+            except AntigravityNetworkError as exc:
+                logger.warning("Network error refreshing token: %s. Trying to proceed with stale token if available.", exc)
 
         if self._access_token:
             logger.warning("Using potentially stale Antigravity access token")
             return self._access_token
 
-        raise RuntimeError("No valid Antigravity credentials. Run: uv run python core/antigravity_auth.py auth account add")
+        raise AntigravityConfigurationError("No valid Antigravity credentials. Run: uv run python core/antigravity_auth.py auth account add")
 
     # --- Request building -------------------------------------------------- #
 
@@ -592,18 +626,20 @@ class AntigravityProvider(LLMProvider):
             except urllib.error.HTTPError as exc:
                 if exc.code in (401, 403) and self._refresh_token:
                     # Token rejected — refresh once and retry this endpoint.
-                    result = _do_token_refresh(self._refresh_token)
-                    if result:
-                        self._access_token, self._token_expires_at = result
-                        headers["Authorization"] = f"Bearer {self._access_token}"
-                        req2 = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
-                        try:
-                            return urllib.request.urlopen(req2, timeout=120)  # noqa: S310
-                        except urllib.error.HTTPError as exc2:
-                            last_exc = exc2
-                            continue
-                    last_exc = exc
-                    continue
+                    try:
+                        self._access_token, self._token_expires_at = _do_token_refresh(self._refresh_token)
+                    except (AntigravityOAuthError, AntigravityNetworkError) as token_exc:
+                        logger.warning("Token refresh failed during retry: %s", token_exc)
+                        last_exc = token_exc
+                        continue
+
+                    headers["Authorization"] = f"Bearer {self._access_token}"
+                    req2 = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
+                    try:
+                        return urllib.request.urlopen(req2, timeout=120)  # noqa: S310
+                    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc2:
+                        last_exc = exc2
+                        continue
                 elif exc.code >= 500:
                     last_exc = exc
                     continue
@@ -612,12 +648,12 @@ class AntigravityProvider(LLMProvider):
                     err_body = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     err_body = "(unreadable)"
-                raise RuntimeError(f"Antigravity HTTP {exc.code} from {url}: {err_body}") from exc
+                raise AntigravityNetworkError(f"Antigravity HTTP {exc.code} from {url}: {err_body}") from exc
             except (urllib.error.URLError, OSError) as exc:
                 last_exc = exc
                 continue
 
-        raise RuntimeError(f"All Antigravity endpoints failed. Last error: {last_exc}") from last_exc
+        raise AntigravityNetworkError(f"All Antigravity endpoints failed. Last error: {last_exc}") from last_exc
 
     # --- LLMProvider interface --------------------------------------------- #
 
