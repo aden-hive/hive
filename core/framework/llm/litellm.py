@@ -37,8 +37,7 @@ except ImportError:
     RateLimitError = Exception  # type: ignore[assignment, misc]
     CustomLogger = object  # type: ignore[assignment, misc]
 
-from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
-from framework.config import get_aux_max_tokens, get_max_tokens
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE, get_aux_max_tokens, get_max_tokens
 from framework.llm.model_catalog import get_model_pricing
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent

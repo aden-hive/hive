@@ -6575,7 +6575,7 @@ class AgentLoop(AgentProtocol):
                 # shield: a grace-window timeout must not cancel the in-flight
                 # work — it still has the full `timeout` budget to finish in.
                 result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # genuinely slow — fall through and hand back the handle
             except Exception:
                 # Failed fast. Let collect_result surface it rather than
