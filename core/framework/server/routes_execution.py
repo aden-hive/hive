@@ -538,7 +538,12 @@ async def handle_chat(request: web.Request) -> web.Response:
                 is_large = attachment_size > LARGE_TEXT_THRESHOLD_BYTES
                 _text_bytes = raw_bytes
 
-                def _read_text_attachment(_text_bytes=_text_bytes, is_large=is_large, text_filepath=text_filepath, text_filename=text_filename) -> tuple[str, int]:
+                def _read_text_attachment(
+                    _text_bytes=_text_bytes,
+                    is_large=is_large,
+                    text_filepath=text_filepath,
+                    text_filename=text_filename,
+                ) -> tuple[str, int]:
                     if _text_bytes is not None:
                         t = _text_bytes.decode("utf-8", errors="replace")
                         return t, (t.count("\n") + 1 if t else 0)
