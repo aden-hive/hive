@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from framework.llm.provider import LLMProvider, LLMResponse
+from framework.config import get_aux_max_tokens
 from framework.testing.llm_judge import LLMJudge
 
 # ============================================================================
@@ -100,7 +101,7 @@ class TestLLMJudgeWithProvider:
         )
 
         call = provider.complete_calls[0]
-        assert call["max_tokens"] == 500
+        assert call["max_tokens"] == get_aux_max_tokens()
         assert call["json_mode"] is True
         assert call["system"] == ""
         assert len(call["messages"]) == 1
@@ -308,7 +309,7 @@ class TestLLMJudgeBackwardCompatibility:
         # Check that the correct model was used
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
-        assert call_kwargs["max_tokens"] == 500
+        assert call_kwargs["max_tokens"] == get_aux_max_tokens()
 
     def test_openai_fallback_uses_litellm_provider(self, monkeypatch):
         """When OPENAI_API_KEY is set, evaluate() should use a LiteLLM-based provider."""
@@ -370,7 +371,7 @@ class TestLLMJudgeBackwardCompatibility:
 
         call = captured_calls[0]
         assert call["model"] == "gpt-4o-mini"
-        assert call["max_tokens"] == 500
+        assert call["max_tokens"] == get_aux_max_tokens()
         assert call["json_mode"] is True
 
 

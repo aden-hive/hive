@@ -10,7 +10,6 @@ import Home from "./pages/home";
 // page chunk loads.
 const ColonyChat = lazy(() => import("./pages/colony-chat"));
 const QueenDM = lazy(() => import("./pages/queen-dm"));
-const QueenRouting = lazy(() => import("./pages/queen-routing"));
 const OrgChart = lazy(() => import("./pages/org-chart"));
 const PromptLibrary = lazy(() => import("./pages/prompt-library"));
 const SkillsLibrary = lazy(() => import("./pages/skills-library"));
@@ -36,7 +35,10 @@ function App() {
       <Route element={<AppLayout />}>
         <Route path="/" element={<Home />} />
         <Route path="/colony/:colonyId" element={<ColonyChatRoute />} />
-        <Route path="/queen-routing" element={<QueenRouting />} />
+        {/* /queen-routing (LLM-classified queen pick) is deprecated: starting
+            a conversation requires hand-picking a queen on Home. Stale links
+            land on Home instead of a dead classifier screen. */}
+        <Route path="/queen-routing" element={<Navigate to="/" replace />} />
         <Route path="/queen/:queenId" element={<QueenDM />} />
         <Route path="/org-chart" element={<OrgChart />} />
         <Route path="/skills-library" element={<SkillsLibrary />} />

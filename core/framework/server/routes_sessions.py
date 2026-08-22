@@ -982,6 +982,24 @@ async def handle_live_sessions_stream(request: web.Request) -> web.StreamRespons
     return sse.response  # type: ignore[return-value]
 
 
+async def handle_get_session_snapshot(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/snapshot — the same state projection a
+    fresh SSE subscribe injects as ``session_snapshot``.
+
+    Poll target for the frontend's stall watchdog: when the gate-clearing
+    SSE events are lost (backpressure disconnect, silently dead TCP path),
+    the UI reconciles its isStreaming / pending-queue state against this
+    instead of staying stuck until a manual page refresh.
+    """
+    from framework.host.event_bus import compute_session_snapshot
+
+    manager = _get_manager(request)
+    session = manager.get_session(request.match_info["session_id"])
+    if session is None or getattr(session, "event_bus", None) is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    return web.json_response(compute_session_snapshot(session.event_bus))
+
+
 async def handle_get_live_session(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id} — get session detail.
 
@@ -2154,7 +2172,13 @@ async def handle_session_history(request: web.Request) -> web.Response:
     manager = _get_manager(request)
     live_sessions = {s.id: s for s in manager.list_sessions()}
 
-    disk_sessions = SessionManager.list_cold_sessions()
+    # Off-loop: this walks every queen's sessions/ dir, JSON-parses every
+    # conversation part of any summary-stale session and rewrites its
+    # summary.json — hundreds of ms to seconds of disk+CPU that used to
+    # stall every SSE stream on each sidebar refresh.
+    disk_sessions = await asyncio.get_running_loop().run_in_executor(
+        _history_read_executor(), SessionManager.list_cold_sessions
+    )
     for s in disk_sessions:
         if s["session_id"] in live_sessions:
             live = live_sessions[s["session_id"]]
@@ -2203,7 +2227,11 @@ async def handle_list_colony_sessions(request: web.Request) -> web.Response:
     manager = _get_manager(request)
     live_sessions = {s.id: s for s in manager.list_sessions()}
 
-    sessions = SessionManager.list_colony_sessions(colony_id)
+    # Off-loop for the same reason as handle_session_history: summary
+    # rebuilds parse every part file of stale sessions.
+    sessions = await asyncio.get_running_loop().run_in_executor(
+        _history_read_executor(), SessionManager.list_colony_sessions, colony_id
+    )
     for s in sessions:
         sid = s.get("session_id")
         if sid in live_sessions:
@@ -2547,6 +2575,23 @@ async def handle_session_attachment(request: web.Request) -> web.Response:
                 break
         if filepath is not None:
             break
+
+    if filepath is None:
+        # Resumed sessions store under their resume-SOURCE directory
+        # (``storage_session_id = queen_resume_from or id``), which the
+        # by-id directory walk above cannot find under the CURRENT id.
+        # Ask the live session for its actual storage dir — without this,
+        # every attachment produced after a cold-resume 404s (invisible
+        # image chips) even though the file is right there on disk.
+        live = _get_manager(request).get_session(session_id)
+        live_dir = getattr(live, "queen_dir", None) if live is not None else None
+        if live_dir:
+            for candidate_dir in _candidate_dirs(Path(live_dir)):
+                candidate = candidate_dir / filename
+                if candidate.is_file():
+                    filepath = candidate
+                    break
+
     if filepath is None:
         return web.Response(status=404, text="Attachment not found")
 
@@ -3041,6 +3086,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/live", handle_live_sessions_stream)
     app.router.add_get("/api/sessions/history", handle_session_history)
     app.router.add_delete("/api/sessions/history/{session_id}", handle_delete_history_session)
+    app.router.add_get("/api/sessions/{session_id}/snapshot", handle_get_session_snapshot)
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 

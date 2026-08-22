@@ -136,6 +136,28 @@ class SkillDiscovery:
                 self._scanned_dirs.append(user_agents)
                 all_skills.extend(self._scan_scope(user_agents, "user"))
 
+            # External agent ecosystems — configuration.json "external_skills":
+            # extra skill roots from other agents' trees (Claude Code's
+            # ~/.claude/skills, Codex's ~/.codex/skills, ...). SKILL.md is a
+            # cross-agent standard, so they parse as-is. Scanned at user
+            # scope BELOW the Hive-specific tree, so a Hive copy of the same
+            # skill name wins any collision.
+            import os as _os
+
+            from framework.config import get_hive_config
+
+            for raw in get_hive_config().get("external_skills") or []:
+                try:
+                    ext = Path(_os.path.expandvars(str(raw))).expanduser()
+                except (TypeError, ValueError):
+                    logger.warning("external_skills entry unusable: %r", raw)
+                    continue
+                if ext.is_dir():
+                    self._scanned_dirs.append(ext)
+                    all_skills.extend(self._scan_scope(ext, "user"))
+                else:
+                    logger.warning("external_skills path not found: %s", raw)
+
             # Hive-specific (higher precedence within user scope). Honors
             # HIVE_HOME so the desktop's per-user root (set via env) wins
             # over the shared ``~/.hive`` location.

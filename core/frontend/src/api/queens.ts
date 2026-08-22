@@ -118,8 +118,27 @@ export const queensApi = {
         title: string;
         portrait?: PortraitDescriptor | null;
         has_avatar?: boolean;
+        custom?: boolean;
       }>;
     }>("/queen/profiles"),
+
+  /** Create a brand-new custom queen (writes queens/<id>/profile.yaml).
+   * `queen_id` is derived from the name when omitted. */
+  createQueen: (body: {
+    name: string;
+    title?: string;
+    persona?: string;
+    queen_id?: string;
+  }) =>
+    api.post<{
+      queen: {
+        id: string;
+        name: string;
+        title: string;
+        has_avatar?: boolean;
+        custom?: boolean;
+      };
+    }>("/queen/create", body),
 
   /** Get full profile for a queen. */
   getProfile: (queenId: string) =>

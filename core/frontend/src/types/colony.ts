@@ -26,15 +26,6 @@ export interface QueenBee {
   status: "online" | "offline";
 }
 
-export interface Template {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  icon: string;
-  agentPath: string;
-}
-
 import type { PortraitDescriptor } from "@/api/queens";
 
 export interface QueenProfileSummary {
@@ -46,6 +37,9 @@ export interface QueenProfileSummary {
    * Renderers gate the `<img>` load on this so first-time users don't
    * see a 404 for every queen in the sidebar. */
   has_avatar?: boolean;
+  /** True for user-created queens (not part of the shipped catalog).
+   * The leader catalog groups these under "Custom". */
+  custom?: boolean;
 }
 
 export interface UserProfile {

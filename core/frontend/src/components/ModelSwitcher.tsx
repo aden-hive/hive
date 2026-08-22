@@ -15,15 +15,19 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     connectedProviders,
     availableModels,
     setModel,
+    setCustomModel,
     activateSubscription,
     activeSubscription,
     subscriptions,
     detectedSubscriptions,
     loading,
+    apiBase,
   } = useModel();
 
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customModelInput, setCustomModelInput] = useState("");
+  const [customSaving, setCustomSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on click outside
@@ -78,6 +82,35 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     }
   };
 
+  const handleCustomModel = async (modelId: string) => {
+    const trimmed = modelId.trim();
+    if (!trimmed || customSaving) return;
+    setError(null);
+    setCustomSaving(true);
+    try {
+      await setCustomModel(trimmed);
+      setCustomModelInput("");
+      setOpen(false);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Failed to switch model";
+      setError(msg);
+    } finally {
+      setCustomSaving(false);
+    }
+  };
+
+  // A config pointing at an endpoint the hardcoded provider list doesn't
+  // know about (self-hosted vLLM, vendor proxy, …) is a first-class choice:
+  // show it with its own section instead of hiding it.
+  const customHost = (() => {
+    if (!apiBase) return null;
+    try {
+      return new URL(apiBase).host;
+    } catch {
+      return apiBase;
+    }
+  })();
+
   // All detected subscriptions (active ones shown with checkmark)
   const detectedSubs = subscriptions.filter(
     (sub) => detectedSubscriptions.has(sub.id)
@@ -112,7 +145,50 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
       {open && (
         <div className="absolute right-0 top-full mt-1.5 w-[260px] bg-card border border-border/60 rounded-lg shadow-xl z-50 overflow-hidden">
           <div className="max-h-[320px] overflow-y-auto">
-            {!hasAnyProvider ? (
+            {/* Custom endpoint — whatever configuration.json points at */}
+            {customHost && (
+              <div>
+                <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                  Custom Endpoint · {customHost}
+                </p>
+                <div
+                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${
+                    !activeSubscription
+                      ? "bg-primary/10 text-primary"
+                      : "text-foreground"
+                  }`}
+                >
+                  {!activeSubscription ? (
+                    <Check className="w-3 h-3 flex-shrink-0" />
+                  ) : (
+                    <span className="w-3" />
+                  )}
+                  <span className="truncate">{currentModel}</span>
+                </div>
+                <form
+                  className="flex items-center gap-1.5 px-3 pb-2 pt-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void handleCustomModel(customModelInput);
+                  }}
+                >
+                  <input
+                    value={customModelInput}
+                    onChange={(e) => setCustomModelInput(e.target.value)}
+                    placeholder="Switch model on this endpoint…"
+                    className="flex-1 min-w-0 rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!customModelInput.trim() || customSaving}
+                    className="rounded-md border border-primary/30 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                  >
+                    {customSaving ? "…" : "Use"}
+                  </button>
+                </form>
+              </div>
+            )}
+            {!hasAnyProvider && !customHost ? (
               <p className="px-4 py-3 text-xs text-muted-foreground">
                 No providers available. Add an API key or subscription.
               </p>

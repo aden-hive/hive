@@ -5,6 +5,7 @@ import { apiUrl } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
 import { useQueenDecommission } from "@/lib/me";
 import QueenPortraitGlyph from "./QueenPortraitGlyph";
+import MarkdownContent from "./MarkdownContent";
 import { queensApi, type QueenProfile } from "@/api/queens";
 import { sessionsApi } from "@/api/sessions";
 import { compressImage } from "@/lib/image-utils";
@@ -15,6 +16,15 @@ interface QueenProfilePanelProps {
   queenId: string;
   colonies: Colony[];
   onClose: () => void;
+}
+
+/** Structural-marker heuristic: headings, lists, blockquotes, fences,
+ * emphasis, inline code, links, tables. Plain prose stays a simple <p>
+ * (markdown rendering would swallow its single line breaks). */
+function looksLikeMarkdown(text: string): boolean {
+  return /(^|\n)\s{0,3}(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|```)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\)|(^|\n)\|[^\n]+\|/.test(
+    text,
+  );
 }
 
 function SectionHeader({ children, onEdit }: { children: React.ReactNode; onEdit?: () => void }) {
@@ -439,7 +449,14 @@ export default function QueenProfilePanel({ queenId, colonies, onClose }: QueenP
             {profile?.summary && (
               <div className="mb-6">
                 <SectionHeader onEdit={startEditing}>About</SectionHeader>
-                <p className="text-sm text-foreground/80 leading-relaxed">{profile.summary}</p>
+                {looksLikeMarkdown(profile.summary) ? (
+                  <MarkdownContent
+                    content={profile.summary}
+                    className="text-sm text-foreground/80 leading-relaxed"
+                  />
+                ) : (
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">{profile.summary}</p>
+                )}
               </div>
             )}
 

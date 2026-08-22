@@ -20,6 +20,10 @@ export interface LLMConfig {
   active_subscription: string | null;
   detected_subscriptions: string[];
   subscriptions: SubscriptionInfo[];
+  /** The endpoint configuration.json actually points at — set for custom
+   * OpenAI-compatible endpoints (self-hosted vLLM, vendor proxies, …). */
+  api_base?: string | null;
+  api_key_env_var?: string | null;
 }
 
 export interface LLMConfigUpdateResponse {
@@ -71,8 +75,74 @@ export interface FeaturesConfig {
   email_senders: boolean;
 }
 
+/** One provider slot in configuration.json (llm / worker_llm /
+ * vision_fallback) — displayed and saved verbatim, unknown keys included. */
+export type LlmRole = "llm" | "worker_llm" | "vision_fallback";
+export interface LlmSection {
+  provider?: string;
+  model?: string;
+  api_base?: string;
+  api_key?: string;
+  api_key_env_var?: string;
+  max_tokens?: number | null;
+  max_context_tokens?: number | null;
+  [k: string]: unknown;
+}
+
+/** One configured external skill root and its resolution status. */
+export interface ExternalSkillSource {
+  path: string;
+  resolved?: string;
+  exists: boolean;
+  skills: number;
+  error?: string;
+}
+
 export const configApi = {
   getLLMConfig: () => api.get<LLMConfig>("/config/llm"),
+
+  /** The three provider slots in configuration.json, verbatim. */
+  getLlmSections: () =>
+    api.get<Record<LlmRole, LlmSection | null>>("/config/llm-sections"),
+
+  /** Write one slot verbatim (null clears worker/vision; the api_key is
+   * health-checked against api_base before committing). */
+  putLlmSection: (role: LlmRole, section: LlmSection | null) =>
+    api.put<{ role: LlmRole; section: LlmSection | null; sessions_swapped?: number }>(
+      "/config/llm-sections",
+      { role, section },
+    ),
+
+  /** Saved vendor configs (configuration.json "provider_library"), verbatim. */
+  getProviderLibrary: () =>
+    api.get<{ library: Record<string, LlmSection> }>("/config/provider-library"),
+
+  /** Save (or delete, with null) one named library entry. No health check —
+   * validation happens when the entry is applied to a slot. */
+  putProviderLibraryEntry: (name: string, section: LlmSection | null) =>
+    api.put<{ name: string; section: LlmSection | null }>(
+      "/config/provider-library",
+      { name, section },
+    ),
+
+  /** Copy a library entry into a slot — same validation + hot-swap path as
+   * putLlmSection. */
+  applyProviderLibraryEntry: (name: string, role: LlmRole) =>
+    api.post<{ role: LlmRole; section: LlmSection; sessions_swapped?: number }>(
+      "/config/provider-library/apply",
+      { name, role },
+    ),
+
+  /** External skill roots (configuration.json "external_skills"), verbatim.
+   * `suggestions` = auto-discovered known agent skill dirs (exist, contain
+   * skills, not yet configured). */
+  getExternalSkills: () =>
+    api.get<{ paths: string[]; resolved: ExternalSkillSource[]; suggestions?: ExternalSkillSource[] }>(
+      "/config/external-skills",
+    ),
+
+  setExternalSkills: (paths: string[]) =>
+    api.put<{ paths: string[]; resolved: ExternalSkillSource[] }>("/config/external-skills", { paths }),
 
   getFeatures: () => api.get<{ features: FeaturesConfig }>("/config/features"),
 
@@ -88,6 +158,11 @@ export const configApi = {
 
   setLLMConfig: (provider: string, model: string) =>
     api.put<LLMConfigUpdateResponse>("/config/llm", { provider, model }),
+
+  /** Switch models on the config's own (custom) endpoint — no catalogue
+   * validation, api_base / api_key_env_var stay as configured. */
+  setLLMConfigCustom: (model: string) =>
+    api.put<LLMConfigUpdateResponse>("/config/llm", { custom: true, model }),
 
   activateSubscription: (subscriptionId: string) =>
     api.put<LLMConfigUpdateResponse>("/config/llm", { subscription: subscriptionId }),

@@ -32,6 +32,7 @@ dynamic-prompt providers wired in ``colony_runtime`` and
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -381,8 +382,12 @@ async def handle_list_all_skills(request: web.Request) -> web.Response:
 
     # Raw discovery (no override filtering) — we apply per-scope stores
     # below when computing ``visible_to``.
+    # Off-loop: discover() recursively walks every scope root (framework +
+    # ~/.agents + external_skills + HIVE_HOME + one/two per queen/colony)
+    # with a stat per entry and a file read per skill — in-loop it stalled
+    # every SSE stream for the duration on each Skills Library load.
     discovery = SkillDiscovery(DiscoveryConfig(project_root=None, skip_framework_scope=False, extra_scopes=extras))
-    discovered = discovery.discover()
+    discovered = await asyncio.to_thread(discovery.discover)
 
     # Load all stores once. Colonies have no store of their own — they
     # inherit their owning queen's, so visibility is queen-level only.

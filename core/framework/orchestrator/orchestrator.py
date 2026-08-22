@@ -353,8 +353,6 @@ class Orchestrator:
 
         return errors
 
-    # Max chars of formatted messages before proactively splitting for LLM.
-    _PHASE_LLM_CHAR_LIMIT = 240_000
     _PHASE_LLM_MAX_DEPTH = 10
 
     async def _phase_llm_compact(
@@ -387,8 +385,11 @@ class Orchestrator:
                 lines.append(f"[{m.role}]: {m.content}")
         formatted = "\n\n".join(lines)
 
-        # Proactive split
-        if len(formatted) > self._PHASE_LLM_CHAR_LIMIT and len(messages) > 1:
+        # Proactive split — threshold derived from the model window.
+        from framework.agent_loop.internals.compaction import llm_compact_char_limit
+
+        _win = getattr(conversation, "_max_context_tokens", 32000)
+        if len(formatted) > llm_compact_char_limit(_win) and len(messages) > 1:
             summary = await self._phase_llm_compact_split(
                 conversation,
                 next_spec,

@@ -33,6 +33,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.config import (
+    get_aux_max_tokens,
+    get_hive_config,
     get_vision_fallback_api_base,
     get_vision_fallback_api_key,
     get_vision_fallback_model,
@@ -271,7 +273,11 @@ async def caption_tool_image(
     api_key = get_vision_fallback_api_key()
     api_base = get_vision_fallback_api_base()
     if not api_key and not model_override:
-        logger.debug("vision_fallback configured but no API key resolved; skipping")
+        logger.info(
+            "vision_fallback configured (%s) but no API key resolved (literal api_key / env %s both empty); skipping",
+            model,
+            get_hive_config().get("vision_fallback", {}).get("api_key_env_var"),
+        )
         return None
 
     try:
@@ -320,7 +326,10 @@ async def caption_tool_image(
     kwargs: dict[str, Any] = {
         "model": rewritten_model,
         "messages": messages,
-        "max_tokens": 8192,
+        "max_tokens": int(
+            get_hive_config().get("vision_fallback", {}).get("max_tokens")
+            or get_aux_max_tokens()
+        ),
         "timeout": timeout_s,
     }
     # Always pass api_key when we have one, even alongside proxy-rewritten

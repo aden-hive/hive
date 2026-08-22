@@ -22,6 +22,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from framework.config import get_aux_max_tokens
+
 if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider
 
@@ -233,7 +235,7 @@ async def classify_park(ctx: ParkContext, llm: LLMProvider | None) -> Classifier
         resp = await llm.acomplete(
             messages=[{"role": "user", "content": _build_prompt(ctx)}],
             system=_SYSTEM,
-            max_tokens=200,
+            max_tokens=get_aux_max_tokens(),
             json_mode=True,
         )
         data = json.loads((resp.content or "").strip())

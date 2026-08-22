@@ -17,12 +17,3 @@ export interface GraphNode {
   edgeLabels?: Record<string, string>;
 }
 
-export type RunState = "idle" | "deploying" | "running";
-
-export interface RunButtonProps {
-  runState: RunState;
-  disabled: boolean;
-  onRun: () => void;
-  onPause: () => void;
-  btnRef: React.Ref<HTMLButtonElement>;
-}

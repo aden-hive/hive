@@ -1454,9 +1454,22 @@ class ColonyRuntime:
         # the spillover_dir, worker tool results >8 KB were silently
         # truncated in place with no on-disk copy — large browser HTML /
         # web_search / tracker payloads lost their tails.
+        from framework.config import (
+            get_max_tool_result_chars as _get_max_trc,
+            get_worker_max_context_tokens as _get_worker_max_ctx,
+        )
+
         _spawn_loop_config = _build_worker_loop_config(loop_config_overrides or {})
         _spawn_loop_config.spillover_dir = str(worker_storage / "data")
-        _spawn_loop_config.max_tool_result_chars = 30_000
+        _spawn_loop_config.max_tool_result_chars = _get_max_trc()
+        # Same config-first resolution the queen gets: worker_llm/llm config
+        # key, then the worker model's catalog window, then the legacy
+        # default. Skipped entirely when the spawner passed an explicit
+        # per-worker budget (whitelisted override) — runtime intent wins.
+        if "max_context_tokens" not in (loop_config_overrides or {}):
+            _spawn_loop_config.max_context_tokens = _get_worker_max_ctx(
+                fallback=_spawn_loop_config.max_context_tokens
+            )
         agent_loop = AgentLoop(
             event_bus=self._scoped_event_bus,
             tool_executor=spawn_executor,

@@ -124,11 +124,10 @@ Sources keep the Queen fleet-aware and disciplined: `active_workers_reminder` (r
 
 ## The maturation arc: execute first, then systematize
 
-A Queen doesn't design a colony up front. She grows into one across three phases (see `agents/queen/nodes/__init__.py`, `agents/queen/incubating_evaluator.py`):
+A Queen doesn't design a colony up front. She grows into one across two phases (see `agents/queen/nodes/__init__.py`):
 
 1. **Independent** — the Queen is a standalone conversational agent doing the work herself. She has `suggest_colony` to propose scaling up when a task turns out to be parallel, recurring, or long-running.
-2. **Incubating** — `start_incubating_colony` runs a **fail-closed** LLM gate that decides whether the plan is settled enough to commit. Forking is expensive (it ends the interactive chat and the colony runs unattended), so a broken or uncertain gate returns `ready=False` and the Queen self-corrects rather than proceeding.
-3. **Colony** — the Queen forks a headless worker spec to disk and enters fan-out mode.
+2. **Colony** — the Queen forks a headless worker spec to disk and enters fan-out mode. Forking is expensive (it ends the interactive chat and the colony runs unattended), so the commit point is an explicit user confirmation in the frontend popup rather than something the Queen decides alone.
 
 The defining move is **execute-first-then-systematize**. The Queen does one unit of the work end-to-end herself — the **pilot** — and records the result in the tracker. Then she factors the proven protocol into a reusable **skill + playbook** and calls `run_playbook` — "the convergence spine" (`host/playbook/runner.py`): a deterministic runner that owns no durable state, treats the tracker as the source of truth, dispatches a worker clone per row (with retry/backoff, lanes, and a dead-letter path), and — because "what's left" is always a fresh tracker query — makes **re-running a playbook resume by construction**.
 

@@ -70,12 +70,9 @@ Storage: `~/.hive/sessions/{session_id}/logs/` ([runtime_log_store.py](../../cor
 
 > Gap: cost lives in the response object and is rolled into L2/L3 logs, but is **not** in the event bus stream and **not** in any aggregate query surface.
 
-### 3.4 Colony Progress DB
+### 3.4 Colony Tracker DB
 
-[core/framework/host/progress_db.py:44-110](../../core/framework/host/progress_db.py#L44-L110) — per-colony SQLite (WAL mode):
-
-- `tasks` (id, seq, priority, goal, status: pending|claimed|started|completed|failed, worker_id, claimed_at, started_at, completed_at, retry_count, last_error)
-- `steps`, `sop_checklist`, `colony_meta`
+[core/framework/host/tracker_db.py](../../core/framework/host/tracker_db.py) — per-colony SQLite (WAL mode). Supersedes the earlier `progress_db.py`, whose task-queue tables were folded into the tracker (startup strips the legacy ProgressDB fields).
 
 This is the closest thing we have to a status SQL store today, but it is **per-colony** and **task-shaped** — not session-shaped or usage-shaped.
 
@@ -323,7 +320,7 @@ The first four are direct consequences of the local-first / cloud-required gap s
 - Runtime log schemas: [core/framework/tracker/runtime_log_schemas.py](../../core/framework/tracker/runtime_log_schemas.py)
 - Runtime log store: [core/framework/tracker/runtime_log_store.py](../../core/framework/tracker/runtime_log_store.py)
 - LLM accounting: [core/framework/llm/provider.py](../../core/framework/llm/provider.py), [model_catalog.py](../../core/framework/llm/model_catalog.py)
-- Colony progress DB: [core/framework/host/progress_db.py](../../core/framework/host/progress_db.py)
+- Colony tracker DB: [core/framework/host/tracker_db.py](../../core/framework/host/tracker_db.py)
 - Task events: [core/framework/tasks/events.py](../../core/framework/tasks/events.py)
 - Session HTTP: [core/framework/server/routes_sessions.py](../../core/framework/server/routes_sessions.py)
 - SSE primitive: [core/framework/server/sse.py](../../core/framework/server/sse.py)

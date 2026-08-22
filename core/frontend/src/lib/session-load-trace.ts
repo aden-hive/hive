@@ -22,6 +22,10 @@
  * as cheap no-ops; flip this to `true` to capture resume-flow logs again.
  */
 const ENABLED = false;
+/** Callers that build EXPENSIVE trace arguments (full-transcript
+ * summaries) must gate on this — trace() no-ops when disabled, but
+ * argument evaluation still runs eagerly at the call site. */
+export const TRACE_ENABLED = ENABLED;
 
 interface TraceRecord {
   iso: string;

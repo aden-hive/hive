@@ -84,3 +84,5 @@ screenshots/*
 .coverage
 
 temp/
+# Agent runtime scratch output — never commit
+data/

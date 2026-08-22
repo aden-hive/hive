@@ -59,14 +59,24 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
         "pdf_read",
         "attach_file",
     ],
-    # Terminal basic — the 3-tool subset queens get out of the box.
+    # Terminal basic — the subset queens get out of the box.
     #   terminal_exec — foreground command execution (Bash equivalent)
     #   terminal_rg   — ripgrep content search (Grep equivalent)
     #   terminal_glob — name/glob file listing (Glob equivalent)
+    #   terminal_output_get — see INVARIANT below
+    #
+    # INVARIANT (ported from the desktop runtime): terminal_exec hands out
+    # a deferred-result handle — ``output_handle`` — when output overflows
+    # max_output_kb. The tool that redeems it MUST ship in the same tier as
+    # terminal_exec; a handle nobody can redeem is worse than no handle at
+    # all. (Slow commands are separately handled by
+    # ``LoopConfig.background_tools`` + the synthetic ``collect_result``,
+    # which bypass this allowlist entirely.)
     "terminal_basic": [
         "terminal_exec",
         "terminal_rg",
         "terminal_glob",
+        "terminal_output_get",
     ],
     # Terminal advanced — the power-user tools beyond the basics. Not in
     # any role default; opt in explicitly per-queen via the Tool Library.
@@ -111,8 +121,13 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
     # terminal_core / terminal_extended: terminal_exec measured at 200/1k
     # carries (the single most-invoked tool); rg (3.3/1k) and glob (1.3/1k)
     # are cold — terminal_exec can express both when loaded ad hoc.
+    # output_get is cold by call count but rides along anyway: it redeems
+    # the output_handle terminal_exec hands out, and a handle is useless in
+    # a tier that can't cash it (test_deferred_handle_redeemers enforces
+    # this for every emitter/tier pair). Correctness beats the carry cost.
     "terminal_core": [
         "terminal_exec",
+        "terminal_output_get",
     ],
     "terminal_extended": [
         "terminal_rg",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Globe, Download } from "lucide-react";
-import { api, subscribeSse } from "@/api/client";
+import { api } from "@/api/client";
 import { Tooltip } from "@/components/Tooltip";
 
 // "stale" = bridge reports the extension is connected but the last app-level
@@ -96,72 +96,65 @@ export default function BrowserStatusBadge({ sessionId }: { sessionId?: string |
 
   useEffect(() => {
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
     // Fresh slate when the viewed queen changes, so a previous session's tab
-    // doesn't linger until the next status frame arrives.
+    // doesn't linger until the next poll lands.
     setActiveTab(null);
 
-    const path = sessionId
-      ? `/browser/status/stream?session_id=${encodeURIComponent(sessionId)}`
-      : "/browser/status/stream";
-
-    subscribeSse(
-      path,
-      {
-        onEvent: (name, data) => {
-          if (name !== "status") return;
-          try {
-            const parsed = JSON.parse(data) as BridgeStatusPayload;
-            if (!parsed.bridge) {
-              setStatus("offline");
-              setDetail("Bridge runtime offline");
-              setActiveTab(null);
-              return;
-            }
-            if (parsed.health === "stale") {
-              setStatus("stale");
-              setActiveTab(null);
-              const ageS = parsed.last_pong_age_ms != null
-                ? Math.round(parsed.last_pong_age_ms / 1000)
-                : null;
-              setDetail(ageS != null ? `Extension stale (no pong in ${ageS}s)` : "Extension stale");
-              return;
-            }
-            if (parsed.connected) {
-              setStatus("connected");
-              setDetail(parsed.extension_version ? `Hive Bridge Extension v${parsed.extension_version}` : null);
-              setActiveTab(parsed.active_tab ?? null);
-            } else {
-              setStatus("disconnected");
-              setDetail("Click to install Hive Browser Bridge");
-              setActiveTab(null);
-            }
-          } catch {
-            setStatus("offline");
-            setDetail(null);
-            setActiveTab(null);
-          }
-        },
-        // Relay auto-retries on the main side; flip to offline so the
-        // badge doesn't get stuck on "connected" after a backend restart.
-        onError: () => setStatus("offline"),
-        onClose: () => setStatus("offline"),
-      },
-      // Feature stream — this badge is its own UI indicator. Don't feed
-      // the global runtime-connectivity banner; a routine 5-min keep-alive
-      // close here doesn't mean the runtime is down.
-      { silentConnectivity: true },
-    ).then((unsub) => {
-      if (cancelled) {
-        unsub();
+    const apply = (parsed: BridgeStatusPayload) => {
+      if (!parsed.bridge) {
+        setStatus("offline");
+        setDetail("Bridge runtime offline");
+        setActiveTab(null);
         return;
       }
-      unsubscribe = unsub;
-    });
+      if (parsed.health === "stale") {
+        setStatus("stale");
+        setActiveTab(null);
+        const ageS = parsed.last_pong_age_ms != null
+          ? Math.round(parsed.last_pong_age_ms / 1000)
+          : null;
+        setDetail(ageS != null ? `Extension stale (no pong in ${ageS}s)` : "Extension stale");
+        return;
+      }
+      if (parsed.connected) {
+        setStatus("connected");
+        setDetail(parsed.extension_version ? `Hive Bridge Extension v${parsed.extension_version}` : null);
+        setActiveTab(parsed.active_tab ?? null);
+      } else {
+        setStatus("disconnected");
+        setDetail("Click to install Hive Browser Bridge");
+        setActiveTab(null);
+      }
+    };
+
+    // Polling, not the SSE stream: every EventSource permanently occupies
+    // one of the browser's ~6 same-origin HTTP/1.1 sockets, and this badge
+    // was one of the standing streams that exhausted the pool (attachments
+    // and fetches then queue behind it forever). A 15s badge latency is a
+    // fine trade; the /stream endpoint remains for the desktop shell whose
+    // IPC-based SSE is exempt from the connection cap.
+    const poll = async () => {
+      try {
+        const parsed = await api.get<BridgeStatusPayload>(
+          sessionId
+            ? `/browser/status?session_id=${encodeURIComponent(sessionId)}`
+            : "/browser/status",
+        );
+        if (!cancelled) apply(parsed);
+      } catch {
+        if (!cancelled) {
+          setStatus("offline");
+          setDetail(null);
+          setActiveTab(null);
+        }
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 15_000);
 
     return () => {
       cancelled = true;
-      unsubscribe?.();
+      clearInterval(timer);
     };
   }, [sessionId]);
 

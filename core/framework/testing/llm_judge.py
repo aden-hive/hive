@@ -9,6 +9,8 @@ import json
 import os
 from typing import TYPE_CHECKING, Any
 
+from framework.config import get_aux_max_tokens
+
 if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider
 
@@ -103,7 +105,7 @@ Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
                 client = self._get_client()
                 response = client.messages.create(
                     model="claude-haiku-4-5-20251001",
-                    max_tokens=500,
+                    max_tokens=get_aux_max_tokens(),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return self._parse_json_result(response.content[0].text.strip())
@@ -114,7 +116,7 @@ Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
             response = active_provider.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system="",  # Empty to satisfy legacy test expectations
-                max_tokens=500,
+                max_tokens=get_aux_max_tokens(),
                 json_mode=True,
             )
             return self._parse_json_result(response.content.strip())

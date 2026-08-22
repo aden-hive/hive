@@ -25,10 +25,7 @@ server/
 ├── routes_sessions.py     # Session lifecycle, info, and discovery
 ├── routes_execution.py    # Trigger, inject, chat, stop, resume, replay
 ├── routes_events.py       # SSE event streaming
-├── routes_graphs.py       # Graph topology & node inspection
-├── routes_logs.py         # Execution logs (summary/details/tools)
 ├── routes_credentials.py  # Credential management & validation
-├── routes_agents.py       # Legacy backward-compat routes
 └── tests/
     └── test_api.py        # Full test suite with mocked runtimes
 ```

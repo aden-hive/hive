@@ -8,6 +8,7 @@ import ChatPanel, {
   type ImageContent,
 } from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
+import { api } from "@/api/client";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi, type PortraitDescriptor } from "@/api/queens";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/chat-helpers";
 import {
   beginLoad,
+  TRACE_ENABLED,
   msgSummary,
   trace as traceLoad,
 } from "@/lib/session-load-trace";
@@ -531,7 +533,13 @@ export default function QueenDM() {
   // (count + first/last createdAt + the calendar days covered). This is
   // the line that makes a mid-resume message-loss obvious — the count
   // drops or `days` shrinks to just the most recent day.
+  //
+  // TRACE_ENABLED guard is load-bearing: traceLoad() no-ops when tracing
+  // is off, but its ARGUMENTS were still evaluated eagerly — msgSummary()
+  // walks the entire transcript, so every streaming delta paid an O(n)
+  // scan that grew with the session and starved router transitions.
   useEffect(() => {
+    if (!TRACE_ENABLED) return;
     traceLoad("messages", "messages[] changed", {
       sessionId,
       ...msgSummary(messages),
@@ -1116,7 +1124,10 @@ export default function QueenDM() {
             // URL so a refresh rehydrates the live session; the effect
             // re-runs on the new param, but we still restore `sid` below
             // so this run paints without waiting on the re-run.
-            setSearchParams({ session: sid }, { replace: true });
+            // (cancelled re-check: a bootstrap resolving after the user
+            // navigated away must not drag the router back here — this
+            // was the "click Home, revive, but stay in the session" bug.)
+            if (!cancelled) setSearchParams({ session: sid }, { replace: true });
           }
           // Don't hold the overlay hostage to the disk restore. Race it
           // against a short budget: if history lands fast (common case) the
@@ -1149,7 +1160,7 @@ export default function QueenDM() {
           setSessionId(sid);
           setQueenReady(true);
 
-          if (selectedSessionParam !== sid) {
+          if (selectedSessionParam !== sid && !cancelled) {
             setSearchParams({ session: sid }, { replace: true });
           }
         } else {
@@ -1178,7 +1189,7 @@ export default function QueenDM() {
           setSessionId(sid);
           setQueenReady(true);
 
-          if (isBootstrap) {
+          if (isBootstrap && !cancelled) {
             // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
             // this session instead of creating another new one.
             setSearchParams({ session: sid }, { replace: true });
@@ -1201,7 +1212,7 @@ export default function QueenDM() {
             }
           }
 
-          if (!isBootstrap && selectedSessionParam && selectedSessionParam !== sid) {
+          if (!isBootstrap && selectedSessionParam && selectedSessionParam !== sid && !cancelled) {
             setSearchParams({ session: sid }, { replace: true });
           }
         }
@@ -1639,11 +1650,13 @@ export default function QueenDM() {
           }
           return;
         }
-        // Snapshot is a *seed* for the explicit signals (active is
-        // derived; isStreaming and awaitingInput mirror what the
-        // server already knows). Only flip these ON from positive
-        // signals; live events clear them on the way out so we
-        // don't need the snapshot's help for that.
+        // Snapshot is authoritative in BOTH directions. The old
+        // "only flip ON from positive signals" stance assumed live
+        // events would always clear isStreaming on the way out — but
+        // the clearing events (llm_turn_complete etc.) could be
+        // dropped under backpressure, and every reconnect then
+        // re-seeded isStreaming=true with nothing ever clearing it:
+        // the composer queued messages forever until a page refresh.
         setQueenReady(true);
         // "tool" busy_reason means a tool from an in-flight LLM turn is
         // still running — the queen is still mid-LLM-loop, so the typing
@@ -1651,6 +1664,11 @@ export default function QueenDM() {
         // !awaiting_input) qualify; null means idle.
         if (d.queen_busy_reason === "llm" || d.queen_busy_reason === "tool") {
           setIsStreaming(true);
+        } else {
+          // Server says idle — reconcile the stuck-streaming case and
+          // deliver anything the closed gate accumulated.
+          setIsStreaming(false);
+          flushNextPendingRef.current?.();
         }
         // The in-flight tool surface is the inline tool_status pill
         // (one per tool_use_id, deduped across replay paths). The SSE
@@ -1786,6 +1804,15 @@ export default function QueenDM() {
 
         case "client_output_delta":
         case "llm_text_delta": {
+          for (const msg of emittedMessages) upsertMessage(msg);
+          setIsStreaming(true);
+          break;
+        }
+
+        case "llm_reasoning_delta":
+        case "client_reasoning": {
+          // Live thinking bubble — the point is feedback DURING the silent
+          // reasoning phase, so these must upsert live, not only on replay.
           for (const msg of emittedMessages) upsertMessage(msg);
           setIsStreaming(true);
           break;
@@ -2248,8 +2275,10 @@ export default function QueenDM() {
   // Core backend send — used both for immediate sends and for Steer /
   // auto-flush paths out of the pending queue.
   const sendToBackend = useCallback(
-    (text: string, images?: ImageContent[], displayMessage?: string) => {
-      if (!sessionId) return;
+    (text: string, images?: ImageContent[], displayMessage?: string): boolean => {
+      // `false` = not accepted — the pending queue keeps its entry and
+      // retries on the next flush instead of destroying the message.
+      if (!sessionId) return false;
       // Flip isStreaming optimistically so the typing dots / message
       // spinner show the instant the user sends, instead of waiting
       // for the first llm_text_delta (which can lag by a second or
@@ -2262,6 +2291,7 @@ export default function QueenDM() {
         console.error("[queen-dm] chat failed:", err);
         setIsStreaming(false);
       });
+      return true;
     },
     [sessionId],
   );
@@ -2280,6 +2310,49 @@ export default function QueenDM() {
       queenAboutToResumeRef.current = true;
     }, []),
   });
+
+  // ── Stall watchdog ─────────────────────────────────────────────────
+  // Self-heal for lost gate events: isStreaming is cleared only by SSE
+  // events that can be dropped (backpressure) or never arrive (silently
+  // dead TCP). If we look busy but nothing has arrived for 20s, ask the
+  // server for its authoritative snapshot and reconcile — clearing the
+  // gate and flushing any queued messages instead of waiting for a
+  // manual page refresh.
+  const lastEventAtRef = useRef(lastEventAt);
+  lastEventAtRef.current = lastEventAt;
+  const watchdogBusyRef = useRef(false);
+  useEffect(() => {
+    if (!sessionId || !isStreaming) return;
+    const iv = setInterval(async () => {
+      if (Date.now() - lastEventAtRef.current < 20_000) return;
+      if (watchdogBusyRef.current) return;
+      watchdogBusyRef.current = true;
+      try {
+        const snap = await api.get<{ queen_busy_reason?: string | null }>(
+          `/sessions/${sessionId}/snapshot`,
+        );
+        const busy =
+          snap.queen_busy_reason === "llm" || snap.queen_busy_reason === "tool";
+        if (!busy) {
+          console.warn(
+            "[queen-dm] stall watchdog: server idle but isStreaming stuck — reconciling",
+          );
+          setIsStreaming(false);
+          flushNextPendingRef.current?.();
+        } else {
+          // Server really is busy; the stream is just quiet. Reset the
+          // clock so we don't hammer the endpoint every 5s.
+          setLastEventAt(Date.now());
+        }
+      } catch {
+        // 404 (session being recycled) / transient network — leave state
+        // alone; the session-gone path handles real disappearance.
+      } finally {
+        watchdogBusyRef.current = false;
+      }
+    }, 5_000);
+    return () => clearInterval(iv);
+  }, [sessionId, isStreaming]);
 
   // Reset the queue whenever we navigate to a different queen. The hook
   // outlives the route change (same component instance), so without this,
@@ -2538,14 +2611,15 @@ export default function QueenDM() {
       }));
   }, [historySessions, sessionId]);
 
-  // Withhold the history timeline until the active session has fully
-  // restored (`loading` clears in the bootstrap effect's `finally`, once
-  // `restoreMessages` has resolved with ALL of the current session's
-  // messages). Otherwise, while `messages` is still empty, ChatPanel's
-  // auto-fill sees `hiddenOlderCount === 0` and cascades straight into
-  // loading OLDER sessions — so a days-old session's messages render
-  // before today's session has finished loading.
-  const historyTimelineForPanel = loading ? undefined : historyByDay;
+  // Sessions are PARALLEL conversations — one queen can serve several
+  // concurrent chats (different counterparts, long-lived threads) — not a
+  // linear timeline. Rendering the other sessions as scrollback "previous
+  // sessions" above the active chat misreads them, so the inline timeline
+  // stays off; navigation lives in the header QueenSessionSwitcher.
+  // (`historyByDay` is intentionally unused now but kept computed so the
+  // grouping logic stays exercised for a future opt-in timeline.)
+  const historyTimelineForPanel = undefined;
+  void historyByDay;
 
   // Prior sessions of this queen, newest first, for the Action Plan's
   // "Previous sessions" fold. After a session fork the just-left session
@@ -2649,6 +2723,14 @@ export default function QueenDM() {
           lastEventAt={lastEventAt}
           headerAction={
             <div className="flex items-center gap-1.5">
+              <QueenSessionSwitcher
+                sessions={historySessions}
+                currentSessionId={sessionId}
+                loading={historyLoading}
+                creatingNew={creatingNewSession}
+                onSelect={(sid) => setSearchParams({ session: sid })}
+                onCreateNew={handleCreateNewSession}
+              />
               <button
                 onClick={() => setActionPlanOpen((open) => !open)}
                 disabled={!sessionId}

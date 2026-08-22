@@ -16,7 +16,6 @@ import {
   Twitter,
   Hexagon,
 } from "lucide-react";
-import type { Template } from "@/types/colony";
 
 /** Agent slug → queen persona mapping. */
 export const QUEEN_REGISTRY: Record<
@@ -227,42 +226,3 @@ export function sortQueenProfiles<T extends { id: string }>(profiles: T[]): T[] 
   return orderQueens(profiles);
 }
 
-/** Pre-defined templates for the home page */
-export const TEMPLATES: Template[] = [
-  {
-    id: "reddit-engagement",
-    title: "Reddit Engagement Bot",
-    description:
-      "Monitor subreddits and auto-draft contextual replies that mention your...",
-    category: "Marketing & Growth",
-    icon: "Globe",
-    agentPath: "examples/reddit_engagement",
-  },
-  {
-    id: "competitive-intel",
-    title: "Competitive Intelligence",
-    description:
-      "Track HackerNews & Product Hunt for competitors and auto-generate comparis...",
-    category: "Operations & Analytics",
-    icon: "Search",
-    agentPath: "examples/competitive_intel_agent",
-  },
-  {
-    id: "outbound-sales",
-    title: "Outbound Sales Pipeline",
-    description:
-      "Enrich target accounts, generate personalized scripts, and automate...",
-    category: "Sales & Biz Dev",
-    icon: "MessageSquare",
-    agentPath: "examples/sdr_agent",
-  },
-  {
-    id: "devops-incident",
-    title: "DevOps Incident Commander",
-    description:
-      "Auto-triage P1 alerts, create Slack war rooms, and pull relevant runbooks instantly.",
-    category: "Engineering & DevOps",
-    icon: "Terminal",
-    agentPath: "examples/devops_incident",
-  },
-];

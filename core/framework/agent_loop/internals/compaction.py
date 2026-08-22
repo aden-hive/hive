@@ -28,8 +28,19 @@ from framework.orchestrator.node import NodeContext
 logger = logging.getLogger(__name__)
 
 # Limits for LLM compaction
-LLM_COMPACT_CHAR_LIMIT: int = 240_000
 LLM_COMPACT_MAX_DEPTH: int = 10
+
+
+def llm_compact_char_limit(max_context_tokens: int) -> int:
+    """Input-size ceiling (chars) for one compaction-summary call.
+
+    Derived from the model window instead of a constant: the historic
+    240_000 literal was 180k * 4/3 — ~45% of the window at the chars/3
+    token estimate — and silently overflowed smaller windows (and CJK
+    text, where chars/token is closer to 1). Ratio preserved; the floor
+    keeps tiny windows from splitting into confetti.
+    """
+    return max(20_000, (max_context_tokens * 4) // 3)
 # Max output tokens for a single compaction summary call. A summary must be a
 # small fraction of the window — using ``max_context_tokens // 2`` (e.g. 90k on a
 # 180k window) lets the model emit a "summary" nearly as large as the input, which
@@ -311,7 +322,7 @@ async def compact(
     *,
     config: LoopConfig,
     event_bus: EventBus | None,
-    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    char_limit: int | None = None,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
 ) -> None:
     """Run the full compaction pipeline if conversation needs compaction.
@@ -528,14 +539,14 @@ async def llm_compact(
     accumulator: OutputAccumulator | None = None,
     _depth: int = 0,
     *,
-    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    char_limit: int | None = None,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
 ) -> str:
     """Summarise *messages* with LLM, splitting recursively if too large.
 
-    If the formatted text exceeds ``LLM_COMPACT_CHAR_LIMIT`` or the LLM
+    If the formatted text exceeds the window-derived char limit or the LLM
     rejects the call with a context-length error, the messages are split
     in half and each half is summarised independently.  Tool history is
     appended once at the top-level call (``_depth == 0``).
@@ -550,6 +561,8 @@ async def llm_compact(
 
     if _depth > max_depth:
         raise RuntimeError(f"LLM compaction recursion limit ({max_depth})")
+    if char_limit is None:
+        char_limit = llm_compact_char_limit(max_context_tokens)
 
     # Strip images before summarisation to avoid wasting tokens
     if _depth == 0:
@@ -647,12 +660,14 @@ async def _llm_compact_split(
     accumulator: OutputAccumulator | None,
     _depth: int,
     *,
-    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    char_limit: int | None = None,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
 ) -> str:
     """Split messages in half and summarise each half independently."""
+    if char_limit is None:
+        char_limit = llm_compact_char_limit(max_context_tokens)
     mid = max(1, len(messages) // 2)
     s1 = await llm_compact(
         ctx,

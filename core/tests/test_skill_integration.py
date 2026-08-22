@@ -1,11 +1,33 @@
 """Integration tests for the skill system — prompt composition and backward compatibility."""
 
-from framework.orchestrator.prompt_composer import compose_system_prompt
+from framework.orchestrator.prompting import NodePromptSpec, build_system_prompt
 from framework.skills.catalog import SkillCatalog
 from framework.skills.config import SkillsConfig
 from framework.skills.defaults import DefaultSkillManager
 from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 from framework.skills.parser import ParsedSkill
+
+
+def _compose(
+    identity_prompt: str | None = None,
+    focus_prompt: str | None = None,
+    narrative: str | None = None,
+    accounts_prompt: str | None = None,
+    skills_catalog_prompt: str | None = None,
+    protocols_prompt: str | None = None,
+) -> str:
+    # NodePromptSpec fields are non-optional strings; callers here pass None
+    # for "section absent", so coerce before building.
+    return build_system_prompt(
+        NodePromptSpec(
+            identity_prompt=identity_prompt or "",
+            focus_prompt=focus_prompt or "",
+            narrative=narrative or "",
+            accounts_prompt=accounts_prompt or "",
+            skills_catalog_prompt=skills_catalog_prompt or "",
+            protocols_prompt=protocols_prompt or "",
+        )
+    )
 
 
 def _make_skill(
@@ -27,11 +49,11 @@ def _make_skill(
 
 
 class TestPromptComposition:
-    """Test that skill prompts integrate correctly with compose_system_prompt."""
+    """Test that skill prompts integrate correctly with build_system_prompt."""
 
     def test_backward_compat_no_skill_params(self):
-        """compose_system_prompt works without skill params (backward compat)."""
-        prompt = compose_system_prompt(
+        """Prompt builds without skill params (backward compat)."""
+        prompt = _compose(
             identity_prompt="You are a helpful agent.",
             focus_prompt="Focus on the task.",
         )
@@ -45,7 +67,7 @@ class TestPromptComposition:
         catalog = SkillCatalog([_make_skill(source_scope="project")])
         catalog_prompt = catalog.to_prompt()
 
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="You are an agent.",
             focus_prompt=None,
             skills_catalog_prompt=catalog_prompt,
@@ -58,7 +80,7 @@ class TestPromptComposition:
         manager.load()
         protocols_prompt = manager.build_protocols_prompt()
 
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="You are an agent.",
             focus_prompt=None,
             protocols_prompt=protocols_prompt,
@@ -69,7 +91,7 @@ class TestPromptComposition:
         """Verify the three-layer onion ordering with all sections present."""
         catalog = SkillCatalog([_make_skill(source_scope="project")])
 
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="IDENTITY_SECTION",
             focus_prompt="FOCUS_SECTION",
             narrative="NARRATIVE_SECTION",
@@ -94,7 +116,7 @@ class TestPromptComposition:
 
     def test_none_skill_prompts_excluded(self):
         """None values for skill prompts should not add content."""
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="Hello",
             focus_prompt=None,
             skills_catalog_prompt=None,
@@ -105,7 +127,7 @@ class TestPromptComposition:
 
     def test_empty_skill_prompts_excluded(self):
         """Empty string skill prompts should not add content."""
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="Hello",
             focus_prompt=None,
             skills_catalog_prompt="",
@@ -175,7 +197,7 @@ class TestEndToEndPipeline:
         protocols_prompt = manager.build_protocols_prompt()
 
         # Compose
-        prompt = compose_system_prompt(
+        prompt = _compose(
             identity_prompt="Agent identity.",
             focus_prompt=None,
             skills_catalog_prompt=catalog_prompt,

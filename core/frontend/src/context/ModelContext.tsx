@@ -37,6 +37,12 @@ interface ModelContextValue {
   currentModel: string;
   hasApiKey: boolean;
   loading: boolean;
+  /** Custom OpenAI-compatible endpoint from configuration.json, when set.
+   * Non-null means the active config points somewhere the hardcoded
+   * provider list doesn't know about — the UI surfaces it as its own
+   * selectable entry. */
+  apiBase: string | null;
+  apiKeyEnvVar: string | null;
 
   // Which providers have keys stored (env var or credential store)
   connectedProviders: Set<string>;
@@ -51,6 +57,8 @@ interface ModelContextValue {
 
   // Actions
   setModel: (provider: string, model: string) => Promise<void>;
+  /** Switch models on the config's own custom endpoint (api_base kept). */
+  setCustomModel: (model: string) => Promise<void>;
   activateSubscription: (subscriptionId: string) => Promise<void>;
   saveProviderKey: (providerId: string, apiKey: string) => Promise<void>;
   removeProviderKey: (providerId: string) => Promise<void>;
@@ -64,6 +72,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [currentModel, setCurrentModel] = useState("");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [apiBase, setApiBase] = useState<string | null>(null);
+  const [apiKeyEnvVar, setApiKeyEnvVar] = useState<string | null>(null);
   const [connectedProviders, setConnectedProviders] = useState<Set<string>>(new Set());
   const [availableModels, setAvailableModels] = useState<Record<string, ModelOption[]>>({});
   const [subscriptions, setSubscriptions] = useState<SubscriptionInfo[]>([]);
@@ -80,6 +90,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       setCurrentProvider(llmConfig.provider);
       setCurrentModel(llmConfig.model);
       setHasApiKey(llmConfig.has_api_key);
+      setApiBase(llmConfig.api_base ?? null);
+      setApiKeyEnvVar(llmConfig.api_key_env_var ?? null);
       setAvailableModels(modelsData.models);
 
       // Backend checks both env vars and credential store for all providers
@@ -100,6 +112,15 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
+  // configuration.json is a hand-editable file and the backend reads it
+  // fresh per request — the UI must reflect out-of-band edits too. Refetch
+  // whenever the window regains focus (the edit-file-then-switch-back flow).
+  useEffect(() => {
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
   const setModel = useCallback(
     async (provider: string, model: string) => {
       const result = await configApi.setLLMConfig(provider, model);
@@ -110,6 +131,14 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const setCustomModel = useCallback(async (model: string) => {
+    const result = await configApi.setLLMConfigCustom(model);
+    setCurrentProvider(result.provider);
+    setCurrentModel(result.model);
+    setHasApiKey(result.has_api_key);
+    setActiveSubscription(result.active_subscription);
+  }, []);
 
   const activateSubscriptionFn = useCallback(
     async (subscriptionId: string) => {
@@ -151,12 +180,15 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         currentModel,
         hasApiKey,
         loading,
+        apiBase,
+        apiKeyEnvVar,
         connectedProviders,
         subscriptions,
         detectedSubscriptions,
         activeSubscription,
         availableModels,
         setModel,
+        setCustomModel,
         activateSubscription: activateSubscriptionFn,
         saveProviderKey,
         removeProviderKey,

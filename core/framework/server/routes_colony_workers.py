@@ -1291,7 +1291,17 @@ async def handle_global_crm_status(request: web.Request) -> web.Response:
     and the gate treats that as "let the CRM page show its own sign-in state",
     rather than dropping a signed-out user into the setup flow.
     """
-    from framework.crm import client as crm_client, errors as crm_errors
+    # The CRM package is optional (desktop-only); without it this build
+    # simply has no CRM rather than a 500. 501 — NOT 404, which this
+    # handler already maps to "team has no CRM yet" and would drop the
+    # user into a setup flow this build cannot run.
+    try:
+        from framework.crm import client as crm_client, errors as crm_errors
+    except ImportError:
+        return web.json_response(
+            {"error": "CRM is not available in this build", "code": "crm_unavailable"},
+            status=501,
+        )
 
     try:
         result = await asyncio.to_thread(crm_client.setup_status)

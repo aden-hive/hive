@@ -773,6 +773,26 @@ describe("replayEventsToMessages", () => {
     expect(sseRow).toBeDefined();
     expect(diskRow!.id).toBe(sseRow!.id);
   });
+
+  it("streaming reasoning deltas then the final block upsert one reasoning bubble", () => {
+    const base = {
+      stream_id: "queen",
+      node_id: "queen",
+      execution_id: "session-1",
+    };
+    const restored = replayEventsToMessages(
+      [
+        makeEvent({ ...base, type: "llm_reasoning_delta", timestamp: "2026-04-20T12:00:00.000Z", data: { content: "Let me", snapshot: "Let me", iteration: 0 } }),
+        makeEvent({ ...base, type: "llm_reasoning_delta", timestamp: "2026-04-20T12:00:01.000Z", data: { content: " plan.", snapshot: "Let me plan.", iteration: 0 } }),
+        makeEvent({ ...base, type: "client_reasoning", timestamp: "2026-04-20T12:00:02.000Z", data: { reasoning: "Let me plan. Done.", iteration: 0 } }),
+      ],
+      "queen-dm",
+      "Alexandra",
+    );
+    const reasoning = restored.filter((m) => m.type === "reasoning");
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0].content).toBe("Let me plan. Done.");
+  });
 });
 
 // ---------------------------------------------------------------------------

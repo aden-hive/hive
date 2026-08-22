@@ -8,8 +8,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
-import { isQueenDecommissioned, useMe, useQueenDecommission, useSetQueenLead, useSetQueenPosition, useSetQueenPositions, useResetQueenPositions } from "@/lib/me";
+import { activateQueen, isQueenDecommissioned, useMe, useQueenDecommission, useSetQueenLead, useSetQueenPosition, useSetQueenPositions, useResetQueenPositions } from "@/lib/me";
 import { agentsApi } from "@/api/agents";
+import { queensApi } from "@/api/queens";
 import type { QueenProfileSummary, Colony } from "@/types/colony";
 import QueenProfilePanel from "@/components/QueenProfilePanel";
 import QueenPortraitGlyph from "@/components/QueenPortraitGlyph";
@@ -446,12 +447,153 @@ function FunctionGroup({
   );
 }
 
+/* ── Custom queens (user-created, outside the preset catalog) ────────── */
+
+function CustomQueenRow({ queen }: { queen: QueenProfileSummary }) {
+  const navigate = useNavigate();
+  const { isDecommissioned, setDecommissioned, saving } =
+    useQueenDecommission(queen.id);
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-xs font-semibold text-foreground truncate">
+          {queen.name || queen.id}
+        </div>
+        <div className="text-[10px] text-muted-foreground truncate">
+          {queen.title || queen.id}
+        </div>
+      </div>
+      <div className="ml-auto flex items-center gap-2">
+        {isDecommissioned ? (
+          <>
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground rounded bg-muted px-1.5 py-0.5">
+              Decommissioned
+            </span>
+            <button
+              onClick={() => void setDecommissioned(false)}
+              disabled={saving}
+              className="rounded-md border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+            >
+              {saving ? "…" : "Re-enable"}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => navigate(`/queen/${queen.id}`)}
+            className="rounded-md border border-border/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/30"
+          >
+            Open DM
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewQueenDialog({ onClose }: { onClose: () => void }) {
+  const { refresh } = useColony();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [persona, setPersona] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { queen } = await queensApi.createQueen({
+        name: name.trim(),
+        title: title.trim() || undefined,
+        persona: persona.trim() || undefined,
+      });
+      // Active immediately — a queen created then hidden by the default
+      // roster filter would look like the creation silently failed.
+      activateQueen(queen.id);
+      refresh();
+      onClose();
+      navigate(`/queen/${queen.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setSaving(false);
+    }
+  };
+  const inputCls =
+    "w-full mb-3 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50";
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onMouseDown={onClose}
+    >
+      <div
+        className="w-[26rem] max-w-[92vw] rounded-xl border border-border/60 bg-card p-5 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="text-sm font-semibold text-foreground mb-3">
+          New Queen
+        </div>
+        <label className="block text-[11px] text-muted-foreground mb-1">
+          Name *
+        </label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+          className={inputCls}
+          placeholder="Display name"
+        />
+        <label className="block text-[11px] text-muted-foreground mb-1">
+          Title
+        </label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className={inputCls}
+          placeholder="Role / one-line intro"
+        />
+        <label className="block text-[11px] text-muted-foreground mb-1">
+          Persona — free text, becomes her core traits
+        </label>
+        <textarea
+          value={persona}
+          onChange={(e) => setPersona(e.target.value)}
+          rows={4}
+          className={inputCls + " resize-y"}
+          placeholder="Voice, temperament, duties…"
+        />
+        {error && (
+          <div className="mb-3 text-[11px] text-red-500">{error}</div>
+        )}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void submit()}
+            disabled={!name.trim() || saving}
+            className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+          >
+            {saving ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Leader catalog grouped by function ──────────────────────────────── */
 
 function LeaderCatalog() {
   const { me } = useMe();
   const { refresh: refreshColony, queenProfiles } = useColony();
   const { setLead, savingQueenId } = useSetQueenLead();
+  const [newQueenOpen, setNewQueenOpen] = useState(false);
+  // User-created queens live outside the preset function slots.
+  const customQueens = queenProfiles.filter((q) => q.custom);
   const personas = allPersonaSummaries(QUEEN_DISPLAY_ORDER);
   const groups: { functionId: string; personas: PersonaSummary[] }[] = [];
   for (const p of personas) {
@@ -503,6 +645,34 @@ function LeaderCatalog() {
           />
         );
       })}
+
+      {/* Custom queens — user-created, no preset function slot */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-semibold text-foreground/80">
+            Custom
+          </span>
+          <button
+            onClick={() => setNewQueenOpen(true)}
+            className="rounded-md border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
+          >
+            + New Queen
+          </button>
+        </div>
+        {customQueens.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {customQueens.map((q) => (
+              <CustomQueenRow key={q.id} queen={q} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] text-muted-foreground">
+            No custom queens yet — create one from scratch.
+          </div>
+        )}
+      </div>
+
+      {newQueenOpen && <NewQueenDialog onClose={() => setNewQueenOpen(false)} />}
     </div>
   );
 }

@@ -1488,32 +1488,42 @@ class SessionManager:
                 )
             await asyncio.sleep(0.5)
 
-        iteration_offset = 0
         events_path = queen_dir / "events.jsonl"
-        try:
-            if events_path.exists():
-                max_iter = -1
-                with open(events_path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            evt = json.loads(line)
-                            it = evt.get("data", {}).get("iteration")
-                            if isinstance(it, int) and it > max_iter:
-                                max_iter = it
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-                if max_iter >= 0:
-                    iteration_offset = max_iter + 1
-                    logger.info(
-                        "Session '%s' resuming with iteration_offset=%d (from events.jsonl max)",
-                        session.id,
-                        iteration_offset,
-                    )
-        except OSError:
-            pass
+
+        def _scan_iteration_offset() -> int:
+            """Full-file scan for max(iteration). Runs in a worker thread:
+            imported/long-lived sessions carry events.jsonl files of tens
+            of MB, and parsing them on the event loop froze the whole
+            server (every SSE stream and request) for each session open."""
+            offset = 0
+            try:
+                if events_path.exists():
+                    max_iter = -1
+                    with open(events_path, encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                evt = json.loads(line)
+                                it = evt.get("data", {}).get("iteration")
+                                if isinstance(it, int) and it > max_iter:
+                                    max_iter = it
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                    if max_iter >= 0:
+                        offset = max_iter + 1
+            except OSError:
+                pass
+            return offset
+
+        iteration_offset = await asyncio.to_thread(_scan_iteration_offset)
+        if iteration_offset > 0:
+            logger.info(
+                "Session '%s' resuming with iteration_offset=%d (from events.jsonl max)",
+                session.id,
+                iteration_offset,
+            )
         session.event_bus.set_session_log(events_path, iteration_offset=iteration_offset)
 
         logger.debug("[_start_queen] Calling create_queen...")

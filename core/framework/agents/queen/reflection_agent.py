@@ -37,6 +37,7 @@ from framework.agents.queen.queen_memory_v2 import (
     parse_frontmatter,
     scan_memory_files,
 )
+from framework.config import get_aux_max_tokens, get_hive_config
 from framework.llm.provider import LLMResponse, Tool
 from framework.tracker.llm_debug_logger import log_llm_turn
 
@@ -355,7 +356,15 @@ async def _reflection_loop(
                 messages=messages,
                 system=system,
                 tools=_REFLECTION_TOOLS,
-                max_tokens=2048,
+                # Follow the configured LLM budget instead of a hardcoded
+                # 2048: hybrid reasoners (e.g. deepseek-v4) spend "thinking"
+                # tokens from the same budget, and 2048 can be exhausted
+                # before any visible output (finish_reason=length, empty
+                # response, reflection lost). Floor keeps small configs sane.
+                max_tokens=max(
+                    int(get_hive_config().get("llm", {}).get("max_tokens") or 0),
+                    get_aux_max_tokens(),
+                ),
             )
         except asyncio.CancelledError:
             logger.warning("reflect: LLM call cancelled (task cancelled)")

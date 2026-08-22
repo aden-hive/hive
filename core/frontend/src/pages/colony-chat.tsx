@@ -12,7 +12,7 @@ import type { AgentCredentialFormRequest } from "@/api/credentials";
 import { executionApi } from "@/api/execution";
 import { workersApi } from "@/api/workers";
 import { sessionsApi, colonySessionsApi } from "@/api/sessions";
-import { useMultiSSE } from "@/hooks/use-sse";
+import { type SseConnectionState, useMultiSSE } from "@/hooks/use-sse";
 import { usePendingQueue } from "@/hooks/use-pending-queue";
 import type { LiveSession, AgentEvent } from "@/api/types";
 import {
@@ -31,7 +31,7 @@ import {
   shouldUsePrefetchedColonyRestore,
 } from "@/lib/colony-session-restore";
 import { cronToLabel } from "@/lib/graphUtils";
-import { ApiError } from "@/api/client";
+import { api, ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
 import SessionReportAction from "@/components/SessionReportAction";
@@ -363,6 +363,10 @@ export default function ColonyChat() {
   // colony-chat feeds them here so the panel works on /colony routes too.
   const debug = useDebugState();
   const [lastEventAt, setLastEventAt] = useState<number>(() => Date.now());
+  // Stream connectivity surfaced to ChatPanel's liveness pill. The colony
+  // page previously passed no onConnectionState, so it could never even
+  // show "Reconnecting..." while its stream was down.
+  const [sseState, setSseState] = useState<SseConnectionState>("live");
   const [reminders, setReminders] = useState<
     {
       source: string;
@@ -644,7 +648,15 @@ export default function ColonyChat() {
       }
       return;
     }
-    if (!agentPath) return;
+    if (!agentPath) {
+      // This run is the latest (the token was just bumped) and it is
+      // exiting without owning the load — clear any `loading: true` a
+      // superseded run left behind, or the "Connecting to agent..."
+      // overlay stays up forever with `ready: false` silently gating
+      // every send.
+      updateState({ loading: false });
+      return;
+    }
     loadingRef.current = true;
     updateState({ loading: true, error: null, ready: false, sessionId: null });
 
@@ -1102,6 +1114,9 @@ export default function ColonyChat() {
         case "client_output_delta":
         case "client_input_received":
         case "client_input_requested":
+        // Live thinking bubble — must upsert live, not only on disk replay.
+        case "llm_reasoning_delta":
+        case "client_reasoning":
         case "llm_text_delta": {
           // Defer the queen's ask_user bubble so it doesn't render alongside
           // the popup widget. Stash on request, commit on receive — see
@@ -1142,7 +1157,10 @@ export default function ColonyChat() {
 
           if (
             isQueen &&
-            (event.type === "llm_text_delta" || event.type === "client_output_delta")
+            (event.type === "llm_text_delta" ||
+              event.type === "client_output_delta" ||
+              event.type === "llm_reasoning_delta" ||
+              event.type === "client_reasoning")
           ) {
             // isStreaming narrow contract (matches queen-dm): true while the
             // QUEEN is emitting text tokens. Gated on isQueen because workers
@@ -1702,10 +1720,17 @@ export default function ColonyChat() {
                 : null,
             interruptCause: activity === "interrupted" ? (d.interrupt_cause ?? null) : null,
             awaitingInput: activity === "awaiting_user",
-            ...(activity === "awaiting_user" || activity === "interrupted"
-              ? { isStreaming: false }
-              : {}),
+            // Snapshot is authoritative in both directions: any state
+            // that is not "executing" clears isStreaming. Colony's only
+            // live clearer (loop_state_changed) is droppable under
+            // backpressure, and a reconnect that couldn't clear the flag
+            // left the composer queueing messages until a page refresh.
+            ...(activity !== "executing" ? { isStreaming: false } : {}),
           });
+          if (activity !== "executing") {
+            // Deliver anything the closed gate accumulated.
+            flushNextPendingRef.current?.();
+          }
           break;
         }
 
@@ -1726,6 +1751,42 @@ export default function ColonyChat() {
     return {};
   }, [agentPath, agentState.sessionId, agentState.ready]);
 
+  // ── Stall watchdog ─────────────────────────────────────────────────
+  // Mirror of queen-dm's: colony's isStreaming has a single SSE clearer
+  // (loop_state_changed) that can be dropped under backpressure. Reconcile
+  // against the server snapshot after 20s of streaming silence.
+  const lastEventAtRef = useRef(lastEventAt);
+  lastEventAtRef.current = lastEventAt;
+  const watchdogBusyRef = useRef(false);
+  useEffect(() => {
+    const sid = agentState.sessionId;
+    if (!sid || !(agentState.isStreaming ?? false)) return;
+    const iv = setInterval(async () => {
+      if (Date.now() - lastEventAtRef.current < 20_000) return;
+      if (watchdogBusyRef.current) return;
+      watchdogBusyRef.current = true;
+      try {
+        const snap = await api.get<{ activity?: string | null }>(
+          `/sessions/${sid}/snapshot`,
+        );
+        if (snap.activity !== "executing") {
+          console.warn(
+            "[colony-chat] stall watchdog: server idle but isStreaming stuck — reconciling",
+          );
+          updateState({ isStreaming: false });
+          flushNextPendingRef.current?.();
+        } else {
+          setLastEventAt(Date.now());
+        }
+      } catch {
+        // transient / session recycling — leave state alone
+      } finally {
+        watchdogBusyRef.current = false;
+      }
+    }, 5_000);
+    return () => clearInterval(iv);
+  }, [agentState.sessionId, agentState.isStreaming, updateState]);
+
   // Auto-resume nonce. Bumped when SSE reports the session id is gone
   // (HTTP 404 on pre-open) so useMultiSSE re-mounts the SSE stream after
   // we've re-created the session in the runtime. See onSessionGone below
@@ -1736,6 +1797,10 @@ export default function ColonyChat() {
   useMultiSSE({
     sessions: sseSessions,
     onEvent: handleSSEEvent,
+    onConnectionState: (_agentType, state) => {
+      setSseState(state);
+      if (state === "live") setLastEventAt(Date.now());
+    },
     onSessionGone: (_agentType, goneSessionId) => {
       // Runtime lost this session (hive-serve restarted or supervisord
       // killed and restarted it). On-disk queen_dir is intact — we can
@@ -1884,9 +1949,20 @@ export default function ColonyChat() {
 
   // Core backend send — bypasses queue logic. Used both for the normal path
   // (agent idle) and for Steer / auto-flush paths.
+  // Returns whether the message was actually handed to the HTTP layer:
+  // callers (the pending queue in particular) must NOT treat a false return
+  // as sent. The old void signature silently swallowed messages whenever
+  // `ready` was false — the queue had already deleted its copy, so the
+  // user's text was destroyed while the bubble looked delivered.
   const sendToBackend = useCallback(
-    (text: string, images?: ImageContent[], displayMessage?: string) => {
-      if (!agentState.sessionId || !agentState.ready) return;
+    (text: string, images?: ImageContent[], displayMessage?: string): boolean => {
+      if (!agentState.sessionId || !agentState.ready) {
+        console.warn(
+          "[colony-chat] send deferred: session not ready",
+          { sessionId: agentState.sessionId, ready: agentState.ready },
+        );
+        return false;
+      }
       executionApi.chat(agentState.sessionId, text, images, displayMessage).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         upsertMessage({
@@ -1901,6 +1977,7 @@ export default function ColonyChat() {
         });
         updateState({ isStreaming: false });
       });
+      return true;
     },
     [agentPath, agentState.sessionId, agentState.ready, updateState, upsertMessage],
   );
@@ -2026,7 +2103,15 @@ export default function ColonyChat() {
       // Optimistic isStreaming — the next loop_state_changed will reconcile
       // activity moments later, but this closes the click→roundtrip window.
       updateState({ isStreaming: true });
-      sendToBackend(text, images, displayMessage);
+      if (!sendToBackend(text, images, displayMessage)) {
+        // Gate closed after all (load superseded / not ready) — keep the
+        // message queued instead of destroying it; the next flush retries.
+        updateState({ isStreaming: false });
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, queued: true } : m)),
+        );
+        enqueuePending(msgId, { text, images, displayMessage });
+      }
     },
     [
       agentPath,
@@ -2280,6 +2365,8 @@ export default function ColonyChat() {
               })
             }
             disabled={agentState.loading || !agentState.queenReady}
+            sseState={sseState}
+            lastEventAt={lastEventAt}
             queenPhase={agentState.queenPhase}
             queenTitle={queenInfo.role}
             pendingQuestions={agentState.awaitingInput ? agentState.pendingQuestions : null}

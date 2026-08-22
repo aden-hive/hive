@@ -201,6 +201,22 @@ export function useMe(): MeContextValue {
   );
 }
 
+/**
+ * Non-hook variant of `useQueenDecommission(id).setDecommissioned(false)` for
+ * flows that only learn the queen id at runtime — e.g. right after creating a
+ * custom queen, where a hook can't be called with the fresh id. Applies the
+ * same first-write hidden seed so the rest of the default-hidden set stays
+ * hidden.
+ */
+export function activateQueen(queenId: string): void {
+  const current = readQueensMap();
+  writeQueensMap({
+    ...current,
+    ...defaultHiddenSeed(getSnapshot(), queenId),
+    [queenId]: { ...(current[queenId] ?? {}), decommissioned: false },
+  });
+}
+
 /** Read + toggle a queen's decommissioned state (persisted locally). */
 export function useQueenDecommission(queenId: string) {
   const me = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

@@ -27,7 +27,13 @@ type LiveToolsResponse = {
 };
 
 export default function DebugPanel() {
-  const { events, replay } = useDebugState();
+  const { events, replay, setActive } = useDebugState();
+  // Tell the provider the panel is visible: the shared context only
+  // re-renders on SSE events while a panel instance is mounted.
+  useEffect(() => {
+    setActive(true);
+    return () => setActive(false);
+  }, [setActive]);
   const { rows, byQueen, byColony, connected: liveConnected } = useLiveSessions();
   const [globalEvents, setGlobalEvents] = useState<AgentEvent[]>([]);
   const [expanded, setExpanded] = useState<Record<Section, boolean>>({

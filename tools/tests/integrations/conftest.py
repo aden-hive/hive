@@ -36,7 +36,9 @@ INFRA_ONLY_CREDENTIAL_SPECS: set[str] = {"slack_app"}
 # Community-contributed tool variants that are not registered in the central
 # __init__.py and therefore don't need CredentialSpecs. The project has its
 # own registered equivalents (e.g., powerbi_tool, twitter_tool).
-UNREGISTERED_COMMUNITY_MODULES: set[str] = {"mssql_tool"}
+# Empty today — an unregistered module is dead weight, so prefer registering
+# or removing it over adding an exemption here.
+UNREGISTERED_COMMUNITY_MODULES: set[str] = set()
 
 # --- Tool Module Discovery ---
 

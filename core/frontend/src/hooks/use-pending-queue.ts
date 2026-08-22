@@ -13,12 +13,15 @@ interface QueuedPayload {
 }
 
 interface UsePendingQueueArgs {
-  /** Sends a message to the backend. Must handle its own errors. */
+  /** Sends a message to the backend. Must handle its own errors.
+   * Return `false` when the message was NOT accepted (gate closed —
+   * e.g. session not ready): the queue keeps the entry and retries on
+   * the next flush. `void`/`true` counts as accepted. */
   sendToBackend: (
     text: string,
     images?: ImageContent[],
     displayMessage?: string,
-  ) => void;
+  ) => boolean | void;
   /** Setter for the chat message list — used to flip/strip the `queued` flag. */
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   /** Fires once per flush, before any message is sent. Typically sets
@@ -58,6 +61,13 @@ export function usePendingQueue({
     (messageId: string) => {
       const pending = queueRef.current.get(messageId);
       if (!pending) return;
+      // Send FIRST, dequeue only on acceptance. The old delete-then-send
+      // order destroyed the message whenever sendToBackend's gate was
+      // closed (colony `ready === false`): the queue entry was gone, the
+      // bubble's queued ring stripped, and nothing had been posted.
+      if (sendToBackend(pending.text, pending.images, pending.displayMessage) === false) {
+        return; // still queued — a later flush retries
+      }
       queueRef.current.delete(messageId);
       // Re-stamp createdAt to the actual send moment. A queued bubble was
       // stamped at *typing* time; the backend injects it at the next
@@ -73,7 +83,6 @@ export function usePendingQueue({
         ),
       );
       onFlushStart?.();
-      sendToBackend(pending.text, pending.images, pending.displayMessage);
     },
     [sendToBackend, setMessages, onFlushStart],
   );
@@ -102,6 +111,11 @@ export function usePendingQueue({
     const first = queueRef.current.entries().next();
     if (first.done) return;
     const [firstId, payload] = first.value;
+    // Send FIRST, dequeue only on acceptance — see steer() for why the
+    // old delete-then-send order destroyed messages.
+    if (sendToBackend(payload.text, payload.images, payload.displayMessage) === false) {
+      return; // still queued — the next flush trigger retries
+    }
     queueRef.current.delete(firstId);
     // Re-stamp to send time — same reasoning as steer(): the message
     // enters the conversation now (at this turn boundary), not when typed.
@@ -111,7 +125,6 @@ export function usePendingQueue({
       ),
     );
     onFlushStart?.();
-    sendToBackend(payload.text, payload.images, payload.displayMessage);
   }, [sendToBackend, setMessages, onFlushStart]);
 
   // Ref to the latest flushNext so SSE handlers captured with narrow deps

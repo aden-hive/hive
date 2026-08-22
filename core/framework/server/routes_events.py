@@ -31,6 +31,11 @@ DEFAULT_EVENT_TYPES = [
     # live streaming would leave the reply merged above the steer.
     EventType.CLIENT_INPUT_COMMITTED,
     EventType.LLM_TEXT_DELTA,
+    # Thinking-model feedback: throttled reasoning stream while the model is
+    # still silent, then the consolidated block. Without these a long native
+    # think (minutes on deepseek/glm) renders as a dead page.
+    EventType.LLM_REASONING_DELTA,
+    EventType.CLIENT_REASONING,
     EventType.TOOL_CALL_STARTED,
     EventType.TOOL_CALL_COMPLETED,
     EventType.EXECUTION_STARTED,
@@ -248,6 +253,15 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "credentials_required",
         "worker_graph_loaded",
         "queen_phase_changed",
+        # Gate keys: these are the ONLY events that clear the frontend's
+        # isStreaming flag and flush its pending-message queue. Dropping
+        # one under backpressure used to leave the composer stuck forever
+        # (messages queued client-side, never posted, "fixed" only by a
+        # page refresh). A visible disconnect + snapshot resync on
+        # queue-full beats a silent dropped state transition.
+        "llm_turn_complete",
+        "loop_state_changed",
+        "tool_call_completed",
     }
 
     client_disconnected = asyncio.Event()

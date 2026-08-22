@@ -53,16 +53,17 @@ export default function QueenSessionSwitcher({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // Only show today's sessions in the dropdown
+  // Parallel-conversation model: one queen can serve several concurrent
+  // chats (different counterparts, long-lived threads), so the dropdown
+  // spans ALL sessions — live ones first, then by most recent activity.
+  // A today-only filter would misread parallel sessions as "past" ones.
   const sorted = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
-    return [...sessions]
-      .filter((s) => s.created_at >= todayStart)
-      .sort((a, b) => {
-        if (a.live !== b.live) return a.live ? -1 : 1;
-        return b.created_at - a.created_at;
-      });
+    return [...sessions].sort((a, b) => {
+      if (a.live !== b.live) return a.live ? -1 : 1;
+      return (
+        (b.last_active_at ?? b.created_at) - (a.last_active_at ?? a.created_at)
+      );
+    });
   }, [sessions]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));

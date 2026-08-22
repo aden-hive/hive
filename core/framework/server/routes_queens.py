@@ -23,6 +23,7 @@ from aiohttp import web
 from framework.agents.queen.queen_profiles import (
     DEFAULT_QUEENS,
     _materialize_default_queen,
+    create_queen_profile,
     default_profile_persona,
     ensure_default_queens,
     list_queens,
@@ -119,6 +120,37 @@ async def handle_list_profiles(request: web.Request) -> web.Response:
     ensure_default_queens()
     queens = list_queens()
     return web.json_response({"queens": queens})
+
+
+async def handle_create_queen(request: web.Request) -> web.Response:
+    """POST /api/queen/create — create a custom queen from scratch.
+
+    Body: ``{"name": "...", "title"?: "...", "persona"?: "...", "queen_id"?: "..."}``.
+    ``queen_id`` is derived from the name when omitted. Returns 201 with the
+    new catalog entry (``custom: true``), 400 on validation errors, 409 when
+    the id is already taken (including built-in catalog ids).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "Body must be an object"}, status=400)
+    try:
+        entry = create_queen_profile(
+            name=str(body.get("name") or ""),
+            title=str(body.get("title") or ""),
+            persona=str(body.get("persona") or ""),
+            queen_id=str(body.get("queen_id") or ""),
+        )
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except FileExistsError as e:
+        return web.json_response(
+            {"error": f"queen id already exists: {e}"}, status=409
+        )
+    schedule_push()
+    return web.json_response({"queen": entry}, status=201)
 
 
 def _transform_profile_for_api(profile: dict) -> dict:
@@ -793,6 +825,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/queen/profiles", handle_list_profiles)
     app.router.add_get("/api/queen/{queen_id}/profile", handle_get_profile)
     app.router.add_patch("/api/queen/{queen_id}/profile", handle_update_profile)
+    app.router.add_post("/api/queen/create", handle_create_queen)
     app.router.add_post("/api/queen/initialize-preferences", handle_initialize_preferences)
     app.router.add_post("/api/queen/{queen_id}/avatar", handle_upload_avatar)
     app.router.add_get("/api/queen/{queen_id}/avatar", handle_get_avatar)

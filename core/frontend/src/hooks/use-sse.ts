@@ -111,12 +111,61 @@ interface UseGlobalEventsOptions {
   enabled?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Shared global stream. Browsers cap same-origin HTTP/1.1 connections at ~6
+// and every EventSource holds one for its whole life — with several
+// components each opening their own /events/global (AppLayout mounts two,
+// SentinelSection, ToolsEditor, DebugPanel), the pool exhausts and every
+// <img> / fetch / SSE-reconnect queues forever ("frozen until refresh").
+// One refcounted EventSource serves all useGlobalEvents instances instead:
+// the first listener opens it, the last listener out closes it.
+// (The Electron desktop app never had this problem: its SSE rides IPC to
+// the main process and bypasses the renderer's connection pool entirely.)
+// ---------------------------------------------------------------------------
+
+type GlobalEventListener = (event: AgentEvent) => void;
+const globalEventListeners = new Set<GlobalEventListener>();
+let globalStreamUnsub: (() => void) | null = null;
+let globalStreamOpening = false;
+
+function ensureGlobalStream(): void {
+  if (globalStreamUnsub || globalStreamOpening) return;
+  globalStreamOpening = true;
+  void subscribeSse("/events/global", {
+    onEvent: (_evt, data) => {
+      try {
+        const event: AgentEvent = JSON.parse(data);
+        if (!GLOBAL_EVENT_TYPES.has(event.type)) return;
+        // Snapshot: a listener may unsubscribe (or another mount) mid-loop.
+        for (const listener of [...globalEventListeners]) listener(event);
+      } catch {
+        // Ignore parse errors (keepalive comments)
+      }
+    },
+  }).then((unsub) => {
+    globalStreamOpening = false;
+    if (globalEventListeners.size === 0) {
+      // Everyone left while the subscription was being established.
+      unsub();
+      return;
+    }
+    globalStreamUnsub = unsub;
+  });
+}
+
+function releaseGlobalStream(): void {
+  if (globalEventListeners.size === 0 && globalStreamUnsub) {
+    globalStreamUnsub();
+    globalStreamUnsub = null;
+  }
+}
+
 /**
  * Subscribe to the process-wide global SSE channel
  * (`/events/global`). Used by the Tool Library and Integrations
  * pages to refetch silently when credentials connect/disconnect or
- * a sibling tab edits a queen's allowlist. Stays open for the
- * lifetime of the calling component.
+ * a sibling tab edits a queen's allowlist. All instances share ONE
+ * underlying EventSource (see above).
  */
 export function useGlobalEvents({
   eventTypes,
@@ -131,32 +180,17 @@ export function useGlobalEvents({
   useEffect(() => {
     if (!enabled) return;
 
-    let cancelled = false;
-    let localUnsub: (() => void) | null = null;
-
-    subscribeSse("/events/global", {
-      onEvent: (_evt, data) => {
-        try {
-          const event: AgentEvent = JSON.parse(data);
-          if (!GLOBAL_EVENT_TYPES.has(event.type)) return;
-          const filter = filterRef.current;
-          if (filter && !filter.has(event.type)) return;
-          onEventRef.current(event);
-        } catch {
-          // Ignore parse errors (keepalive comments)
-        }
-      },
-    }).then((unsub) => {
-      if (cancelled) {
-        unsub();
-        return;
-      }
-      localUnsub = unsub;
-    });
+    const listener: GlobalEventListener = (event) => {
+      const filter = filterRef.current;
+      if (filter && !filter.has(event.type)) return;
+      onEventRef.current(event);
+    };
+    globalEventListeners.add(listener);
+    ensureGlobalStream();
 
     return () => {
-      cancelled = true;
-      localUnsub?.();
+      globalEventListeners.delete(listener);
+      releaseGlobalStream();
     };
   }, [enabled]);
 }

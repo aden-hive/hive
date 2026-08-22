@@ -38,6 +38,7 @@ except ImportError:
     CustomLogger = object  # type: ignore[assignment, misc]
 
 from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
+from framework.config import get_aux_max_tokens, get_max_tokens
 from framework.llm.model_catalog import get_model_pricing
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
@@ -1835,12 +1836,18 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
-        """Generate a completion using LiteLLM."""
+        """Generate a completion using LiteLLM.
+
+        ``max_tokens=None`` resolves to ``llm.aux_max_tokens`` (config) so an
+        unspecified budget can't silently starve a thinking model.
+        """
+        if max_tokens is None:
+            max_tokens = get_aux_max_tokens()
         self._refresh_api_key()
         # Codex ChatGPT backend requires streaming — delegate to the unified
         # async streaming path which properly handles tool calls.
@@ -2120,7 +2127,7 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
@@ -2128,12 +2135,16 @@ class LiteLLMProvider(LLMProvider):
     ) -> LLMResponse:
         """Async version of complete(). Uses litellm.acompletion — non-blocking.
 
+        ``max_tokens=None`` resolves to ``llm.aux_max_tokens`` (config).
+
         ``system_dynamic_suffix`` is an optional per-turn tail. When set and
         the provider honors ``cache_control``, ``system`` is sent as the
         cached prefix and the suffix trails as an uncached second content
         block. Otherwise the two strings are concatenated into a single
         system message (legacy behavior).
         """
+        if max_tokens is None:
+            max_tokens = get_aux_max_tokens()
         self._refresh_api_key()
         # Codex ChatGPT backend requires streaming — route through stream() which
         # already handles Codex quirks and has proper tool call accumulation.
@@ -2856,12 +2867,14 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         system_dynamic_suffix: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a completion via litellm.acompletion(stream=True).
+
+        ``max_tokens=None`` resolves to ``llm.max_tokens`` via get_max_tokens().
 
         Yields StreamEvent objects as chunks arrive from the provider.
         Tool call arguments are accumulated across chunks and yielded as
@@ -2874,6 +2887,8 @@ class LiteLLMProvider(LLMProvider):
         ``system_dynamic_suffix`` is an optional per-turn tail. See
         ``acomplete`` docstring for the two-block split semantics.
         """
+        if max_tokens is None:
+            max_tokens = get_max_tokens()
         self._refresh_api_key()
         from framework.llm.stream_events import (
             FinishEvent,

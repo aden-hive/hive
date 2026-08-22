@@ -206,18 +206,7 @@ mcp_servers:
 
 Both approaches work. The JSON file takes precedence for backward compatibility.
 
-## Migration from Python agents
-
-Run the migration tool to convert existing agents:
-
-```bash
-uv run python -m framework.tools.migrate_agent exports/my_agent
-```
-
-This generates `agent.yaml` from the existing `agent.py` + `nodes/` + `config.py`.
-The original files are left untouched. Once verified, you can delete the Python files.
-
-## Files after migration
+## Agent directory layout
 
 ```
 my_agent/

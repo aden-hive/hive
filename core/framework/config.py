@@ -334,6 +334,8 @@ def get_vision_fallback_api_key() -> str | None:
     vision = get_hive_config().get("vision_fallback", {})
     if not vision:
         return get_api_key()
+    if vision.get("api_key"):
+        return vision["api_key"]
     api_key_env_var = vision.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
@@ -362,6 +364,11 @@ def get_worker_api_key() -> str | None:
     worker_llm = get_hive_config().get("worker_llm", {})
     if not worker_llm:
         return get_api_key()
+
+    # Literal key in the worker section (provider activation writes it).
+    literal = worker_llm.get("api_key")
+    if literal:
+        return literal
 
     # Worker-specific subscription / env var
     if worker_llm.get("use_claude_code_subscription"):
@@ -516,8 +523,15 @@ def get_worker_max_tokens() -> int:
     return get_max_tokens()
 
 
-def get_worker_max_context_tokens() -> int:
-    """Return max_context_tokens for the worker LLM, falling back to default."""
+def get_worker_max_context_tokens(fallback: int | None = None) -> int:
+    """Return max_context_tokens for the worker LLM, falling back to default.
+
+    ``fallback`` (when given) replaces the terminal default, letting a call
+    site keep its legacy literal while honoring explicit config first. In
+    fallback mode the QUEEN model's catalog window is deliberately NOT
+    consulted: a worker on an uncataloged local model must not inherit e.g.
+    an 872k opus window and never compact before its real 32k limit.
+    """
     worker_llm = get_hive_config().get("worker_llm", {})
     if worker_llm and "max_context_tokens" in worker_llm:
         return worker_llm["max_context_tokens"]
@@ -525,6 +539,11 @@ def get_worker_max_context_tokens() -> int:
         catalog = _catalog_limits_for(worker_llm)
         if catalog is not None:
             return catalog[1]
+    if fallback is not None:
+        llm = get_hive_config().get("llm", {})
+        if "max_context_tokens" in llm:
+            return llm["max_context_tokens"]
+        return fallback
     return get_max_context_tokens()
 
 
@@ -540,16 +559,51 @@ def get_max_tokens() -> int:
     return DEFAULT_MAX_TOKENS
 
 
-def get_max_context_tokens() -> int:
+def get_max_context_tokens(fallback: int = DEFAULT_MAX_CONTEXT_TOKENS) -> int:
     """Return the configured max_context_tokens, falling back to the model's
-    catalog entry, then DEFAULT_MAX_CONTEXT_TOKENS."""
+    catalog entry, then ``fallback``.
+
+    ``fallback`` lets a call site keep its legacy terminal default (e.g. the
+    queen loop's 180k) while still honoring an explicit config key or the
+    model catalog's real window.
+    """
     llm = get_hive_config().get("llm", {})
     if "max_context_tokens" in llm:
         return llm["max_context_tokens"]
     catalog = _catalog_limits_for(llm)
     if catalog is not None:
         return catalog[1]
-    return DEFAULT_MAX_CONTEXT_TOKENS
+    return fallback
+
+
+def get_aux_max_tokens() -> int:
+    """Output budget for small utility LLM calls (``llm.aux_max_tokens``).
+
+    Covers memory-recall selection, queen routing, sentinel/edge classifiers,
+    evaluators, and skill-test invocations. One shared knob instead of
+    per-site literals: thinking models spend the budget on hidden reasoning
+    before any visible output, so the historic tiny caps (150-2048) silently
+    starved these calls into empty responses.
+    """
+    llm = get_hive_config().get("llm", {})
+    if "aux_max_tokens" in llm:
+        return llm["aux_max_tokens"]
+    # Clamp to the main model's output cap: strict local servers (vLLM,
+    # llama.cpp) reject requests whose prompt + max_tokens exceed the model
+    # window, so a small configured llm.max_tokens must bound aux calls too.
+    return min(DEFAULT_MAX_TOKENS, get_max_tokens())
+
+
+def get_max_tool_result_chars(fallback: int = 30_000) -> int:
+    """Spillover threshold for tool results (``loop.max_tool_result_chars``).
+
+    ``fallback`` lets a call site keep a profile-supplied legacy value when
+    the config key is unset.
+    """
+    loop = get_hive_config().get("loop", {})
+    if "max_tool_result_chars" in loop:
+        return loop["max_tool_result_chars"]
+    return fallback
 
 
 def get_api_keys() -> list[str] | None:
@@ -606,6 +660,15 @@ def get_api_key() -> str | None:
 
     llm = get_hive_config().get("llm", {})
     provider = llm.get("provider", "")
+
+    # Literal key in configuration.json (written by provider activation in
+    # the UI). A key that travels WITH the endpoint config beats every
+    # ambient source — the whole point of a provider entry is "this base,
+    # this model, this key", independent of launch-shell env state.
+    literal = llm.get("api_key")
+    if literal:
+        logger.debug("[hive-auth] get_api_key -> llm.api_key fp=%s", _fp(literal))
+        return literal
 
     # Claude Code subscription: read OAuth token directly
     if llm.get("use_claude_code_subscription"):

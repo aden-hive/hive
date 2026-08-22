@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ExternalSkillSources from "@/components/ExternalSkillSources";
 import { useSearchParams } from "react-router-dom";
 import {
   Library,
@@ -310,6 +311,8 @@ function SkillsCatalog({ initialQueenId }: { initialQueenId?: string | null }) {
           <Upload className="w-3.5 h-3.5" /> Upload
         </button>
       </div>
+
+      <ExternalSkillSources onChanged={() => void reload()} />
 
       {context && (
         <div className="flex items-center gap-1 mb-4">

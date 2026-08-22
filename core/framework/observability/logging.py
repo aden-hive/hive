@@ -241,6 +241,32 @@ def configure_logging(
     root_logger.handlers.clear()
     root_logger.addHandler(stdout_handler)
     root_logger.addHandler(stderr_handler)
+
+    # Persistent diagnostics: without a file handler, every traceback and
+    # access line lives only in whichever console launched the process —
+    # server stalls and 500s then look "mysterious" because nothing
+    # survives to be inspected. HIVE_HOME/logs/hive-server.log, rotating,
+    # opt-out via HIVE_NO_FILE_LOG=1.
+    if not os.getenv("HIVE_NO_FILE_LOG"):
+        try:
+            from logging.handlers import RotatingFileHandler
+
+            from framework.config import HIVE_HOME
+
+            log_dir = HIVE_HOME / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                log_dir / "hive-server.log",
+                maxBytes=20 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+        except Exception:
+            # A broken log path must never take the server down.
+            pass
+
     root_logger.setLevel(level.upper())
 
     # Suppress noisy LiteLLM INFO logs (model/provider line + Provider List URL

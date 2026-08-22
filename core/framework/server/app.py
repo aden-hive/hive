@@ -302,31 +302,35 @@ async def error_middleware(request: web.Request, handler):
 
 @web.middleware
 async def access_log_middleware(request: web.Request, handler):
-    """Log ``METHOD path -> status`` for every request.
+    """Log ``METHOD path -> status (duration)`` for every request.
 
     The runtime otherwise records no HTTP access line, which makes
     client-reported failures (e.g. a download 404 raised in the Electron
     main process, invisible to the renderer's Network tab) impossible to
-    trace. Non-2xx responses are logged at WARNING so they stand out.
+    trace. Non-2xx responses and slow requests (>1s — the classic sign of
+    event-loop-stalling work) are logged at WARNING so they stand out.
     """
+    started = time.monotonic()
+
+    def _line(status: int) -> None:
+        elapsed = time.monotonic() - started
+        slow = elapsed > 1.0
+        logger.log(
+            logging.WARNING if (status >= 400 or slow) else logging.INFO,
+            "[access] %s %s -> %d (%.0fms)%s",
+            request.method,
+            request.rel_url,
+            status,
+            elapsed * 1000,
+            " SLOW" if slow else "",
+        )
+
     try:
         response = await handler(request)
     except web.HTTPException as exc:
-        logger.log(
-            logging.WARNING if exc.status >= 400 else logging.INFO,
-            "[access] %s %s -> %d",
-            request.method,
-            request.rel_url,
-            exc.status,
-        )
+        _line(exc.status)
         raise
-    logger.log(
-        logging.WARNING if response.status >= 400 else logging.INFO,
-        "[access] %s %s -> %d",
-        request.method,
-        request.rel_url,
-        response.status,
-    )
+    _line(response.status)
     return response
 
 
@@ -761,13 +765,47 @@ async def handle_browser_tab_reveal(request: web.Request) -> web.Response:
     return web.json_response(await _reveal_browser_tab(tab_id))
 
 
+async def _browser_status_payload(session_id: str | None) -> dict:
+    """One status probe → the payload shape both the GET and the SSE emit.
+
+    ``health`` mirrors the stream's classification; ``active_tab`` is
+    resolved only when scoped to a session AND the extension is connected
+    (the /contexts probe costs an RPC per tab group).
+    """
+    status = await _probe_browser_bridge()
+    pong = status.get("last_pong_age_ms")
+    health = (
+        "healthy"
+        if status.get("connected") and (pong is None or pong < 15000)
+        else "stale"
+        if status.get("connected")
+        else "disconnected"
+        if status.get("bridge")
+        else "offline"
+    )
+    payload = {**status, "health": health}
+    if session_id:
+        active_tab: dict | None = None
+        if status.get("connected"):
+            active_tab = _active_tab_for_profile(await _probe_browser_contexts(), session_id)
+        payload["active_tab"] = active_tab
+    return payload
+
+
 async def handle_browser_status(request: web.Request) -> web.Response:
     """GET /api/browser/status — proxy the GCU bridge status check server-side.
 
     Checks http://127.0.0.1:9230/status so the browser never makes a
     cross-origin request that would log ERR_CONNECTION_REFUSED in the console.
+    Accepts ``?session_id=`` to include that session's ``active_tab`` — the
+    web UI polls this instead of holding the SSE stream open (each
+    EventSource permanently occupies one of the browser's ~6 same-origin
+    sockets; the stream endpoint remains for the desktop shell, whose SSE
+    rides IPC and is exempt from that cap).
     """
-    return web.json_response(await _probe_browser_bridge())
+    return web.json_response(
+        await _browser_status_payload(request.query.get("session_id"))
+    )
 
 
 async def handle_browser_status_stream(request: web.Request) -> web.StreamResponse:
@@ -805,38 +843,32 @@ async def handle_browser_status_stream(request: web.Request) -> web.StreamRespon
         await resp.write(payload.encode("utf-8"))
 
     last: tuple | None = None
+    quiet_ticks = 0
     try:
         while True:
-            status = await _probe_browser_bridge()
-            pong = status.get("last_pong_age_ms")
-            health = (
-                "healthy"
-                if status.get("connected") and (pong is None or pong < 15000)
-                else "stale"
-                if status.get("connected")
-                else "disconnected"
-                if status.get("bridge")
-                else "offline"
-            )
-            # Resolve the session's focused tab only when scoped and live —
-            # the /contexts probe does an RPC per tab group, so we don't pay
-            # for it on the global stream or while the extension is down.
-            active_tab: dict | None = None
-            if session_id and status.get("connected"):
-                active_tab = _active_tab_for_profile(await _probe_browser_contexts(), session_id)
+            payload = await _browser_status_payload(session_id)
+            active_tab = payload.get("active_tab") or {}
             signature = (
-                status["bridge"],
-                status["connected"],
-                health,
-                (active_tab or {}).get("title"),
-                (active_tab or {}).get("url"),
+                payload["bridge"],
+                payload["connected"],
+                payload["health"],
+                active_tab.get("title"),
+                active_tab.get("url"),
             )
             if signature != last:
-                payload = {**status, "health": health}
-                if session_id:
-                    payload["active_tab"] = active_tab
                 await _send("status", payload)
                 last = signature
+                quiet_ticks = 0
+            else:
+                # Keepalive: on a steady bridge this stream used to emit
+                # zero bytes indefinitely, so a silently-dead TCP path was
+                # indistinguishable from "nothing changed". Comment every
+                # ~15s keeps intermediaries and the client's liveness view
+                # honest without waking EventSource message handlers.
+                quiet_ticks += 1
+                if quiet_ticks >= 5:
+                    await resp.write(b": keepalive\n\n")
+                    quiet_ticks = 0
             await asyncio.sleep(3.0)
     except (asyncio.CancelledError, ConnectionResetError, ClientConnectionResetError):
         logger.debug("browser status stream: client disconnected")

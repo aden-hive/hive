@@ -29,6 +29,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from framework.config import get_aux_max_tokens
 from framework.orchestrator.safe_eval import safe_eval
 
 logger = logging.getLogger(__name__)
@@ -247,7 +248,7 @@ Respond with ONLY a JSON object:
             response = await llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a routing agent. Respond with JSON only.",
-                max_tokens=150,
+                max_tokens=get_aux_max_tokens(),
             )
 
             # Parse response

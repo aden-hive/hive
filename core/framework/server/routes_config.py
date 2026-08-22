@@ -23,6 +23,7 @@ from framework.agents.queen.queen_memory_v2 import (
 from framework.config import (
     _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
+    HIVE_HOME,
     OPENROUTER_API_BASE,
     get_hive_config,
 )
@@ -427,6 +428,12 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
             "active_subscription": active_subscription,
             "detected_subscriptions": detected_subscriptions,
             "subscriptions": SUBSCRIPTIONS,
+            # Surface the endpoint the config actually points at, so the UI
+            # can present a custom OpenAI-compatible endpoint (self-hosted
+            # vLLM, vendor proxy, …) as a first-class choice instead of only
+            # the hardcoded provider list.
+            "api_base": llm.get("api_base"),
+            "api_key_env_var": llm.get("api_key_env_var"),
         }
     )
 
@@ -434,9 +441,12 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
 async def handle_update_llm_config(request: web.Request) -> web.Response:
     """PUT /api/config/llm — set active provider + model, hot-swap running sessions.
 
-    Accepts two modes:
+    Accepts three modes:
     1. API key mode: {"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
     2. Subscription mode: {"subscription": "claude_code"} (uses preset model)
+    3. Custom endpoint mode: {"custom": true, "model": "...", "api_base"?, "api_key_env_var"?}
+       — keeps/updates the config's own endpoint and switches models on it
+       without catalogue validation.
     """
     try:
         body = await request.json()
@@ -444,6 +454,74 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
     subscription_id = body.get("subscription")
+
+    if body.get("custom"):
+        # ── Custom endpoint mode ─────────────────────────────────────
+        # The active config may point at an OpenAI-compatible endpoint the
+        # shipped catalogue knows nothing about (self-hosted vLLM, a vendor
+        # proxy, …). Let the user keep that endpoint and switch models on it
+        # freely: no catalogue validation (the endpoint's model list is
+        # unknowable here); api_base / api_key_env_var default to what the
+        # config already has, so a model switch never clobbers the endpoint
+        # it runs on.
+        model = str(body.get("model") or "").strip()
+        if not model:
+            return web.json_response({"error": "'model' is required"}, status=400)
+        config = get_hive_config()
+        llm_section = config.setdefault("llm", {})
+        provider = str(
+            body.get("provider") or llm_section.get("provider") or "openai"
+        )
+        api_base = (
+            str(body.get("api_base") or llm_section.get("api_base") or "").strip()
+            or None
+        )
+        env_var = str(
+            body.get("api_key_env_var") or llm_section.get("api_key_env_var") or ""
+        ).strip()
+        api_key = os.environ.get(env_var) if env_var else None
+        if api_key is None:
+            api_key = _resolve_api_key(provider, request)
+
+        llm_section["provider"] = provider
+        llm_section["model"] = model
+        if body.get("max_tokens"):
+            llm_section["max_tokens"] = int(body["max_tokens"])
+        if body.get("max_context_tokens"):
+            llm_section["max_context_tokens"] = int(body["max_context_tokens"])
+        if env_var:
+            llm_section["api_key_env_var"] = env_var
+        if api_base:
+            llm_section["api_base"] = api_base
+        for flag in _ALL_SUBSCRIPTION_FLAGS:
+            llm_section.pop(flag, None)
+        _write_config_atomic(config)
+
+        full_model = f"{provider}/{model}"
+        swapped = _hot_swap_sessions(
+            request, full_model, api_key=api_key, api_base=api_base
+        )
+        logger.info(
+            "LLM config updated (custom endpoint): provider=%s model=%s base=%s, "
+            "hot-swapped %d session(s)",
+            provider,
+            model,
+            api_base,
+            swapped,
+        )
+        return web.json_response(
+            {
+                "provider": provider,
+                "model": model,
+                "has_api_key": api_key is not None,
+                "max_tokens": llm_section.get("max_tokens"),
+                "max_context_tokens": llm_section.get("max_context_tokens"),
+                "sessions_swapped": swapped,
+                "active_subscription": None,
+                "api_base": api_base,
+                "api_key_env_var": env_var or None,
+            }
+        )
 
     if subscription_id:
         # ── Subscription mode ────────────────────────────────────────
@@ -1064,9 +1142,336 @@ async def handle_update_rate_limits(request: web.Request) -> web.Response:
 # ------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Provider slots — the UI is a verbatim editor over configuration.json's
+# llm / worker_llm / vision_fallback sections. No parallel representation,
+# no library, no sync: read = the section as stored, write = the section
+# as typed. Absolute accuracy by construction.
+# ---------------------------------------------------------------------------
+
+_ROLE_SECTIONS = ("llm", "worker_llm", "vision_fallback")
+
+
+async def handle_get_llm_sections(request: web.Request) -> web.Response:
+    """GET /api/config/llm-sections — the three provider slots, verbatim."""
+    cfg = get_hive_config()
+    return web.json_response(
+        {role: (cfg.get(role) or None) for role in _ROLE_SECTIONS}
+    )
+
+
+async def _write_role_section(
+    request: web.Request, role: str, section: dict, validate: bool
+) -> web.Response:
+    """Validate + commit one provider section into a slot, verbatim.
+
+    Shared by the direct slot editor (PUT /llm-sections) and the library
+    apply endpoint — both paths must behave identically: same health check,
+    same verbatim write, same hot-swap when the main slot changes.
+    """
+    if not str(section.get("model") or "").strip():
+        return web.json_response({"error": "'model' is required"}, status=400)
+
+    provider = str(section.get("provider") or "openai")
+    api_base = str(section.get("api_base") or "").strip() or None
+    api_key = str(section.get("api_key") or "")
+    if not api_key:
+        env_var = section.get("api_key_env_var")
+        if env_var:
+            api_key = os.environ.get(str(env_var), "")
+
+    if validate and api_key and api_base:
+        check = await _validate_provider_key(
+            provider, api_key, api_base=api_base, model=str(section["model"])
+        )
+        if check.get("valid") is False:
+            return web.json_response(
+                {"error": f"Key check failed against {api_base}: "
+                          f"{check.get('message', 'unknown error')}"},
+                status=400,
+            )
+
+    config = get_hive_config()
+    config[role] = section  # verbatim — the file mirrors the editor exactly
+    _write_config_atomic(config)
+
+    swapped = 0
+    if role == "llm":
+        full_model = f"{provider}/{section['model']}"
+        swapped = _hot_swap_sessions(
+            request, full_model, api_key=api_key or None, api_base=api_base
+        )
+    logger.info(
+        "Provider slot %s written: %s/%s @ %s, hot-swapped %d session(s)",
+        role,
+        provider,
+        section.get("model"),
+        api_base,
+        swapped,
+    )
+    return web.json_response(
+        {"role": role, "section": section, "sessions_swapped": swapped}
+    )
+
+
+async def handle_put_llm_section(request: web.Request) -> web.Response:
+    """PUT /api/config/llm-sections — write ONE slot verbatim.
+
+    Body: ``{"role": r, "section": {...} | null, "validate"?: true}``.
+    ``section: null`` clears worker_llm / vision_fallback (llm cannot be
+    cleared — the runtime always needs a main model). When the section
+    carries an api_key + api_base and ``validate`` isn't false, the key is
+    health-checked against the endpoint before committing. The section is
+    stored exactly as given — unknown keys included.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    role = str(body.get("role") or "")
+    if role not in _ROLE_SECTIONS:
+        return web.json_response(
+            {"error": "'role' must be llm | worker_llm | vision_fallback"},
+            status=400,
+        )
+    section = body.get("section", None)
+
+    if section is None:
+        if role == "llm":
+            return web.json_response(
+                {"error": "The llm slot cannot be cleared - the runtime "
+                          "always needs a main model."},
+                status=400,
+            )
+        config = get_hive_config()
+        if role in config:
+            config.pop(role, None)
+            _write_config_atomic(config)
+        logger.info("Provider slot cleared: %s", role)
+        return web.json_response({"role": role, "section": None})
+
+    if not isinstance(section, dict):
+        return web.json_response(
+            {"error": "'section' must be a JSON object or null"}, status=400
+        )
+    return await _write_role_section(
+        request, role, section, validate=bool(body.get("validate", True))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider library — named vendor configs saved under "provider_library" in
+# configuration.json. A library entry is the same verbatim section shape as a
+# slot; applying one COPIES it into the slot (no reference indirection), so
+# the runtime getters and the slots' verbatim contract stay untouched.
+# ---------------------------------------------------------------------------
+
+
+def _get_provider_library() -> dict[str, dict]:
+    lib = get_hive_config().get("provider_library")
+    if not isinstance(lib, dict):
+        return {}
+    return {str(k): v for k, v in lib.items() if isinstance(v, dict)}
+
+
+async def handle_get_provider_library(request: web.Request) -> web.Response:
+    """GET /api/config/provider-library — saved vendor configs, verbatim."""
+    return web.json_response({"library": _get_provider_library()})
+
+
+async def handle_put_provider_library(request: web.Request) -> web.Response:
+    """PUT /api/config/provider-library — save or delete ONE library entry.
+
+    Body: ``{"name": n, "section": {...} | null}``. ``section: null``
+    deletes the entry. No health check here — a stored config may hold a
+    key for an endpoint that isn't reachable right now; validation runs
+    when the entry is applied to a slot.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return web.json_response({"error": "'name' is required"}, status=400)
+    section = body.get("section", None)
+
+    config = get_hive_config()
+    library = config.get("provider_library")
+    if not isinstance(library, dict):
+        library = {}
+
+    if section is None:
+        library.pop(name, None)
+        if library:
+            config["provider_library"] = library
+        else:
+            config.pop("provider_library", None)
+        _write_config_atomic(config)
+        logger.info("Provider library entry deleted: %s", name)
+        return web.json_response({"name": name, "section": None})
+
+    if not isinstance(section, dict):
+        return web.json_response(
+            {"error": "'section' must be a JSON object or null"}, status=400
+        )
+    if not str(section.get("model") or "").strip():
+        return web.json_response({"error": "'model' is required"}, status=400)
+
+    library[name] = section  # verbatim, unknown keys included
+    config["provider_library"] = library
+    _write_config_atomic(config)
+    logger.info(
+        "Provider library entry saved: %s (%s/%s)",
+        name,
+        section.get("provider"),
+        section.get("model"),
+    )
+    return web.json_response({"name": name, "section": section})
+
+
+async def handle_apply_provider_library(request: web.Request) -> web.Response:
+    """POST /api/config/provider-library/apply — copy a library entry into a slot.
+
+    Body: ``{"name": n, "role": r, "validate"?: true}``. The entry is
+    written into the slot verbatim through the same path as the direct
+    slot editor: health-checked (unless ``validate`` is false) and
+    hot-swapped into running sessions when the main llm slot changes.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    role = str(body.get("role") or "")
+    if role not in _ROLE_SECTIONS:
+        return web.json_response(
+            {"error": "'role' must be llm | worker_llm | vision_fallback"},
+            status=400,
+        )
+    name = str(body.get("name") or "").strip()
+    section = _get_provider_library().get(name)
+    if section is None:
+        return web.json_response(
+            {"error": f"No provider library entry named '{name}'"}, status=404
+        )
+    return await _write_role_section(
+        request, role, section, validate=bool(body.get("validate", True))
+    )
+
+
+# ---------------------------------------------------------------------------
+# External skill sources — configuration.json "external_skills", verbatim.
+# Extra skill roots from other agent ecosystems (Claude Code ~/.claude/skills,
+# Codex ~/.codex/skills, ...); SKILL.md is a cross-agent standard.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_external_skills(paths: list) -> list[dict]:
+    """Resolve each configured path: expansion, existence, parsed-skill count."""
+    from framework.skills.discovery import SkillDiscovery
+
+    d = SkillDiscovery()
+    out: list[dict] = []
+    for raw in paths:
+        entry: dict = {"path": raw}
+        try:
+            ext = Path(os.path.expandvars(str(raw))).expanduser()
+            entry["resolved"] = str(ext)
+            entry["exists"] = ext.is_dir()
+            entry["skills"] = (
+                len(d._scan_scope(ext, "user")) if ext.is_dir() else 0
+            )
+        except Exception as exc:
+            entry["exists"] = False
+            entry["skills"] = 0
+            entry["error"] = str(exc)
+        out.append(entry)
+    return out
+
+
+# Well-known per-agent skill roots (all follow the cross-agent SKILL.md
+# standard). Probed for auto-discovery suggestions; only dirs that exist
+# AND contain at least one parseable skill are surfaced. ~/.agents/skills
+# is absent on purpose — Hive scans it natively already.
+_KNOWN_AGENT_SKILL_DIRS = (
+    "~/.claude/skills",     # Claude Code
+    "~/.codex/skills",      # OpenAI Codex CLI
+    "~/.cursor/skills",     # Cursor
+    "~/.openclaw/skills",   # OpenClaw
+    "~/.gemini/skills",     # Gemini CLI
+)
+
+
+def _suggest_external_skills(configured: list[str]) -> list[dict]:
+    """Probe known agent skill dirs not yet configured; keep real finds only."""
+    def _norm(raw: str) -> str:
+        try:
+            return str(Path(os.path.expandvars(raw)).expanduser().resolve())
+        except Exception:
+            return raw
+
+    have = {_norm(p) for p in configured}
+    out: list[dict] = []
+    for cand in _KNOWN_AGENT_SKILL_DIRS:
+        if _norm(cand) in have:
+            continue
+        [r] = _resolve_external_skills([cand])
+        if r.get("exists") and r.get("skills", 0) > 0:
+            out.append(r)
+    return out
+
+
+async def handle_get_external_skills(request: web.Request) -> web.Response:
+    """GET /api/config/external-skills — configured paths + resolution status,
+    plus auto-discovered suggestions from known agent ecosystems."""
+    paths = get_hive_config().get("external_skills") or []
+    paths = [p for p in paths if isinstance(p, str)]
+    # Off-loop: both helpers do full recursive directory walks + SKILL.md
+    # parses (up to ~10 roots including the auto-discovery probes).
+    resolved = await asyncio.to_thread(_resolve_external_skills, paths)
+    suggestions = await asyncio.to_thread(_suggest_external_skills, paths)
+    return web.json_response(
+        {"paths": paths, "resolved": resolved, "suggestions": suggestions}
+    )
+
+
+async def handle_put_external_skills(request: web.Request) -> web.Response:
+    """PUT /api/config/external-skills — write the path list verbatim.
+
+    Body: {"paths": ["~/.claude/skills", ...]}. Non-existent paths are
+    allowed (saved with a warning status) — the directory may appear later.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not all(isinstance(x, str) for x in paths):
+        return web.json_response(
+            {"error": "'paths' must be a list of strings"}, status=400
+        )
+    paths = [x.strip() for x in paths if x.strip()]
+    config = get_hive_config()
+    if paths:
+        config["external_skills"] = paths
+    else:
+        config.pop("external_skills", None)
+    _write_config_atomic(config)
+    logger.info("external_skills updated: %s", paths)
+    resolved = await asyncio.to_thread(_resolve_external_skills, paths)
+    return web.json_response({"paths": paths, "resolved": resolved})
+
+
 def register_routes(app: web.Application) -> None:
     """Register LLM config routes."""
     app.router.add_get("/api/config/llm", handle_get_llm_config)
+    app.router.add_get("/api/config/llm-sections", handle_get_llm_sections)
+    app.router.add_get("/api/config/external-skills", handle_get_external_skills)
+    app.router.add_put("/api/config/external-skills", handle_put_external_skills)
+    app.router.add_put("/api/config/llm-sections", handle_put_llm_section)
+    app.router.add_get("/api/config/provider-library", handle_get_provider_library)
+    app.router.add_put("/api/config/provider-library", handle_put_provider_library)
+    app.router.add_post("/api/config/provider-library/apply", handle_apply_provider_library)
     app.router.add_put("/api/config/llm", handle_update_llm_config)
     app.router.add_get("/api/config/models", handle_get_models)
     app.router.add_get("/api/config/sentinel", handle_get_sentinel_config)

@@ -222,10 +222,18 @@ class LoopConfig:
     # per-call timeout (e.g. image generation, which can take minutes). This
     # keeps the agent loop — and the shared MCP server — unblocked. See
     # ``AgentLoop._execute_tool`` / ``_start_background_tool``.
-    background_tools: set[str] = field(default_factory=lambda: {"image_generate"})
+    background_tools: set[str] = field(default_factory=lambda: {"image_generate", "terminal_exec"})
     # Timeout for a backgrounded tool's underlying call. Must stay below
     # MCPClient._CALL_RESULT_TIMEOUT (240s), same invariant as the overrides.
     background_tool_timeout_seconds: float = 235.0
+    # Grace window before a background tool actually backgrounds. Work that
+    # finishes inside it returns on the original call and never mints a
+    # handle. This is a CEILING, not a sleep: a 10ms command returns in
+    # 10ms; only work that overruns the window pays it, and the command is
+    # running throughout. Sized from a production terminal_exec session
+    # (median command 1.5s vs 4.9s of model latency per collect_result
+    # turn a handle forces). Set 0 to always background immediately.
+    background_tool_grace_seconds: float = 5.0
 
     # LLM stream inactivity watchdog. Split into two budgets so legitimate
     # slow TTFT on large contexts doesn't get mistaken for a dead connection.

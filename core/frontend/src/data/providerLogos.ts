@@ -730,7 +730,6 @@ const LOGO_DATA: Record<string, LogoEntry> = {
   moosend: { s: "moosend.svg", c: "#000000", name: "Moosend" },
   mrpeasy: { s: "mrpeasy.svg", c: "#000000", name: "Mrpeasy" },
   ms_teams: { s: "ms_teams.svg", c: "#000000", name: "Ms Teams" },
-  mssql: { s: "mssql.svg", c: "#000000", name: "Mssql" },
   multiple_csv: { s: "multiple_csv.svg", c: "#000000", name: "Multiple Csv" },
   mux: { s: "mux.svg", c: "#000000", name: "Mux" },
   my_hours: { s: "my_hours.svg", c: "#000000", name: "My Hours" },

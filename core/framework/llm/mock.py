@@ -117,7 +117,7 @@ class MockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
@@ -151,7 +151,7 @@ class MockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
@@ -175,7 +175,7 @@ class MockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         system_dynamic_suffix: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a mock completion as word-level TextDeltaEvents.

@@ -127,17 +127,29 @@ export interface SubscribeSseOptions {
   silentConnectivity?: boolean;
 }
 
-// Named SSE event types the backend emits (SSEResponse.send_event(..., event=...)
-// and app.py `_send`). Default/unnamed events arrive via `onmessage`. EventSource
-// only routes a named event to a matching addEventListener, so we register these
-// explicitly; everything else lands on the default "message" handler.
-const NAMED_SSE_EVENTS = ["status", "snapshot", "update"] as const;
+// Reconnect backoff bounds for the fetch-based SSE reader below.
+const SSE_RETRY_MIN_MS = 1_000;
+const SSE_RETRY_MAX_MS = 15_000;
 
 /**
  * Subscribe to a runtime SSE stream. Returns a promise (kept for API
- * compatibility with the previous IPC-based client) that resolves to an
+ * compatibility with the desktop IPC-based client) that resolves to an
  * unsubscribe function. Named SSE events are delivered to `onEvent(name, data)`;
  * default events arrive as `onEvent("message", data)`.
+ *
+ * Implementation: a fetch()-streaming SSE reader, NOT native EventSource.
+ * This restores the lifecycle contract the desktop client has and the
+ * EventSource port silently dropped:
+ *   - `onError(message, status)` carries the real HTTP status, so the
+ *     404 → session-gone auto-resume path actually fires;
+ *   - `onClose()` fires TERMINALLY (the subscription is over — today only
+ *     the 404 session-gone case), so `sseState: "closed"` and the
+ *     resumeNonce re-mount machinery are reachable again; routine stream
+ *     rotations are absorbed by the internal retry loop instead;
+ *   - reconnects are our own bounded-backoff loop with honest
+ *     `onReconnecting(delayMs)` signals (a 404 stops the loop — the
+ *     session is gone; retrying the same id is pointless and the caller
+ *     resumes from disk instead).
  */
 export async function subscribeSse(
   path: string,
@@ -145,36 +157,99 @@ export async function subscribeSse(
   options?: SubscribeSseOptions,
 ): Promise<() => void> {
   const silent = options?.silentConnectivity === true;
-  const es = new EventSource(apiUrl(path));
+  let aborted = false;
+  let controller: AbortController | null = null;
+  let retryDelay = SSE_RETRY_MIN_MS;
 
-  es.onopen = () => {
-    if (!silent) publishConnectivity("sse:open", { path });
-    handlers.onOpen?.();
+  const readStream = async (body: ReadableStream<Uint8Array>) => {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let eventName = "message";
+    let dataLines: string[] = [];
+    const dispatch = () => {
+      if (dataLines.length > 0) {
+        handlers.onEvent?.(eventName, dataLines.join("\n"));
+      }
+      eventName = "message";
+      dataLines = [];
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        let line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line === "") {
+          dispatch();
+          continue;
+        }
+        if (line.startsWith(":")) continue; // comment / keepalive
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim() || "message";
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).replace(/^ /, ""));
+          continue;
+        }
+        // id:/retry: fields — not used by this backend; ignore.
+      }
+    }
+    dispatch();
   };
 
-  es.onmessage = (e: MessageEvent) => {
-    handlers.onEvent?.("message", e.data);
-  };
-
-  for (const name of NAMED_SSE_EVENTS) {
-    es.addEventListener(name, (e) => {
-      handlers.onEvent?.(name, (e as MessageEvent).data);
-    });
-  }
-
-  es.onerror = () => {
-    // EventSource auto-reconnects while readyState === CONNECTING.
-    if (es.readyState === EventSource.CONNECTING) {
-      if (!silent) publishConnectivity("sse:reconnecting", { path, delayMs: 0 });
-      handlers.onReconnecting?.(0);
-    } else {
-      if (!silent) publishConnectivity("sse:error", { path });
-      handlers.onError?.("sse_error");
+  const loop = async () => {
+    while (!aborted) {
+      controller = new AbortController();
+      try {
+        const resp = await fetch(apiUrl(path), {
+          headers: { Accept: "text/event-stream" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!resp.ok || !resp.body) {
+          if (!silent) publishConnectivity("sse:error", { path, status: resp.status });
+          handlers.onError?.(`sse_http_${resp.status}`, resp.status);
+          if (resp.status === 404) {
+            // Session gone — stop retrying this id; the caller's
+            // session-gone handler resumes from disk with a fresh id.
+            handlers.onClose?.();
+            return;
+          }
+        } else {
+          if (!silent) publishConnectivity("sse:open", { path });
+          handlers.onOpen?.();
+          retryDelay = SSE_RETRY_MIN_MS;
+          await readStream(resp.body);
+          if (aborted) return;
+          // Server ended the stream (restart / keepalive rotation).
+          // NOT onClose: that is a TERMINAL signal (consumers tear down
+          // their registry entry on it — use-sse deletes the agentType so
+          // a resumeNonce can re-mount). A routine rotation is handled by
+          // our own retry loop below with an honest onReconnecting.
+          if (!silent) publishConnectivity("sse:close", { path });
+        }
+      } catch (err) {
+        if (aborted) return;
+        if (!silent) publishConnectivity("sse:error", { path });
+        handlers.onError?.(err instanceof Error ? err.message : "sse_error");
+      }
+      if (aborted) return;
+      if (!silent) publishConnectivity("sse:reconnecting", { path, delayMs: retryDelay });
+      handlers.onReconnecting?.(retryDelay);
+      await new Promise((r) => setTimeout(r, retryDelay));
+      retryDelay = Math.min(retryDelay * 2, SSE_RETRY_MAX_MS);
     }
   };
+  void loop();
 
   return () => {
-    es.close();
+    aborted = true;
+    controller?.abort();
     if (!silent) publishConnectivity("sse:close", { path });
   };
 }

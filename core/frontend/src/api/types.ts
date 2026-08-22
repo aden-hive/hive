@@ -257,6 +257,7 @@ export type EventTypeName =
   | "node_action_plan"
   | "llm_text_delta"
   | "llm_reasoning_delta"
+  | "client_reasoning"
   | "llm_turn_complete"
   | "tool_call_started"
   | "tool_call_completed"

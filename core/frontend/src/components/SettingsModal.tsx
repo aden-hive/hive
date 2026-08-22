@@ -10,6 +10,7 @@ import { useColony } from "@/context/ColonyContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useMe } from "@/lib/me";
 import { useModel, LLM_PROVIDERS } from "@/context/ModelContext";
+import ProviderManager from "./ProviderManager";
 import { credentialsApi } from "@/api/credentials";
 import { configApi, type ModelOption, type RateLimitEntry } from "@/api/config";
 import { compressImage } from "@/lib/image-utils";
@@ -43,7 +44,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const {
     currentProvider, currentModel, connectedProviders, availableModels,
     setModel, saveProviderKey, subscriptions, detectedSubscriptions,
-    activeSubscription, activateSubscription,
+    activeSubscription, activateSubscription, apiBase,
   } = useModel();
 
   const [displayName, setDisplayName] = useState(
@@ -224,9 +225,23 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const modelsForLabel = availableModels[providerForModels] || [];
   const currentModelLabel = modelsForLabel.find((m) => m.id === currentModel)?.label || currentModel || "Not configured";
 
+  // A configured api_base means the runtime talks to a custom
+  // OpenAI-compatible endpoint — naming it after the protocol provider
+  // ("OpenAI (GPT)") would misattribute where requests actually go.
+  const customHost = (() => {
+    if (!apiBase) return null;
+    try {
+      return new URL(apiBase).host;
+    } catch {
+      return apiBase;
+    }
+  })();
+
   const currentProviderName = activeSubscription
     ? (subscriptions.find((s) => s.id === activeSubscription)?.name || currentProvider)
-    : (LLM_PROVIDERS.find((p) => p.id === currentProvider)?.name || currentProvider);
+    : customHost
+      ? `Custom endpoint (${customHost})`
+      : (LLM_PROVIDERS.find((p) => p.id === currentProvider)?.name || currentProvider);
 
   const selectableProviders = LLM_PROVIDERS.filter(
     (p) => connectedProviders.has(p.id) && availableModels[p.id]?.length,
@@ -296,7 +311,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <button onClick={onClose} className="absolute top-3 right-3 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -632,6 +647,10 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                 </div>
 
                 <div className="flex flex-col gap-2">
+                  {/* User-defined providers — one config = one JSON entry
+                      (providers.json). The standalone runtime's own
+                      credential management; built-in BYOK cards follow. */}
+                  <ProviderManager />
                   {LLM_PROVIDERS.map((provider) => {
                     const connected = connectedProviders.has(provider.id);
                     const editing = editingProvider === provider.id;

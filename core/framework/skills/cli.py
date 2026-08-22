@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from framework.config import get_aux_max_tokens
+
 _SKILL_MD_TEMPLATE = """\
 ---
 name: {name}
@@ -1111,7 +1113,7 @@ def cmd_skill_test(args) -> int:
             response = provider.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=skill.body,
-                max_tokens=2048,
+                max_tokens=get_aux_max_tokens(),
             )
             if not use_json:
                 print("\n── Response ──────────────────────────────────────────────────")
@@ -1165,7 +1167,7 @@ def cmd_skill_test(args) -> int:
                         response = provider.complete(
                             messages=[{"role": "user", "content": eval_prompt}],
                             system=skill.body,
-                            max_tokens=2048,
+                            max_tokens=get_aux_max_tokens(),
                         )
                         skill_response = response.content
                     except Exception as exc:

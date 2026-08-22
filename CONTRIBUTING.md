@@ -161,7 +161,7 @@ Hive runs on **macOS, Windows, and Linux** with platform-specific optimizations.
 |---------|-------|---------|-------|-------|
 | Core Framework | ✅ | ✅ | ✅ | Fully tested |
 | CLI Runner | ✅ | ✅ | ✅ | Platform-aware terminal handling |
-| File Operations | ✅ | ✅ | ✅ | Atomic writes with ACL preservation (Windows) |
+| File Operations | ✅ | ✅ | ✅ | Atomic writes (tempfile + rename) |
 | Browser Automation | ✅ | ✅ | ✅ | Playwright-based |
 | Process Spawning | ✅ | ✅ | ✅ | subprocess + asyncio |
 | Credential Storage | ✅ | ✅ | ✅ | `~/.hive/credentials` |
@@ -169,10 +169,9 @@ Hive runs on **macOS, Windows, and Linux** with platform-specific optimizations.
 
 ### Platform-Specific Code
 
-**Windows Support** (`core/framework/credentials/_win32_atomic.py`)
-- Uses `ReplaceFileW` API for atomic file replacement
-- Preserves NTFS DACL (Discretionary Access Control Lists)
-- Handles FAT32 vs NTFS volume detection
+**Windows Support** (`core/framework/utils/io.py`)
+- `atomic_write` uses `tempfile.mkstemp` + `os.replace` so readers never see a half-written file
+- Unique temp names per writer, so concurrent writers sharing a `HIVE_HOME` can't truncate each other
 
 **macOS Support**
 - Uses `open` command for browser launching

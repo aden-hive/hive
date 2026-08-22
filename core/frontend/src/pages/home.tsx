@@ -4,7 +4,7 @@ import { Send, Copy, Check, Loader2 } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { useMe, canMakeLLMCalls, resolvePreferredQueenId, isQueenDecommissioned } from "@/lib/me";
 import { userStorage } from "@/lib/userStorage";
-import { PENDING_CLASSIFY_KEY } from "@/lib/routing-keys";
+import { stageComposerHandoff } from "@/lib/composerHandoff";
 import {
   prefillPlaceholders,
   resolvePlaceholders,
@@ -62,6 +62,9 @@ export default function Home() {
   // Double-send guard: a colony launch can take a few seconds to create.
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
+  // A hand-typed message awaiting its hand-picked queen (dialog open while
+  // non-null). Replaces the deprecated /queen-routing LLM classification.
+  const [queenPick, setQueenPick] = useState<string | null>(null);
   const [detailPrompt, setDetailPrompt] = useState<Prompt | CustomPrompt | null>(null);
   // When a prompt seeds the box, remember the queen it deploys to (and the
   // colony name) so submitting skips the classify LLM call. Cleared when the
@@ -240,25 +243,19 @@ export default function Home() {
     // the box is emptied); a hand-typed task has no origin and classifies.
     const origin = promptOrigin;
     setPromptOrigin(null);
-    const free = !canMakeLLMCalls(me);
-
-    // Pick a queen + colony name WITHOUT the LLM when we can: a prompt-seeded
-    // message already carries its queen; a free user can't classify, so fall
-    // back to their preferred queen + a name derived from the prompt.
-    let target: { queenId: string; colonyName: string } | null =
+    // A prompt-seeded message already carries an explicitly chosen queen —
+    // deploy straight there. Everything hand-typed opens the queen picker:
+    // starting a conversation is the user's call, so they hand-pick who to
+    // talk to. (The /queen-routing LLM classification is deprecated — a
+    // classifier guessing the counterpart was the wrong design for
+    // conversations.)
+    const target: { queenId: string; colonyName: string } | null =
       origin && deployQueens.some((q) => q.id === origin.queenId) ? origin : null;
-    if (!target && free) {
-      const queenId = resolvePreferredQueenId(me, deployQueens.map((q) => q.id));
-      if (queenId) target = { queenId, colonyName: deriveColonyName(steered) };
-    }
     if (target) {
-      // deployColony itself decides free vs. paid behavior from the user's tag.
       await deployColony({ ...target, goal: steered });
       return;
     }
-    // Paid + hand-typed: classify the queen + colony name on the routing screen.
-    userStorage.session.set(PENDING_CLASSIFY_KEY, steered);
-    navigate("/queen-routing");
+    setQueenPick(steered);
     } finally {
       // Navigation usually unmounts this page; reset for the error/stay path.
       sendingRef.current = false;
@@ -488,6 +485,56 @@ export default function Home() {
           </div>
         </div>
         )}
+
+      {/* Hand-pick the queen for a hand-typed message (replaces the
+          deprecated /queen-routing LLM classification). */}
+      {queenPick !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onMouseDown={() => setQueenPick(null)}
+        >
+          <div
+            className="w-[24rem] max-w-[92vw] rounded-xl border border-border/60 bg-card p-4 shadow-xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="text-sm font-semibold text-foreground mb-1">
+              Who do you want to talk to?
+            </div>
+            <div className="text-[11px] text-muted-foreground mb-3">
+              Your message is sent to the queen you pick.
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-1.5">
+              {deployQueens.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => {
+                    stageComposerHandoff(q.id, queenPick, []);
+                    setQueenPick(null);
+                    setInputValue("");
+                    // ?new=1 is load-bearing: queen-dm consumes the staged
+                    // handoff ONLY on the bootstrap path (isBootstrap), and
+                    // without the flag the page redirects to the last
+                    // session and silently drops the message.
+                    navigate(`/queen/${q.id}?new=1`);
+                  }}
+                  className="w-full text-left rounded-lg border border-border/60 px-3 py-2 text-xs transition-colors hover:border-primary/40 hover:bg-primary/5"
+                >
+                  <span className="font-semibold text-foreground">{q.name}</span>
+                  {q.title && (
+                    <span className="ml-2 text-muted-foreground">{q.title}</span>
+                  )}
+                </button>
+              ))}
+              {deployQueens.length === 0 && (
+                <div className="text-[11px] text-muted-foreground">
+                  No active queens — enable one in the Org Chart&apos;s leader
+                  catalog.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

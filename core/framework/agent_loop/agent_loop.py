@@ -324,31 +324,16 @@ async def _captioning_chain(
     intent: str,
     image_content: list[dict[str, Any]],
 ) -> tuple[str, str] | None:
-    """Configured vision_fallback → ``gemini/gemini-3-flash-preview``.
+    """The configured ``vision_fallback`` — and nothing else.
 
-    The Gemini override reuses the configured ``api_key`` / ``api_base``,
-    so a Hive subscriber (whose token routes to a multi-model proxy)
-    keeps coverage when their primary model glitches. Without
-    configured creds litellm falls through to env-based Gemini auth;
-    users with neither Hive nor a ``GEMINI_API_KEY`` simply lose the
-    second try.
+    There used to be a hardcoded ``gemini-3-flash-preview`` retry here
+    that reused the configured endpoint's base/auth. Against any custom
+    endpoint that base is wrong for Gemini, so the retry could only fail
+    confusingly — and its noise masked the real error from the
+    configured attempt. The configured slot is the single source of
+    truth: it works, or the images are dropped with an honest log line.
     """
-    if result := await caption_tool_image(intent, image_content):
-        return result
-    # Match the configured model's proxy prefix so the override is routed
-    # through the same endpoint with the same auth shape. Without this,
-    # a Hive subscriber's `hive/...` config would override to
-    # `gemini/...` — which sends Google's Gemini protocol to the
-    # Anthropic-compatible Hive proxy (404), not what we want.
-    configured = (get_vision_fallback_model() or "").lower()
-    if configured.startswith("hive/"):
-        override = "hive/gemini-3-flash-preview"
-    elif configured.startswith("kimi/"):
-        override = "kimi/gemini-3-flash-preview"
-    else:
-        override = "gemini/gemini-3-flash-preview"
-    logger.warning("vision_fallback failed; trying %s", override)
-    return await caption_tool_image(intent, image_content, model_override=override)
+    return await caption_tool_image(intent, image_content)
 
 
 # Pattern for detecting context-window-exceeded errors across LLM providers.
@@ -2041,9 +2026,15 @@ class AgentLoop(AgentProtocol):
             )
             # Sync max_context_tokens from live config so mid-session model
             # switches are reflected in compaction decisions and the UI bar.
+            # Fallback = this loop's own budget, NOT the global 32k default:
+            # when config/catalog don't resolve (local/proxy models), the
+            # compaction trigger must agree with the LoopConfig-driven
+            # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct()
+            conversation._max_context_tokens = _live_mct(
+                fallback=self._config.max_context_tokens
+            )
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 
@@ -4097,6 +4088,37 @@ class AgentLoop(AgentProtocol):
                 _clean_snapshot = ""  # visible-only text for the frontend
                 _reasoning_emitted = ""  # last reasoning emitted via CLIENT_REASONING (dedup)
                 _reasoning_native = ""  # accumulated native reasoning-delta text (thinking models)
+                _reasoning_streamed_len = 0  # chars of _reasoning_native already published live
+                _reasoning_last_pub = 0.0
+
+                async def _stream_reasoning_delta() -> None:
+                    """Live-stream native reasoning to the UI, throttled to ~1/s.
+
+                    A thinking model can reason for minutes before its first
+                    visible character; without these events the session looks
+                    dead the whole time. Snapshot is tail-capped — the full
+                    text still arrives via CLIENT_REASONING at flush.
+                    """
+                    nonlocal _reasoning_streamed_len, _reasoning_last_pub
+                    if not (self._event_bus and ctx.emits_client_io):
+                        return
+                    if len(_reasoning_native) <= _reasoning_streamed_len:
+                        return
+                    now = time.monotonic()
+                    if now - _reasoning_last_pub < 1.0:
+                        return
+                    tail = _reasoning_native[_reasoning_streamed_len:]
+                    _reasoning_streamed_len = len(_reasoning_native)
+                    _reasoning_last_pub = now
+                    await self._event_bus.emit_llm_reasoning_delta(
+                        stream_id=stream_id,
+                        node_id=node_id,
+                        content=tail,
+                        execution_id=execution_id,
+                        iteration=iteration,
+                        inner_turn=inner_turn,
+                        snapshot=_reasoning_native[-4000:],
+                    )
 
                 async def _flush_reasoning() -> None:
                     """Surface reasoning to monitors once per turn (deduped).
@@ -4147,6 +4169,7 @@ class AgentLoop(AgentProtocol):
                         # Accumulate; flushed to monitors when the first visible
                         # text arrives (or at FinishEvent for tool-only turns).
                         _reasoning_native += event.content
+                        await _stream_reasoning_delta()
 
                     elif isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
@@ -6466,7 +6489,7 @@ class AgentLoop(AgentProtocol):
             return preflight
 
         if tc.tool_name in (getattr(self._config, "background_tools", None) or set()):
-            return self._start_background_tool(tc)
+            return await self._start_background_tool(tc)
 
         return await self._execute_tool_inner(tc, self._resolve_tool_timeout(tc.tool_name))
 
@@ -6508,13 +6531,20 @@ class AgentLoop(AgentProtocol):
                 result = _attach_file_publish_failure(result, f"unexpected error: {exc}")
         return result
 
-    def _start_background_tool(self, tc: ToolCallEvent) -> ToolResult:
-        """Start a background tool's real call as a detached task and return a
-        handle. The agent collects the outcome later via ``collect_result``."""
-        self._bg_counter += 1
-        handle = f"bg_{self._bg_counter}"
+    async def _start_background_tool(self, tc: ToolCallEvent) -> ToolResult:
+        """Run a background tool's real call, returning a handle only if it's slow.
+
+        Backgrounding is not free: the handle costs the agent a whole extra
+        model turn to spend on ``collect_result``, and that turn is inference
+        latency, not tool time. So we wait ``background_tool_grace_seconds``
+        first: work that lands inside the window returns its real result on
+        the original call and never mints a handle; only genuinely slow work
+        (image generation, a long command) pays for the deferred path.
+        (Ported from the desktop runtime's async-job logic — without it,
+        terminal_exec ran foreground and slammed into the shared 60s tool
+        timeout, resetting the MCP connection.)
+        """
         timeout = float(getattr(self._config, "background_tool_timeout_seconds", 235.0))
-        task = asyncio.create_task(self._execute_tool_inner(tc, timeout))
 
         def _retrieve(t: asyncio.Task) -> None:
             # Retrieve any exception so a never-collected task doesn't log
@@ -6523,12 +6553,40 @@ class AgentLoop(AgentProtocol):
             if not t.cancelled():
                 t.exception()
 
+        # Register BEFORE the grace await, not after. CancelledError derives
+        # from BaseException, so a user stop landing inside the grace window
+        # propagates straight out of this coroutine — and anything not yet in
+        # ``_background_calls`` at that moment is a live subprocess nobody can
+        # reach or collect. Claiming the handle up front costs only a gap in
+        # handle numbering on the fast path, which the agent never sees.
+        self._bg_counter += 1
+        handle = f"bg_{self._bg_counter}"
+        task = asyncio.create_task(self._execute_tool_inner(tc, timeout))
         task.add_done_callback(_retrieve)
         self._background_calls[handle] = {
             "task": task,
             "tool": tc.tool_name,
             "started": time.time(),
         }
+
+        grace = float(getattr(self._config, "background_tool_grace_seconds", 5.0))
+        if grace > 0:
+            try:
+                # shield: a grace-window timeout must not cancel the in-flight
+                # work — it still has the full `timeout` budget to finish in.
+                result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
+            except asyncio.TimeoutError:
+                pass  # genuinely slow — fall through and hand back the handle
+            except Exception:
+                # Failed fast. Let collect_result surface it rather than
+                # duplicating the error shaping here.
+                pass
+            else:
+                # Beat the window: hand back the real result and retire the
+                # handle, since there is nothing left to collect.
+                self._background_calls.pop(handle, None)
+                return result
+
         logger.info("[AgentLoop] backgrounded tool '%s' as %s", tc.tool_name, handle)
         payload = {
             "status": "started",
@@ -6686,10 +6744,18 @@ class AgentLoop(AgentProtocol):
 
     # --- Compaction -----------------------------------------------------------
 
-    # Max chars of formatted messages before proactively splitting for LLM.
-    _LLM_COMPACT_CHAR_LIMIT = 240_000
+    # Optional override for the window-derived split threshold (tests
+    # shrink it); None -> llm_compact_char_limit(max_context_tokens).
+    _LLM_COMPACT_CHAR_LIMIT: int | None = None
     # Max recursion depth for binary-search splitting.
     _LLM_COMPACT_MAX_DEPTH = 10
+
+    def _compact_char_limit(self) -> int:
+        if self._LLM_COMPACT_CHAR_LIMIT is not None:
+            return self._LLM_COMPACT_CHAR_LIMIT
+        from framework.agent_loop.internals.compaction import llm_compact_char_limit
+
+        return llm_compact_char_limit(self._config.max_context_tokens)
 
     async def _compact(
         self,
@@ -6715,7 +6781,7 @@ class AgentLoop(AgentProtocol):
             accumulator=accumulator,
             config=self._config,
             event_bus=self._event_bus,
-            char_limit=self._LLM_COMPACT_CHAR_LIMIT,
+            char_limit=self._compact_char_limit(),
             max_depth=self._LLM_COMPACT_MAX_DEPTH,
         )
         # After compaction: re-announce surfaces the model can't see unless
@@ -6736,7 +6802,7 @@ class AgentLoop(AgentProtocol):
     ) -> str:
         """Summarise *messages* with LLM, splitting recursively if too large.
 
-        If the formatted text exceeds ``_LLM_COMPACT_CHAR_LIMIT`` or the LLM
+        If the formatted text exceeds the window-derived char limit or the LLM
         rejects the call with a context-length error, the messages are split
         in half and each half is summarised independently.  Tool history is
         appended once at the top-level call (``_depth == 0``).
@@ -6746,7 +6812,7 @@ class AgentLoop(AgentProtocol):
             messages=messages,
             accumulator=accumulator,
             _depth=_depth,
-            char_limit=self._LLM_COMPACT_CHAR_LIMIT,
+            char_limit=self._compact_char_limit(),
             max_depth=self._LLM_COMPACT_MAX_DEPTH,
             max_context_tokens=self._config.max_context_tokens,
         )

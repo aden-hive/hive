@@ -241,6 +241,11 @@ async def handle_chat(request: web.Request) -> web.Response:
         # compaction storm.
         LARGE_PDF_THRESHOLD_BYTES = 10 * 1024 * 1024
 
+        # Text extraction is CPU-bound per page; a dense 1000-page PDF under
+        # the size threshold used to burn minutes. Beyond this cap the agent
+        # reads further pages selectively via pdf_read.
+        _PDF_EXTRACT_MAX_PAGES = 200
+
         # Same idea for text files: above this, only a truncated head is
         # prepended and the agent reads the rest from disk via terminal
         # tools. 256 KB of text is already ~64k tokens — enough to be
@@ -281,7 +286,21 @@ async def handle_chat(request: web.Request) -> web.Response:
                 ext = target.suffix.lower()
                 mime = _EXT_TO_MIME.get(ext)
                 if mime is None:
-                    logger.warning("[handle_chat] attachment ref unsupported extension %r: %s", ext, url)
+                    # Unknown/binary type (e.g. .docx, .xlsx, archives) — no
+                    # inline block exists for it, but the file IS on disk and
+                    # the agent has terminal tools. Surface it instead of
+                    # silently dropping the user's attachment.
+                    try:
+                        _size = target.stat().st_size
+                    except OSError:
+                        _size = 0
+                    rel = url[len("hive-attachment://") :].lstrip("/")
+                    saved_image_paths.append(rel)
+                    attachment_text_parts.append(
+                        f"[Attachment saved to disk: {rel} ({_fmt_size(_size)}) — "
+                        f"no inline preview for '{ext or 'unknown'}' files; read/convert "
+                        f"it from disk with terminal tools]"
+                    )
                     continue
                 # Defer the byte read — for a large PDF we won't emit a block
                 # and reading 100 MB into memory for nothing is wasteful.
@@ -301,7 +320,9 @@ async def handle_chat(request: web.Request) -> web.Response:
                 try:
                     header, b64data = url.split(",", 1)
                     mime = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
-                    raw_bytes = base64.b64decode(b64data)
+                    # Off-loop: a 20 MB body means ~27 MB of base64 — CPU
+                    # work that would stall every SSE stream if run inline.
+                    raw_bytes = await asyncio.to_thread(base64.b64decode, b64data)
                 except Exception:
                     logger.debug("[handle_chat] failed to decode attachment %d", idx)
                     continue
@@ -318,7 +339,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     # data: URI path — save the bytes to disk now.
                     pdf_filename = f"{ts}_{idx}.pdf"
                     pdf_filepath = attachments_dir / pdf_filename
-                    pdf_filepath.write_bytes(raw_bytes)
+                    await asyncio.to_thread(pdf_filepath.write_bytes, raw_bytes)
                     rel_path = f"data/attachments/{pdf_filename}"
                     saved_image_paths.append(rel_path)
                 else:
@@ -328,34 +349,43 @@ async def handle_chat(request: web.Request) -> web.Response:
 
                 is_large = attachment_size > LARGE_PDF_THRESHOLD_BYTES
 
-                # Always compute page count — cheap (pdfplumber pages are
-                # lazy) and used in the [Attachments] hint regardless.
-                pdf_page_count = 0
-                try:
-                    import pdfplumber
+                # Page count + (for small PDFs) text extraction. Runs in a
+                # worker thread: extract_text() on a dense sub-10MB PDF is
+                # pure CPU that used to freeze the whole server for up to
+                # minutes. Page cap bounds the extraction (a 9.9 MB
+                # 1000-page PDF is still megabytes of text otherwise).
+                _pdf_bytes = raw_bytes
 
-                    # Use the file path for hive-attachment so we don't
-                    # have to load bytes into memory just to count pages.
-                    if raw_bytes is not None:
-                        pdf_src: Any = io.BytesIO(raw_bytes)
-                    else:
-                        pdf_src = pdf_filepath
-                    with pdfplumber.open(pdf_src) as pdf:
-                        pdf_page_count = len(pdf.pages)
-                        if not is_large:
-                            # Belt-and-braces text extraction for small PDFs —
-                            # gives the user-visible chat transcript a
-                            # searchable text copy. Skipped for large PDFs:
-                            # a 1000-page extraction is megabytes of text
-                            # and itself blows the context.
-                            for page_num, page in enumerate(pdf.pages):
-                                page_text = page.extract_text()
-                                if page_text and page_text.strip():
-                                    attachment_text_parts.append(f"[PDF page {page_num + 1}]\n{page_text.strip()}")
-                except ImportError:
-                    logger.warning("[handle_chat] pdfplumber not installed; PDF page count + text prepend skipped")
-                except Exception:
-                    logger.debug("[handle_chat] PDF inspection failed", exc_info=True)
+                def _inspect_pdf() -> tuple[int, list[str]]:
+                    page_count = 0
+                    parts: list[str] = []
+                    try:
+                        import pdfplumber
+
+                        # Use the file path for hive-attachment so we don't
+                        # have to load bytes into memory just to count pages.
+                        pdf_src: Any = io.BytesIO(_pdf_bytes) if _pdf_bytes is not None else pdf_filepath
+                        with pdfplumber.open(pdf_src) as pdf:
+                            page_count = len(pdf.pages)
+                            if not is_large:
+                                for page_num, page in enumerate(pdf.pages):
+                                    if page_num >= _PDF_EXTRACT_MAX_PAGES:
+                                        parts.append(
+                                            f"[PDF text extraction stopped at page {_PDF_EXTRACT_MAX_PAGES} "
+                                            f"of {page_count} — read the rest via pdf_read]"
+                                        )
+                                        break
+                                    page_text = page.extract_text()
+                                    if page_text and page_text.strip():
+                                        parts.append(f"[PDF page {page_num + 1}]\n{page_text.strip()}")
+                    except ImportError:
+                        logger.warning("[handle_chat] pdfplumber not installed; PDF page count + text prepend skipped")
+                    except Exception:
+                        logger.debug("[handle_chat] PDF inspection failed", exc_info=True)
+                    return page_count, parts
+
+                pdf_page_count, _pdf_parts = await asyncio.to_thread(_inspect_pdf)
+                attachment_text_parts.extend(_pdf_parts)
 
                 if not is_large:
                     # Small PDF — load bytes if we deferred earlier, then
@@ -365,7 +395,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     # native `file`). Sidecar also accepts this shape.
                     if raw_bytes is None:
                         try:
-                            raw_bytes = pdf_filepath.read_bytes()
+                            raw_bytes = await asyncio.to_thread(pdf_filepath.read_bytes)
                         except OSError as exc:
                             logger.warning(
                                 "[handle_chat] small PDF byte-read failed (%s): %s",
@@ -373,7 +403,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                                 pdf_filepath,
                             )
                             continue
-                        b64data = base64.b64encode(raw_bytes).decode()
+                        b64data = (await asyncio.to_thread(base64.b64encode, raw_bytes)).decode()
                     images_only.append(
                         {
                             "type": "file",
@@ -426,7 +456,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     # data: URI path — save bytes to disk now.
                     csv_filename = f"{ts}_{idx}.csv"
                     csv_filepath = attachments_dir / csv_filename
-                    csv_filepath.write_bytes(raw_bytes)
+                    await asyncio.to_thread(csv_filepath.write_bytes, raw_bytes)
                     rel_path = f"data/attachments/{csv_filename}"
                     saved_image_paths.append(rel_path)
                 else:
@@ -435,38 +465,47 @@ async def handle_chat(request: web.Request) -> web.Response:
 
                 # Bounded parse — the cap matches PDFs (100 MB) so the file
                 # must NOT be list()'d into memory. Materialize header +
-                # first 200 rows, count the rest row-by-row (O(1) memory),
-                # and stream straight from disk for uploaded refs instead
-                # of read_bytes()ing the whole file.
-                csv_row_count = 0
-                try:
-                    import csv as _csv_mod
-                    from itertools import islice
+                # first 200 rows, count the rest row-by-row (O(1) memory).
+                # Runs in a worker thread: the full-file row count over a
+                # 100 MB CSV is seconds of loop-stalling work otherwise.
+                _csv_bytes = raw_bytes
 
-                    if raw_bytes is not None:
-                        src_fh: Any = io.StringIO(raw_bytes.decode("utf-8", errors="replace"))
-                    else:
-                        src_fh = open(csv_filepath, newline="", encoding="utf-8", errors="replace")
+                def _parse_csv() -> tuple[int, str | None]:
+                    row_count = 0
+                    text_part: str | None = None
                     try:
-                        reader = _csv_mod.reader(src_fh)
-                        header = next(reader, None)
-                        if header is not None:
-                            data_rows = list(islice(reader, 200))
-                            csv_row_count = len(data_rows) + sum(1 for _ in reader)
-                            lines = [
-                                f"[CSV file: {csv_filename}, {csv_row_count} rows, {len(header)} columns]",
-                                " | ".join(header),
-                                " | ".join("---" for _ in header),
-                            ]
-                            for r in data_rows:
-                                lines.append(" | ".join(r))
-                            if csv_row_count > 200:
-                                lines.append(f"... ({csv_row_count - 200} more rows truncated)")
-                            attachment_text_parts.append("\n".join(lines))
-                    finally:
-                        src_fh.close()
-                except Exception:
-                    logger.debug("[handle_chat] CSV parse failed", exc_info=True)
+                        import csv as _csv_mod
+                        from itertools import islice
+
+                        if _csv_bytes is not None:
+                            src_fh: Any = io.StringIO(_csv_bytes.decode("utf-8", errors="replace"))
+                        else:
+                            src_fh = open(csv_filepath, newline="", encoding="utf-8", errors="replace")
+                        try:
+                            reader = _csv_mod.reader(src_fh)
+                            header = next(reader, None)
+                            if header is not None:
+                                data_rows = list(islice(reader, 200))
+                                row_count = len(data_rows) + sum(1 for _ in reader)
+                                lines = [
+                                    f"[CSV file: {csv_filename}, {row_count} rows, {len(header)} columns]",
+                                    " | ".join(header),
+                                    " | ".join("---" for _ in header),
+                                ]
+                                for r in data_rows:
+                                    lines.append(" | ".join(r))
+                                if row_count > 200:
+                                    lines.append(f"... ({row_count - 200} more rows truncated)")
+                                text_part = "\n".join(lines)
+                        finally:
+                            src_fh.close()
+                    except Exception:
+                        logger.debug("[handle_chat] CSV parse failed", exc_info=True)
+                    return row_count, text_part
+
+                csv_row_count, _csv_part = await asyncio.to_thread(_parse_csv)
+                if _csv_part is not None:
+                    attachment_text_parts.append(_csv_part)
 
                 logger.info(
                     "[handle_chat] CSV attached: %d rows, %d bytes (text prepend, no LLM block)",
@@ -484,7 +523,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     # programmatic clients; ".txt" is a safe default ext.
                     text_filename = f"{ts}_{idx}.txt"
                     text_filepath = attachments_dir / text_filename
-                    text_filepath.write_bytes(raw_bytes)
+                    await asyncio.to_thread(text_filepath.write_bytes, raw_bytes)
                     rel_path = f"data/attachments/{text_filename}"
                     saved_image_paths.append(rel_path)
                 else:
@@ -494,12 +533,16 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # Bounded read — the cap matches PDFs (100 MB), so a large
                 # file is never loaded fully into memory: only the inlined
                 # head is decoded, and the line count streams in chunks.
+                # Runs in a worker thread (chunked newline count over a
+                # 100 MB file is loop-stalling work).
                 is_large = attachment_size > LARGE_TEXT_THRESHOLD_BYTES
-                try:
-                    if raw_bytes is not None:
-                        text = raw_bytes.decode("utf-8", errors="replace")
-                        line_count = text.count("\n") + 1 if text else 0
-                    elif is_large:
+                _text_bytes = raw_bytes
+
+                def _read_text_attachment() -> tuple[str, int]:
+                    if _text_bytes is not None:
+                        t = _text_bytes.decode("utf-8", errors="replace")
+                        return t, (t.count("\n") + 1 if t else 0)
+                    if is_large:
                         with open(text_filepath, "rb") as fh:
                             # ×4: worst-case UTF-8 bytes per char, so the
                             # decoded head always covers LARGE_TEXT_HEAD_CHARS.
@@ -507,11 +550,12 @@ async def handle_chat(request: web.Request) -> web.Response:
                             newlines = head_bytes.count(b"\n")
                             while chunk := fh.read(1024 * 1024):
                                 newlines += chunk.count(b"\n")
-                        line_count = newlines + 1
-                        text = head_bytes.decode("utf-8", errors="replace")
-                    else:
-                        text = text_filepath.read_text(encoding="utf-8", errors="replace")
-                        line_count = text.count("\n") + 1 if text else 0
+                        return head_bytes.decode("utf-8", errors="replace"), newlines + 1
+                    t = text_filepath.read_text(encoding="utf-8", errors="replace")
+                    return t, (t.count("\n") + 1 if t else 0)
+
+                try:
+                    text, line_count = await asyncio.to_thread(_read_text_attachment)
                 except OSError as exc:
                     logger.warning(
                         "[handle_chat] text attachment read failed (%s): %s",
@@ -546,7 +590,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # we deferred the byte read upstream; load it now.
                 if is_attachment_ref and raw_bytes is None:
                     try:
-                        raw_bytes = resolved_path.read_bytes()
+                        raw_bytes = await asyncio.to_thread(resolved_path.read_bytes)
                     except OSError as exc:
                         logger.warning(
                             "[handle_chat] image attachment-ref read failed (%s): %s",
@@ -554,12 +598,12 @@ async def handle_chat(request: web.Request) -> web.Response:
                             resolved_path,
                         )
                         continue
-                    b64data = base64.b64encode(raw_bytes).decode()
+                    b64data = (await asyncio.to_thread(base64.b64encode, raw_bytes)).decode()
                 if not is_attachment_ref:
                     ext_choice = _MIME_TO_EXT.get(mime, ".bin")
                     filename = f"{ts}_{idx}{ext_choice}"
                     filepath = attachments_dir / filename
-                    filepath.write_bytes(raw_bytes)
+                    await asyncio.to_thread(filepath.write_bytes, raw_bytes)
                     rel_path = f"data/attachments/{filename}"
                     saved_image_paths.append(rel_path)
                     images_only.append(img)
@@ -583,8 +627,13 @@ async def handle_chat(request: web.Request) -> web.Response:
                 try:
                     from PIL import Image
 
-                    with Image.open(io.BytesIO(raw_bytes)) as im:
-                        dims_str = f"{im.size[0]}×{im.size[1]}, "
+                    _img_bytes = raw_bytes
+
+                    def _probe_dims() -> str:
+                        with Image.open(io.BytesIO(_img_bytes)) as im:
+                            return f"{im.size[0]}×{im.size[1]}, "
+
+                    dims_str = await asyncio.to_thread(_probe_dims)
                 except Exception:
                     pass
                 saved_attachment_info.append(
@@ -668,8 +717,6 @@ async def handle_chat(request: web.Request) -> web.Response:
         if node is None and session.queen_task is not None and not session.queen_task.done():
             logger.warning("[handle_chat] Queen executor exists but node not ready yet (initializing). Waiting...")
             # Wait a short time for initialization to progress
-            import asyncio
-
             for _ in range(50):  # Max 5 seconds
                 await asyncio.sleep(0.1)
                 node = queen_executor.node_registry.get("queen")

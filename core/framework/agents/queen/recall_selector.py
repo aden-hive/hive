@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from framework.config import get_aux_max_tokens
 from framework.agents.queen.queen_memory_v2 import (
     format_memory_manifest,
     global_memory_dir as _default_global_memory_dir,
@@ -86,7 +87,7 @@ async def select_memories(
         resp = await llm.acomplete(
             messages=[{"role": "user", "content": user_msg}],
             system=SELECT_MEMORIES_SYSTEM_PROMPT,
-            max_tokens=1024,
+            max_tokens=get_aux_max_tokens(),
             response_format={"type": "json_object"},
         )
         raw = (resp.content or "").strip()

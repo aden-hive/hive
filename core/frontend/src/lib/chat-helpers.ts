@@ -485,6 +485,15 @@ export interface ReplayState {
    * until the first identity event; queen bubbles then fall back to the
    * page-level `queenDisplayName`. */
   queenIdentityName?: string;
+  /** First-seen epoch-ms per reasoning bubble id. Streaming upserts replace
+   * the message wholesale, so ordering needs the bubble's original time,
+   * not the latest snapshot's. */
+  reasoningStartedAt: Record<string, number>;
+  /** Bubble ids whose final client_reasoning block has been applied. A
+   * coalesced llm_reasoning_delta can be flushed to disk AFTER the final
+   * block (tool-only turns flush at llm_turn_complete); its stale
+   * tail-capped snapshot must not overwrite the full text on replay. */
+  reasoningFinal: Set<string>;
 }
 
 export function newReplayState(): ReplayState {
@@ -501,6 +510,8 @@ export function newReplayState(): ReplayState {
     seenEventKeys: new Set<string>(),
     snapshotSeq: 0,
     snapshotAt: 0,
+    reasoningStartedAt: {},
+    reasoningFinal: new Set<string>(),
   };
 }
 
@@ -754,9 +765,80 @@ export function replayEvent(
     case "execution_started":
       state.turnCounters[turnKey] = currentTurn + 1;
       break;
-    case "llm_turn_complete":
+    case "llm_turn_complete": {
       state.turnCounters[turnKey] = currentTurn + 1;
+      // Flush any attach_file chips still queued for this execution. The
+      // normal path drains them into the NEXT queen text bubble — but the
+      // turn can end without one (or the trailing text delta is dropped
+      // under SSE backpressure, being non-critical), and the chips then
+      // never rendered live while a refresh (full disk replay) showed
+      // them: the exact "attachment invisible until refresh" asymmetry.
+      // Stable id (execution-scoped) so live + replay paths dedupe.
+      const leftover = event.execution_id
+        ? state.queenPendingChips[event.execution_id]
+        : undefined;
+      if (leftover && leftover.length > 0) {
+        const chips = leftover.splice(0);
+        const chipMsgId = `chips-${streamId}-${event.execution_id}`;
+        state.queenChipsAppliedByMsgId[chipMsgId] = chips;
+        out.push({
+          id: chipMsgId,
+          agent: queenDisplayName || agentDisplayName || "Queen",
+          agentColor: "",
+          content: "",
+          timestamp: "",
+          thread,
+          createdAt: eventCreatedAt,
+          images: chips.map((c) => ({
+            type: "image_url" as const,
+            image_url: { url: c.url },
+            _fileName: c.filename,
+            _credits: c.credits,
+            _generated: c.generated,
+          })),
+        });
+      }
       break;
+    }
+    case "llm_reasoning_delta":
+    case "client_reasoning": {
+      // Live thinking feedback: a thinking model can reason for minutes
+      // before its first visible character — without a bubble the session
+      // looks dead the whole time. llm_reasoning_delta carries a rolling
+      // tail-capped snapshot; the final client_reasoning replaces it with
+      // the full consolidated block. Same id → one upserted bubble, in
+      // both live SSE and disk replay.
+      const rIter = (event.data?.iteration as number | undefined) ?? currentTurn;
+      const rInner = (event.data?.inner_turn as number | undefined) ?? 0;
+      const rText =
+        event.type === "client_reasoning"
+          ? (event.data?.reasoning as string) || ""
+          : (event.data?.snapshot as string) || (event.data?.content as string) || "";
+      if (!rText.trim()) break;
+      const rMsgId = `reason-${streamId}-${event.execution_id || "exec"}-${rIter}-t${rInner}`;
+      if (event.type === "client_reasoning") {
+        state.reasoningFinal.add(rMsgId);
+      } else if (state.reasoningFinal.has(rMsgId)) {
+        break; // stale rolling snapshot arriving after the final block
+      }
+      const rStartedAt = state.reasoningStartedAt[rMsgId] ?? eventCreatedAt;
+      state.reasoningStartedAt[rMsgId] = rStartedAt;
+      out.push({
+        id: rMsgId,
+        agent: effectiveName || event.node_id || "Agent",
+        agentColor: "",
+        content: rText,
+        timestamp: "",
+        type: "reasoning",
+        role,
+        thread,
+        createdAt: rStartedAt,
+        nodeId: event.node_id || undefined,
+        executionId: event.execution_id || undefined,
+        streamId: event.stream_id || undefined,
+      });
+      break;
+    }
     case "tool_call_started": {
       if (!event.node_id) break;
       const toolName = (event.data?.tool_name as string) || "unknown";

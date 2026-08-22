@@ -626,11 +626,15 @@ class AntigravityProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
+        if max_tokens is None:
+            from framework.config import get_aux_max_tokens  # noqa: PLC0415
+
+            max_tokens = get_aux_max_tokens()
         if json_mode:
             suffix = "\n\nPlease respond with a valid JSON object."
             system = (system + suffix) if system else suffix.strip()
@@ -644,12 +648,16 @@ class AntigravityProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         system_dynamic_suffix: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         import asyncio  # noqa: PLC0415
         import concurrent.futures  # noqa: PLC0415
 
+        if max_tokens is None:
+            from framework.config import get_max_tokens  # noqa: PLC0415
+
+            max_tokens = get_max_tokens()
         # Antigravity (Google's proprietary endpoint) doesn't expose a
         # cache_control hook. Concatenate the dynamic suffix so its shape
         # matches the legacy single-string call site.
