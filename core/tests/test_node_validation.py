@@ -1,6 +1,8 @@
 import pytest
 from pydantic import ValidationError
+
 from framework.orchestrator.node import NodeSpec
+
 
 def test_node_spec_duplicate_output_keys():
     with pytest.raises(ValidationError, match="Duplicate keys found in output_keys"):
