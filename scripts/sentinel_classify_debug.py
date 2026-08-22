@@ -185,7 +185,9 @@ def _matches(p: dict, args: argparse.Namespace) -> bool:
     if args.verdict and p.get("verdict") != args.verdict:
         return False
     if args.grep:
-        hay = " ".join(str(p.get(k, "")) for k in ("goal", "last_assistant_text", "recent_user_text", "reason")).lower()
+        hay = " ".join(
+            str(p.get(k, "")) for k in ("goal", "last_assistant_text", "recent_user_text", "reason")
+        ).lower()
         if args.grep.lower() not in hay:
             return False
     return True
@@ -283,12 +285,9 @@ def main() -> int:
         print()
 
     if not args.raw:
-        print(
-            f"{_DIM if args.color else ''}{len(rows)} decision(s)"
-            f"{f', {misfires} likely misfire(s)' if misfires else ''}."
-            f"{_RESET if args.color else ''}",
-            file=sys.stderr,
-        )
+        print(f"{_DIM if args.color else ''}{len(rows)} decision(s)"
+              f"{f', {misfires} likely misfire(s)' if misfires else ''}."
+              f"{_RESET if args.color else ''}", file=sys.stderr)
     return 0
 
 

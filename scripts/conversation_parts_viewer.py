@@ -21,13 +21,9 @@ from typing import Any
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("conversation_dir", type=Path, help="Directory containing meta.json and parts/*.json")
-    parser.add_argument(
-        "--out", type=Path, default=None, help="HTML output path. Defaults to /tmp/<conversation-dir>-conversation.html"
-    )
+    parser.add_argument("--out", type=Path, default=None, help="HTML output path. Defaults to /tmp/<conversation-dir>-conversation.html")
     parser.add_argument("--open", action="store_true", help="Open the generated HTML in the default browser")
-    parser.add_argument(
-        "--max-embed-chars", type=int, default=2_000_000, help="Trim very large content fields before embedding in HTML"
-    )
+    parser.add_argument("--max-embed-chars", type=int, default=2_000_000, help="Trim very large content fields before embedding in HTML")
     return parser.parse_args()
 
 
@@ -91,9 +87,7 @@ def _load_parts(conversation_dir: Path, max_embed_chars: int) -> list[dict[str, 
         summary["file"] = str(path)
         parts.append(summary)
 
-    parts.sort(
-        key=lambda item: (item.get("seq") if isinstance(item.get("seq"), int) else sys.maxsize, item.get("file", ""))
-    )
+    parts.sort(key=lambda item: (item.get("seq") if isinstance(item.get("seq"), int) else sys.maxsize, item.get("file", "")))
     return parts
 
 

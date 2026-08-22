@@ -37,7 +37,8 @@ try:
     import psutil
 except ImportError:  # pragma: no cover - psutil is a core dependency
     print(
-        "psutil is required. Run inside the runtime venv: `uv run python scripts/mem_report.py`",
+        "psutil is required. Run inside the runtime venv: "
+        "`uv run python scripts/mem_report.py`",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -212,7 +213,8 @@ def build_report(samples: list[Sample], gone: int, denied: int) -> dict:
 def print_report(report: dict) -> None:
     procs = report["processes"]
     if not procs:
-        print("No runtime processes found. Is `hive serve` running? (use --pid to anchor on a specific PID)")
+        print("No runtime processes found. Is `hive serve` running? "
+              "(use --pid to anchor on a specific PID)")
         return
 
     # Per-process table, sorted by PSS desc.
@@ -230,7 +232,10 @@ def print_report(report: dict) -> None:
     print(f"{'CATEGORY':<18} {'COUNT':>7} {'RSS':>11} {'PSS':>11} {'USS':>11}")
     print("-" * 62)
     for cat, c in report["categories"].items():
-        print(f"{cat:<18} {c['count']:>7} {human(c['rss']):>11} {human(c['pss']):>11} {human(c['uss']):>11}")
+        print(
+            f"{cat:<18} {c['count']:>7} "
+            f"{human(c['rss']):>11} {human(c['pss']):>11} {human(c['uss']):>11}"
+        )
 
     t = report["totals"]
     shared = t["rss"] - t["pss"]
@@ -244,19 +249,15 @@ def print_report(report: dict) -> None:
 
     if any(c.startswith("chrome") for c in report["categories"]):
         print()
-        print(
-            "Note: chrome:* covers ALL Chrome/Chromium on this host. In an isolated sandbox "
-            "that is the runtime's browser; on a\n      shared/dev machine it also includes "
-            "unrelated browsers. Use --no-chrome to isolate the Python runtime footprint."
-        )
+        print("Note: chrome:* covers ALL Chrome/Chromium on this host. In an isolated sandbox "
+              "that is the runtime's browser; on a\n      shared/dev machine it also includes "
+              "unrelated browsers. Use --no-chrome to isolate the Python runtime footprint.")
 
     sk = report["skipped"]
     if sk["gone"] or sk["access_denied"]:
         print()
-        print(
-            f"Skipped: {sk['gone']} exited mid-scan, {sk['access_denied']} access-denied "
-            f"(run as the runtime user or root to read their PSS)."
-        )
+        print(f"Skipped: {sk['gone']} exited mid-scan, {sk['access_denied']} access-denied "
+              f"(run as the runtime user or root to read their PSS).")
 
     print()
     print("Deeper attribution once you know the dominant process:")
@@ -266,16 +267,13 @@ def print_report(report: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Per-process PSS/USS breakdown for a running Hive runtime.")
-    ap.add_argument(
-        "--pid", type=int, default=None, help="Anchor on this runtime root PID instead of auto-detecting `hive serve`."
-    )
+    ap.add_argument("--pid", type=int, default=None,
+                    help="Anchor on this runtime root PID instead of auto-detecting `hive serve`.")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
-    ap.add_argument(
-        "--watch", type=float, default=None, metavar="SECS", help="Resample every SECS seconds until interrupted."
-    )
-    ap.add_argument(
-        "--no-chrome", action="store_true", help="Exclude chrome:* processes and focus on the Python runtime footprint."
-    )
+    ap.add_argument("--watch", type=float, default=None, metavar="SECS",
+                    help="Resample every SECS seconds until interrupted.")
+    ap.add_argument("--no-chrome", action="store_true",
+                    help="Exclude chrome:* processes and focus on the Python runtime footprint.")
     args = ap.parse_args()
 
     def one_pass() -> dict:
