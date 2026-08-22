@@ -9,7 +9,7 @@ def __getattr__(name: str):
         from framework.orchestrator.context import GraphContext
 
         return GraphContext
-    if name in ("DEFAULT_MAX_TOKENS", "EdgeCondition", "EdgeSpec", "GraphSpec"):
+    if name in ("DEFAULT_MAX_TOKENS", "EdgeCondition", "EdgeSpec", "GraphSpec", "ConditionEvaluationError"):
         from framework.orchestrator import edge as _e
 
         return getattr(_e, name)

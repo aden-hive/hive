@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_TOKENS = 8192
 
 
+class ConditionEvaluationError(Exception):
+    """Raised when an edge condition expression fails to evaluate due to a runtime or syntax error."""
+
+    pass
+
+
 class EdgeCondition(StrEnum):
     """When an edge should be traversed."""
 
@@ -196,10 +202,18 @@ class EdgeSpec(BaseModel):
             )
             return result
         except Exception as e:
-            logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
-            logger.warning(f"         Error: {e}")
-            logger.warning(f"         Available context keys: {list(context.keys())}")
-            return False
+            logger.error(
+                "      ❌ Edge '%s' condition evaluation failed: %s\n"
+                "         Error: %s\n"
+                "         Available context keys: %s",
+                self.id,
+                self.condition_expr,
+                e,
+                list(context.keys()),
+            )
+            raise ConditionEvaluationError(
+                f"Edge '{self.id}' condition evaluation failed for expression '{self.condition_expr}': {e}"
+            ) from e
 
     async def _llm_decide(
         self,
