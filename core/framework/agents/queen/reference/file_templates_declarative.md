@@ -75,7 +75,7 @@ nodes:
     description: Prepare worker results for queen review
     max_node_visits: 0
     input_keys: [results, user_request]
-    output_keys: [next_action, feedback, worker_summary]
+    output_keys: [next_action]
     nullable_output_keys: [feedback, worker_summary]
     tools:
       policy: none   # handoff nodes don't need tools

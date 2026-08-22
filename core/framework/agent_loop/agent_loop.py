@@ -6198,11 +6198,10 @@ class AgentLoop(AgentProtocol):
         output_keys: list[str] | None,
         nullable_keys: list[str] | None = None,
     ) -> list[str]:
-        """Return output keys that have not been set yet (excluding nullable keys)."""
+        """Return output keys that have not been set yet."""
         if not output_keys:
             return []
-        skip = set(nullable_keys) if nullable_keys else set()
-        return [k for k in output_keys if k not in skip and accumulator.get(k) is None]
+        return [k for k in output_keys if accumulator.get(k) is None]
 
     @staticmethod
     def _ngram_similarity(s1: str, s2: str, n: int = 2) -> float:
