@@ -169,14 +169,16 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include buffer keys directly for easier access in conditions
+        # Unpack buffer keys first so the framework builtins below always take
+        # precedence — a buffer key named "result"/"true"/"false"/"output"/"buffer"
+        # must not shadow the reserved names and mis-route the edge (issue #7380).
         context = {
+            **buffer_data,  # Unpack buffer keys directly into context
             "output": output,
             "buffer": buffer_data,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **buffer_data,  # Unpack buffer keys directly into context
         }
 
         try:
