@@ -23,6 +23,9 @@ def test_node_spec_empty_string_keys():
     with pytest.raises(ValidationError, match="Output keys cannot be empty strings"):
         NodeSpec(id="test", name="Test", description="Test node", output_keys=["result", ""])
 
+    with pytest.raises(ValidationError, match="Output keys cannot be empty strings"):
+        NodeSpec(id="test", name="Test", description="Test node", output_keys=["result", "   "])
+
 
 def test_node_spec_valid_keys():
     # Should not raise any error

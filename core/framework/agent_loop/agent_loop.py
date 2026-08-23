@@ -6198,6 +6198,8 @@ class AgentLoop(AgentProtocol):
     ) -> list[str]:
         """Return output keys that have not been set yet."""
         if not output_keys:
+            if nullable_keys and all(accumulator.get(k) is None for k in nullable_keys):
+                return nullable_keys.copy()
             return []
         return [k for k in output_keys if accumulator.get(k) is None]
 
