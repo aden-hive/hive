@@ -13,7 +13,7 @@ def __getattr__(name: str):
         from framework.orchestrator import edge as _e
 
         return getattr(_e, name)
-    if name in ("Orchestrator", "ExecutionResult"):
+    if name in ("Orchestrator", "ExecutionResult", "ParallelExecutionConfig"):
         from framework.orchestrator import orchestrator as _o
 
         return getattr(_o, name)

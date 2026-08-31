@@ -145,6 +145,12 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
+    # Execution timeout
+    timeout_seconds: float | None = Field(
+        default=None,
+        description="Timeout in seconds for this node. If None, uses orchestrator default.",
+    )
+
     # Visit limits (for feedback/callback edges)
     max_node_visits: int = Field(
         default=0,

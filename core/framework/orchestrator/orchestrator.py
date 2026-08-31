@@ -111,6 +111,9 @@ class ParallelExecutionConfig:
     # Timeout per branch in seconds
     branch_timeout_seconds: float = 300.0
 
+    # Timeout per sequential node in seconds
+    node_timeout_seconds: float = 300.0
+
 
 class Orchestrator:
     """
@@ -158,6 +161,7 @@ class Orchestrator:
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
         skill_dirs: list[str] | None = None,
+        node_timeout_seconds: float | None = None,
     ):
         """
         Initialize the executor.
@@ -188,6 +192,7 @@ class Orchestrator:
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
             skill_dirs: Skill base directories for Tier 3 resource access
+            node_timeout_seconds: Timeout for sequential (non-fanout) nodes in seconds
         """
         self.runtime = runtime
         self.llm = llm
@@ -235,6 +240,11 @@ class Orchestrator:
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
+        self.node_timeout_seconds = (
+            node_timeout_seconds
+            if node_timeout_seconds is not None
+            else getattr(self._parallel_config, "node_timeout_seconds", 300.0)
+        )
 
         # Pause/resume control
         self._pause_requested = asyncio.Event()
@@ -1358,9 +1368,64 @@ class Orchestrator:
             self.logger.error(execution_error)
             return True
 
-        # Track fan-out branch workers for per-branch timeout enforcement
-        _fanout_branch_tasks: dict[str, asyncio.Task] = {}  # worker_id → timeout-wrapper task
+        # Check event bus availability early
+        has_event_subscription = self._event_bus is not None and hasattr(self._event_bus, "subscribe")
+
+        # Track node/branch workers for timeout enforcement: worker_id → (timed_task, timeout, is_fanout)
+        _timed_node_tasks: dict[str, tuple[asyncio.Task, float, bool]] = {}
         branch_timeout = self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
+        node_timeout = self.node_timeout_seconds
+
+        def _wrap_worker_task(worker: NodeWorker, is_fanout: bool) -> asyncio.Task | None:
+            """Wrap a worker task in an asyncio.wait_for timeout."""
+            if worker._task is None:
+                return None
+            spec_timeout = getattr(worker.node_spec, "timeout_seconds", None)
+            if spec_timeout is not None and spec_timeout > 0:
+                timeout = spec_timeout
+            else:
+                timeout = branch_timeout if is_fanout else node_timeout
+
+            if timeout > 0:
+                timed_task = asyncio.ensure_future(asyncio.wait_for(worker._task, timeout=timeout))
+                _timed_node_tasks[worker.node_spec.id] = (timed_task, timeout, is_fanout)
+
+                if has_event_subscription:
+                    wid = worker.node_spec.id
+
+                    async def _watch_timeout(task: asyncio.Task, target_wid: str, t_val: float, fanout: bool):
+                        try:
+                            await task
+                        except asyncio.TimeoutError:
+                            err_msg = f"Branch failed (timed out after {t_val}s)" if fanout else f"Node failed (timed out after {t_val}s)"
+                            w = workers.get(target_wid)
+                            if w:
+                                w.lifecycle = WorkerLifecycle.FAILED
+                                w._last_result = NodeResult(success=False, error=err_msg)
+                            self.logger.warning(f"  ⏱ {'Branch' if fanout else 'Node'} {target_wid}: {err_msg}")
+                            if self._event_bus and hasattr(self._event_bus, "emit_worker_failed"):
+                                await self._event_bus.emit_worker_failed(
+                                    stream_id=self._stream_id,
+                                    node_id=target_wid,
+                                    worker_id=target_wid,
+                                    error=err_msg,
+                                    execution_id=self._execution_id,
+                                )
+                            else:
+                                failed_workers[target_wid] = err_msg
+                                if target_wid in terminal_worker_ids:
+                                    completed_terminals.add(target_wid)
+                                if _check_graph_done() or _mark_quiescent_terminal_failure():
+                                    completion_event.set()
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(_watch_timeout(timed_task, wid, timeout, is_fanout))
+
+                return timed_task
+            return worker._task
 
         def _route_activation(
             activation: Activation,
@@ -1394,14 +1459,11 @@ class Orchestrator:
             if target_worker.check_readiness():
                 target_worker.activate(inherited_tags=activation.fan_out_tags)
                 if target_worker._task is not None:
-                    # Fan-out branch: wrap with timeout
+                    # Wrap with branch or sequential node timeout
                     is_fanout_branch = any(tag.via_branch == activation.target_id for tag in activation.fan_out_tags)
-                    if is_fanout_branch and branch_timeout > 0:
-                        timed_task = asyncio.ensure_future(asyncio.wait_for(target_worker._task, timeout=branch_timeout))
-                        _fanout_branch_tasks[activation.target_id] = timed_task
+                    timed_task = _wrap_worker_task(target_worker, is_fanout_branch)
+                    if timed_task is not None:
                         pending_tasks_map[activation.target_id] = timed_task
-                    else:
-                        pending_tasks_map[activation.target_id] = target_worker._task
 
         # Subscribe to worker events
         sub_completed = None
@@ -1489,7 +1551,6 @@ class Orchestrator:
                 completion_event.set()
 
         # Subscribe to events (only if event bus has subscribe capability)
-        has_event_subscription = self._event_bus is not None and hasattr(self._event_bus, "subscribe")
         if has_event_subscription:
             sub_completed = self._event_bus.subscribe(
                 event_types=[EventType.WORKER_COMPLETED],
@@ -1512,11 +1573,27 @@ class Orchestrator:
 
             # Wait for completion — two strategies depending on event bus availability
             if has_event_subscription and sub_completed is not None:
-                # Event-driven: wait for completion events
+                # Event-driven: wrap entry workers with timeout watcher and wait for completion events
+                for wid in entry_worker_ids:
+                    w = workers[wid]
+                    if w._task is not None:
+                        _wrap_worker_task(w, is_fanout=False)
                 await completion_event.wait()
             else:
                 # No event bus: wait on worker tasks directly and route completions inline.
-                pending_tasks: dict[str, asyncio.Task] = {wid: w._task for wid, w in workers.items() if w._task is not None}
+                pending_tasks: dict[str, asyncio.Task] = {}
+                for wid in entry_worker_ids:
+                    w = workers[wid]
+                    if w._task is not None:
+                        t = _wrap_worker_task(w, is_fanout=False)
+                        if t is not None:
+                            pending_tasks[wid] = t
+                for wid, w in workers.items():
+                    if wid not in pending_tasks and w._task is not None:
+                        t = _wrap_worker_task(w, is_fanout=False)
+                        if t is not None:
+                            pending_tasks[wid] = t
+
                 while True:
                     if _check_graph_done():
                         break
@@ -1558,16 +1635,30 @@ class Orchestrator:
                         except Exception as exc:
                             task_error = exc
 
-                        # Check for fan-out branch timeout
-                        if isinstance(task_error, asyncio.TimeoutError) and wid in _fanout_branch_tasks:
-                            error = f"Branch failed (timed out after {branch_timeout}s)"
+                        # Check for node or fan-out branch timeout
+                        if isinstance(task_error, asyncio.TimeoutError) and wid in _timed_node_tasks:
+                            _, timeout_sec, is_fanout = _timed_node_tasks.pop(wid)
+                            error = f"Branch failed (timed out after {timeout_sec}s)" if is_fanout else f"Node failed (timed out after {timeout_sec}s)"
                             failed_workers[wid] = error
                             worker.lifecycle = WorkerLifecycle.FAILED
-                            self.logger.warning(f"  ⏱ Branch {wid}: {error}")
+                            worker._last_result = NodeResult(success=False, error=error)
+                            self.logger.warning(f"  ⏱ {'Branch' if is_fanout else 'Node'} {wid}: {error}")
                             if wid in terminal_worker_ids:
                                 completed_terminals.add(wid)
-                            _fanout_branch_tasks.pop(wid, None)
+
+                            # Route ON_FAILURE activations
+                            outgoing = await worker._evaluate_outgoing_edges(worker._last_result)
+                            worker._last_activations = outgoing
+                            for activation in outgoing:
+                                _route_activation(
+                                    activation,
+                                    workers,
+                                    pending_tasks,
+                                    has_event_subscription=False,
+                                )
                             continue
+
+                        _timed_node_tasks.pop(wid, None)
 
                         if worker.lifecycle == WorkerLifecycle.COMPLETED and task_error is None:
                             # Read result directly from the worker
