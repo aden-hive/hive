@@ -1396,7 +1396,7 @@ class Orchestrator:
                     async def _watch_timeout(task: asyncio.Task, target_wid: str, t_val: float, fanout: bool):
                         try:
                             await task
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             err_msg = f"Branch failed (timed out after {t_val}s)" if fanout else f"Node failed (timed out after {t_val}s)"
                             w = workers.get(target_wid)
                             if w:
@@ -1638,7 +1638,11 @@ class Orchestrator:
                         # Check for node or fan-out branch timeout
                         if isinstance(task_error, asyncio.TimeoutError) and wid in _timed_node_tasks:
                             _, timeout_sec, is_fanout = _timed_node_tasks.pop(wid)
-                            error = f"Branch failed (timed out after {timeout_sec}s)" if is_fanout else f"Node failed (timed out after {timeout_sec}s)"
+                            error = (
+                                f"Branch failed (timed out after {timeout_sec}s)"
+                                if is_fanout
+                                else f"Node failed (timed out after {timeout_sec}s)"
+                            )
                             failed_workers[wid] = error
                             worker.lifecycle = WorkerLifecycle.FAILED
                             worker._last_result = NodeResult(success=False, error=error)
