@@ -98,6 +98,8 @@ def register_tools(mcp: FastMCP) -> None:
         if ":" in domain:
             domain = domain.split(":")[0]
 
+        if max_results < 1:
+            return {"error": "max_results must be at least 1"}
         max_results = min(max_results, 200)
 
         try:

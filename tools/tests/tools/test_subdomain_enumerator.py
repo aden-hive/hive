@@ -41,6 +41,16 @@ class TestInputValidation:
     """Test domain input cleaning."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_results", [0, -1])
+    async def test_rejects_non_positive_max_results(self, enumerate_fn, max_results):
+        """Non-positive limits must fail before making a network request."""
+        with patch("httpx.AsyncClient") as mock_client:
+            result = await enumerate_fn("example.com", max_results=max_results)
+
+        assert result == {"error": "max_results must be at least 1"}
+        mock_client.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_strips_https_prefix(self, enumerate_fn):
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
