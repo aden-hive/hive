@@ -15,6 +15,38 @@ import {
   type GitHubIssue,
   type GitHubReaction,
 } from "./auto-close-duplicates";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ProcurementAgent } from '../src/agents/ProcurementAgent';
+import { SharedMemory } from '../src/core/SharedMemory';
+
+describe('Hive Procurement Agent: B2B Discovery', () => {
+  const scout = new ProcurementAgent();
+
+  it('should filter SAP Ariba opportunities by tech-moat keywords', async () => {
+    const matches = await scout.searchAriba(['AI', 'SaaS', 'Computer Vision']);
+    
+    // Defensive check
+    expect(matches).not.toHaveLength(0);
+    expect(matches[0]).toBeDefined();
+
+    const topLead = matches[0];
+    expect(topLead.category).toBe('Information Technology');
+    expect(topLead.description).toMatch(/artificial intelligence/i);
+  }); // Semicolon added at line 64
+});
+
+describe('Bug #804: Memory Isolation', () => {
+  it('should prevent cross-node state corruption via deep copy', async () => {
+    const mem = new SharedMemory();
+    mem.write("procurement_data", [{ id: "SAP-1", status: "OPEN" }]);
+    
+    const leaked = mem.read("procurement_data");
+    leaked[0].status = "CORRUPTED";
+    
+    const original = mem.read("procurement_data");
+    expect(original[0].status).toBe("OPEN"); // Assert Deep Isolation
+  });
+});
 
 describe("extractDuplicateIssueNumber", () => {
   test("extracts #123 format", () => {
