@@ -419,7 +419,7 @@ from core.framework.credentials.aden import AdenCredentialClient, AdenClientConf
 # Configure
 # API key loaded from ADEN_API_KEY env var by default
 client = AdenCredentialClient(AdenClientConfig(
-    base_url=os.environ["ADEN_API_URL"],
+    base_url=os.getenv("ADEN_API_URL"),
     tenant_id=os.environ.get("ADEN_TENANT_ID"),
 ))
 
@@ -468,7 +468,7 @@ store = CredentialStore(
 def create_tenant_store(tenant_id: str) -> CredentialStore:
     # Explicit api_key for per-tenant credentials
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
+        base_url=os.getenv("ADEN_API_URL"),
         api_key=os.environ[f"ADEN_API_KEY_{tenant_id}"],
         tenant_id=tenant_id,
     ))
@@ -622,8 +622,8 @@ Test against Aden staging environment:
 @pytest.mark.integration
 def test_aden_sync():
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_STAGING_URL"],
-        api_key=os.environ["ADEN_STAGING_API_KEY"],
+        base_url=os.getenv("ADEN_STAGING_URL"),
+        api_key=os.getenv("ADEN_STAGING_API_KEY"),
     ))
 
     # Should successfully fetch
