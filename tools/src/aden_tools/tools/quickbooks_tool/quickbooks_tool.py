@@ -195,6 +195,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             return {"error": "line_items must be valid JSON"}
         if not isinstance(items, list) or len(items) == 0:
             return {"error": "line_items must be a non-empty JSON array"}
+        if not all(isinstance(item, dict) for item in items):
+            return {"error": "each line item must be a JSON object"}
 
         lines = []
         for item in items:

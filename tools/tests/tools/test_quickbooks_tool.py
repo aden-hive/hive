@@ -128,6 +128,17 @@ class TestQuickbooksCreateInvoice:
             result = tool_fns["quickbooks_create_invoice"](customer_id="1", line_items="not json")
         assert "error" in result
 
+    @pytest.mark.parametrize("line_items", ["[1]", '["item"]', "[null]", "[[]]"])
+    def test_rejects_non_object_line_items(self, tool_fns, line_items):
+        with (
+            patch.dict("os.environ", ENV),
+            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.post") as mock_post,
+        ):
+            result = tool_fns["quickbooks_create_invoice"](customer_id="1", line_items=line_items)
+
+        assert result == {"error": "each line item must be a JSON object"}
+        mock_post.assert_not_called()
+
     def test_successful_create(self, tool_fns):
         data = {
             "Invoice": {
