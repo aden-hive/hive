@@ -1,0 +1,220 @@
+{
+  "agent": {
+    "id": "tech_news_reporter",
+    "name": "Tech & AI News Reporter",
+    "version": "1.0.0",
+    "description": "Research the latest technology and AI news from the web, summarize key stories, and produce a well-organized report for the user to read."
+  },
+  "graph": {
+    "id": "tech_news_reporter-graph",
+    "goal_id": "tech-news-report",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "compile-report"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Greet the user and ask if they have specific tech/AI topics to focus on, or if they want a general news roundup.",
+        "node_type": "event_loop",
+        "input_keys": [],
+        "output_keys": [
+          "research_brief"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are the intake assistant for a Tech & AI News Reporter agent.\n\n**STEP 1 — Greet and ask the user:**\nGreet the user and ask what kind of tech/AI news they're interested in today. Offer options like:\n- General tech & AI roundup (covers everything notable)\n- Specific topics (e.g., LLMs, robotics, startups, cybersecurity, semiconductors)\n- A particular company or product\n\nKeep it brief and friendly. If the user already stated a preference in their initial message, acknowledge it.\n\nAfter your greeting, call ask_user() to wait for the user's response.\n\n**STEP 2 — After the user responds, call set_output:**\n- set_output(\"research_brief\", \"<a clear, concise description of what to search for based on the user's preferences>\")\n\nIf the user just wants a general roundup, set: \"General tech and AI news roundup covering the most notable stories from the past week\"",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "description": "Search the web for recent tech/AI news articles, scrape the top results, and extract key information including titles, summaries, sources, and topics.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "research_brief"
+        ],
+        "output_keys": [
+          "articles_data"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a news researcher for a Tech & AI News Reporter agent.\n\nYour task: Find and summarize recent tech/AI news based on the research_brief.\n\n**Instructions:**\n1. Use web_search to find recent tech and AI news articles. Run multiple searches with different queries to get diverse coverage (e.g., \"latest AI news this week\", \"tech industry news today\", topic-specific queries from the brief).\n2. Pick the 5-10 most interesting and significant articles from the search results.\n3. Use web_scrape on each selected article to get the full content.\n4. For each article, extract: title, source name, URL, publication date, a 2-3 sentence summary, and the main topic category.\n\n**Output format:**\nUse set_output(\"articles_data\", <JSON string>) with this structure:\n```json\n{\n  \"articles\": [\n    {\n      \"title\": \"Article Title\",\n      \"source\": \"Source Name\",\n      \"url\": \"https://...\",\n      \"date\": \"2026-02-05\",\n      \"summary\": \"2-3 sentence summary of the key points.\",\n      \"topic\": \"AI / Semiconductors / Startups / etc.\"\n    }\n  ],\n  \"search_date\": \"2026-02-06\",\n  \"topics_covered\": [\"AI\", \"Semiconductors\", \"...\"]\n}\n```\n\n**Rules:**\n- Only include REAL articles with REAL URLs you found via search. Never fabricate.\n- Focus on news from the past week.\n- Aim for at least 3 distinct topic categories.\n- Keep summaries factual and concise.",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "compile-report",
+        "name": "Compile Report",
+        "description": "Organize the researched articles into a structured HTML report, save it, and deliver a clickable link to the user.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "articles_data"
+        ],
+        "output_keys": [
+          "report_file"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are the report compiler for a Tech & AI News Reporter agent.\n\nYour task: Turn the articles_data into a polished, readable HTML report and deliver it to the user.\n\n**Instructions:**\n1. Parse the articles_data JSON to get the list of articles.\n2. Generate a well-structured HTML report with:\n   - A header with the report title and date\n   - A table of contents / summary section listing topics covered\n   - Articles grouped by topic category\n   - For each article: title (linked to source URL), source name, date, and summary\n   - Clean, readable styling (inline CSS)\n3. Use save_data to save the HTML report as \"tech_news_report.html\".\n4. Use serve_file_to_user to get a clickable link for the user.\n\n**STEP 1 — Respond to the user (text only, NO tool calls):**\nPresent a brief text summary of the report highlights — how many articles, what topics are covered, and a few headline highlights. Tell the user you're generating their full report now.\n\n**STEP 2 — After presenting the summary, save and serve the report:**\n- save_data(filename=\"tech_news_report.html\", data=<html_content>, data_dir=<data_dir>)\n- serve_file_to_user(filename=\"tech_news_report.html\", data_dir=<data_dir>, label=\"Tech & AI News Report\", open_in_browser=True)\n- set_output(\"report_file\", \"tech_news_report.html\")\n\nThe report will auto-open in the user's default browser. Let them know the report has been opened.",
+        "tools": [
+          "save_data",
+          "serve_file_to_user"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-research",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "research-to-compile-report",
+        "source": "research",
+        "target": "compile-report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Research the latest technology and AI news from the web, summarize key stories, and produce a well-organized report for the user to read.",
+    "created_at": "2026-02-06T08:42:51.476802"
+  },
+  "goal": {
+    "id": "tech-news-report",
+    "name": "Tech & AI News Reporter",
+    "description": "Research the latest technology and AI news from the web, summarize key stories, and produce a well-organized report for the user to read.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "sc-find-articles",
+        "description": "Finds recent, relevant tech/AI news articles",
+        "metric": "Number of articles sourced",
+        "target": "5+ articles",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-diverse-topics",
+        "description": "Covers diverse topics, not just one story",
+        "metric": "Distinct topics covered",
+        "target": "3+ topics",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "sc-structured-report",
+        "description": "Produces a structured, readable report with sections, summaries, and links",
+        "metric": "Report has clear sections and summaries",
+        "target": "Yes",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-source-attribution",
+        "description": "Includes source attribution with URLs for every story",
+        "metric": "Stories with source URLs",
+        "target": "100%",
+        "weight": 0.15,
+        "met": false
+      },
+      {
+        "id": "sc-deliver-report",
+        "description": "Delivers the report to the user in a viewable format",
+        "metric": "User receives a viewable report",
+        "target": "Yes",
+        "weight": 0.15,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-no-fabrication",
+        "description": "Never fabricate news stories or URLs",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      },
+      {
+        "id": "c-source-attribution",
+        "description": "Always attribute sources with links",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      },
+      {
+        "id": "c-recent-news",
+        "description": "Only include news from the past week",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-06 08:39:00.123362",
+    "updated_at": "2026-02-06 08:39:00.123364"
+  },
+  "required_tools": [
+    "web_scrape",
+    "save_data",
+    "serve_file_to_user",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-06T08:42:51.476862",
+    "node_count": 3,
+    "edge_count": 2
+  }
+}
