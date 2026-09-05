@@ -1,0 +1,376 @@
+{
+  "agent": {
+    "id": "student_assignment_agent",
+    "name": "Student Assignment Helper Agent",
+    "version": "1.0.0",
+    "description": "An intelligent assignment helper that takes a student's topic, researches it thoroughly, creates a structured outline, drafts a well-written assignment, reviews it for quality, and delivers a polished final document — with checkpoints for student feedback."
+  },
+  "graph": {
+    "id": "student-assignment-agent-graph",
+    "goal_id": "complete-student-assignment",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are an intelligent student assignment helper. You help students research topics, structure their thoughts, and write well-organized, plagiarism-free assignments. You always follow academic writing standards, cite sources properly, and respect word limits. You never fabricate information — every claim must trace back to a real source.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Assignment Intake",
+        "description": "Understand the assignment requirements from the student",
+        "node_type": "event_loop",
+        "input_keys": [
+          "topic"
+        ],
+        "output_keys": [
+          "assignment_brief"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The assignment brief is clear and includes: topic, subject area, word limit, academic level, any specific requirements or instructions from the teacher.",
+        "system_prompt": "You are a friendly assignment intake assistant helping a student.\n\n**STEP 1 — Greet and gather info (text only, NO tool calls):**\nAsk the student for the following details (ask all at once, not one by one):\n1. What is the assignment topic or question?\n2. What subject is this for? (e.g., History, Biology, Computer Science)\n3. What is the word limit? (e.g., 500 words, 1000 words)\n4. What is their academic level? (e.g., High School, Undergraduate, Postgraduate)\n5. Any specific instructions from the teacher? (e.g., use at least 5 sources, include case studies)\n6. When is the deadline? (optional)\n\nBe friendly, encouraging, and concise. Tell the student you'll help them write a great assignment!\n\n**STEP 2 — After the student responds, confirm understanding and call set_output:**\n- Summarize what you understood\n- Ask if anything needs correction\n- Once confirmed: set_output(\"assignment_brief\", \"A detailed paragraph covering: topic, subject, word limit, academic level, special instructions, and deadline.\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "research",
+        "name": "Topic Research",
+        "description": "Search the web for relevant, authoritative information on the assignment topic",
+        "node_type": "event_loop",
+        "input_keys": [
+          "assignment_brief",
+          "feedback"
+        ],
+        "output_keys": [
+          "findings",
+          "sources",
+          "key_points"
+        ],
+        "nullable_output_keys": [
+          "feedback"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "Findings reference at least 5 distinct sources with URLs. Key points are well-organized and directly relevant to the assignment topic.",
+        "system_prompt": "You are a research assistant helping a student find information for their assignment.\n\nIf feedback is provided, this is a follow-up round — focus on the gaps or areas the student wants improved.\n\nWork in phases:\n1. **Search**: Use web_search with 4-6 diverse queries covering different angles of the topic.\n   Prioritize academic and authoritative sources (.edu, .gov, Wikipedia, established publications, research papers).\n2. **Fetch**: Use web_scrape on the most relevant URLs (aim for 5-8 sources).\n   Extract key facts, statistics, definitions, examples, and arguments.\n3. **Organize**: Group findings into clear themes or sections relevant to the assignment.\n\nImportant:\n- Work in batches of 3-4 tool calls at a time\n- Focus on quality over quantity\n- Track which URL each finding comes from (needed for references)\n- Look for: definitions, key concepts, examples, case studies, expert opinions, statistics\n- Call set_output for each key in a SEPARATE turn\n\nWhen done, use set_output (one key at a time):\n- set_output(\"findings\", \"Detailed organized findings grouped by theme, with source URLs for each fact.\")\n- set_output(\"sources\", [{\"url\": \"...\", \"title\": \"...\", \"summary\": \"...\"}])\n- set_output(\"key_points\", \"A bullet list of the most important points to include in the assignment.\")",
+        "tools": [
+          "exa_search",
+          "web_scrape",
+          "load_data",
+          "save_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "outline",
+        "name": "Assignment Outline",
+        "description": "Create a structured outline for the assignment based on research findings",
+        "node_type": "event_loop",
+        "input_keys": [
+          "findings",
+          "key_points",
+          "assignment_brief"
+        ],
+        "output_keys": [
+          "outline",
+          "outline_approved"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "A clear, structured outline has been created and approved by the student, covering introduction, body sections, and conclusion within the word limit.",
+        "system_prompt": "You are an academic writing coach helping a student plan their assignment.\n\n**STEP 1 — Create and present the outline (text only, NO tool calls):**\nBased on the research findings, create a detailed outline:\n\n1. **Introduction** (~10% of word limit)\n   - Hook / opening statement\n   - Background context\n   - Thesis statement / main argument\n\n2. **Body Sections** (~80% of word limit)\n   - Section 1: [Key theme/argument with supporting points]\n   - Section 2: [Key theme/argument with supporting points]\n   - Section 3: [Key theme/argument with supporting points]\n   (Add more sections as needed based on word limit)\n\n3. **Conclusion** (~10% of word limit)\n   - Summary of key points\n   - Restate thesis\n   - Final thoughts / recommendations\n\n4. **References**\n   - List of sources to be cited\n\nPresent this outline clearly and ask the student:\n- Does this structure look good?\n- Any sections to add, remove, or change?\n- Any specific points they want emphasized?\n\n**STEP 2 — After student approves, call set_output:**\n- set_output(\"outline\", \"The complete approved outline with all sections and key points.\")\n- set_output(\"outline_approved\", \"true\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "draft",
+        "name": "Write Assignment Draft",
+        "description": "Write a complete, well-structured assignment draft based on the outline and research",
+        "node_type": "event_loop",
+        "input_keys": [
+          "outline",
+          "findings",
+          "sources",
+          "assignment_brief"
+        ],
+        "output_keys": [
+          "draft_content",
+          "word_count"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "A complete assignment draft has been written following the outline, staying within the word limit, using proper academic language, and citing sources correctly.",
+        "system_prompt": "You are an expert academic writer. Write a complete assignment draft based on the outline and research findings.\n\n**Writing Guidelines:**\n- Follow the approved outline structure exactly\n- Use formal academic language appropriate for the student's level\n- Stay within the specified word limit (±10% is acceptable)\n- Cite sources inline using [Author/Source, Year] or numbered [1], [2] format\n- Write in clear, coherent paragraphs with smooth transitions\n- Start each section with a topic sentence\n- Use evidence and examples from the research to support every claim\n- Never fabricate facts — only use information from the research findings\n- Avoid plagiarism — paraphrase and cite properly\n\n**Structure to follow:**\n1. Write the Introduction\n2. Write each Body Section with proper headings\n3. Write the Conclusion\n4. Add a References list at the end\n\n**After writing:**\n- Count the approximate word count\n- set_output(\"draft_content\", \"The complete assignment draft text with all sections.\")\n- set_output(\"word_count\", \"Approximate word count as a number\")",
+        "tools": [
+          "save_data",
+          "load_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "review",
+        "name": "Review & Quality Check",
+        "description": "Review the draft for quality, grammar, structure and get student feedback",
+        "node_type": "event_loop",
+        "input_keys": [
+          "draft_content",
+          "word_count",
+          "assignment_brief",
+          "outline"
+        ],
+        "output_keys": [
+          "needs_revision",
+          "revision_feedback"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The draft has been reviewed, feedback provided to the student, and student has indicated whether they want revisions or are ready for final output.",
+        "system_prompt": "Review the assignment draft and present it to the student for feedback.\n\n**STEP 1 — Quality Check and Present (text only, NO tool calls):**\n\nFirst, internally check the draft for:\n✅ Does it follow the outline structure?\n✅ Is the word count within limits?\n✅ Is academic language used throughout?\n✅ Are all claims cited with sources?\n✅ Is there a clear introduction, body, and conclusion?\n✅ Do paragraphs flow logically?\n\nThen present to the student:\n1. **Quality Summary** — Overall assessment of the draft\n2. **Word Count** — Current count vs required\n3. **Strengths** — What's well written\n4. **Suggested Improvements** — Any areas that could be better\n5. **Show the Draft** — Display the full draft for the student to read\n\nAsk the student:\n- Are you happy with this draft?\n- Would you like any changes? (more detail on any section, different tone, more examples, etc.)\n- Or shall we finalize it?\n\n**STEP 2 — After student responds, call set_output:**\n- set_output(\"needs_revision\", \"true\") — if they want changes\n- set_output(\"needs_revision\", \"false\") — if they are satisfied\n- set_output(\"revision_feedback\", \"Specific changes the student wants, or empty string if satisfied\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "report",
+        "name": "Final Assignment Delivery",
+        "description": "Deliver the final polished assignment as a downloadable HTML file",
+        "node_type": "event_loop",
+        "input_keys": [
+          "draft_content",
+          "sources",
+          "assignment_brief",
+          "word_count"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "A polished HTML assignment file has been saved and the download link has been presented to the student.",
+        "system_prompt": "Create and deliver the final polished assignment as an HTML file.\n\nIMPORTANT: save_data requires TWO separate arguments: filename and data.\nCall it like: save_data(filename=\"assignment.html\", data=\"<html>...</html>\")\n\n**STEP 1 — Build and save the HTML file (tool calls, NO text to student yet):**\n\nCreate a clean, well-formatted HTML document:\n\n```html\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <title>[Assignment Title]</title>\n  <style>\n    body { font-family: 'Times New Roman', serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.8; color: #222; }\n    h1 { text-align: center; font-size: 1.5em; margin-bottom: 5px; }\n    .meta { text-align: center; color: #555; font-size: 0.9em; margin-bottom: 30px; }\n    h2 { font-size: 1.2em; margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }\n    p { text-align: justify; margin-bottom: 15px; }\n    .references { margin-top: 40px; font-size: 0.9em; }\n    .references li { margin-bottom: 8px; }\n    .word-count { text-align: right; color: #777; font-size: 0.85em; margin-top: 20px; }\n  </style>\n</head>\n<body>\n  <h1>[Assignment Title]</h1>\n  <div class=\"meta\">Subject: [Subject] | Word Count: [X] words | Date: [Date]</div>\n  \n  <h2>Introduction</h2>\n  <p>[Introduction content]</p>\n  \n  <h2>[Body Section 1 Title]</h2>\n  <p>[Content]</p>\n  \n  <!-- More sections -->\n  \n  <h2>Conclusion</h2>\n  <p>[Conclusion content]</p>\n  \n  <div class=\"references\">\n    <h2>References</h2>\n    <ol>\n      <li>[Reference 1]</li>\n    </ol>\n  </div>\n  \n  <div class=\"word-count\">Total Word Count: [X] words</div>\n</body>\n</html>\n```\n\nSave the file:\n  save_data(filename=\"assignment.html\", data=\"<complete html>\")\n\nThen get the link:\n  serve_file_to_user(filename=\"assignment.html\", label=\"📄 Download Your Assignment\")\n\n**STEP 2 — Present to the student (text only, NO tool calls):**\n\nTell the student:\n- Their assignment is ready! 🎉\n- Share the clickable download link\n- Give a brief summary: word count, sections covered, sources cited\n- Wish them good luck!\n- Ask if they have any final questions\n\n**STEP 3 — After student responds:**\n- Answer any final questions\n- When done: set_output(\"delivery_status\", \"completed\")",
+        "tools": [
+          "save_data",
+          "serve_file_to_user",
+          "load_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-research",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "research-to-outline",
+        "source": "research",
+        "target": "outline",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "outline-to-draft",
+        "source": "outline",
+        "target": "draft",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "draft-to-review",
+        "source": "draft",
+        "target": "review",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "review-to-draft-revision",
+        "source": "review",
+        "target": "draft",
+        "condition": "conditional",
+        "condition_expr": "str(needs_revision).lower() == 'true'",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "review-to-report",
+        "source": "review",
+        "target": "report",
+        "condition": "conditional",
+        "condition_expr": "str(needs_revision).lower() != 'true'",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "An intelligent assignment helper that researches topics, creates outlines, writes drafts, reviews quality, and delivers polished assignments — with student checkpoints at every stage.",
+    "created_at": "2026-03-08T00:00:00.000000"
+  },
+  "goal": {
+    "id": "complete-student-assignment",
+    "name": "Complete Student Assignment",
+    "description": "Help a student complete a well-researched, properly structured, and academically written assignment on any topic.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "research-quality",
+        "description": "At least 5 authoritative sources used for research",
+        "metric": "source_count",
+        "target": ">=5",
+        "weight": 0.20,
+        "met": false
+      },
+      {
+        "id": "outline-approval",
+        "description": "Student approves the assignment outline before drafting",
+        "metric": "outline_approved",
+        "target": "true",
+        "weight": 0.20,
+        "met": false
+      },
+      {
+        "id": "word-limit-compliance",
+        "description": "Final assignment is within 10% of the specified word limit",
+        "metric": "word_count_compliance",
+        "target": "true",
+        "weight": 0.20,
+        "met": false
+      },
+      {
+        "id": "citation-coverage",
+        "description": "Every factual claim in the assignment cites its source",
+        "metric": "citation_coverage",
+        "target": "100%",
+        "weight": 0.20,
+        "met": false
+      },
+      {
+        "id": "student-satisfaction",
+        "description": "Student reviews and approves the draft before final delivery",
+        "metric": "student_approval",
+        "target": "true",
+        "weight": 0.20,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-plagiarism",
+        "description": "All content must be paraphrased and properly cited — never copy-paste from sources",
+        "constraint_type": "quality",
+        "category": "academic-integrity"
+      },
+      {
+        "id": "no-hallucination",
+        "description": "Only include information found in fetched sources",
+        "constraint_type": "quality",
+        "category": "accuracy"
+      },
+      {
+        "id": "word-limit",
+        "description": "Final assignment must stay within the student's specified word limit (±10%)",
+        "constraint_type": "functional",
+        "category": "requirements"
+      },
+      {
+        "id": "student-checkpoints",
+        "description": "Student must approve outline and review draft before final delivery",
+        "constraint_type": "functional",
+        "category": "interaction"
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-03-08T00:00:00.000000",
+    "updated_at": "2026-03-08T00:00:00.000000"
+  },
+  "required_tools": [
+    "list_data_files",
+    "load_data",
+    "save_data",
+    "serve_file_to_user",
+    "web_scrape",
+    "exa_search"
+  ],
+  "metadata": {
+    "created_at": "2026-03-08T00:00:00.000000",
+    "node_count": 6,
+    "edge_count": 6
+  }
+}
