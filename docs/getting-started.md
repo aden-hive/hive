@@ -143,6 +143,8 @@ hive/
 
 ## Running an Agent
 
+Run these commands from the project root (the `hive/` directory). Replace `my_agent` with your agent's package name (the folder name under `exports/`).
+
 ```bash
 # Launch the web dashboard in your browser
 hive open
