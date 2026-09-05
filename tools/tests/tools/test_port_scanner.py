@@ -62,6 +62,23 @@ class TestInputValidation:
             assert "Invalid port list" in result["error"]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("ports", ["0", "65536", "-1", "80,70000"])
+    async def test_rejects_out_of_range_ports(self, scan_fn, ports):
+        with (
+            patch("socket.gethostbyname", return_value="93.184.216.34") as mock_resolve,
+            patch(
+                "aden_tools.tools.port_scanner.port_scanner._check_port",
+                new_callable=AsyncMock,
+                return_value={"open": False},
+            ) as mock_check,
+        ):
+            result = await scan_fn("example.com", ports=ports)
+
+        assert result == {"error": f"Invalid port list: {ports}. Ports must be between 1 and 65535"}
+        mock_resolve.assert_not_called()
+        mock_check.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_custom_port_list(self, scan_fn):
         with patch("socket.gethostbyname", return_value="93.184.216.34"):
             with patch(
