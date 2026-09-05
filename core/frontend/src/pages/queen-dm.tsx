@@ -29,6 +29,11 @@ import {
   type OlderCursor,
 } from "@/lib/chat-helpers";
 import {
+  clearDismissedQuestions,
+  isQuestionSetDismissed,
+  rememberDismissedQuestions,
+} from "@/lib/pending-question-dismissal";
+import {
   beginLoad,
   TRACE_ENABLED,
   msgSummary,
@@ -136,6 +141,10 @@ export default function QueenDM() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
   const [loading, setLoading] = useState(true);
   // Latest runtime bootstrap stage ("Starting tool servers", …), polled
   // from /api/startup-status while the loading overlay is up so a slow
@@ -1673,7 +1682,11 @@ export default function QueenDM() {
           // the switch case that populates pendingQuestions, so the
           // modal can't render and the user has no way to answer the
           // queen.
-          if (Array.isArray(d.pending_questions) && d.pending_questions.length > 0) {
+          if (
+            Array.isArray(d.pending_questions) &&
+            d.pending_questions.length > 0 &&
+            !isQuestionSetDismissed(sessionIdRef.current, d.pending_questions)
+          ) {
             setPendingQuestions(d.pending_questions);
           }
           return;
@@ -1889,7 +1902,9 @@ export default function QueenDM() {
           setAwaitingInput(true);
           setParkReason((event.data?.park_reason as string | undefined) ?? null);
           setIsStreaming(false);
-          setPendingQuestions(questions);
+          if (!isQuestionSetDismissed(sessionIdRef.current, questions)) {
+            setPendingQuestions(questions);
+          }
           break;
         }
 
@@ -1913,6 +1928,7 @@ export default function QueenDM() {
           // resolved requests out of the SSE replay (see
           // collect_resolved_request_seqs in event_bus.py); this is
           // the renderer-side belt to that suspenders.
+          clearDismissedQuestions(sessionIdRef.current);
           setPendingQuestions(null);
           setAwaitingInput(false);
           setParkReason(null);
@@ -2715,7 +2731,7 @@ export default function QueenDM() {
           pendingQuestions={awaitingInput ? pendingQuestions : null}
           onQuestionSubmit={handleQuestionAnswer}
           onQuestionDismiss={() => {
-            setAwaitingInput(false);
+            rememberDismissedQuestions(sessionId, pendingQuestions);
             setPendingQuestions(null);
           }}
           supportsImages={true}

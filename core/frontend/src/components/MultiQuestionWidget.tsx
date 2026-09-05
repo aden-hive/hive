@@ -96,6 +96,7 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss, in
           {onDismiss && (
             <button
               onClick={onDismiss}
+              aria-label="Dismiss question"
               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors flex-shrink-0"
             >
               <X className="w-4 h-4" />
