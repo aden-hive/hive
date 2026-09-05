@@ -1,0 +1,189 @@
+{
+  "agent": {
+    "id": "meeting_scheduler",
+    "name": "Meeting Scheduler",
+    "version": "1.0.0",
+    "description": "Schedule meetings by checking Google Calendar availability, booking optimal time slots, recording details in Google Sheets, and sending email confirmations with Google Meet links to attendees."
+  },
+  "goal": {
+    "id": "meeting-scheduler-goal",
+    "name": "Schedule Meetings",
+    "description": "Check calendar availability, find optimal meeting times, record meetings, and send reminders.",
+    "success_criteria": [
+      {
+        "id": "sc-1",
+        "description": "Meeting time found within requested duration",
+        "metric": "calendar_availability",
+        "target": "success",
+        "weight": 0.35
+      },
+      {
+        "id": "sc-2",
+        "description": "Meeting recorded in spreadsheet accurately",
+        "metric": "data_persistence",
+        "target": "recorded",
+        "weight": 0.30
+      },
+      {
+        "id": "sc-3",
+        "description": "Attendee email reminder sent",
+        "metric": "communication",
+        "target": "sent",
+        "weight": 0.25
+      },
+      {
+        "id": "sc-4",
+        "description": "User confirms meeting details",
+        "metric": "user_acknowledgment",
+        "target": "confirmed",
+        "weight": 0.10
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-1",
+        "description": "Must use Google Calendar API for availability check",
+        "constraint_type": "hard",
+        "category": "functional"
+      },
+      {
+        "id": "c-2",
+        "description": "Meeting duration must match requested time",
+        "constraint_type": "hard",
+        "category": "accuracy"
+      },
+      {
+        "id": "c-3",
+        "description": "Spreadsheet record must include date, time, attendee, title",
+        "constraint_type": "hard",
+        "category": "quality"
+      }
+    ]
+  },
+  "graph": {
+    "id": "meeting-scheduler-graph",
+    "goal_id": "meeting-scheduler-goal",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are a helpful meeting scheduler assistant that manages calendar availability and sends confirmations.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Gather meeting details from the user",
+        "node_type": "event_loop",
+        "input_keys": ["attendee_email", "meeting_duration_minutes"],
+        "output_keys": ["attendee_email", "meeting_duration_minutes", "meeting_title"],
+        "nullable_output_keys": ["attendee_email", "meeting_duration_minutes", "meeting_title"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a meeting scheduler assistant. Gather meeting details from the user: attendee email, meeting duration (in minutes), and meeting title. Call set_output immediately after the user provides all details.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "schedule",
+        "name": "Schedule",
+        "description": "Find available time on calendar, book meeting with Google Meet, and log to Google Sheet",
+        "node_type": "event_loop",
+        "input_keys": ["attendee_email", "meeting_duration_minutes", "meeting_title"],
+        "output_keys": ["meeting_time", "booking_confirmed", "spreadsheet_recorded", "email_sent", "meet_link"],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a meeting booking agent that creates Google Calendar events with Google Meet and logs to Google Sheets. Steps: 1) Use calendar_check_availability to find potential time slots, 2) Use calendar_list_events for secondary verification, 3) Use calendar_create_event with attendees to create the event (Google Meet link is auto-generated), 4) Use google_sheets functions to log meeting details, 5) Use send_email to send confirmation to attendee. Extract the Google Meet link from the calendar event response and include it in the email.",
+        "tools": ["calendar_check_availability", "calendar_list_events", "calendar_create_event", "google_sheets_get_spreadsheet", "google_sheets_create_spreadsheet", "google_sheets_append_values", "send_email"],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": null
+      },
+      {
+        "id": "confirm",
+        "name": "Confirm",
+        "description": "Present meeting confirmation and ask if user wants to schedule another meeting",
+        "node_type": "event_loop",
+        "input_keys": ["meeting_time", "attendee_email", "meeting_title", "meet_link"],
+        "output_keys": ["next_action"],
+        "nullable_output_keys": ["next_action"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a meeting scheduler assistant. Present the confirmed meeting details to the user (time, attendee, title, and Google Meet link). Ask if they want to schedule another meeting. Call set_output(\"next_action\", \"another\") if yes, or set_output(\"next_action\", \"done\") if no.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-schedule",
+        "source": "intake",
+        "target": "schedule",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "schedule-to-confirm",
+        "source": "schedule",
+        "target": "confirm",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "confirm-to-intake",
+        "source": "confirm",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "str(next_action).lower() == 'another'",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ]
+  },
+  "required_tools": [
+    "calendar_check_availability",
+    "calendar_list_events",
+    "calendar_create_event",
+    "google_sheets_get_spreadsheet",
+    "google_sheets_create_spreadsheet",
+    "google_sheets_append_values",
+    "send_email"
+  ],
+  "metadata": {
+    "node_count": 3,
+    "edge_count": 3
+  }
+}
