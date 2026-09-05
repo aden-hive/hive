@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+
+  hive:
+    container_name: hive
+
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+
+    ports:
+      - "8787:8787"
+
+    volumes:
+      - hive_config:/root/.hive
+
+    restart: unless-stopped
+
+volumes:
+  hive_config:
