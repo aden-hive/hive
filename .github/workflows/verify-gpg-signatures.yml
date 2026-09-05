@@ -1,0 +1,49 @@
+name: Verify GPG Commit Signatures
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verify-signatures:
+    name: Check All Commits Are GPG Signed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify all commits in PR are GPG signed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          echo "Checking GPG signatures for commits in this PR..."
+          echo "----------------------------------------------------"
+
+          while read -r commit status; do
+            case "$status" in
+              G|U|X|Y|R)
+                echo "SIGNED   : $commit"
+                ;;
+              N)
+                echo "UNSIGNED : $commit (no signature found)"
+                ;;
+              B)
+                echo "INVALID  : $commit (bad or corrupted signature)"
+                ;;
+              E)
+                echo "UNKNOWN  : $commit (signature cannot be verified — missing public key)"
+                ;;
+              *)
+                echo "UNKNOWN  : $commit (unexpected status: $status)"
+                ;;
+            esac
+          done < <(git log --pretty="%H %G?" "$BASE".."$HEAD")
+
+          echo "----------------------------------------------------"
+          echo "GPG signing is optional but encouraged."
+          echo "Setup guide: GPG_SIGNING.md"
