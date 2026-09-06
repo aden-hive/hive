@@ -642,6 +642,26 @@ def _delete_message_index_subtrees(session_id: str, disposer: Disposer, manifest
     return freed
 
 
+def _deep_clean_targets(wdir: Path) -> list[Path]:
+    """Everything :func:`deep_clean_worker` is responsible for removing.
+
+    Used both to decide whether a previous run finished and to drive the
+    deletion loop, so the two can never disagree.
+    """
+    targets: list[Path] = []
+    for sub in ("conversations", "data"):
+        p = wdir / sub
+        if p.exists():
+            targets.append(p)
+    try:
+        for p in wdir.iterdir():
+            if p.is_file() and p.name not in _WORKER_KEEP_FILES:
+                targets.append(p)
+    except OSError:
+        pass
+    return targets
+
+
 def deep_clean_worker(
     colony_id: str,
     worker_id: str,
@@ -654,13 +674,17 @@ def deep_clean_worker(
 
     Order is crash-safe: the tombstone is written before any deletion so
     (a) resume_worker refuses the worker from that point on and (b) a
-    rerun after a crash simply finishes the deletions.
+    rerun after a crash simply finishes the deletions. The short-circuit
+    for an already-cleaned worker therefore checks every target this
+    function removes, not just ``conversations/`` — a crash between two
+    targets would otherwise strand the rest permanently.
     """
     report = TargetReport(name="worker_deep_clean", tier=2)
     result_path = wdir / "result.json"
 
     tombstone_exists = result_path.exists()
-    already_cleaned = tombstone_exists and not (wdir / "conversations").exists()
+    targets = _deep_clean_targets(wdir)
+    already_cleaned = tombstone_exists and not targets
     if already_cleaned:
         return report
 
@@ -693,18 +717,6 @@ def deep_clean_worker(
         )
 
     report.bytes_freed += _delete_message_index_subtrees(worker_id, disposer, manifest, 2, "worker_deep_clean")
-
-    targets: list[Path] = []
-    for sub in ("conversations", "data"):
-        p = wdir / sub
-        if p.exists():
-            targets.append(p)
-    try:
-        for p in wdir.iterdir():
-            if p.is_file() and p.name not in _WORKER_KEEP_FILES:
-                targets.append(p)
-    except OSError:
-        pass
 
     for p in targets:
         item = PruneItem(
