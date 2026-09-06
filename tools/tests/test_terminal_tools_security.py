@@ -269,3 +269,39 @@ def test_destructive_warning_powershell_variable_switch_values():
         warning = get_warning(cmd)
         assert warning is not None, f"expected warning for {cmd!r}"
         assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_powershell_invalid_switch_names():
+    """PowerShell binds a parameter by a unique prefix of its name, so
+    `-recurseTypo` and `-forceValue` are rejected by the shell. Warning about a
+    command that never runs is noise, so those must not match."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    for cmd in [
+        "Remove-Item -recurseTypo C:\\x",
+        "Remove-Item -forceValue C:\\x",
+        "Remove-Item -recursed C:\\x",
+        "Remove-Item -forced C:\\x",
+        "Remove-Item -recursively C:\\x",
+    ]:
+        assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"
+
+
+def test_destructive_warning_powershell_valid_switch_prefixes():
+    """Every valid unique prefix of -Recurse and -Force still binds."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        ("Remove-Item -rec C:\\x", "recursively delete"),
+        ("Remove-Item -recu C:\\x", "recursively delete"),
+        ("Remove-Item -recur C:\\x", "recursively delete"),
+        ("Remove-Item -recurs C:\\x", "recursively delete"),
+        ("Remove-Item -Recurse C:\\x", "recursively delete"),
+        ("Remove-Item -for C:\\x", "force-delete"),
+        ("Remove-Item -forc C:\\x", "force-delete"),
+        ("Remove-Item -Force C:\\x", "force-delete"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"

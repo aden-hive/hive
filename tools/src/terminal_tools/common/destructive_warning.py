@@ -18,13 +18,19 @@ from collections.abc import Sequence
 # as one command.
 _SEG = r"[^;&|\r\n]*[ \t]"
 
+# PowerShell binds a parameter by any unique prefix of its name, so the switch
+# names are spelled as prefix alternations rather than ``-rec\w*``: a trailing
+# ``\w*`` would also match ``-recurseTypo``, which PowerShell rejects outright,
+# and warning about a command that never runs is noise.
+_RECURSE_NAME = r"rec(?:u(?:r(?:s(?:e)?)?)?)?"
+_FORCE_NAME = r"for(?:c(?:e)?)?"
+
 # A PowerShell switch can be explicitly disabled as ``-Recurse:$false``, which
 # is not destructive, so that spelling is rejected. ``\b`` keeps the rejection
 # to the literal value: ``-Recurse:$falseFlag`` is a *variable* that may resolve
-# to true, so it must still warn. Abbreviated parameter names (``-rec``,
-# ``-for``) bind the same way in PowerShell and are accepted.
-_PS_RECURSE = rf"(?={_SEG}-rec\w*\b(?![ \t]*:[ \t]*\$false\b))"
-_PS_FORCE = rf"(?={_SEG}-for\w*\b(?![ \t]*:[ \t]*\$false\b))"
+# to true, so it must still warn.
+_PS_RECURSE = rf"(?={_SEG}-{_RECURSE_NAME}\b(?![ \t]*:[ \t]*\$false\b))"
+_PS_FORCE = rf"(?={_SEG}-{_FORCE_NAME}\b(?![ \t]*:[ \t]*\$false\b))"
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Git — data loss / hard to reverse
