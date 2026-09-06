@@ -2,7 +2,7 @@
 
 import re
 
-from framework.orchestrator import NodeSpec
+from framework.orchestrator.node import NodeSpec
 
 # Wraps prompt sections that should only be shown to vision-capable models.
 # Content inside `<!-- vision-only -->...<!-- /vision-only -->` is kept for
