@@ -236,3 +236,36 @@ def test_semantic_exit_timed_out():
     status, msg = classify("sleep 999", None, timed_out=True)
     assert status == "error"
     assert "timed out" in msg.lower()
+
+
+def test_destructive_warning_switch_must_share_command_segment():
+    """A switch on the next line belongs to a different command. The segment
+    body excludes newlines, so the whitespace before the flag must be
+    horizontal only or it re-bridges the boundary it just refused."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    for cmd in [
+        "Remove-Item C:\\x\n-Recurse",
+        "Remove-Item C:\\x\n-Force",
+        "Remove-Item C:\\x\r\n-Recurse -Force",
+        "del C:\\temp\n/s /q",
+        "rd C:\\build\n/s",
+    ]:
+        assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"
+
+
+def test_destructive_warning_powershell_variable_switch_values():
+    """Only the literal `$false` disables a switch. `-Recurse:$falseFlag` is a
+    variable that may resolve to true, so it must still warn."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        ("Remove-Item -Recurse:$falseFlag C:\\x", "recursively delete"),
+        ("Remove-Item -Force:$falseish C:\\x", "force-delete"),
+        ("Remove-Item -Recurse:$myVar C:\\x", "recursively delete"),
+        ("Remove-Item -Recurse:$true C:\\x", "recursively delete"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"

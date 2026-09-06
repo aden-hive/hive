@@ -11,12 +11,20 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-# PowerShell switch lookaheads, scoped to the current command segment.
-# A switch can be explicitly disabled as ``-Recurse:$false``, which is not
-# destructive, so those spellings are rejected. Abbreviated parameter names
-# (``-rec``, ``-for``) bind the same way in PowerShell and are accepted.
-_PS_RECURSE = r"(?=[^;&|\n]*\s-rec\w*\b(?!\s*:\s*\$false))"
-_PS_FORCE = r"(?=[^;&|\n]*\s-for\w*\b(?!\s*:\s*\$false))"
+# Switch/flag lookaheads, scoped to the current command segment. The segment
+# body excludes separators *and* both newline characters, and the whitespace
+# before the flag is horizontal only — a bare ``\s`` would consume the newline
+# the segment body just refused, letting ``Remove-Item C:\x\n-Recurse`` match
+# as one command.
+_SEG = r"[^;&|\r\n]*[ \t]"
+
+# A PowerShell switch can be explicitly disabled as ``-Recurse:$false``, which
+# is not destructive, so that spelling is rejected. ``\b`` keeps the rejection
+# to the literal value: ``-Recurse:$falseFlag`` is a *variable* that may resolve
+# to true, so it must still warn. Abbreviated parameter names (``-rec``,
+# ``-for``) bind the same way in PowerShell and are accepted.
+_PS_RECURSE = rf"(?={_SEG}-rec\w*\b(?![ \t]*:[ \t]*\$false\b))"
+_PS_FORCE = rf"(?={_SEG}-for\w*\b(?![ \t]*:[ \t]*\$false\b))"
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Git — data loss / hard to reverse
@@ -53,22 +61,19 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # in command position because ``del``/``rd`` are short, word-like tokens;
     # ``Remove-Item`` is unambiguous and is matched anywhere in a pipeline.
     (
-        re.compile(
-            r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/s\b)(?=[^;&|\n]*\s/[fq]\b)",
-            re.IGNORECASE,
-        ),
+        re.compile(rf"(^|[;&|\n]\s*)(?:del|erase)\b(?={_SEG}/s\b)(?={_SEG}/[fq]\b)", re.IGNORECASE),
         "may recursively force-delete files",
     ),
     (
-        re.compile(r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/s\b)", re.IGNORECASE),
+        re.compile(rf"(^|[;&|\n]\s*)(?:del|erase)\b(?={_SEG}/s\b)", re.IGNORECASE),
         "may recursively delete files",
     ),
     (
-        re.compile(r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/[fq]\b)", re.IGNORECASE),
+        re.compile(rf"(^|[;&|\n]\s*)(?:del|erase)\b(?={_SEG}/[fq]\b)", re.IGNORECASE),
         "may force-delete files",
     ),
     (
-        re.compile(r"(^|[;&|\n]\s*)(?:rd|rmdir)\b(?=[^;&|\n]*\s/s\b)", re.IGNORECASE),
+        re.compile(rf"(^|[;&|\n]\s*)(?:rd|rmdir)\b(?={_SEG}/s\b)", re.IGNORECASE),
         "may recursively delete a directory tree",
     ),
     (
