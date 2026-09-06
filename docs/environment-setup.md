@@ -99,13 +99,14 @@ This sets up the MCP tools and workflows for building agents.
 
 ### Cursor IDE Support
 
-MCP tools are also available in Cursor. To enable:
+MCP tools are also available in Cursor. The repository does not ship a `.cursor/mcp.json`,
+so configure the servers yourself first:
 
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor. The repository does not ship a `.cursor/mcp.json`, so add the servers
-   to your own Cursor MCP configuration.
-4. Open Agent chat and verify MCP tools are available
+1. Add the MCP servers to your own Cursor MCP configuration and save it
+2. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+3. Run `MCP: Enable` to enable MCP servers
+4. Restart Cursor so Agent chat picks up the saved configuration
+5. Open Agent chat and verify MCP tools are available
 
 ### 2. Build an Agent
 
