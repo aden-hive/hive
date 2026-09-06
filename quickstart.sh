@@ -29,6 +29,16 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
 
+# Make Python encode terminal output as UTF-8.
+#
+# On Windows, Python encodes stdout/stderr with the ANSI code page (cp1252 on
+# most installs), so the check marks and box glyphs this script prints from its
+# inline `python -c` blocks raise UnicodeEncodeError and abort the run part-way
+# through setup. POSIX shells are already UTF-8, so this is a no-op there.
+# Only set when the caller has not chosen an encoding themselves.
+: "${PYTHONIOENCODING:=utf-8}"
+export PYTHONIOENCODING
+
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
