@@ -95,6 +95,15 @@ BENIGN_COMMANDS = [
     "Start-Process notepad",
     "Stop-Process -Name myworker",
     "taskkill /IM mytool.exe",
+    # A protected name in a LATER command is not this kill's target.
+    # The kill verb and its target must share one command segment.
+    "kill 1234; echo chrome",
+    "kill 1234 && echo chrome is fine",
+    "Stop-Process -Id 1234; Write-Output chrome",
+    "Stop-Process -Id 1234 & echo chrome",
+    "spps -Id 99; Write-Output chromium",
+    "taskkill /PID 4321; echo chrome",
+    "taskkill /IM mytool.exe & echo chrome",
 ]
 
 

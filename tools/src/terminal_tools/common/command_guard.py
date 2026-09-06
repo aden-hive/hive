@@ -75,7 +75,11 @@ _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # platform-shaped hole.
     (
         # PowerShell: Stop-Process -Name chrome  /  kill -Name chrome
-        re.compile(rf"\b{_PS_STOP}\b[^\n]*{_PROTECTED}", re.IGNORECASE),
+        # Scoped to one command segment: the kill target has to sit in the
+        # same command as the verb, so a protected name mentioned in a LATER
+        # command is not this kill's business. Without that, `kill 1234; echo
+        # chrome` reads as a browser kill.
+        re.compile(rf"\b{_PS_STOP}\b[^\n;|&]*{_PROTECTED}", re.IGNORECASE),
         "kills browser/runtime processes (PowerShell Stop-Process)",
     ),
     (
@@ -86,14 +90,17 @@ _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         # cmd / Windows: taskkill /IM chrome.exe  (or /F /IM ...)
-        re.compile(rf"\btaskkill\b[^\n]*{_PROTECTED}", re.IGNORECASE),
+        # Same segment scoping as the PowerShell stop verb above.
+        re.compile(rf"\btaskkill\b[^\n;|&]*{_PROTECTED}", re.IGNORECASE),
         "kills browser/runtime processes (taskkill)",
     ),
     (
         # WMI spelling of the same kill, via wmic or Get-CimInstance:
         # wmic process where "name='chrome.exe'" delete
+        # `;`/`&` end the command, but `|` must stay crossable here: the
+        # Get-CimInstance form pipes into Remove-CimInstance.
         re.compile(
-            rf"\b(?:wmic|get-cim\w*|get-wmi\w*)\b[^\n]*{_PROTECTED}[^\n]*\b(?:delete|terminate|remove-cim\w*)\b",
+            rf"\b(?:wmic|get-cim\w*|get-wmi\w*)\b[^\n;&]*{_PROTECTED}[^\n;&]*\b(?:delete|terminate|remove-cim\w*)\b",
             re.IGNORECASE,
         ),
         "kills browser/runtime processes (WMI process delete)",
