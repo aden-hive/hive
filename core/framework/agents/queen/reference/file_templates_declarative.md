@@ -212,5 +212,4 @@ Both approaches work. The JSON file takes precedence for backward compatibility.
 my_agent/
   agent.yaml           # The only required file
   mcp_servers.json     # Optional (can inline in YAML)
-  flowchart.json       # Optional (auto-generated)
 ```
