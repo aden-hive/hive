@@ -35,7 +35,9 @@ NC='\033[0m' # No Color
 # most installs), so the check marks and box glyphs this script prints from its
 # inline `python -c` blocks raise UnicodeEncodeError and abort the run part-way
 # through setup. POSIX shells are already UTF-8, so this is a no-op there.
-# Only set when the caller has not chosen an encoding themselves.
+# Only set when the caller has not already chosen an encoding. An empty
+# value is not a choice: Python ignores it and falls back to the ANSI code
+# page, which is the crash above, so `:=` defaults it too.
 : "${PYTHONIOENCODING:=utf-8}"
 export PYTHONIOENCODING
 
