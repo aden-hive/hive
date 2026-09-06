@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -26,6 +27,30 @@ import threading
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror, parse as urlparse, request as urlrequest
+
+
+class PortAlreadyInUseError(RuntimeError):
+    """Raised when the address the server was asked to bind is taken."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        super().__init__(
+            f"Port {port} on {host} is already in use.\n"
+            f"A Hive server is probably running there already — open http://{host}:{port}\n"
+            f"To run a second one, pick another port: hive serve --port {port + 1}"
+        )
+
+
+async def start_site_or_raise_port_in_use(site: Any, runner: Any, host: str, port: int) -> None:
+    try:
+        await site.start()
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        await runner.cleanup()
+        raise PortAlreadyInUseError(host, port) from exc
+
 
 # ---------------------------------------------------------------------------
 # Public registration
@@ -218,7 +243,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
-        await site.start()
+        await start_site_or_raise_port_in_use(site, runner, args.host, args.port)
 
         # Sentinel: colony-queen autopilot. The manager owns outbound
         # escalation delivery + the inbound Telegram/Slack listeners and
@@ -278,6 +303,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         asyncio.run(run_server())
     except KeyboardInterrupt:
         print("\nServer stopped.")
+    except PortAlreadyInUseError as exc:
+        print(exc)
+        return 1
     return 0
 
 
