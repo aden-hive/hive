@@ -34,6 +34,15 @@ _BROWSER_BIN = r"(?:[\w./-]*/)?(?:google-chrome(?:-stable|-beta|-unstable)?|chro
 
 _KILL_VERB = r"(?:pkill|killall|kill)"
 
+# PowerShell ships built-in aliases for each of these cmdlets, and an agent
+# reaching for the shortest spelling gets the same effect as the canonical
+# one — so the guard has to recognise the alias too, or the protection is
+# only as strong as the caller's verbosity. Stop-Process is kill/spps,
+# Get-Process is gps/ps, Start-Process is saps/start.
+_PS_STOP = r"(?:stop-process|spps|kill)"
+_PS_GET = r"(?:get-process|gps|ps)"
+_PS_START = r"(?:start-process|saps|start)"
+
 _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(rf"\b(?:pkill|killall)\b[^\n;|&]*{_PROTECTED}", re.IGNORECASE),
@@ -65,12 +74,14 @@ _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # native kill/launch verbs too, or the browser-protection stance has a
     # platform-shaped hole.
     (
-        # PowerShell: Stop-Process -Name chrome  /  Get-Process chrome | Stop-Process
-        re.compile(rf"\bstop-process\b[^\n]*{_PROTECTED}", re.IGNORECASE),
+        # PowerShell: Stop-Process -Name chrome  /  kill -Name chrome
+        re.compile(rf"\b{_PS_STOP}\b[^\n]*{_PROTECTED}", re.IGNORECASE),
         "kills browser/runtime processes (PowerShell Stop-Process)",
     ),
     (
-        re.compile(rf"\bget-process\b[^\n]*{_PROTECTED}[^\n]*\|\s*(?:[^|\n]*\|\s*)?stop-process\b", re.IGNORECASE),
+        # Get-Process chrome | Stop-Process, and every alias spelling of both
+        # halves: gps chrome | kill, ps chrome | spps, ...
+        re.compile(rf"\b{_PS_GET}\b[^\n]*{_PROTECTED}[^\n]*\|\s*(?:[^|\n]*\|\s*)?{_PS_STOP}\b", re.IGNORECASE),
         "kills browser/runtime processes (PowerShell Get-Process | Stop-Process)",
     ),
     (
@@ -79,9 +90,18 @@ _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         "kills browser/runtime processes (taskkill)",
     ),
     (
+        # WMI spelling of the same kill, via wmic or Get-CimInstance:
+        # wmic process where "name='chrome.exe'" delete
+        re.compile(
+            rf"\b(?:wmic|get-cim\w*|get-wmi\w*)\b[^\n]*{_PROTECTED}[^\n]*\b(?:delete|terminate|remove-cim\w*)\b",
+            re.IGNORECASE,
+        ),
+        "kills browser/runtime processes (WMI process delete)",
+    ),
+    (
         # PowerShell Start-Process / cmd `start` launching a browser binary
         # (bare `chrome`, quoted `"chrome.exe"`, or a full path all match).
-        re.compile(rf"\b(?:start-process|start)\b[^\n;|&]*{_BROWSER_BIN}\b", re.IGNORECASE),
+        re.compile(rf"\b{_PS_START}\b[^\n;|&]*{_BROWSER_BIN}\b", re.IGNORECASE),
         "launches a browser process",
     ),
 )

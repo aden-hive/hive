@@ -47,6 +47,26 @@ ESCALATION_COMMANDS = [
     "/opt/google/chrome/chrome --profile-directory=Default",
 ]
 
+# PowerShell ships aliases for Stop-Process (kill, spps), Get-Process (gps,
+# ps) and Start-Process (saps, start). An agent reaching for the shortest
+# spelling gets the same 2026-06-11 outcome, so the guard must recognise the
+# alias too. WMI is the same kill wearing a third spelling.
+WINDOWS_ALIAS_COMMANDS = [
+    "Get-Process chrome | kill",
+    "Get-Process chrome | spps",
+    "gps chrome | kill",
+    "ps chrome | Stop-Process",
+    "gps chrome | Stop-Process",
+    "Get-Process -Name chrome | kill -Force",
+    "Get-Process msedge | Where-Object { $_.CPU -gt 1 } | kill",
+    "kill -Name chrome",
+    "spps -Name bridge_host",
+    "saps chrome",
+    'saps "chrome.exe"',
+    "wmic process where \"name='chrome.exe'\" delete",
+    "wmic process where \"name='msedge.exe'\" call terminate",
+]
+
 BENIGN_COMMANDS = [
     # Read-only process inspection (workers legitimately did these too)
     "ps aux | grep -i chrome | head -5",
@@ -65,10 +85,20 @@ BENIGN_COMMANDS = [
     "echo google-chrome is installed",
     "ls /opt/google/chrome/",
     "cat /home/x/chrome_notes.txt",
+    # Windows read-only inspection and unrelated alias use
+    "Get-Process chrome",
+    "gps chrome",
+    "gps | Sort-Object CPU",
+    "Get-Process | Sort-Object CPU -Descending",
+    "wmic process list brief",
+    "saps notepad",
+    "Start-Process notepad",
+    "Stop-Process -Name myworker",
+    "taskkill /IM mytool.exe",
 ]
 
 
-@pytest.mark.parametrize("cmd", INCIDENT_COMMANDS + ESCALATION_COMMANDS)
+@pytest.mark.parametrize("cmd", INCIDENT_COMMANDS + ESCALATION_COMMANDS + WINDOWS_ALIAS_COMMANDS)
 def test_kill_and_launch_commands_blocked(cmd):
     msg = check_command(cmd)
     assert msg is not None, f"guard MISSED: {cmd!r}"
