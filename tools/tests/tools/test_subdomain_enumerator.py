@@ -90,6 +90,54 @@ class TestInputValidation:
             # Result should not error
             assert "error" not in result
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_results", [-1, 0, -50])
+    async def test_non_positive_max_results_rejected(self, enumerate_fn, max_results):
+        with patch("httpx.AsyncClient") as MockClient:
+            result = await enumerate_fn("example.com", max_results=max_results)
+
+            # Rejected before any network work is attempted
+            MockClient.assert_not_called()
+            assert "error" in result
+            assert "max_results" in result["error"]
+            assert result["domain"] == "example.com"
+            assert "subdomains" not in result
+
+    @pytest.mark.asyncio
+    async def test_negative_max_results_does_not_slice_off_last_subdomain(self, enumerate_fn):
+        """max_results=-1 previously fell through to subdomains[:-1]."""
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = _mock_crtsh_response(
+                ["a.example.com", "b.example.com", "c.example.com"]
+            )
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            MockClient.return_value = mock_client
+
+            result = await enumerate_fn("example.com", max_results=-1)
+
+            assert "error" in result
+            assert "subdomains" not in result
+            mock_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_max_results_one_is_accepted(self, enumerate_fn):
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = _mock_crtsh_response(
+                ["a.example.com", "b.example.com", "c.example.com"]
+            )
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            MockClient.return_value = mock_client
+
+            result = await enumerate_fn("example.com", max_results=1)
+
+            assert "error" not in result
+            assert result["subdomains"] == ["a.example.com"]
+            assert result["total_found"] == 1
+
 
 # ---------------------------------------------------------------------------
 # Connection Errors
