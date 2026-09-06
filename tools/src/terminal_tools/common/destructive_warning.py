@@ -11,6 +11,13 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+# PowerShell switch lookaheads, scoped to the current command segment.
+# A switch can be explicitly disabled as ``-Recurse:$false``, which is not
+# destructive, so those spellings are rejected. Abbreviated parameter names
+# (``-rec``, ``-for``) bind the same way in PowerShell and are accepted.
+_PS_RECURSE = r"(?=[^;&|\n]*\s-rec\w*\b(?!\s*:\s*\$false))"
+_PS_FORCE = r"(?=[^;&|\n]*\s-for\w*\b(?!\s*:\s*\$false))"
+
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Git — data loss / hard to reverse
     (re.compile(r"\bgit\s+reset\s+--hard\b"), "may discard uncommitted changes"),
@@ -65,20 +72,11 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         "may recursively delete a directory tree",
     ),
     (
-        re.compile(
-            r"\bremove-item\b(?=[^;&|\n]*\s-rec\w*\b)(?=[^;&|\n]*\s-for\w*\b)",
-            re.IGNORECASE,
-        ),
+        re.compile(rf"\bremove-item\b{_PS_RECURSE}{_PS_FORCE}", re.IGNORECASE),
         "may recursively force-delete files",
     ),
-    (
-        re.compile(r"\bremove-item\b(?=[^;&|\n]*\s-rec\w*\b)", re.IGNORECASE),
-        "may recursively delete files",
-    ),
-    (
-        re.compile(r"\bremove-item\b(?=[^;&|\n]*\s-for\w*\b)", re.IGNORECASE),
-        "may force-delete files",
-    ),
+    (re.compile(rf"\bremove-item\b{_PS_RECURSE}", re.IGNORECASE), "may recursively delete files"),
+    (re.compile(rf"\bremove-item\b{_PS_FORCE}", re.IGNORECASE), "may force-delete files"),
     # Database
     (
         re.compile(r"\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b", re.IGNORECASE),

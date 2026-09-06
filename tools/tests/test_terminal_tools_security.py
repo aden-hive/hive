@@ -121,11 +121,27 @@ def test_destructive_warning_powershell_remove_item():
         (r"Get-ChildItem C:\t | Remove-Item -Recurse -Force", "recursively force-delete"),
         # PowerShell accepts abbreviated parameter names.
         (r"remove-item -rec -for C:\x", "recursively force-delete"),
+        # An explicitly enabled switch still counts.
+        (r"Remove-Item -Recurse:$true C:\x", "recursively delete"),
     ]
     for cmd, expected in cases:
         warning = get_warning(cmd)
         assert warning is not None, f"expected warning for {cmd!r}"
         assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_powershell_disabled_switches():
+    """PowerShell binds `-Recurse:$false` as a disabled switch — that call is
+    not destructive and must not warn."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    for cmd in [
+        r"Remove-Item -Recurse:$false -Force:$false C:\x",
+        r"Remove-Item -Recurse:$false C:\x",
+        r"Remove-Item -Force:$false C:\x",
+        r"Remove-Item -Recurse:$False -Force:$False C:\x",
+    ]:
+        assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"
 
 
 def test_destructive_warning_windows_clean_commands():
