@@ -1,12 +1,42 @@
 """Excel Tool - Read and manipulate Excel files (.xlsx, .xlsm)."""
 
 import os
+import re
 from datetime import datetime
 from typing import Any
 
 from fastmcp import FastMCP
 
 from ..file_system_toolkits.security import get_sandboxed_path
+
+# Write/DDL keywords that must not appear as SQL keywords in an excel_sql query.
+# Matched on word boundaries, the same way csv_sql does it, so an ordinary
+# identifier that merely contains one of them is not mistaken for a write:
+# "created_at" is not CREATE, "updated_at" is not UPDATE, and a status value of
+# 'DELETED' is not DELETE. A bare substring test rejected all three.
+_WRITE_KEYWORD_PATTERN = re.compile(
+    r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)\b",
+    re.IGNORECASE,
+)
+
+
+def _validate_select_query(query: str) -> str | None:
+    """Check that *query* is a read-only SELECT.
+
+    Returns an error message describing the first problem found, or ``None``
+    when the query is acceptable.
+    """
+    if not query or not query.strip():
+        return "query cannot be empty"
+
+    if not query.strip().upper().startswith("SELECT"):
+        return "Only SELECT queries are allowed for security reasons"
+
+    match = _WRITE_KEYWORD_PATTERN.search(query)
+    if match:
+        return f"'{match.group().upper()}' is not allowed in queries"
+
+    return None
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -466,29 +496,10 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
 
-            if not query or not query.strip():
-                return {"error": "query cannot be empty"}
-
-            # Security: only allow SELECT statements
-            query_upper = query.strip().upper()
-            if not query_upper.startswith("SELECT"):
-                return {"error": "Only SELECT queries are allowed for security reasons"}
-
-            # Disallowed keywords
-            disallowed = [
-                "INSERT",
-                "UPDATE",
-                "DELETE",
-                "DROP",
-                "CREATE",
-                "ALTER",
-                "TRUNCATE",
-                "EXEC",
-                "EXECUTE",
-            ]
-            for keyword in disallowed:
-                if keyword in query_upper:
-                    return {"error": f"'{keyword}' is not allowed in queries"}
+            # Security: only allow read-only SELECT statements
+            query_error = _validate_select_query(query)
+            if query_error:
+                return {"error": query_error}
 
             # Load workbook
             wb = load_workbook(secure_path, read_only=True, data_only=True)
