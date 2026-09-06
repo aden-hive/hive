@@ -73,6 +73,79 @@ def test_destructive_warning_clean_commands():
         assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"
 
 
+def test_destructive_warning_rm_double_dash_separator():
+    """`rm` short flags stay recognised when a `--` end-of-options separator
+    follows them, including the `-fr` ordering."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        ("rm -rf -- /tmp/foo", "recursively force-remove"),
+        ("rm -fr -- /tmp/foo", "recursively force-remove"),
+        ("rm -r -- /tmp/foo", "recursively remove"),
+        ("rm -f -- /tmp/foo", "force-remove"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_windows_delete_catalog():
+    """On Windows the resolved shell may be PowerShell/cmd — the catalog must
+    cover the native delete verbs, not just POSIX `rm`."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        (r"del /F /S /Q C:\temp", "recursively force-delete"),
+        (r"del /S /Q C:\temp", "recursively force-delete"),
+        (r"del /s C:\temp\*", "recursively delete"),
+        (r"del /F important.txt", "force-delete"),
+        (r"erase /Q C:\logs\*", "force-delete"),
+        (r"rmdir /S /Q C:\build", "directory tree"),
+        (r"rd /s /q C:\build", "directory tree"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_powershell_remove_item():
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        (r"Remove-Item -Recurse -Force C:\x", "recursively force-delete"),
+        (r"Remove-Item -Path C:\x -Recurse", "recursively delete"),
+        (r"Remove-Item C:\x -Force", "force-delete"),
+        # Pipeline form: the verb is not in command position.
+        (r"Get-ChildItem C:\t | Remove-Item -Recurse -Force", "recursively force-delete"),
+        # PowerShell accepts abbreviated parameter names.
+        (r"remove-item -rec -for C:\x", "recursively force-delete"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_windows_clean_commands():
+    """Benign Windows input must not trip the delete patterns: `del`/`rd` are
+    short, word-like tokens, so they only count in command position."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    for cmd in [
+        'echo "run del /s /q to clean"',  # quoted prose, not a command
+        "model /s",  # 'del' inside a word
+        "git delete-branch feature/x",  # 'del' inside a word
+        r"dir /s C:\src",  # listing, not deleting
+        r"rd C:\emptydir",  # non-recursive rmdir
+        "Get-Command Remove-Item",  # no -Recurse / -Force
+        "Get-Help Remove-Item -Full",
+        "findstr /s TODO *.py",
+    ]:
+        assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"
+
+
 def test_command_guard_blocks_windows_browser_kills():
     """On Windows the resolved shell may be PowerShell/cmd — the guard must
     catch the native kill verbs, not just bash pkill/killall."""

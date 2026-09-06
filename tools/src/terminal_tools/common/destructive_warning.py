@@ -39,6 +39,46 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (re.compile(r"(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*[rR]"), "may recursively remove files"),
     (re.compile(r"(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*f"), "may force-remove files"),
+    # File deletion — Windows cmd and PowerShell. On a Windows host the
+    # resolved shell may be PowerShell or cmd, so the POSIX ``rm`` patterns
+    # above leave a platform-shaped hole — the same reasoning ``command_guard``
+    # applies to its Windows kill/launch verbs. The cmd verbs are matched only
+    # in command position because ``del``/``rd`` are short, word-like tokens;
+    # ``Remove-Item`` is unambiguous and is matched anywhere in a pipeline.
+    (
+        re.compile(
+            r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/s\b)(?=[^;&|\n]*\s/[fq]\b)",
+            re.IGNORECASE,
+        ),
+        "may recursively force-delete files",
+    ),
+    (
+        re.compile(r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/s\b)", re.IGNORECASE),
+        "may recursively delete files",
+    ),
+    (
+        re.compile(r"(^|[;&|\n]\s*)(?:del|erase)\b(?=[^;&|\n]*\s/[fq]\b)", re.IGNORECASE),
+        "may force-delete files",
+    ),
+    (
+        re.compile(r"(^|[;&|\n]\s*)(?:rd|rmdir)\b(?=[^;&|\n]*\s/s\b)", re.IGNORECASE),
+        "may recursively delete a directory tree",
+    ),
+    (
+        re.compile(
+            r"\bremove-item\b(?=[^;&|\n]*\s-rec\w*\b)(?=[^;&|\n]*\s-for\w*\b)",
+            re.IGNORECASE,
+        ),
+        "may recursively force-delete files",
+    ),
+    (
+        re.compile(r"\bremove-item\b(?=[^;&|\n]*\s-rec\w*\b)", re.IGNORECASE),
+        "may recursively delete files",
+    ),
+    (
+        re.compile(r"\bremove-item\b(?=[^;&|\n]*\s-for\w*\b)", re.IGNORECASE),
+        "may force-delete files",
+    ),
     # Database
     (
         re.compile(r"\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b", re.IGNORECASE),
