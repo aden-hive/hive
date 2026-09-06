@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tarfile
 import time
@@ -155,6 +156,65 @@ def test_crash_resume_converges() -> None:
     assert not (wdir / "data").exists()
     assert json.loads((wdir / "result.json").read_text(encoding="utf-8")) == tombstone
     assert report.bytes_freed > 0
+
+
+def test_crash_resume_after_conversations_removed() -> None:
+    """Crash landed between the conversations/ and data/ deletions.
+
+    The tombstone is written before any deletion, so a resume check that
+    only looks at conversations/ treats this worker as finished and leaves
+    data/ and the stray files unswept forever.
+    """
+    wdir = _build_worker()
+    tombstone = {"status": "completed", "summary": "s", "_janitor": {"pruned_at": "x"}}
+    (wdir / "result.json").write_text(json.dumps(tombstone), encoding="utf-8")
+    shutil.rmtree(wdir / "conversations")
+    _age_tree(wdir, 30)
+    assert (wdir / "data").exists()
+    assert (wdir / "os").exists()
+
+    report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+
+    assert not (wdir / "data").exists()
+    assert not (wdir / "os").exists()
+    assert not (wdir / "reminder_state.json").exists()
+    assert sorted(p.name for p in wdir.iterdir()) == ["meta.json", "result.json", "tasks.json"]
+    assert json.loads((wdir / "result.json").read_text(encoding="utf-8")) == tombstone
+    assert report.bytes_freed > 0
+
+
+def test_crash_resume_with_only_stray_files_left() -> None:
+    """Both subtrees gone but stray session-root files still present."""
+    wdir = _build_worker()
+    tombstone = {"status": "completed", "summary": "s", "_janitor": {"pruned_at": "x"}}
+    (wdir / "result.json").write_text(json.dumps(tombstone), encoding="utf-8")
+    shutil.rmtree(wdir / "conversations")
+    shutil.rmtree(wdir / "data")
+    _age_tree(wdir, 30)
+
+    report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+
+    assert sorted(p.name for p in wdir.iterdir()) == ["meta.json", "result.json", "tasks.json"]
+    assert report.files > 0
+
+
+def test_fully_cleaned_worker_short_circuits() -> None:
+    """Nothing left to remove: no work done, tombstone left untouched."""
+    wdir = _build_worker()
+    tombstone = {"status": "completed", "summary": "s", "_janitor": {"pruned_at": "x"}}
+    (wdir / "result.json").write_text(json.dumps(tombstone), encoding="utf-8")
+    shutil.rmtree(wdir / "conversations")
+    shutil.rmtree(wdir / "data")
+    (wdir / "os").unlink()
+    (wdir / "reminder_state.json").unlink()
+    _age_tree(wdir, 30)
+
+    report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+
+    assert report.files == 0
+    assert report.bytes_freed == 0
+    assert sorted(p.name for p in wdir.iterdir()) == ["meta.json", "result.json", "tasks.json"]
+    assert json.loads((wdir / "result.json").read_text(encoding="utf-8")) == tombstone
 
 
 def test_recent_worker_is_skipped() -> None:
