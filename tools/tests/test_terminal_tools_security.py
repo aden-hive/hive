@@ -147,3 +147,49 @@ def test_semantic_exit_timed_out():
     status, msg = classify("sleep 999", None, timed_out=True)
     assert status == "error"
     assert "timed out" in msg.lower()
+
+
+def test_destructive_warning_command_prefixes():
+    """`sudo rm -rf /` deletes exactly what `rm -rf /` deletes, but the
+    file-deletion patterns are command-anchored, so a prefix used to displace
+    the verb and silence the warning. The git/kubectl/terraform patterns are
+    not anchored and already warned under `sudo`; this restores parity."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    cases = [
+        ("sudo rm -rf /", "recursively force-remove"),
+        ("doas rm -rf /", "recursively force-remove"),
+        ("sudo -E rm -rf /home", "recursively force-remove"),
+        ("sudo -u root rm -rf /srv", "recursively force-remove"),
+        ("nohup rm -rf /data", "recursively force-remove"),
+        ("time rm -rf /data", "recursively force-remove"),
+        ("env rm -rf /data", "recursively force-remove"),
+        ("FOO=1 rm -rf /data", "recursively force-remove"),
+        ("FOO=1 BAR=2 rm -rf /data", "recursively force-remove"),
+        ("find . -name '*.pyc' | xargs rm -rf", "recursively force-remove"),
+        ("make clean && sudo rm -rf build", "recursively force-remove"),
+        ("sudo rm -r /var/log", "recursively remove"),
+        ("sudo rm -f /var/log/x", "force-remove"),
+        ("sudo rm -rf -- /", "recursively force-remove"),
+    ]
+    for cmd, expected in cases:
+        warning = get_warning(cmd)
+        assert warning is not None, f"expected warning for {cmd!r}"
+        assert expected in warning, f"warning {warning!r} should mention {expected!r}"
+
+
+def test_destructive_warning_prefix_is_not_a_wildcard():
+    """Only real prefix verbs displace the command; quoting or an unrelated
+    command must still leave the input silent."""
+    from terminal_tools.common.destructive_warning import get_warning
+
+    for cmd in [
+        "echo sudo rm -rf /",
+        'echo "sudo rm -rf /"',
+        "sudo apt update",
+        "sudo systemctl restart nginx",
+        "sudo docker ps",
+        "grep -r rm .",
+        "cat sudo_rm_notes.txt",
+    ]:
+        assert get_warning(cmd) is None, f"unexpected warning for {cmd!r}"

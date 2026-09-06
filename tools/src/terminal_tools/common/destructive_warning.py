@@ -11,6 +11,17 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+# Command-position prefixes that displace the verb without changing what it
+# does: ``sudo rm -rf /`` deletes exactly what ``rm -rf /`` deletes. Also
+# covers leading environment assignments (``FOO=1 rm -rf /``) and the
+# ``xargs`` spelling reached through a pipe. Without this the file-deletion
+# patterns stay silent under ``sudo`` while the git/kubectl/terraform
+# patterns, which are not command-anchored, still warn.
+_CMD_PREFIX = (
+    r"(?:(?:sudo|doas|nohup|time|command|env|xargs)(?:\s+-\w+(?:\s+[^-\s]\S*)?)*\s+"
+    r"|[A-Za-z_]\w*=\S*\s+)*"
+)
+
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Git — data loss / hard to reverse
     (re.compile(r"\bgit\s+reset\s+--hard\b"), "may discard uncommitted changes"),
@@ -34,11 +45,14 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bgit\s+commit\b[^;&|\n]*--amend\b"), "may rewrite the last commit"),
     # File deletion — most specific patterns first so the warning is descriptive
     (
-        re.compile(r"(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*[rR][a-zA-Z]*f|(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*f[a-zA-Z]*[rR]"),
+        re.compile(
+            rf"(^|[;&|\n]\s*){_CMD_PREFIX}rm\s+-[a-zA-Z]*[rR][a-zA-Z]*f"
+            rf"|(^|[;&|\n]\s*){_CMD_PREFIX}rm\s+-[a-zA-Z]*f[a-zA-Z]*[rR]"
+        ),
         "may recursively force-remove files",
     ),
-    (re.compile(r"(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*[rR]"), "may recursively remove files"),
-    (re.compile(r"(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*f"), "may force-remove files"),
+    (re.compile(rf"(^|[;&|\n]\s*){_CMD_PREFIX}rm\s+-[a-zA-Z]*[rR]"), "may recursively remove files"),
+    (re.compile(rf"(^|[;&|\n]\s*){_CMD_PREFIX}rm\s+-[a-zA-Z]*f"), "may force-remove files"),
     # Database
     (
         re.compile(r"\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b", re.IGNORECASE),
