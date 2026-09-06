@@ -85,7 +85,13 @@ _BLOCK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         # Get-Process chrome | Stop-Process, and every alias spelling of both
         # halves: gps chrome | kill, ps chrome | spps, ...
-        re.compile(rf"\b{_PS_GET}\b[^\n]*{_PROTECTED}[^\n]*\|\s*(?:[^|\n]*\|\s*)?{_PS_STOP}\b", re.IGNORECASE),
+        # `|` stays crossable - it is the pipeline this pattern exists
+        # to catch - but `;` and `&` do not, for the same reason as the
+        # stop verb above: they end the command, so a protected name on
+        # the far side is a different command's business. Without that,
+        # `gps; echo chrome | spps -Id 1234` reads as a browser kill
+        # when `spps` is actually aimed at a generic PID.
+        re.compile(rf"\b{_PS_GET}\b[^\n;&]*{_PROTECTED}[^\n;&]*\|\s*(?:[^|\n;&]*\|\s*)?{_PS_STOP}\b", re.IGNORECASE),
         "kills browser/runtime processes (PowerShell Get-Process | Stop-Process)",
     ),
     (

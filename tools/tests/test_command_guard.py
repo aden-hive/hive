@@ -65,6 +65,10 @@ WINDOWS_ALIAS_COMMANDS = [
     'saps "chrome.exe"',
     "wmic process where \"name='chrome.exe'\" delete",
     "wmic process where \"name='msedge.exe'\" call terminate",
+    # The same kill through the CIM cmdlets, which the WMI pattern also
+    # accepts (remove-cim*) but no test exercised.
+    "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Remove-CimInstance",
+    "Get-WmiObject Win32_Process -Filter \"Name='msedge.exe'\" | Remove-CimInstance",
 ]
 
 BENIGN_COMMANDS = [
@@ -104,6 +108,12 @@ BENIGN_COMMANDS = [
     "spps -Id 99; Write-Output chromium",
     "taskkill /PID 4321; echo chrome",
     "taskkill /IM mytool.exe & echo chrome",
+    # Same rule for the Get-Process | Stop-Process pipeline: `|` is part of
+    # the kill being matched, but `;` and `&` end the command, so a protected
+    # name before the separator is not what the stop verb is aimed at.
+    "gps; echo chrome | spps -Id 1234",
+    "Get-Process; Write-Output chrome | Stop-Process -Id 99",
+    "gps & echo chrome | kill -Id 1234",
 ]
 
 
