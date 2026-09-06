@@ -7,10 +7,9 @@ export interface PendingQuestion {
 const dismissedQuestionSetBySession = new Map<string, string>();
 
 function questionSetKey(questions: PendingQuestion[]): string {
-  return questions
-    .map((question) => question.id || question.prompt)
-    .sort()
-    .join("\n");
+  return JSON.stringify(
+    questions.map((question) => question.id || question.prompt).sort(),
+  );
 }
 
 export function rememberDismissedQuestions(

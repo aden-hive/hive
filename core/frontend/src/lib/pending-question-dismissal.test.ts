@@ -55,6 +55,19 @@ describe("pending question dismissal", () => {
     expect(isQuestionSetDismissed("session-a", [{ id: "", prompt: "Which size?" }])).toBe(false);
   });
 
+  it("keeps prompt sets apart when only the position of a newline differs", () => {
+    rememberDismissedQuestions("session-a", [
+      { id: "", prompt: "A\nB" },
+      { id: "", prompt: "C" },
+    ]);
+    expect(
+      isQuestionSetDismissed("session-a", [
+        { id: "", prompt: "A" },
+        { id: "", prompt: "B\nC" },
+      ]),
+    ).toBe(false);
+  });
+
   it("never treats an empty set or a missing session as dismissed", () => {
     rememberDismissedQuestions("session-a", [colorQuestion]);
     expect(isQuestionSetDismissed("session-a", [])).toBe(false);
