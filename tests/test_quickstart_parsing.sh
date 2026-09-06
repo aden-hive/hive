@@ -26,15 +26,21 @@ if [ ! -f "$QUICKSTART" ]; then
 fi
 
 # Pull in only the catalogue layer. Sourcing the whole installer would run it.
-CATALOG_SRC="$(sed -n '/^CATALOG_FS=/,/^apply_preset() {/p' "$QUICKSTART" | sed '$d')"
+CATALOG_SRC="$(sed -n '/^CATALOG_FS=/,/^HIVE_CONFIG_DIR=/p' "$QUICKSTART" | sed '$d')"
 if [ -z "$CATALOG_SRC" ]; then
     echo "FATAL: could not extract the catalogue region from quickstart.sh" >&2
-    echo "       (expected a CATALOG_FS= line above apply_preset())" >&2
+    echo "       (expected a CATALOG_FS= line above HIVE_CONFIG_DIR=)" >&2
     exit 1
 fi
 eval "$CATALOG_SRC"
 
-for fn in parse_catalog_rows get_preset_field get_default_model; do
+# Every reader of a parsed collection, so a row type that stops being
+# populated fails here rather than silently returning nothing.
+for fn in parse_catalog_rows get_preset_field get_default_model \
+          get_model_choice_count get_model_choice_field \
+          get_model_choice_id get_model_choice_label \
+          get_model_choice_maxtokens get_model_choice_maxcontexttokens \
+          get_preset_model_choice_count get_preset_model_choice_field; do
     if ! declare -f "$fn" >/dev/null; then
         echo "FATAL: $fn was not defined by the extracted region" >&2
         exit 1
@@ -61,6 +67,7 @@ FS="$CATALOG_FS"
 FIXTURE="DEFAULT${FS}anthropic${FS}claude-sonnet-4
 DEFAULT${FS}ollama${FS}llama3.1
 MODEL${FS}anthropic${FS}claude-sonnet-4${FS}Claude Sonnet 4${FS}8192${FS}200000
+MODEL${FS}ollama${FS}llama3.1${FS}${FS}4096${FS}8192
 PRESET${FS}anthropic${FS}anthropic${FS}claude-sonnet-4${FS}8192${FS}200000${FS}ANTHROPIC_API_KEY${FS}
 PRESET${FS}ollama_local${FS}ollama${FS}${FS}4096${FS}8192${FS}${FS}http://localhost:11434
 PRESET${FS}ollama_cloud${FS}ollama${FS}${FS}4096${FS}8192${FS}OLLAMA_API_KEY${FS}https://ollama.com
@@ -92,6 +99,31 @@ check "trailing api_base empty" ""                   "$(get_preset_field anthrop
 echo "other row types still parse:"
 check "default model"      "claude-sonnet-4"         "$(get_default_model anthropic)"
 check "default model 2"    "llama3.1"                "$(get_default_model ollama)"
+
+# MODEL and PRESET_MODEL are separate collections filled by the same loader.
+# Checking only the DEFAULT rows above would let a regression that stops
+# populating either one pass, so read them back through their real consumers
+# rather than asserting on the packed strings.
+echo "MODEL rows — read back through get_model_choice_*:"
+check "anthropic choice count" "1"                 "$(get_model_choice_count anthropic)"
+check "ollama choice count"    "1"                 "$(get_model_choice_count ollama)"
+check "choice id"              "claude-sonnet-4"   "$(get_model_choice_id anthropic 0)"
+check "choice label"           "Claude Sonnet 4"   "$(get_model_choice_label anthropic 0)"
+check "choice max_tokens"      "8192"              "$(get_model_choice_maxtokens anthropic 0)"
+check "choice max_context"     "200000"            "$(get_model_choice_maxcontexttokens anthropic 0)"
+
+# The empty-label ollama row is the MODEL-side version of the reported bug:
+# a collapsed separator shifts the token counts left into the label's place.
+echo "MODEL row with an empty label — the same collapse, one row type over:"
+check "empty label stays empty" ""                 "$(get_model_choice_label ollama 0)"
+check "max_tokens not shifted"  "4096"             "$(get_model_choice_maxtokens ollama 0)"
+check "max_context not shifted" "8192"             "$(get_model_choice_maxcontexttokens ollama 0)"
+
+echo "PRESET_MODEL rows — read back through get_preset_model_choice_*:"
+check "preset model count"      "1"                "$(get_preset_model_choice_count ollama_local)"
+check "preset model id"         "llama3.1"         "$(get_preset_model_choice_field ollama_local 0 id)"
+check "preset model label"      "Llama 3.1"        "$(get_preset_model_choice_field ollama_local 0 label)"
+check "preset model recommended" "true"            "$(get_preset_model_choice_field ollama_local 0 recommended)"
 
 # The reported crash: the config writer casts both token counts with int().
 # Check each one, because a collapsed row can leave the first still numeric

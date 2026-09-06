@@ -97,7 +97,13 @@ jobs:
     name: Quickstart Parsing (macOS system bash 3.2)
     runs-on: macos-latest
     steps:
+      # This job runs on pull_request and executes a script out of the
+      # checkout, so the checkout token must not be left in .git/config
+      # where that script could read it. No step here needs authenticated
+      # git access.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Show the bash under test
         run: /bin/bash --version
