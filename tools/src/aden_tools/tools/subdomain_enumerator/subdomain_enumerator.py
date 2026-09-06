@@ -86,7 +86,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         Args:
             domain: Base domain to enumerate (e.g., "example.com"). No protocol prefix.
-            max_results: Maximum number of subdomains to return (default 50, max 200).
+            max_results: Maximum number of subdomains to return (default 50, min 1, max 200).
 
         Returns:
             Dict with discovered subdomains, interesting findings,
@@ -97,6 +97,12 @@ def register_tools(mcp: FastMCP) -> None:
         domain = domain.split("/")[0]
         if ":" in domain:
             domain = domain.split(":")[0]
+
+        if max_results < 1:
+            return {
+                "error": f"max_results must be a positive integer (got {max_results})",
+                "domain": domain,
+            }
 
         max_results = min(max_results, 200)
 
