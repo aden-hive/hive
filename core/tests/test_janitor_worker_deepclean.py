@@ -198,6 +198,12 @@ def test_crash_resume_with_only_stray_files_left() -> None:
     assert report.files > 0
 
 
+def _index_subtrees(wid: str = _WID, colony: str = "c1") -> list[Path]:
+    """The message-index copies _build_worker() plants for a worker."""
+    root = config.HIVE_HOME / ".message_index"
+    return [root / tree / "colonies" / colony / wid for tree in ("events", "data", "meta")]
+
+
 def test_fully_cleaned_worker_short_circuits() -> None:
     """Nothing left to remove: no work done, tombstone left untouched."""
     wdir = _build_worker()
@@ -207,6 +213,9 @@ def test_fully_cleaned_worker_short_circuits() -> None:
     shutil.rmtree(wdir / "data")
     (wdir / "os").unlink()
     (wdir / "reminder_state.json").unlink()
+    # Fully cleaned means the index side too, not just the worker directory.
+    for sub in _index_subtrees():
+        shutil.rmtree(sub)
     _age_tree(wdir, 30)
 
     report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
@@ -299,3 +308,59 @@ def test_archive_failure_keeps_source(monkeypatch) -> None:
     with pytest.raises(OSError):
         disposer.dispose_dir(wdir / "conversations")
     assert (wdir / "conversations" / "parts" / "0000000004.json").exists()
+
+
+def test_pending_index_copies_block_the_short_circuit() -> None:
+    """Worker directory is clean but index copies remain: still work to do.
+
+    deep_clean_worker deletes the index subtrees *after* the short-circuit,
+    so a tombstoned worker with nothing left locally would otherwise return
+    early and strand them -- stranded bytes plus ghost search_messages hits.
+    """
+    wdir = _build_worker()
+    tombstone = {"status": "completed", "summary": "s", "_janitor": {"pruned_at": "x"}}
+    (wdir / "result.json").write_text(json.dumps(tombstone), encoding="utf-8")
+    shutil.rmtree(wdir / "conversations")
+    shutil.rmtree(wdir / "data")
+    (wdir / "os").unlink()
+    (wdir / "reminder_state.json").unlink()
+    _age_tree(wdir, 30)
+
+    assert all(sub.exists() for sub in _index_subtrees())
+
+    report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+
+    assert not any(sub.exists() for sub in _index_subtrees()), "index copies were stranded"
+    assert report.bytes_freed > 0
+    # The tombstone and keep-set are untouched by the index pass.
+    assert sorted(p.name for p in wdir.iterdir()) == ["meta.json", "result.json", "tasks.json"]
+
+
+def test_failed_target_scan_is_not_a_clean_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unreadable worker directory must not read as 'already finished'.
+
+    iterdir() failing yields no targets, which is byte-identical to a
+    finished worker. Short-circuiting on that strands whatever is really
+    in there, permanently, because the tombstone stops any later pass.
+    """
+    from framework.maintenance import retention as _retention
+
+    wdir = _build_worker()
+    tombstone = {"status": "completed", "summary": "s", "_janitor": {"pruned_at": "x"}}
+    (wdir / "result.json").write_text(json.dumps(tombstone), encoding="utf-8")
+    shutil.rmtree(wdir / "conversations")
+    shutil.rmtree(wdir / "data")
+    _age_tree(wdir, 30)
+
+    real_iterdir = Path.iterdir
+
+    def boom(self):
+        if self == wdir:
+            raise OSError(13, "Permission denied")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", boom)
+
+    targets, scan_complete = _retention._deep_clean_targets(wdir)
+    assert targets == []
+    assert scan_complete is False, "a failed scan must be reported, not swallowed"

@@ -609,6 +609,22 @@ def _extract_worker_summary(wdir: Path) -> tuple[str, str]:
     return "unknown", ""
 
 
+def _message_index_subtrees(session_id: str) -> list[Path]:
+    """Index copies of one session: .message_index/{events,data,meta}/*/*/<id>.
+
+    Read by both the deleter and the completion check, so the two cannot
+    disagree about whether the index side is finished.
+    """
+    index_root = config.HIVE_HOME / ".message_index"
+    subs: list[Path] = []
+    for tree in ("events", "data", "meta"):
+        base = index_root / tree
+        if not base.is_dir():
+            continue
+        subs.extend(base.glob(f"*/*/{session_id}"))
+    return subs
+
+
 def _delete_message_index_subtrees(session_id: str, disposer: Disposer, manifest: Manifest, tier: int, target: str) -> int:
     """Remove .message_index/{events,data,meta}/*/*/<session_id> subtrees.
 
@@ -616,50 +632,51 @@ def _delete_message_index_subtrees(session_id: str, disposer: Disposer, manifest
     so leaving it behind both strands bytes and serves ghost results
     from search_messages after the source is pruned.
     """
-    index_root = config.HIVE_HOME / ".message_index"
     freed = 0
-    for tree in ("events", "data", "meta"):
-        base = index_root / tree
-        if not base.is_dir():
-            continue
-        for sub in base.glob(f"*/*/{session_id}"):
-            item = PruneItem(
-                path=str(sub),
-                bytes=0,
-                tier=tier,
-                target=target,
-                action="delete",
-                reason="message index copy of pruned session",
-            )
-            try:
-                _, item.bytes = disposer.dispose_dir(sub)
-                item.outcome = "candidate" if disposer.dry_run else "done"
-                freed += item.bytes
-            except (OSError, ValueError) as exc:
-                item.outcome = "error"
-                item.error = str(exc)
-            manifest.add(item)
+    for sub in _message_index_subtrees(session_id):
+        item = PruneItem(
+            path=str(sub),
+            bytes=0,
+            tier=tier,
+            target=target,
+            action="delete",
+            reason="message index copy of pruned session",
+        )
+        try:
+            _, item.bytes = disposer.dispose_dir(sub)
+            item.outcome = "candidate" if disposer.dry_run else "done"
+            freed += item.bytes
+        except (OSError, ValueError) as exc:
+            item.outcome = "error"
+            item.error = str(exc)
+        manifest.add(item)
     return freed
 
 
-def _deep_clean_targets(wdir: Path) -> list[Path]:
+def _deep_clean_targets(wdir: Path) -> tuple[list[Path], bool]:
     """Everything :func:`deep_clean_worker` is responsible for removing.
 
     Used both to decide whether a previous run finished and to drive the
     deletion loop, so the two can never disagree.
+
+    Returns the targets and whether the scan actually completed. An
+    unreadable directory yields no targets, which is indistinguishable
+    from a finished worker unless the failure is reported separately --
+    and treating it as finished would strand the contents permanently.
     """
     targets: list[Path] = []
     for sub in ("conversations", "data"):
         p = wdir / sub
         if p.exists():
             targets.append(p)
+    scan_complete = True
     try:
         for p in wdir.iterdir():
             if p.is_file() and p.name not in _WORKER_KEEP_FILES:
                 targets.append(p)
     except OSError:
-        pass
-    return targets
+        scan_complete = False
+    return targets, scan_complete
 
 
 def deep_clean_worker(
@@ -683,8 +700,13 @@ def deep_clean_worker(
     result_path = wdir / "result.json"
 
     tombstone_exists = result_path.exists()
-    targets = _deep_clean_targets(wdir)
-    already_cleaned = tombstone_exists and not targets
+    targets, scan_complete = _deep_clean_targets(wdir)
+    # Index copies are removed further down, after this return, so a worker
+    # with no local targets left can still owe the index side. Skipping on
+    # an incomplete scan for the same reason: unknown is not done.
+    already_cleaned = (
+        tombstone_exists and scan_complete and not targets and not _message_index_subtrees(worker_id)
+    )
     if already_cleaned:
         return report
 
