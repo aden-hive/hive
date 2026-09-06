@@ -93,6 +93,21 @@ jobs:
           uv run playwright install chromium
           uv run pytest tests/ -v
 
+  quickstart-parsing:
+    name: Quickstart Parsing (macOS system bash 3.2)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the bash under test
+        run: /bin/bash --version
+
+      # Runs against /bin/bash explicitly: macOS ships bash 3.2 there, which is
+      # the shell the quickstart installer actually runs under for most macOS
+      # users. Anything newer on PATH would not exercise the same code path.
+      - name: Model catalogue parsing regression test
+        run: /bin/bash tests/test_quickstart_parsing.sh
+
   validate:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
