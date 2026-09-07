@@ -2032,9 +2032,7 @@ class AgentLoop(AgentProtocol):
             # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct(
-                fallback=self._config.max_context_tokens
-            )
+            conversation._max_context_tokens = _live_mct(fallback=self._config.max_context_tokens)
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 

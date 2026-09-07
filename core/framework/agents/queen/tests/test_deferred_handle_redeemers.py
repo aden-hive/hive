@@ -51,8 +51,7 @@ def test_emitter_categories_ship_their_redeemers(emitter: str):
         tools = set(qtd._TOOL_CATEGORIES[category])
         missing = _REDEEMERS[emitter] - tools
         assert not missing, (
-            f"category {category!r} offers {emitter} but not {sorted(missing)} — "
-            f"an agent in this tier receives handles it cannot redeem"
+            f"category {category!r} offers {emitter} but not {sorted(missing)} — an agent in this tier receives handles it cannot redeem"
         )
 
 
@@ -74,9 +73,7 @@ def test_always_enabled_tiers_ship_their_redeemers(emitter: str):
         if emitter not in enabled:
             continue  # this tier doesn't hand out the handle; nothing to redeem
         missing = _REDEEMERS[emitter] - enabled
-        assert not missing, (
-            f"{label} always-enabled set has {emitter} but not {sorted(missing)}"
-        )
+        assert not missing, f"{label} always-enabled set has {emitter} but not {sorted(missing)}"
 
 
 def test_terminal_exec_is_dispatched_in_background():
@@ -93,7 +90,4 @@ def test_terminal_exec_is_dispatched_in_background():
     assert "terminal_exec" in cfg.background_tools
     # collect_result is only attached when background_tools is non-empty.
     assert cfg.background_tools, "collect_result would not be offered to the agent"
-    assert cfg.background_tool_grace_seconds > 0, (
-        "grace window disabled — every quick command would pay a full "
-        "collect_result model turn"
-    )
+    assert cfg.background_tool_grace_seconds > 0, "grace window disabled — every quick command would pay a full collect_result model turn"

@@ -37,13 +37,7 @@ async def test_orchestrator_sequential_node_timeout():
         goal_id="wait_goal",
         entry_node="slow_node",
         terminal_nodes=[],
-        nodes=[NodeSpec(
-            id="slow_node",
-            name="Slow Node",
-            description="A node that hangs",
-            entry=True,
-            callable=SlowNode
-        )],
+        nodes=[NodeSpec(id="slow_node", name="Slow Node", description="A node that hangs", entry=True, callable=SlowNode)],
         edges=[],
     )
 
