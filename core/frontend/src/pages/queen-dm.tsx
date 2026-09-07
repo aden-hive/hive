@@ -9,6 +9,7 @@ import ChatPanel, {
 } from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { api } from "@/api/client";
+import { configApi } from "@/api/config";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi, type PortraitDescriptor } from "@/api/queens";
@@ -136,6 +137,33 @@ export default function QueenDM() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Latest runtime bootstrap stage ("Starting tool servers", …), polled
+  // from /api/startup-status while the loading overlay is up so a slow
+  // `hive open` cold start shows staged progress instead of a bare
+  // spinner (mirroring the desktop shell's loading screen).
+  const [bootStage, setBootStage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loading) {
+      setBootStage(null);
+      return;
+    }
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await configApi.getStartupStatus();
+        if (!alive) return;
+        setBootStage(s.ready ? null : s.stage + (s.detail ? ` — ${s.detail}` : ""));
+      } catch {
+        // Server still coming up — keep whatever we last showed.
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [loading]);
   const [queenReady, setQueenReady] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   // SSE connection state surfaced to the user. "reconnecting" appears
@@ -2765,8 +2793,11 @@ export default function QueenDM() {
             populated rather than assembled live in front of the user.
             The parent div is `relative`; this sits opaque on top. */}
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/60" />
+            {bootStage && (
+              <p className="text-[11px] text-muted-foreground animate-pulse">{bootStage}…</p>
+            )}
           </div>
         )}
       </div>

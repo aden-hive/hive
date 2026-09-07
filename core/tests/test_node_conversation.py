@@ -2358,3 +2358,133 @@ class TestTruncateOversizedUserMessages:
             # Each retains the typed prompt and the attachments hint.
             assert "teach me calculus 1" in m.content
             assert "[Attachments saved to disk]" in m.content
+
+
+# ---------------------------------------------------------------------------
+# Tool-result image hoisting
+# ---------------------------------------------------------------------------
+
+IMG_A = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAA"}}
+IMG_B = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,BBB"}}
+
+
+class TestHoistToolResultImages:
+    """Screenshots must reach models whose API drops tool-result images.
+
+    Regression: on an OpenAI-compatible endpoint the agent took a
+    screenshot, got a tool result describing an image the provider had
+    silently stripped, and spent the rest of the session insisting it
+    could not see.
+    """
+
+    @staticmethod
+    async def _screenshot_turn(model: str | None) -> list[dict[str, Any]]:
+        conv = NodeConversation(system_prompt="sys")
+        await conv.add_user_message("take a screenshot")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "browser_screenshot", "arguments": "{}"}}],
+        )
+        await conv.add_tool_result(tool_use_id="c1", content='{"ok": true}', image_content=[IMG_A])
+        return conv.to_llm_messages(model) if model is not None else conv.to_llm_messages()
+
+    @pytest.mark.asyncio
+    async def test_openai_model_receives_image_as_user_message(self):
+        msgs = await self._screenshot_turn("openai/gpt-6-astra")
+
+        tool_msg = next(m for m in msgs if m["role"] == "tool")
+        assert tool_msg["content"] == '{"ok": true}', "tool result keeps its text"
+
+        hoisted = msgs[-1]
+        assert hoisted["role"] == "user"
+        assert hoisted["content"][1] == IMG_A
+        # The label names the call so the model can tie image to tool.
+        assert "browser_screenshot" in hoisted["content"][0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_anthropic_model_keeps_image_in_tool_result(self):
+        msgs = await self._screenshot_turn("anthropic/claude-opus-4-6")
+
+        tool_msg = next(m for m in msgs if m["role"] == "tool")
+        assert tool_msg["content"][1] == IMG_A
+        assert not any(m["role"] == "user" and isinstance(m["content"], list) for m in msgs)
+
+    @pytest.mark.asyncio
+    async def test_no_model_leaves_shape_untouched(self):
+        msgs = await self._screenshot_turn(None)
+        tool_msg = next(m for m in msgs if m["role"] == "tool")
+        assert tool_msg["content"][1] == IMG_A
+
+    @pytest.mark.asyncio
+    async def test_parallel_tool_results_stay_contiguous(self):
+        """All tool results must land before any other role, or the API
+        400s on the tool message that follows a user turn."""
+        conv = NodeConversation(system_prompt="sys")
+        await conv.add_user_message("screenshot both tabs")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[
+                {"id": "c1", "type": "function", "function": {"name": "browser_screenshot", "arguments": "{}"}},
+                {"id": "c2", "type": "function", "function": {"name": "attach_file", "arguments": "{}"}},
+            ],
+        )
+        await conv.add_tool_result(tool_use_id="c1", content="tab one", image_content=[IMG_A])
+        await conv.add_tool_result(tool_use_id="c2", content="tab two", image_content=[IMG_B])
+
+        msgs = conv.to_llm_messages("openai/gpt-6-astra")
+
+        roles = [m["role"] for m in msgs]
+        assert roles == ["user", "assistant", "tool", "tool", "user"]
+        # Both images ride in the single trailing user message, in order.
+        blocks = msgs[-1]["content"]
+        assert blocks[1:] == [IMG_A, IMG_B]
+        assert "browser_screenshot (1)" in blocks[0]["text"]
+        assert "attach_file (1)" in blocks[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_hoisted_images_merge_with_a_following_user_message(self):
+        """A user reply right after the tool turn must not leave two
+        consecutive user messages behind."""
+        conv = NodeConversation(system_prompt="sys")
+        await conv.add_user_message("look")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "browser_screenshot", "arguments": "{}"}}],
+        )
+        await conv.add_tool_result(tool_use_id="c1", content="ok", image_content=[IMG_A])
+        await conv.add_user_message("what do you see?")
+
+        msgs = conv.to_llm_messages("openai/gpt-6-astra")
+
+        assert [m["role"] for m in msgs] == ["user", "assistant", "tool", "user"]
+        blocks = msgs[-1]["content"]
+        assert IMG_A in blocks
+        assert blocks[-1]["text"] == "what do you see?"
+
+    @pytest.mark.asyncio
+    async def test_text_only_tool_results_are_untouched(self):
+        conv = NodeConversation(system_prompt="sys")
+        await conv.add_user_message("run it")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "terminal_exec", "arguments": "{}"}}],
+        )
+        await conv.add_tool_result(tool_use_id="c1", content="exit 0")
+
+        assert conv.to_llm_messages("openai/gpt-6-astra") == conv.to_llm_messages("anthropic/claude-opus-4-6")
+
+    @pytest.mark.asyncio
+    async def test_stored_image_content_survives_hoisting(self):
+        """Hoisting shapes the request only — eviction, persistence and the
+        UI all read Message.image_content and must still find it."""
+        conv = NodeConversation(system_prompt="sys")
+        await conv.add_user_message("look")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "browser_screenshot", "arguments": "{}"}}],
+        )
+        await conv.add_tool_result(tool_use_id="c1", content="ok", image_content=[IMG_A])
+
+        conv.to_llm_messages("openai/gpt-6-astra")
+
+        assert conv.messages[-1].image_content == [IMG_A]

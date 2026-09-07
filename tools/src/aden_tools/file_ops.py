@@ -537,6 +537,11 @@ class _FilePolicy:
             raise ValueError(f"write denied: '{original}' is outside the configured write_safe_root(s) ({roots})")
 
 
+# Binary formats attach_file can turn into content the model can look at
+# (images and PDFs). Mirrors _BINARY_PREVIEW_EXT_TO_MIME in attach_file_tool.
+_VIEWABLE_BINARY_EXT = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf"})
+
+
 def _is_binary(filepath: str) -> bool:
     """Detect binary files by extension and content sampling."""
     _, ext = os.path.splitext(filepath)
@@ -1437,6 +1442,15 @@ def register_file_tools(
 
         if _is_binary(resolved):
             size = os.path.getsize(resolved)
+            # Images and PDFs aren't undisplayable, just not displayable as
+            # text — attach_file base64s them into content the model can
+            # actually look at. Say so, or an agent that reads a screenshot
+            # here concludes it has no way to see the file at all.
+            if os.path.splitext(resolved)[1].lower() in _VIEWABLE_BINARY_EXT:
+                return (
+                    f"Binary file: {path} ({size:,} bytes). Not displayable as text — "
+                    f'view it with attach_file(paths="{path}").'
+                )
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:

@@ -568,6 +568,20 @@ async def handle_health(request: web.Request) -> web.Response:
     )
 
 
+async def handle_startup_status(request: web.Request) -> web.Response:
+    """GET /api/startup-status — coarse boot/bootstrap stage for the web UI.
+
+    The frontend's loading overlay polls this while it waits on a slow
+    session bootstrap (queen tool servers, history scan) so `hive open`
+    shows staged progress like the desktop's loading screen instead of a
+    bare spinner. Stages are reported by the bootstrap path via
+    framework.server.boot_status.
+    """
+    from framework.server import boot_status
+
+    return web.json_response(boot_status.get_status())
+
+
 async def handle_resources(request: web.Request) -> web.Response:
     """GET /api/health/resources — the built-in system-resource monitor.
 
@@ -1043,6 +1057,7 @@ def create_app(model: str | None = None) -> web.Application:
     # Health check
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/health/resources", handle_resources)
+    app.router.add_get("/api/startup-status", handle_startup_status)
     app.router.add_get("/api/browser/status", handle_browser_status)
     app.router.add_get("/api/browser/status/stream", handle_browser_status_stream)
     app.router.add_post("/api/browser/tab/reveal", handle_browser_tab_reveal)

@@ -46,3 +46,40 @@ def filter_tools_for_model(tools: list[Tool], model: str) -> tuple[list[Tool], l
         return list(tools), []
     kept = [t for t in tools if not t.produces_image]
     return kept, hidden
+
+
+# Model prefixes routed to the Anthropic Messages API — the one API we
+# speak whose tool-result block can itself hold images. ``kimi/`` and
+# ``hive/`` are Anthropic-compatible proxies that ``rewrite_proxy_model``
+# turns into ``anthropic/`` before the request goes out.
+_ANTHROPIC_ROUTED_PREFIXES = (
+    "anthropic/",
+    "claude-",
+    "kimi/",
+    "hive/",
+    "openrouter/anthropic/",
+)
+
+
+def supports_images_in_tool_results(model: str) -> bool:
+    """Return whether *model*'s API carries image blocks inside a tool message.
+
+    Anthropic's ``tool_result`` content can hold image blocks, so a
+    screenshot rides along with the tool result that produced it. No other
+    API we speak does: OpenAI chat completions (and every OpenAI-compatible
+    proxy) and Gemini's ``functionResponse`` carry text there and drop image
+    parts *silently* — no 400, no warning, just a model that insists it
+    cannot see the screenshot it just took. Which is accurate: nothing
+    reached it.
+
+    Callers getting ``False`` should move the images into a following
+    ``user`` message — see ``NodeConversation._hoist_tool_result_images``.
+    Every vision-capable API accepts images there.
+
+    Empty model strings are treated as capable, matching
+    :func:`supports_image_tool_results`, so the default path doesn't
+    reshape messages before a provider is selected.
+    """
+    if not model:
+        return True
+    return model.lower().startswith(_ANTHROPIC_ROUTED_PREFIXES)

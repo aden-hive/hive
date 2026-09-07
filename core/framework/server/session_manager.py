@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from framework.config import COLONIES_DIR, QUEENS_DIR
 from framework.host.colony_binding import ColonyBinding
+from framework.server import boot_status
 from framework.host.triggers import TriggerDefinition
 from framework.utils.text import humanize_slug
 
@@ -1400,6 +1401,7 @@ class SessionManager:
             session.id,
             session.queen_executor,
         )
+        boot_status.report("Preparing queen session", session.queen_name or "")
 
         queen_profile = await self._ensure_session_queen_identity(session, initial_prompt)
 
@@ -1517,6 +1519,7 @@ class SessionManager:
                 pass
             return offset
 
+        boot_status.report("Reading session history")
         iteration_offset = await asyncio.to_thread(_scan_iteration_offset)
         if iteration_offset > 0:
             logger.info(
@@ -1558,6 +1561,7 @@ class SessionManager:
                 "_start_queen: unified ColonyRuntime construction failed",
                 exc_info=True,
             )
+        boot_status.mark_ready("Queen ready")
 
     # ------------------------------------------------------------------
     # Phase 2: unified ColonyRuntime construction

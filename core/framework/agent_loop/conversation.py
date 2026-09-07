@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from framework.llm.capabilities import supports_images_in_tool_results
+
 LEGACY_RUN_ID = "__legacy_run__"
 logger = logging.getLogger(__name__)
 
@@ -885,17 +887,107 @@ class NodeConversation:
             streak += 1
         return streak
 
-    def to_llm_messages(self) -> list[dict[str, Any]]:
+    def to_llm_messages(self, model: str | None = None) -> list[dict[str, Any]]:
         """Return messages as OpenAI-format dicts (system prompt excluded).
 
         Automatically repairs orphaned tool_use blocks (assistant messages
         with tool_calls that lack corresponding tool-result messages).  This
         can happen when a loop is cancelled mid-tool-execution.
+
+        *model* selects the image-delivery shape. Anthropic carries images
+        inside a tool result; everywhere else they must be hoisted into a
+        following user message or the model never sees them
+        (``_hoist_tool_result_images``). Omitting *model* keeps the
+        images where they are — pass it whenever the provider is known.
         """
         msgs = [m.to_llm_dict() for m in self._messages]
         msgs = self._repair_orphaned_tool_calls(msgs)
+        if not supports_images_in_tool_results(model or ""):
+            msgs = self._hoist_tool_result_images(msgs)
         msgs = self._sanitize_for_api(msgs)
         return msgs
+
+    @staticmethod
+    def _hoist_tool_result_images(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Move image blocks out of tool messages into a following user message.
+
+        Only Anthropic's ``tool_result`` can hold an image. On every other
+        API the image blocks we put in a ``tool`` message are dropped in
+        transit without an error, so the agent takes a screenshot, gets
+        back a result that describes an image it cannot see, and concludes
+        its own eyes are broken.
+
+        The images survive as a synthetic ``user`` message appended after
+        the tool run, which every vision-capable API accepts. Placement is
+        after the *whole* contiguous run of tool messages, never between
+        two of them: a parallel tool batch must deliver all of its results
+        before any other role appears, or the API rejects the request.
+
+        The tool message keeps its text — only the non-text blocks move.
+        Purely a request-shaping step: the stored ``Message.image_content``
+        is untouched, so eviction, persistence and the UI are unaffected.
+        """
+        # tool_call_id -> tool name, so the hoisted message can say which
+        # call each image came from.
+        names_by_id: dict[str, str] = {}
+        for m in msgs:
+            if m.get("role") != "assistant":
+                continue
+            for tc in m.get("tool_calls") or []:
+                tc_id = tc.get("id")
+                name = (tc.get("function") or {}).get("name")
+                if tc_id and name:
+                    names_by_id[tc_id] = name
+
+        out: list[dict[str, Any]] = []
+        # (tool name, image blocks) for the tool run being walked.
+        pending: list[tuple[str, list[dict[str, Any]]]] = []
+
+        def _flush() -> None:
+            if not pending:
+                return
+            labels = ", ".join(f"{name} ({len(imgs)})" for name, imgs in pending)
+            hoisted: list[dict[str, Any]] = [
+                {
+                    "type": "text",
+                    "text": (
+                        f"[Image output of the tool call(s) above — {labels}. "
+                        "Delivered here because this model's API cannot carry "
+                        "images inside a tool result.]"
+                    ),
+                }
+            ]
+            for _, images in pending:
+                hoisted.extend(images)
+            out.append({"role": "user", "content": hoisted})
+            pending.clear()
+
+        for m in msgs:
+            if m.get("role") != "tool":
+                _flush()
+                out.append(m)
+                continue
+
+            content = m.get("content")
+            if not isinstance(content, list):
+                out.append(m)
+                continue
+
+            text_blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "text"]
+            image_blocks = [b for b in content if isinstance(b, dict) and b.get("type") != "text"]
+            if not image_blocks:
+                out.append(m)
+                continue
+
+            stripped = dict(m)
+            # Collapse back to the plain string a text-only tool result
+            # would have carried, so the payload matches the no-image shape.
+            stripped["content"] = "\n".join(b.get("text") or "" for b in text_blocks)
+            out.append(stripped)
+            pending.append((names_by_id.get(m.get("tool_call_id") or "", "tool"), image_blocks))
+
+        _flush()
+        return out
 
     @staticmethod
     def _sanitize_for_api(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:

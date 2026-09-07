@@ -98,8 +98,21 @@ export interface ExternalSkillSource {
   error?: string;
 }
 
+/** Coarse runtime boot/bootstrap stage, reported by the session bootstrap
+ * path (tool servers, history scan, prompt composition). Polled by loading
+ * overlays so `hive open` shows staged progress instead of a bare spinner. */
+export interface StartupStatus {
+  ready: boolean;
+  stage: string;
+  detail: string;
+  updated_at: number;
+  history: { stage: string; detail: string; at: number }[];
+}
+
 export const configApi = {
   getLLMConfig: () => api.get<LLMConfig>("/config/llm"),
+
+  getStartupStatus: () => api.get<StartupStatus>("/startup-status"),
 
   /** The three provider slots in configuration.json, verbatim. */
   getLlmSections: () =>

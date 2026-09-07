@@ -736,6 +736,8 @@ async def create_queen(
         register_queen_lifecycle_tools,
     )
 
+    from framework.server import boot_status
+
     # ---- Tool registry ------------------------------------------------
     # Use pre-loaded cached registry if available (fast path)
     if tool_registry is not None:
@@ -743,6 +745,7 @@ async def create_queen(
         logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
     else:
         # Build fresh (slow path - for backwards compatibility)
+        boot_status.report("Starting tool servers", "MCP discovery")
         queen_registry = ToolRegistry()
         # Inject the queen's identity into every MCP subprocess this
         # registry spawns. The memory-tools server reads HIVE_QUEEN_ID
@@ -816,6 +819,8 @@ async def create_queen(
                 logger.info("Queen: loaded MCP registry servers: %s", results)
         except Exception:
             logger.warning("Queen: MCP registry config failed to load", exc_info=True)
+
+    boot_status.report("Composing queen prompt")
 
     # ---- Phase state --------------------------------------------------
     # Phase resolution cascade — first non-empty wins:

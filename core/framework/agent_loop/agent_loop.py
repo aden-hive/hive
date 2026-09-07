@@ -3976,7 +3976,7 @@ class AgentLoop(AgentProtocol):
                 )
                 await self._compact(ctx, conversation, accumulator)
 
-            messages = conversation.to_llm_messages()
+            messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
 
             # Defensive guard: ensure messages don't end with an assistant
             # message.  The Anthropic API rejects "assistant message prefill"
@@ -3990,7 +3990,7 @@ class AgentLoop(AgentProtocol):
                     node_id,
                 )
                 await conversation.add_user_message("[Continue working on your current task.]")
-                messages = conversation.to_llm_messages()
+                messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
             final_system_prompt = conversation.system_prompt
             final_messages = messages
 
