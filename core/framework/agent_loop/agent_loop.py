@@ -2041,7 +2041,9 @@ class AgentLoop(AgentProtocol):
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
             if conversation.needs_compaction():
-                await self._compact(ctx, conversation, accumulator)
+                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
+                total_input_tokens += compact_input
+                total_output_tokens += compact_output
                 _compacted_this_iter = True
 
             # 6e. Run single LLM turn (with transient error retry)
@@ -2415,7 +2417,9 @@ class AgentLoop(AgentProtocol):
             # iteration's pre-turn compaction handles the bloat once the
             # user has actually responded.
             if not _compacted_this_iter and not user_input_requested and not queen_input_requested and conversation.needs_compaction():
-                await self._compact(ctx, conversation, accumulator)
+                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
+                total_input_tokens += compact_input
+                total_output_tokens += compact_output
 
             # Reset auto-block grace streak when real work happens
             if real_tool_results or outputs_set:
@@ -3974,7 +3978,9 @@ class AgentLoop(AgentProtocol):
                     "Pre-send guard: context at %.0f%% of budget, compacting",
                     conversation.usage_ratio() * 100,
                 )
-                await self._compact(ctx, conversation, accumulator)
+                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
+                token_counts["input"] += compact_input
+                token_counts["output"] += compact_output
 
             messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
 
@@ -6762,7 +6768,7 @@ class AgentLoop(AgentProtocol):
         ctx: AgentContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator | None = None,
-    ) -> None:
+    ) -> tuple[int, int]:
         """Compact conversation history to stay within token budget.
 
         0. Microcompaction — count-based clearing of old compactable tool results.
@@ -6775,7 +6781,7 @@ class AgentLoop(AgentProtocol):
         # Reminder hook: let sources re-assert context that compaction
         # would otherwise summarize away (e.g. the open task list).
         await self._fire_reminder(ReminderPoint.PRE_COMPACT, ctx, conversation)
-        result = await compact(
+        compact_input, compact_output = await compact(
             ctx=ctx,
             conversation=conversation,
             accumulator=accumulator,
@@ -6789,7 +6795,7 @@ class AgentLoop(AgentProtocol):
         # post-summary context so the first post-compact turn has them — the
         # summary itself does not faithfully reproduce a tool/skill listing.
         await self._fire_reminder(ReminderPoint.POST_COMPACT, ctx, conversation)
-        return result
+        return compact_input, compact_output
 
     # --- LLM compaction with binary-search splitting ----------------------
 
@@ -6807,7 +6813,7 @@ class AgentLoop(AgentProtocol):
         in half and each half is summarised independently.  Tool history is
         appended once at the top-level call (``_depth == 0``).
         """
-        return await llm_compact(
+        summary, _, _ = await llm_compact(
             ctx=ctx,
             messages=messages,
             accumulator=accumulator,
@@ -6816,6 +6822,7 @@ class AgentLoop(AgentProtocol):
             max_depth=self._LLM_COMPACT_MAX_DEPTH,
             max_context_tokens=self._config.max_context_tokens,
         )
+        return summary
 
     # --- Compaction helpers ------------------------------------------------
 

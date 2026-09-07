@@ -1193,7 +1193,7 @@ async def _compact_queen_conversation_in_place(
     if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
         max_ctx_tokens = int(loop_cfg.max_context_tokens)
 
-    summary = await llm_compact(
+    summary, _, _ = await llm_compact(
         queen_ctx,
         messages,
         accumulator=None,

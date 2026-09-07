@@ -324,7 +324,7 @@ async def compact(
     event_bus: EventBus | None,
     char_limit: int | None = None,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
-) -> None:
+) -> tuple[int, int]:
     """Run the full compaction pipeline if conversation needs compaction.
 
     Pipeline stages (in order, short-circuits when budget is restored):
@@ -334,6 +334,8 @@ async def compact(
     3. Emergency deterministic summary (fallback)
     """
     conv_id = id(conversation)
+    llm_input_tokens = 0
+    llm_output_tokens = 0
 
     # Circuit breaker: stop LLM-based compaction after repeated failures,
     # but still fall through to the emergency deterministic summary so
@@ -417,7 +419,7 @@ async def compact(
             event_bus,
             pre_inventory=pre_inventory,
         )
-        return
+        return 0, 0
 
     # --- Step 1: Prune old tool results (free, fast) ---
     protect = max(2000, config.max_context_tokens // 12)
@@ -441,7 +443,7 @@ async def compact(
             event_bus,
             pre_inventory=pre_inventory,
         )
-        return
+        return 0, 0
 
     # --- Step 2: LLM summary compaction ---
     if ctx.llm is not None and not _llm_compaction_skipped:
@@ -450,7 +452,7 @@ async def compact(
             conversation.usage_ratio() * 100,
         )
         try:
-            summary = await llm_compact(
+            summary, compact_input, compact_output = await llm_compact(
                 ctx,
                 list(conversation.messages),
                 accumulator,
@@ -458,6 +460,8 @@ async def compact(
                 max_depth=max_depth,
                 max_context_tokens=config.max_context_tokens,
             )
+            llm_input_tokens += compact_input
+            llm_output_tokens += compact_output
             await conversation.compact(
                 summary,
                 keep_recent=2,
@@ -491,6 +495,7 @@ async def compact(
         event_bus,
         pre_inventory=pre_inventory,
     )
+    return llm_input_tokens, llm_output_tokens
 
 
 def _record_success(conv_id: int, timestamp: float) -> None:
@@ -543,7 +548,7 @@ async def llm_compact(
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
-) -> str:
+) -> tuple[str, int, int]:
     """Summarise *messages* with LLM, splitting recursively if too large.
 
     If the formatted text exceeds the window-derived char limit or the LLM
@@ -569,10 +574,12 @@ async def llm_compact(
         messages = strip_images_from_messages(messages)
 
     formatted = format_messages_for_summary(messages)
+    input_tokens = 0
+    output_tokens = 0
 
     # Proactive split: avoid wasting an API call on oversized input
     if len(formatted) > char_limit and len(messages) > 1:
-        summary = await _llm_compact_split(
+        summary, input_tokens, output_tokens = await _llm_compact_split(
             ctx,
             messages,
             accumulator,
@@ -625,6 +632,8 @@ async def llm_compact(
                 max_tokens=summary_budget,
             )
             summary = response.content
+            input_tokens = response.input_tokens
+            output_tokens = response.output_tokens
         except Exception as e:
             if is_context_too_large_error(e) and len(messages) > 1:
                 logger.info(
@@ -632,7 +641,7 @@ async def llm_compact(
                     _depth,
                     len(messages),
                 )
-                summary = await _llm_compact_split(
+                summary, input_tokens, output_tokens = await _llm_compact_split(
                     ctx,
                     messages,
                     accumulator,
@@ -651,7 +660,7 @@ async def llm_compact(
         if tool_history and "TOOLS ALREADY CALLED" not in summary:
             summary += "\n\n" + tool_history
 
-    return summary
+    return summary, input_tokens, output_tokens
 
 
 async def _llm_compact_split(
@@ -664,12 +673,12 @@ async def _llm_compact_split(
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
-) -> str:
+) -> tuple[str, int, int]:
     """Split messages in half and summarise each half independently."""
     if char_limit is None:
         char_limit = llm_compact_char_limit(max_context_tokens)
     mid = max(1, len(messages) // 2)
-    s1 = await llm_compact(
+    s1, in1, out1 = await llm_compact(
         ctx,
         messages[:mid],
         None,
@@ -679,7 +688,7 @@ async def _llm_compact_split(
         max_context_tokens=max_context_tokens,
         preserve_user_messages=preserve_user_messages,
     )
-    s2 = await llm_compact(
+    s2, in2, out2 = await llm_compact(
         ctx,
         messages[mid:],
         accumulator,
@@ -689,7 +698,7 @@ async def _llm_compact_split(
         max_context_tokens=max_context_tokens,
         preserve_user_messages=preserve_user_messages,
     )
-    return s1 + "\n\n" + s2
+    return s1 + "\n\n" + s2, in1 + in2, out1 + out2
 
 
 # --- Compaction helpers ------------------------------------------------
