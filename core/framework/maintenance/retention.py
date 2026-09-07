@@ -665,11 +665,15 @@ def _deep_clean_targets(wdir: Path) -> tuple[list[Path], bool]:
     and treating it as finished would strand the contents permanently.
     """
     targets: list[Path] = []
+    scan_complete = True
     for sub in ("conversations", "data"):
         p = wdir / sub
-        if p.exists():
-            targets.append(p)
-    scan_complete = True
+        try:
+            if p.exists():
+                targets.append(p)
+        except OSError:
+            # Child probes can fail just like the root enumeration below.
+            scan_complete = False
     try:
         for p in wdir.iterdir():
             if p.is_file() and p.name not in _WORKER_KEEP_FILES:
@@ -704,9 +708,7 @@ def deep_clean_worker(
     # Index copies are removed further down, after this return, so a worker
     # with no local targets left can still owe the index side. Skipping on
     # an incomplete scan for the same reason: unknown is not done.
-    already_cleaned = (
-        tombstone_exists and scan_complete and not targets and not _message_index_subtrees(worker_id)
-    )
+    already_cleaned = tombstone_exists and scan_complete and not targets and not _message_index_subtrees(worker_id)
     if already_cleaned:
         return report
 

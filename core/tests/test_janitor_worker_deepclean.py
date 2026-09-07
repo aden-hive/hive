@@ -364,3 +364,61 @@ def test_failed_target_scan_is_not_a_clean_worker(monkeypatch: pytest.MonkeyPatc
     targets, scan_complete = _retention._deep_clean_targets(wdir)
     assert targets == []
     assert scan_complete is False, "a failed scan must be reported, not swallowed"
+
+
+@pytest.mark.parametrize("failed_name", ["conversations", "data"])
+def test_child_stat_failure_marks_scan_incomplete(monkeypatch: pytest.MonkeyPatch, failed_name: str) -> None:
+    """A child existence probe can fail before root enumeration starts."""
+    from framework.maintenance import retention
+
+    wdir = _build_worker()
+    blocked = wdir / failed_name
+    healthy = wdir / ("data" if failed_name == "conversations" else "conversations")
+    real_exists = Path.exists
+
+    def fail_child_probe(self):
+        if self == blocked:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "exists", fail_child_probe)
+        targets, scan_complete = retention._deep_clean_targets(wdir)
+
+    assert scan_complete is False
+    assert blocked not in targets
+    assert healthy in targets, "one failed probe must not hide the other child"
+    assert all(p.name not in {"meta.json", "tasks.json", "result.json"} for p in targets)
+    targets, scan_complete = retention._deep_clean_targets(wdir)
+    assert scan_complete is True
+    assert blocked in targets and healthy in targets
+
+
+@pytest.mark.parametrize("failed_name", ["conversations", "data"])
+def test_child_stat_failure_allows_cleanup_and_retry(monkeypatch: pytest.MonkeyPatch, failed_name: str) -> None:
+    """Keep an unreadable child for retry without aborting known cleanup."""
+    wdir = _build_worker()
+    tombstone = b'{"status":"completed","summary":"preserve existing result"}'
+    (wdir / "result.json").write_bytes(tombstone)
+    blocked = wdir / failed_name
+    healthy = wdir / ("data" if failed_name == "conversations" else "conversations")
+    real_exists = Path.exists
+
+    def fail_child_probe(self):
+        if self == blocked:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "exists", fail_child_probe)
+        report = deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+
+    assert blocked.exists(), "the failed probe must not become a deletion target"
+    assert not healthy.exists()
+    assert not any(sub.exists() for sub in _index_subtrees())
+    assert report.bytes_freed > 0
+    assert (wdir / "result.json").read_bytes() == tombstone
+
+    deep_clean_worker("c1", _WID, wdir, disposer=DeleteDisposer(), manifest=Manifest())
+    assert sorted(p.name for p in wdir.iterdir()) == ["meta.json", "result.json", "tasks.json"]
+    assert (wdir / "result.json").read_bytes() == tombstone
