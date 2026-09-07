@@ -1401,7 +1401,7 @@ class Orchestrator:
                     # Apply branch_timeout for fan-out nodes, node_timeout for sequential nodes
                     is_fanout_branch = any(tag.via_branch == activation.target_id for tag in activation.fan_out_tags)
                     timeout = branch_timeout if is_fanout_branch else node_timeout
-                    
+
                     if timeout > 0:
                         timed_task = asyncio.ensure_future(asyncio.wait_for(target_worker._task, timeout=timeout))
                         _timed_tasks[activation.target_id] = timeout
@@ -1576,7 +1576,7 @@ class Orchestrator:
                         if isinstance(task_error, asyncio.TimeoutError) and wid in _timed_tasks:
                             applied_timeout = _timed_tasks.pop(wid)
                             # Identify if it was a fanout branch based on activation context or just general error
-                            # (the actual fanout logic can be complex to re-verify here without tags, 
+                            # (the actual fanout logic can be complex to re-verify here without tags,
                             # but we can just say "Execution failed")
                             error = f"Execution failed (timed out after {applied_timeout}s)"
                             failed_workers[wid] = error

@@ -1,10 +1,10 @@
 import asyncio
-import pytest
 from unittest.mock import MagicMock
 
-from core.framework.orchestrator.orchestrator import Orchestrator, ParallelExecutionConfig
-from core.framework.orchestrator.node import NodeProtocol, NodeSpec
+import pytest
 from core.framework.orchestrator.edge import GraphSpec
+from core.framework.orchestrator.node import NodeProtocol, NodeSpec
+from core.framework.orchestrator.orchestrator import Orchestrator, ParallelExecutionConfig
 
 
 class SlowNode(NodeProtocol):
@@ -19,7 +19,7 @@ async def test_orchestrator_sequential_node_timeout():
     # Configure a tiny timeout to fail quickly
     parallel_config = ParallelExecutionConfig()
     parallel_config.node_timeout_seconds = 0.1
-    
+
     mock_runtime = MagicMock()
     mock_runtime.session_id = "test_session"
 
@@ -40,7 +40,7 @@ async def test_orchestrator_sequential_node_timeout():
             id="slow_node",
             name="Slow Node",
             description="A node that hangs",
-            entry=True, 
+            entry=True,
             callable=SlowNode
         )],
         edges=[],
