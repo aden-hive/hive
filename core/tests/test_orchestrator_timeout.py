@@ -2,9 +2,10 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from core.framework.orchestrator.edge import GraphSpec
-from core.framework.orchestrator.node import NodeProtocol, NodeSpec
-from core.framework.orchestrator.orchestrator import Orchestrator, ParallelExecutionConfig
+
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.node import NodeProtocol, NodeSpec
+from framework.orchestrator.orchestrator import Orchestrator, ParallelExecutionConfig
 
 
 class SlowNode(NodeProtocol):
