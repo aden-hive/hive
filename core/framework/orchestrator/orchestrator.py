@@ -111,6 +111,9 @@ class ParallelExecutionConfig:
     # Timeout per branch in seconds
     branch_timeout_seconds: float = 300.0
 
+    # Timeout per sequential node in seconds
+    node_timeout_seconds: float = 600.0
+
 
 class Orchestrator:
     """
@@ -1358,9 +1361,10 @@ class Orchestrator:
             self.logger.error(execution_error)
             return True
 
-        # Track fan-out branch workers for per-branch timeout enforcement
-        _fanout_branch_tasks: dict[str, asyncio.Task] = {}  # worker_id → timeout-wrapper task
+        # Track branch and node workers for timeout enforcement
+        _timed_tasks: dict[str, float] = {}  # worker_id → timeout applied
         branch_timeout = self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
+        node_timeout = getattr(self._parallel_config, "node_timeout_seconds", 600.0) if self._parallel_config else 600.0
 
         def _route_activation(
             activation: Activation,
@@ -1394,11 +1398,13 @@ class Orchestrator:
             if target_worker.check_readiness():
                 target_worker.activate(inherited_tags=activation.fan_out_tags)
                 if target_worker._task is not None:
-                    # Fan-out branch: wrap with timeout
+                    # Apply branch_timeout for fan-out nodes, node_timeout for sequential nodes
                     is_fanout_branch = any(tag.via_branch == activation.target_id for tag in activation.fan_out_tags)
-                    if is_fanout_branch and branch_timeout > 0:
-                        timed_task = asyncio.ensure_future(asyncio.wait_for(target_worker._task, timeout=branch_timeout))
-                        _fanout_branch_tasks[activation.target_id] = timed_task
+                    timeout = branch_timeout if is_fanout_branch else node_timeout
+
+                    if timeout > 0:
+                        timed_task = asyncio.ensure_future(asyncio.wait_for(target_worker._task, timeout=timeout))
+                        _timed_tasks[activation.target_id] = timeout
                         pending_tasks_map[activation.target_id] = timed_task
                     else:
                         pending_tasks_map[activation.target_id] = target_worker._task
@@ -1516,7 +1522,15 @@ class Orchestrator:
                 await completion_event.wait()
             else:
                 # No event bus: wait on worker tasks directly and route completions inline.
-                pending_tasks: dict[str, asyncio.Task] = {wid: w._task for wid, w in workers.items() if w._task is not None}
+                pending_tasks: dict[str, asyncio.Task] = {}
+                for wid, w in workers.items():
+                    if w._task is not None:
+                        if node_timeout > 0:
+                            timed_task = asyncio.ensure_future(asyncio.wait_for(w._task, timeout=node_timeout))
+                            _timed_tasks[wid] = node_timeout
+                            pending_tasks[wid] = timed_task
+                        else:
+                            pending_tasks[wid] = w._task
                 while True:
                     if _check_graph_done():
                         break
@@ -1558,15 +1572,18 @@ class Orchestrator:
                         except Exception as exc:
                             task_error = exc
 
-                        # Check for fan-out branch timeout
-                        if isinstance(task_error, asyncio.TimeoutError) and wid in _fanout_branch_tasks:
-                            error = f"Branch failed (timed out after {branch_timeout}s)"
+                        # Check for execution timeout
+                        if isinstance(task_error, asyncio.TimeoutError) and wid in _timed_tasks:
+                            applied_timeout = _timed_tasks.pop(wid)
+                            # Identify if it was a fanout branch based on activation context or just general error
+                            # (the actual fanout logic can be complex to re-verify here without tags,
+                            # but we can just say "Execution failed")
+                            error = f"Execution failed (timed out after {applied_timeout}s)"
                             failed_workers[wid] = error
                             worker.lifecycle = WorkerLifecycle.FAILED
-                            self.logger.warning(f"  ⏱ Branch {wid}: {error}")
+                            self.logger.warning(f"  ⏱ Timeout {wid}: {error}")
                             if wid in terminal_worker_ids:
                                 completed_terminals.add(wid)
-                            _fanout_branch_tasks.pop(wid, None)
                             continue
 
                         if worker.lifecycle == WorkerLifecycle.COMPLETED and task_error is None:

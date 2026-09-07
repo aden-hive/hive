@@ -730,13 +730,12 @@ async def create_queen(
     from framework.llm.capabilities import supports_image_tool_results
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
+    from framework.server import boot_status
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         normalize_legacy_phase,
         register_queen_lifecycle_tools,
     )
-
-    from framework.server import boot_status
 
     # ---- Tool registry ------------------------------------------------
     # Use pre-loaded cached registry if available (fast path)
