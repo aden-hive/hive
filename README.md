@@ -134,7 +134,7 @@ This sets up:
 
 - Finally, it will open the Hive interface in your browser
 
-> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
+> **Tip:** To reopen the dashboard later, run `./hive open` (macOS/Linux) or `.\hive.ps1 open` (Windows) — using the wrapper script in the repository, not a bare `hive` command. The wrapper must be run from the project root: your current directory has to be the cloned repository itself, not a subdirectory.
 
 ### Build Your First Agent
 
