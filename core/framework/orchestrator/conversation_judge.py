@@ -28,6 +28,8 @@ class PhaseVerdict:
     action: str  # "ACCEPT" or "RETRY"
     confidence: float = 0.8
     feedback: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 async def evaluate_phase_completion(
@@ -91,10 +93,23 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
             max_tokens=max(1024, max_context_tokens // 5),
             max_retries=1,
         )
+        response_input_tokens = getattr(response, "input_tokens", 0)
+        response_output_tokens = getattr(response, "output_tokens", 0)
+        input_tokens = response_input_tokens if isinstance(response_input_tokens, int) else 0
+        output_tokens = response_output_tokens if isinstance(response_output_tokens, int) else 0
         if not response.content or not response.content.strip():
             logger.debug("Level 2 judge: empty response, accepting by default")
-            return PhaseVerdict(action="ACCEPT", confidence=0.5, feedback="")
-        return _parse_verdict(response.content)
+            return PhaseVerdict(
+                action="ACCEPT",
+                confidence=0.5,
+                feedback="",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        verdict = _parse_verdict(response.content)
+        verdict.input_tokens = input_tokens
+        verdict.output_tokens = output_tokens
+        return verdict
     except Exception as e:
         logger.warning(f"Level 2 judge failed, accepting by default: {e}")
         # On failure, don't block — Level 0 already passed

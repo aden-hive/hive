@@ -252,6 +252,35 @@ class TestJudgeIntegration:
         judge.evaluate.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_quality_judge_usage_is_in_totals_and_step_log(self, runtime, node_spec, buffer):
+        """The implicit quality judge's LLM usage is included in totals."""
+        node_spec.output_keys = []
+        node_spec.success_criteria = "The response is complete."
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        llm.complete = MagicMock(
+            return_value=LLMResponse(
+                content="ACTION: ACCEPT\nCONFIDENCE: 1.0\nFEEDBACK:",
+                model="mock-judge",
+                input_tokens=13,
+                output_tokens=4,
+            )
+        )
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        ctx.runtime_logger = MagicMock()
+
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        # Main turn: 10 + 5. Quality judge: 13 + 4.
+        assert result.tokens_used == 32
+        complete = ctx.runtime_logger.log_node_complete.call_args.kwargs
+        assert complete["input_tokens"] == 23
+        assert complete["output_tokens"] == 9
+        step = ctx.runtime_logger.log_step.call_args.kwargs
+        assert step["input_tokens"] == 23
+        assert step["output_tokens"] == 9
+
+    @pytest.mark.asyncio
     async def test_judge_escalate(self, runtime, node_spec, buffer):
         """Mock judge ESCALATE -> failure."""
         node_spec.output_keys = []
@@ -298,6 +327,30 @@ class TestJudgeIntegration:
 
         assert result.success is True
         assert call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("feedback", [None, ""])
+    async def test_empty_feedback_retry_preserves_judge_usage(self, runtime, node_spec, buffer, feedback):
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(scenarios=[text_scenario("First attempt"), text_scenario("Done")])
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate.side_effect = [
+            JudgeVerdict(action="RETRY", feedback=feedback, input_tokens=13, output_tokens=4),
+            JudgeVerdict(action="ACCEPT", input_tokens=17, output_tokens=6),
+        ]
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        ctx.runtime_logger = MagicMock()
+        node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=2))
+
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert result.tokens_used == 70
+        steps = [call.kwargs for call in ctx.runtime_logger.log_step.call_args_list]
+        assert [(step["input_tokens"], step["output_tokens"]) for step in steps] == [(23, 9), (27, 11)]
+        assert steps[0]["verdict_feedback"] == "Custom judge returned RETRY."
+        complete = ctx.runtime_logger.log_node_complete.call_args.kwargs
+        assert (complete["input_tokens"], complete["output_tokens"]) == (50, 20)
 
 
 # ===========================================================================
@@ -1370,6 +1423,138 @@ class TestTransientErrorRetry:
         result = await node.execute(ctx)
         assert result.success is True
         assert llm._call_index == 2  # 1 failure + 1 success
+
+    @pytest.mark.asyncio
+    async def test_pre_send_compaction_usage_survives_stream_failure(self, runtime, node_spec, buffer):
+        """Usage recorded before a failed stream is not lost."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=ConnectionError("connection reset"),
+            fail_count=1,
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        conversation = NodeConversation()
+        conversation.usage_ratio = MagicMock(return_value=1.0)
+        node = EventLoopNode(config=LoopConfig(max_stream_retries=0))
+
+        async def compact_with_usage(*args, usage_callback=None, **kwargs):
+            usage_callback(12, 6)
+            return 12, 6
+
+        node._compact = compact_with_usage
+        usage: list[tuple[int, int]] = []
+
+        with pytest.raises(ConnectionError, match="connection reset"):
+            await node._run_turn_loop(
+                ctx,
+                conversation,
+                [],
+                0,
+                OutputAccumulator(),
+                usage_callback=lambda input_tokens, output_tokens: usage.append((input_tokens, output_tokens)),
+            )
+
+        assert usage == [(12, 6)]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("interruption", ["cancel", "failure"])
+    async def test_interrupted_iteration_usage_logged_before_park(self, runtime, node_spec, buffer, interruption):
+        node_spec.output_keys = []
+
+        class InterruptedLLM(MockStreamingLLM):
+            async def stream(self, *args, **kwargs):
+                if self._call_index == 1:
+                    self._call_index += 1
+                    if interruption == "cancel":
+                        node.cancel_current_turn()
+                        await asyncio.sleep(0)
+                    raise ValueError("bad request")
+                async for event in super().stream(*args, **kwargs):
+                    yield event
+
+        llm = InterruptedLLM(
+            scenarios=[
+                tool_call_scenario("search", {}),
+                [],
+                text_scenario("Recovered", input_tokens=20, output_tokens=7),
+            ]
+        )
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            stream_id="queen",
+            tools=[Tool(name="search", description="Search", parameters={})],
+        )
+        ctx.runtime_logger = MagicMock()
+        node = EventLoopNode(
+            tool_executor=MagicMock(return_value=ToolResult(tool_use_id="call_1", content="Found")),
+            config=LoopConfig(max_iterations=2, max_stream_retries=0),
+        )
+        steps_at_park = []
+
+        async def resume_once(*args, **kwargs):
+            steps_at_park.append(ctx.runtime_logger.log_step.call_count)
+            # Resume the interrupted iteration, then end the queen's next wait.
+            return len(steps_at_park) == 1
+
+        node._await_user_input = AsyncMock(side_effect=resume_once)
+
+        result = await asyncio.wait_for(node.execute(ctx), timeout=5)
+
+        assert result.success is True
+        assert result.tokens_used == 42
+        assert llm._call_index == 3
+        assert steps_at_park == [1, 1]
+        steps = [call.kwargs for call in ctx.runtime_logger.log_step.call_args_list]
+        assert [step["step_index"] for step in steps] == [0, 1]
+        assert [(step["input_tokens"], step["output_tokens"]) for step in steps] == [(10, 5), (20, 7)]
+        assert steps[0]["is_partial"] is True
+        assert steps[0]["error"] == ("Turn cancelled by user" if interruption == "cancel" else "LLM call failed: bad request")
+        complete = ctx.runtime_logger.log_node_complete.call_args.kwargs
+        assert (complete["input_tokens"], complete["output_tokens"]) == (30, 12)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exhaust_retries", [False, True])
+    async def test_completed_inner_turn_usage_survives_retry(self, runtime, node_spec, buffer, exhaust_retries):
+        node_spec.output_keys = []
+        failed_stream = [StreamErrorEvent(error="connection reset", recoverable=True)]
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("search", {}),
+                failed_stream,
+                failed_stream if exhaust_retries else text_scenario("Recovered", input_tokens=20, output_tokens=7),
+            ]
+        )
+        ctx = build_ctx(runtime, node_spec, buffer, llm, tools=[Tool(name="search", description="Search", parameters={})])
+        ctx.runtime_logger = MagicMock()
+        node = EventLoopNode(
+            tool_executor=MagicMock(return_value=ToolResult(tool_use_id="call_1", content="Found")),
+            config=LoopConfig(max_iterations=2, max_stream_retries=1, stream_retry_backoff_base=0.01),
+        )
+
+        if exhaust_retries:
+            with pytest.raises(ConnectionError, match="connection reset"):
+                await node.execute(ctx)
+        else:
+            result = await node.execute(ctx)
+            assert result.success is True
+            assert result.tokens_used == 42
+
+        assert llm._call_index == 3
+        ctx.runtime_logger.log_step.assert_called_once()
+        step = ctx.runtime_logger.log_step.call_args.kwargs
+        assert step["step_index"] == 0
+        expected_usage = (10, 5) if exhaust_retries else (30, 12)
+        assert (step["input_tokens"], step["output_tokens"]) == expected_usage
+        if exhaust_retries:
+            assert step["is_partial"] is True
+        ctx.runtime_logger.log_node_complete.assert_called_once()
+        complete = ctx.runtime_logger.log_node_complete.call_args.kwargs
+        assert (complete["input_tokens"], complete["output_tokens"]) == expected_usage
+        assert complete["tokens_used"] == sum(expected_usage)
 
     @pytest.mark.asyncio
     async def test_permanent_error_no_retry(self, runtime, node_spec, buffer):

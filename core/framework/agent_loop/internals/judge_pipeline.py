@@ -92,7 +92,12 @@ async def judge_turn(
         verdict = await judge.evaluate(context)
         # Ensure evaluated RETRY always carries feedback for logging.
         if verdict.action == "RETRY" and not verdict.feedback:
-            return JudgeVerdict(action="RETRY", feedback="Custom judge returned RETRY.")
+            return JudgeVerdict(
+                action="RETRY",
+                feedback="Custom judge returned RETRY.",
+                input_tokens=verdict.input_tokens,
+                output_tokens=verdict.output_tokens,
+            )
         return verdict
 
     # --- Level 2: implicit judge ---------------------------------------
@@ -140,6 +145,14 @@ async def judge_turn(
             return JudgeVerdict(
                 action=verdict.action,
                 feedback=verdict.feedback or "Phase criteria not met.",
+                input_tokens=verdict.input_tokens,
+                output_tokens=verdict.output_tokens,
             )
+        return JudgeVerdict(
+            action="ACCEPT",
+            feedback="",
+            input_tokens=verdict.input_tokens,
+            output_tokens=verdict.output_tokens,
+        )
 
     return JudgeVerdict(action="ACCEPT", feedback="")

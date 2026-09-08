@@ -36,6 +36,10 @@ class JudgeVerdict:
     # ""    = evaluated but no feedback; logged with default text.
     # "..." = evaluated with feedback; logged as-is.
     feedback: str | None = None
+    # Usage from an optional validation LLM call. Custom judges can leave these
+    # at zero; the implicit quality judge populates them.
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @runtime_checkable

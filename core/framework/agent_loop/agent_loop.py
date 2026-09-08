@@ -1337,6 +1337,20 @@ class AgentLoop(AgentProtocol):
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
+        iteration_tokens: dict[str, int] = {"input": 0, "output": 0}
+
+        def record_usage(input_tokens: int, output_tokens: int) -> None:
+            """Record usage immediately so later retry/error paths retain it."""
+            nonlocal total_input_tokens, total_output_tokens
+            if not isinstance(input_tokens, int):
+                input_tokens = 0
+            if not isinstance(output_tokens, int):
+                output_tokens = 0
+            total_input_tokens += input_tokens
+            total_output_tokens += output_tokens
+            iteration_tokens["input"] += input_tokens
+            iteration_tokens["output"] += output_tokens
+
         stream_id = ctx.stream_id or ctx.agent_id
         node_id = ctx.agent_id
         execution_id = ctx.execution_id or ""
@@ -1661,6 +1675,7 @@ class AgentLoop(AgentProtocol):
         )
         for iteration in range(start_iteration, _total_iterations):
             iter_start = time.time()
+            iteration_tokens = {"input": 0, "output": 0}
             # Flip into grace mode once the work budget is spent — by EITHER
             # the iteration budget OR the cumulative (lifetime) tool-call
             # budget (LoopConfig.tool_call_lifetime_budget; 0 disables). The
@@ -2032,18 +2047,19 @@ class AgentLoop(AgentProtocol):
             # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct(
-                fallback=self._config.max_context_tokens
-            )
+            conversation._max_context_tokens = _live_mct(fallback=self._config.max_context_tokens)
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
             if conversation.needs_compaction():
-                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
-                total_input_tokens += compact_input
-                total_output_tokens += compact_output
+                await self._compact(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    usage_callback=record_usage,
+                )
                 _compacted_this_iter = True
 
             # 6e. Run single LLM turn (with transient error retry)
@@ -2083,7 +2099,14 @@ class AgentLoop(AgentProtocol):
                         request_system_prompt,
                         request_messages,
                         _,
-                    ) = await self._run_turn_loop(ctx, conversation, tools, iteration, accumulator)
+                    ) = await self._run_turn_loop(
+                        ctx,
+                        conversation,
+                        tools,
+                        iteration,
+                        accumulator,
+                        usage_callback=record_usage,
+                    )
                     logger.debug(
                         "[AgentLoop.execute] iteration=%d: _run_turn_loop completed successfully",
                         iteration,
@@ -2106,9 +2129,6 @@ class AgentLoop(AgentProtocol):
                         turn_tokens,
                         {k: ("set" if v is not None else "None") for k, v in accumulator.to_dict().items()},
                     )
-                    total_input_tokens += turn_tokens.get("input", 0)
-                    total_output_tokens += turn_tokens.get("output", 0)
-
                     # Reminder STOP point: the turn loop just ended on a
                     # text-only turn (no tool result to ride a tail on),
                     # so fire STOP as an injected message. Per-turn drift
@@ -2319,6 +2339,17 @@ class AgentLoop(AgentProtocol):
                                 inner_turn=0,
                             )
                         await conversation.add_assistant_message(visible_error)
+                        if ctx.runtime_logger:
+                            ctx.runtime_logger.log_step(
+                                node_id=node_id,
+                                node_type="event_loop",
+                                step_index=iteration,
+                                error=error_msg,
+                                is_partial=True,
+                                input_tokens=iteration_tokens.get("input", 0),
+                                output_tokens=iteration_tokens.get("output", 0),
+                                latency_ms=int((time.time() - iter_start) * 1000),
+                            )
                         await self._await_user_input(ctx, reason=ParkReason.LLM_ERROR)
                         _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
@@ -2339,8 +2370,8 @@ class AgentLoop(AgentProtocol):
                             error=error_msg,
                             stacktrace=stack_trace,
                             is_partial=True,
-                            input_tokens=0,
-                            output_tokens=0,
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                         ctx.runtime_logger.log_node_complete(
@@ -2367,6 +2398,17 @@ class AgentLoop(AgentProtocol):
 
             if _turn_cancelled:
                 logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        error="Turn cancelled by user",
+                        is_partial=True,
+                        input_tokens=iteration_tokens.get("input", 0),
+                        output_tokens=iteration_tokens.get("output", 0),
+                        latency_ms=int((time.time() - iter_start) * 1000),
+                    )
                 if ctx.supports_direct_user_io:
                     # Persist the user-stop park BEFORE we block. Without
                     # this, killing the runtime mid-wait loses both the
@@ -2417,9 +2459,12 @@ class AgentLoop(AgentProtocol):
             # iteration's pre-turn compaction handles the bloat once the
             # user has actually responded.
             if not _compacted_this_iter and not user_input_requested and not queen_input_requested and conversation.needs_compaction():
-                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
-                total_input_tokens += compact_input
-                total_output_tokens += compact_output
+                await self._compact(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    usage_callback=record_usage,
+                )
 
             # Reset auto-block grace streak when real work happens
             if real_tool_results or outputs_set:
@@ -2548,8 +2593,8 @@ class AgentLoop(AgentProtocol):
                         verdict_feedback="Stall detected before judge evaluation",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
+                        input_tokens=iteration_tokens.get("input", 0),
+                        output_tokens=iteration_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
                     ctx.runtime_logger.log_node_complete(
@@ -2731,8 +2776,8 @@ class AgentLoop(AgentProtocol):
                             verdict_feedback=(f"Worker stall grace ({_worker_text_only_streak}/{self._config.worker_escalation_grace_turns})"),
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                     continue
@@ -2797,8 +2842,8 @@ class AgentLoop(AgentProtocol):
                             verdict_feedback=(f"Auto-failed: stall {_worker_text_only_streak}/{self._config.worker_escalation_grace_turns}"),
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                     continue
@@ -2902,8 +2947,8 @@ class AgentLoop(AgentProtocol):
                                     verdict_feedback=(f"Auto-block grace ({_cf_text_only_streak}/{self._config.cf_grace_turns})"),
                                     tool_calls=logged_tool_calls,
                                     llm_text=assistant_text,
-                                    input_tokens=turn_tokens.get("input", 0),
-                                    output_tokens=turn_tokens.get("output", 0),
+                                    input_tokens=iteration_tokens.get("input", 0),
+                                    output_tokens=iteration_tokens.get("output", 0),
                                     latency_ms=iter_latency_ms,
                                 )
                             continue
@@ -2924,8 +2969,8 @@ class AgentLoop(AgentProtocol):
                             verdict_feedback="Shutdown signaled (queen interaction)",
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                         ctx.runtime_logger.log_node_complete(
@@ -3021,8 +3066,8 @@ class AgentLoop(AgentProtocol):
                             verdict_feedback="No input received (shutdown during wait)",
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                         ctx.runtime_logger.log_node_complete(
@@ -3108,7 +3153,7 @@ class AgentLoop(AgentProtocol):
                             "Blocked for ask_user input (skip judge)",
                             logged_tool_calls,
                             assistant_text,
-                            turn_tokens,
+                            iteration_tokens,
                             iter_start,
                         )
                         continue
@@ -3134,7 +3179,7 @@ class AgentLoop(AgentProtocol):
                         "Shutdown signaled (waiting for queen input)",
                         logged_tool_calls,
                         assistant_text,
-                        turn_tokens,
+                        iteration_tokens,
                         iter_start,
                     )
                     if ctx.runtime_logger:
@@ -3207,7 +3252,7 @@ class AgentLoop(AgentProtocol):
                         "No queen input received (shutdown during wait)",
                         logged_tool_calls,
                         assistant_text,
-                        turn_tokens,
+                        iteration_tokens,
                         iter_start,
                     )
                     if ctx.runtime_logger:
@@ -3256,7 +3301,7 @@ class AgentLoop(AgentProtocol):
                     "Blocked for queen input (skip judge)",
                     logged_tool_calls,
                     assistant_text,
-                    turn_tokens,
+                    iteration_tokens,
                     iter_start,
                 )
                 continue
@@ -3277,7 +3322,7 @@ class AgentLoop(AgentProtocol):
                     "Unjudged (judge_every_n_turns skip)",
                     logged_tool_calls,
                     assistant_text,
-                    turn_tokens,
+                    iteration_tokens,
                     iter_start,
                 )
                 continue
@@ -3290,6 +3335,10 @@ class AgentLoop(AgentProtocol):
                 assistant_text,
                 real_tool_results,
                 iteration,
+            )
+            record_usage(
+                getattr(verdict, "input_tokens", 0),
+                getattr(verdict, "output_tokens", 0),
             )
             fb_preview = (verdict.feedback or "")[:200]
             logger.info(
@@ -3338,8 +3387,8 @@ class AgentLoop(AgentProtocol):
                             verdict_feedback=(f"Judge accepted but missing output keys: {missing}"),
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
+                            input_tokens=iteration_tokens.get("input", 0),
+                            output_tokens=iteration_tokens.get("output", 0),
                             latency_ms=iter_latency_ms,
                         )
                     continue
@@ -3362,8 +3411,8 @@ class AgentLoop(AgentProtocol):
                         verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
+                        input_tokens=iteration_tokens.get("input", 0),
+                        output_tokens=iteration_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
                     ctx.runtime_logger.log_node_complete(
@@ -3405,8 +3454,8 @@ class AgentLoop(AgentProtocol):
                         verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
+                        input_tokens=iteration_tokens.get("input", 0),
+                        output_tokens=iteration_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
                     ctx.runtime_logger.log_node_complete(
@@ -3447,8 +3496,8 @@ class AgentLoop(AgentProtocol):
                         verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
+                        input_tokens=iteration_tokens.get("input", 0),
+                        output_tokens=iteration_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
                 if verdict.feedback is not None:
@@ -3871,6 +3920,7 @@ class AgentLoop(AgentProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
+        usage_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[
         str,
         list[dict],
@@ -3922,6 +3972,18 @@ class AgentLoop(AgentProtocol):
             "cost": 0.0,
             "credits": None,
         }
+
+        def record_turn_usage(input_tokens: int, output_tokens: int) -> None:
+            """Record each completed request before later turn work can fail."""
+            if not isinstance(input_tokens, int):
+                input_tokens = 0
+            if not isinstance(output_tokens, int):
+                output_tokens = 0
+            token_counts["input"] += input_tokens
+            token_counts["output"] += output_tokens
+            if usage_callback is not None:
+                usage_callback(input_tokens, output_tokens)
+
         # Running tool-call count for this turn-loop (one judge
         # iteration). Drives both the soft checkpoint reminders and the
         # hard stop; resets here, per turn-loop. `soft_budget_reminders`
@@ -3978,9 +4040,12 @@ class AgentLoop(AgentProtocol):
                     "Pre-send guard: context at %.0f%% of budget, compacting",
                     conversation.usage_ratio() * 100,
                 )
-                compact_input, compact_output = await self._compact(ctx, conversation, accumulator)
-                token_counts["input"] += compact_input
-                token_counts["output"] += compact_output
+                await self._compact(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    usage_callback=record_turn_usage,
+                )
 
             messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
 
@@ -4252,8 +4317,7 @@ class AgentLoop(AgentProtocol):
                         # delta; flush any accumulated reasoning here so it
                         # still reaches monitors.
                         await _flush_reasoning()
-                        token_counts["input"] += event.input_tokens
-                        token_counts["output"] += event.output_tokens
+                        record_turn_usage(event.input_tokens, event.output_tokens)
                         token_counts["cached"] += event.cached_tokens
                         token_counts["cache_creation"] += event.cache_creation_tokens
                         token_counts["cost"] = token_counts.get("cost", 0.0) + event.cost_usd
@@ -6581,7 +6645,7 @@ class AgentLoop(AgentProtocol):
                 # shield: a grace-window timeout must not cancel the in-flight
                 # work — it still has the full `timeout` budget to finish in.
                 result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # genuinely slow — fall through and hand back the handle
             except Exception:
                 # Failed fast. Let collect_result surface it rather than
@@ -6768,6 +6832,7 @@ class AgentLoop(AgentProtocol):
         ctx: AgentContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator | None = None,
+        usage_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[int, int]:
         """Compact conversation history to stay within token budget.
 
@@ -6787,6 +6852,7 @@ class AgentLoop(AgentProtocol):
             accumulator=accumulator,
             config=self._config,
             event_bus=self._event_bus,
+            usage_callback=usage_callback,
             char_limit=self._compact_char_limit(),
             max_depth=self._LLM_COMPACT_MAX_DEPTH,
         )
@@ -7172,7 +7238,7 @@ class AgentLoop(AgentProtocol):
         feedback: str,
         tool_calls: list[dict],
         llm_text: str,
-        turn_tokens: dict[str, int],
+        iteration_tokens: dict[str, int],
         iter_start: float,
     ) -> None:
         """Log a CONTINUE step that skips judge evaluation (e.g., waiting for input)."""
@@ -7183,7 +7249,7 @@ class AgentLoop(AgentProtocol):
             feedback=feedback,
             tool_calls=tool_calls,
             llm_text=llm_text,
-            turn_tokens=turn_tokens,
+            iteration_tokens=iteration_tokens,
             iter_start=iter_start,
         )
 

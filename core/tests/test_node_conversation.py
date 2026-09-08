@@ -1555,6 +1555,35 @@ class TestLlmCompact:
         assert "TOOLS ALREADY CALLED" in result
         assert "web_search" in result
 
+    @pytest.mark.asyncio
+    async def test_split_usage_callback_keeps_completed_branch_on_failure(self):
+        """Usage from a completed split branch survives a later failure."""
+        from unittest.mock import MagicMock
+
+        from framework.agent_loop.internals.compaction import llm_compact
+
+        ctx = self._make_ctx()
+        ctx.llm.acomplete.side_effect = [
+            MagicMock(content="Part 1 summary", input_tokens=11, output_tokens=7),
+            RuntimeError("second branch failed"),
+        ]
+        messages = [
+            Message(seq=0, role="user", content="x" * 80),
+            Message(seq=1, role="user", content="y" * 80),
+        ]
+        usage: list[tuple[int, int]] = []
+
+        with pytest.raises(RuntimeError, match="second branch failed"):
+            await llm_compact(
+                ctx,
+                messages,
+                char_limit=100,
+                usage_callback=lambda input_tokens, output_tokens: usage.append((input_tokens, output_tokens)),
+            )
+
+        assert usage == [(11, 7)]
+        assert ctx.llm.acomplete.await_count == 2
+
 
 # ---------------------------------------------------------------------------
 # Orphaned tool result repair

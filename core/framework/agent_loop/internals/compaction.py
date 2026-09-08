@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,6 +42,8 @@ def llm_compact_char_limit(max_context_tokens: int) -> int:
     keeps tiny windows from splitting into confetti.
     """
     return max(20_000, (max_context_tokens * 4) // 3)
+
+
 # Max output tokens for a single compaction summary call. A summary must be a
 # small fraction of the window — using ``max_context_tokens // 2`` (e.g. 90k on a
 # 180k window) lets the model emit a "summary" nearly as large as the input, which
@@ -322,6 +325,7 @@ async def compact(
     *,
     config: LoopConfig,
     event_bus: EventBus | None,
+    usage_callback: Callable[[int, int], None] | None = None,
     char_limit: int | None = None,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
 ) -> tuple[int, int]:
@@ -336,6 +340,14 @@ async def compact(
     conv_id = id(conversation)
     llm_input_tokens = 0
     llm_output_tokens = 0
+
+    def record_llm_usage(input_tokens: int, output_tokens: int) -> None:
+        """Keep usage visible if a later compaction step fails."""
+        nonlocal llm_input_tokens, llm_output_tokens
+        llm_input_tokens += input_tokens
+        llm_output_tokens += output_tokens
+        if usage_callback is not None:
+            usage_callback(input_tokens, output_tokens)
 
     # Circuit breaker: stop LLM-based compaction after repeated failures,
     # but still fall through to the emergency deterministic summary so
@@ -452,16 +464,15 @@ async def compact(
             conversation.usage_ratio() * 100,
         )
         try:
-            summary, compact_input, compact_output = await llm_compact(
+            summary, _, _ = await llm_compact(
                 ctx,
                 list(conversation.messages),
                 accumulator,
                 char_limit=char_limit,
                 max_depth=max_depth,
                 max_context_tokens=config.max_context_tokens,
+                usage_callback=record_llm_usage,
             )
-            llm_input_tokens += compact_input
-            llm_output_tokens += compact_output
             await conversation.compact(
                 summary,
                 keep_recent=2,
@@ -548,6 +559,7 @@ async def llm_compact(
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
+    usage_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[str, int, int]:
     """Summarise *messages* with LLM, splitting recursively if too large.
 
@@ -588,6 +600,7 @@ async def llm_compact(
             max_depth=max_depth,
             max_context_tokens=max_context_tokens,
             preserve_user_messages=preserve_user_messages,
+            usage_callback=usage_callback,
         )
     else:
         prompt = build_llm_compaction_prompt(
@@ -632,8 +645,12 @@ async def llm_compact(
                 max_tokens=summary_budget,
             )
             summary = response.content
-            input_tokens = response.input_tokens
-            output_tokens = response.output_tokens
+            response_input_tokens = getattr(response, "input_tokens", 0)
+            response_output_tokens = getattr(response, "output_tokens", 0)
+            input_tokens = response_input_tokens if isinstance(response_input_tokens, int) else 0
+            output_tokens = response_output_tokens if isinstance(response_output_tokens, int) else 0
+            if usage_callback is not None:
+                usage_callback(input_tokens, output_tokens)
         except Exception as e:
             if is_context_too_large_error(e) and len(messages) > 1:
                 logger.info(
@@ -650,6 +667,7 @@ async def llm_compact(
                     max_depth=max_depth,
                     max_context_tokens=max_context_tokens,
                     preserve_user_messages=preserve_user_messages,
+                    usage_callback=usage_callback,
                 )
             else:
                 raise
@@ -673,6 +691,7 @@ async def _llm_compact_split(
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
+    usage_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[str, int, int]:
     """Split messages in half and summarise each half independently."""
     if char_limit is None:
@@ -687,6 +706,7 @@ async def _llm_compact_split(
         max_depth=max_depth,
         max_context_tokens=max_context_tokens,
         preserve_user_messages=preserve_user_messages,
+        usage_callback=usage_callback,
     )
     s2, in2, out2 = await llm_compact(
         ctx,
@@ -697,6 +717,7 @@ async def _llm_compact_split(
         max_depth=max_depth,
         max_context_tokens=max_context_tokens,
         preserve_user_messages=preserve_user_messages,
+        usage_callback=usage_callback,
     )
     return s1 + "\n\n" + s2, in1 + in2, out1 + out2
 

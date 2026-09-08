@@ -98,7 +98,7 @@ def log_skip_judge(
     feedback: str,
     tool_calls: list[dict],
     llm_text: str,
-    turn_tokens: dict[str, int],
+    iteration_tokens: dict[str, int],
     iter_start: float,
 ) -> None:
     """Log a CONTINUE step that skips judge evaluation (e.g., waiting for input)."""
@@ -111,8 +111,8 @@ def log_skip_judge(
             verdict_feedback=feedback,
             tool_calls=tool_calls,
             llm_text=llm_text,
-            input_tokens=turn_tokens.get("input", 0),
-            output_tokens=turn_tokens.get("output", 0),
+            input_tokens=iteration_tokens.get("input", 0),
+            output_tokens=iteration_tokens.get("output", 0),
             latency_ms=int((time.time() - iter_start) * 1000),
         )
 
