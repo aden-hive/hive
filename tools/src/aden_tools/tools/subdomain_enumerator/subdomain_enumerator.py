@@ -100,6 +100,9 @@ def register_tools(mcp: FastMCP) -> None:
 
         max_results = min(max_results, 200)
 
+        if max_results < 1:
+            return {"error": "max_results must be at least 1", "domain": domain}
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
