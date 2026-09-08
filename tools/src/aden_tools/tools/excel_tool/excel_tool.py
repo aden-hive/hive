@@ -1,6 +1,7 @@
 """Excel Tool - Read and manipulate Excel files (.xlsx, .xlsm)."""
 
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -487,7 +488,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "EXECUTE",
             ]
             for keyword in disallowed:
-                if keyword in query_upper:
+                if re.search(rf"\b{keyword}\b", query_upper):
                     return {"error": f"'{keyword}' is not allowed in queries"}
 
             # Load workbook
