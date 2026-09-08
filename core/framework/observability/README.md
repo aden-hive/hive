@@ -231,6 +231,7 @@ ContextVar automatically propagates through async calls. If context seems lost, 
 
 ## See Also
 
+- [Run Post-Mortem](../../../docs/postmortem.md) - `hive postmortem`, which analyses the runtime logs a run leaves behind
 - [Logging Implementation](../observability/logging.py) - Source code
 - [AgentRunner](../runner/runner.py) - Where logging is configured
 - [Runtime Core](../runtime/core.py) - Where trace context is set

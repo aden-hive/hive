@@ -18,6 +18,7 @@ Subsystems:
     hive skill ...                   Manage skills (~/.hive/skills/)
     hive mcp ...                     Manage MCP servers
     hive debugger                    LLM debug log viewer
+    hive postmortem [run_id]         Diagnose a run from its runtime logs
 """
 
 import argparse
@@ -78,6 +79,11 @@ def main() -> None:
     from framework.loader.mcp_registry_cli import register_mcp_commands
 
     register_mcp_commands(subparsers)
+
+    # Run post-mortem analysis (runtime logs -> ranked findings)
+    from framework.postmortem.cli import register_postmortem_commands
+
+    register_postmortem_commands(subparsers)
 
     args = parser.parse_args()
 

@@ -91,6 +91,7 @@ hive/                                    # Repository root
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
+│   │   ├── postmortem/                  # `hive postmortem` - diagnoses a run from its runtime logs
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
