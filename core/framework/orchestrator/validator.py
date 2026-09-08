@@ -241,3 +241,42 @@ class OutputValidator:
             all_errors.extend(result.errors)
 
         return ValidationResult(success=len(all_errors) == 0, errors=all_errors)
+
+    def format_validation_feedback(
+        self,
+        validation_result: ValidationResult,
+        expected_keys: list[str] | None = None,
+        schema: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Format validation errors as feedback for LLM retry.
+
+        Args:
+            validation_result: The failed validation result
+            expected_keys: Optional list of expected output keys
+            schema: Optional JSON schema for reference
+
+        Returns:
+            Formatted feedback string to include in retry prompt
+        """
+        feedback = "Your previous response had validation errors:\n\n"
+        feedback += "ERRORS:\n"
+        for error in validation_result.errors:
+            feedback += f"  - {error}\n"
+
+        if schema:
+            feedback += "\nEXPECTED SCHEMA:\n"
+            if "properties" in schema:
+                feedback += "  Required fields:\n"
+                required = schema.get("required", [])
+                for prop_name, prop_info in schema["properties"].items():
+                    req_marker = " (required)" if prop_name in required else ""
+                    prop_type = prop_info.get("type", "any")
+                    feedback += f"    - {prop_name}: {prop_type}{req_marker}\n"
+        elif expected_keys:
+            feedback += "\nEXPECTED OUTPUT KEYS:\n"
+            for key in expected_keys:
+                feedback += f"  - {key}\n"
+
+        feedback += "\nPlease fix the errors and ensure your response contains all required outputs."
+        return feedback
