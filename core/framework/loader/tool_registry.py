@@ -584,16 +584,15 @@ class ToolRegistry:
 
         cwd = config.get("cwd")
         args = list(config.get("args", []))
-        if not cwd and not args:
-            return config
 
         # Resolve cwd relative to base_dir
-        resolved_cwd: Path | None = None
         if cwd:
             if Path(cwd).is_absolute():
-                resolved_cwd = Path(cwd)
+                resolved_cwd = Path(cwd).resolve()
             else:
                 resolved_cwd = (base_dir / cwd).resolve()
+        else:
+            resolved_cwd = base_dir.resolve()
 
         # Find .py script in args (e.g. files_server.py)
         script_name = None
@@ -602,9 +601,6 @@ class ToolRegistry:
                 script_name = arg
                 script_idx = i
                 break
-
-        if resolved_cwd is None:
-            return config
 
         # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
         # try fallback
@@ -630,20 +626,14 @@ class ToolRegistry:
                 config["cwd"] = str(resolved_cwd)
                 return config
 
-        if not script_name:
-            # No .py script (e.g. GCU uses -m gcu.server); just set cwd
-            config["cwd"] = str(resolved_cwd)
-            return config
+        config["cwd"] = str(resolved_cwd.resolve())
 
-        if os.name == "nt":
-            # Windows: cwd=None avoids WinError 267; use absolute script path
-            config["cwd"] = None
+        if script_name:
             abs_script = str((resolved_cwd / script_name).resolve())
             args = list(config["args"])
             args[script_idx] = abs_script
             config["args"] = args
-        else:
-            config["cwd"] = str(resolved_cwd)
+
         return config
 
     def load_mcp_config(self, config_path: Path) -> None:
