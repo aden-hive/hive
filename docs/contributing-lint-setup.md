@@ -30,7 +30,7 @@ make install-hooks
 | quotes | `Q` | Consistent double-quote usage |
 | pyupgrade | `UP` | Modernize syntax for Python 3.11+ |
 
-**Line length:** 100 characters.
+**Line length:** 120 characters.
 
 **Import order:** stdlib, third-party, first-party (`framework` / `aden_tools`), local.
 
