@@ -197,7 +197,9 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             return {"error": "line_items must be a non-empty JSON array"}
 
         lines = []
-        for item in items:
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                return {"error": f"line_items[{i}] must be an object, got {type(item).__name__}"}
             line: dict[str, Any] = {
                 "Amount": item.get("amount", 0),
                 "DetailType": "SalesItemLineDetail",
