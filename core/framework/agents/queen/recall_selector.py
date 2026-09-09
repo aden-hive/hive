@@ -19,12 +19,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from framework.config import get_aux_max_tokens
 from framework.agents.queen.queen_memory_v2 import (
     format_memory_manifest,
     global_memory_dir as _default_global_memory_dir,
     scan_memory_files,
 )
+from framework.config import get_aux_max_tokens
 
 logger = logging.getLogger(__name__)
 
