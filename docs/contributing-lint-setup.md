@@ -74,15 +74,21 @@ git commit --no-verify -m "message"
 
 ### VS Code (Recommended)
 
-The repository includes `.vscode/extensions.json` and `.vscode/settings.json`. On first open, VS Code will prompt you to install the recommended Ruff extension.
-
-Once installed, the editor will:
+Install the **Ruff** extension from the VS Code marketplace. Once installed, configure ruff as your formatter:
 
 - **Format on save** using ruff
 - **Auto-fix lint issues** on save (import sorting, fixable violations)
 - Show a **ruler at column 100**
 
-No manual configuration needed.
+Add to your workspace `settings.json`:
+
+```json
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "charliermarsh.ruff",
+  "editor.rulers": [100]
+}
+```
 
 ### Other Editors
 
@@ -100,7 +106,7 @@ The repository includes a `.claude/settings.json` hook that automatically runs `
 
 ### Codex CLI
 
-Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config). This file is tracked in git. Run `codex` in the repo root to use the configured MCP tools. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
+Codex CLI (OpenAI, v0.101.0+) can be configured to use Hive's MCP tools. Add the MCP server to your Codex config manually. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
 
 ---
 
@@ -131,8 +137,8 @@ make check    # Verify locally before pushing
 | `tools/pyproject.toml` `[tool.ruff]` | Ruff rules for `tools/` (mirrors core, first-party = `aden_tools`) |
 | `.editorconfig` | Editor-agnostic formatting defaults |
 | `.pre-commit-config.yaml` | Pre-commit hook definitions |
-| `.vscode/settings.json` | VS Code ruff integration |
-| `.vscode/extensions.json` | Recommended VS Code extensions |
+| `.editorconfig` | Editor-agnostic formatting defaults |
+| `.pre-commit-config.yaml` | Pre-commit hook definitions |
 | `.claude/settings.json` | Claude Code post-edit hooks |
 
 The single source of truth for lint rules is the `[tool.ruff]` section in each package's `pyproject.toml`. All other configs (VS Code, pre-commit, Makefile, CI) reference these.
@@ -148,7 +154,7 @@ Only if you want pre-commit hooks: `make install-hooks`. Everything else (VS Cod
 No. The project standardizes on ruff for both linting and formatting. Using a different formatter will cause CI failures.
 
 **Q: What if ruff and my editor disagree?**
-The `.vscode/settings.json` is configured to use ruff as the formatter. If you use a different editor, run `make format` before committing, or rely on the pre-commit hook.
+Configure your editor to use ruff as the formatter. If you use a different editor, run `make format` before committing, or rely on the pre-commit hook.
 
 **Q: I'm getting lint errors in code I didn't write. Do I need to fix them?**
 Only fix lint errors in files you modified. Don't send drive-by lint fix PRs for unrelated files without coordinating first.

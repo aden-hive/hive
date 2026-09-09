@@ -169,14 +169,16 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include buffer keys directly for easier access in conditions
+        # Include buffer keys directly for easier access in conditions.
+        # Unpack buffer_data FIRST, then set the five builtins after it so
+        # buffer keys cannot shadow reserved names like result/true/false.
         context = {
+            **buffer_data,
             "output": output,
             "buffer": buffer_data,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **buffer_data,  # Unpack buffer keys directly into context
         }
 
         try:
@@ -501,6 +503,11 @@ class GraphSpec(BaseModel):
         # Suggest at least one terminal node (graphs should have termination points)
         if not self.terminal_nodes:
             warnings.append("Graph has no terminal nodes defined in 'terminal_nodes'. Consider adding a termination point where execution ends.")
+
+        # Check entry point targets exist
+        for ep_key, ep_node in self.entry_points.items():
+            if not self.get_node(ep_node):
+                errors.append(f"Entry point '{ep_key}' references missing node '{ep_node}'")
 
         # Check edge references
         for edge in self.edges:
