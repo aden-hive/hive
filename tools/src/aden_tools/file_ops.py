@@ -1447,10 +1447,7 @@ def register_file_tools(
             # actually look at. Say so, or an agent that reads a screenshot
             # here concludes it has no way to see the file at all.
             if os.path.splitext(resolved)[1].lower() in _VIEWABLE_BINARY_EXT:
-                return (
-                    f"Binary file: {path} ({size:,} bytes). Not displayable as text — "
-                    f'view it with attach_file(paths="{path}").'
-                )
+                return f'Binary file: {path} ({size:,} bytes). Not displayable as text — view it with attach_file(paths="{path}").'
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:

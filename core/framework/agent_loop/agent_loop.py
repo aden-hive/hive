@@ -2032,9 +2032,7 @@ class AgentLoop(AgentProtocol):
             # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct(
-                fallback=self._config.max_context_tokens
-            )
+            conversation._max_context_tokens = _live_mct(fallback=self._config.max_context_tokens)
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 
@@ -6575,7 +6573,7 @@ class AgentLoop(AgentProtocol):
                 # shield: a grace-window timeout must not cancel the in-flight
                 # work — it still has the full `timeout` budget to finish in.
                 result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # genuinely slow — fall through and hand back the handle
             except Exception:
                 # Failed fast. Let collect_result surface it rather than
