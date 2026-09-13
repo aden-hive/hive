@@ -1034,9 +1034,16 @@ class NodeConversation:
 
             cleaned.append(m)
 
-        # Drop leading assistant/tool messages (no prior context)
-        while cleaned and cleaned[0].get("role") in ("assistant", "tool"):
-            cleaned.pop(0)
+        # Drop leading assistant/tool messages (no prior context) only
+        # when there is no user message later in the list.  A leading
+        # assistant followed by a user message is valid restored history
+        # (e.g. legacy unphased stores) — stripping it would erase the
+        # prior turn from the LLM context.
+        if cleaned and cleaned[0].get("role") in ("assistant", "tool"):
+            has_later_user = any(m.get("role") == "user" for m in cleaned)
+            if not has_later_user:
+                while cleaned and cleaned[0].get("role") in ("assistant", "tool"):
+                    cleaned.pop(0)
 
         return cleaned
 

@@ -1398,7 +1398,9 @@ class AgentLoop(AgentProtocol):
             _restored_recent_responses = restored.recent_responses
             _restored_tool_fingerprints = restored.recent_tool_fingerprints
             _restored_pending_input = restored.pending_input
-            _is_cold_resume = True
+            _is_cold_resume = restored.pending_input is not None or any(
+                m.truncated for m in conversation.messages
+            )
             # Restore the user-stop flag. __init__ defaulted it to False; if
             # the previous process persisted user_stopped=True (cancel route
             # set the flag and a checkpoint write captured it) the idle-nudge
@@ -1964,6 +1966,27 @@ class AgentLoop(AgentProtocol):
                         pending_input=None,
                     )
                     continue
+
+            # 6b1¾. Legacy leading-assistant guard.
+            # A restored conversation may start with an assistant message
+            # (e.g. legacy unphased stores). LLM APIs reject a leading
+            # assistant message with no prior user context, so inject a
+            # continuation prompt to provide the required context.
+            if (
+                restored is not None
+                and conversation.messages
+                and conversation.messages[0].role == "assistant"
+                and (
+                    len(conversation.messages) < 2
+                    or conversation.messages[1].role != "user"
+                )
+            ):
+                logger.info(
+                    "[%s] iter=%d: restored conversation starts with assistant — injecting continuation prompt",
+                    node_id,
+                    iteration,
+                )
+                await conversation.add_user_message("[Continue working on your current task.]")
 
             # 6b2. Dynamic tool refresh (mode switching + mid-session loads).
             # Mirrored inside _run_turn_loop's inner stream loop so a tool

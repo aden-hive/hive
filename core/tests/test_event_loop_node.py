@@ -1089,15 +1089,6 @@ class TestCrashRecovery:
         assert cursor.get("pending_input") is None
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason=(
-            "Restore path for legacy unphased stores is not writing "
-            "messages into the LLM call — separate pre-existing bug. "
-            "The queen's forever-alive semantics (skip_judge=True) are "
-            "tested via test_session_manager_worker_handoff and the "
-            "live manual flow. Unskip once the legacy restore is fixed."
-        )
-    )
     async def test_restore_legacy_unphased_assistant_message_preserves_store(self, tmp_path, runtime, buffer):
         """Legacy queen stores without phase_id should resume instead of being cleared.
 
