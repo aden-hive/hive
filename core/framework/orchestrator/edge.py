@@ -169,14 +169,16 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include buffer keys directly for easier access in conditions
+        # Include buffer keys directly for easier access in conditions.
+        # Unpack buffer_data FIRST, then set the five builtins after it so
+        # buffer keys cannot shadow reserved names like result/true/false.
         context = {
+            **buffer_data,
             "output": output,
             "buffer": buffer_data,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **buffer_data,  # Unpack buffer keys directly into context
         }
 
         try:
