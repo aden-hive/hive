@@ -2,7 +2,7 @@
 
 import re
 
-from framework.orchestrator import NodeSpec
+from framework.orchestrator.node import NodeSpec
 
 # Wraps prompt sections that should only be shown to vision-capable models.
 # Content inside `<!-- vision-only -->...<!-- /vision-only -->` is kept for
@@ -214,7 +214,7 @@ cold-touch the same person:
 1. Load the current CRM state first (required before any write): \
    ``hive-crm summary --json``.
 2. Intake your target people: write them to a JSON array \
-   (``[{"name","email","linkedin","title","org"}...]``) and run \
+   (``[{{"name","email","linkedin","title","org"}}...]``) and run \
    ``hive-crm import --file leads.json --json`` — it creates/dedups each person \
    team-wide and returns their ``person_ids``.
 3. Claim the ones you'll work, ATOMICALLY: \
@@ -687,6 +687,12 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
+    client_facing=True,  # Queen is the sole conversational client-facing node
+    success_criteria=(
+        "Queen responds without raising errors. Queen stays in its current phase "
+        "(independent vs colony) for the conversation. Queen never invokes "
+        "colony-only tools while in independent mode."
+    ),
     tools=sorted(set(_QUEEN_INDEPENDENT_TOOLS + _QUEEN_COLONY_TOOLS)),
     system_prompt=(_queen_character_core + _queen_role_independent + _queen_tools_independent + _queen_behavior_always + _queen_behavior_independent),
 )
