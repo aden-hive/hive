@@ -134,7 +134,12 @@ This sets up:
 
 - Finally, it will open the Hive interface in your browser
 
-> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
+> **Note:** The `hive` CLI must be run from the repository root. The wrapper demands that
+> your current directory exactly equals the repo root (it refuses to run from subdirectories).
+> Since quickstart installs `hive` into `~/.local/bin` (added to your PATH), you can run
+> `hive open` from the repo root, or `./hive open` when using the in-repo wrapper directly.
+
+> **Tip:** To reopen the dashboard later, run `hive open` from the repository root.
 
 ### Build Your First Agent
 
