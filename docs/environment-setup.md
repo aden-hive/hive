@@ -103,7 +103,7 @@ MCP tools are also available in Cursor. To enable:
 
 1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
 2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+3. Add the Hive MCP server to your Cursor config manually
 4. Open Agent chat and verify MCP tools are available
 
 ### 2. Build an Agent

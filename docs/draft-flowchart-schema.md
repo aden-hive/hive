@@ -1,5 +1,7 @@
 # Draft Flowchart System — Complete Reference
 
+> **Note (2026-09):** The files referenced in this document (`flowchart_utils.py`, `routes_graphs.py`, `DraftGraph.tsx`, `workspace.tsx`) and the `save_agent_draft` tool are not present in the current repository. The feature they described may have been renamed or removed. This document is preserved for historical reference but may not reflect the current architecture.
+
 The draft flowchart system bridges user-facing workflow design (planning phase) and the runtime agent graph (execution phase). During planning, the queen agent creates a flowchart that the user reviews. On approval, decision nodes are dissolved into runtime-compatible structures, and the original flowchart is preserved for live status overlay during execution.
 
 ---

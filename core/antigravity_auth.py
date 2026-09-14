@@ -20,6 +20,7 @@ import secrets
 import socket
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -57,6 +58,37 @@ _CREDENTIALS_URL = "https://raw.githubusercontent.com/NoeFabris/opencode-antigra
 # Cached credentials fetched from public source
 _cached_client_id: str | None = None
 _cached_client_secret: str | None = None
+
+
+class OAuthError(Exception):
+    """Base class for Antigravity OAuth failures."""
+
+    def __init__(self, message: str, *, code: str = "oauth_error", provider: str = "antigravity", hint: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.provider = provider
+        self.hint = hint
+
+
+class OAuthConfigError(OAuthError):
+    """Missing or invalid OAuth configuration (client ID/secret, redirect URI)."""
+
+    def __init__(self, message: str, *, provider: str = "antigravity", hint: str = "") -> None:
+        super().__init__(message, code="invalid_config", provider=provider, hint=hint)
+
+
+class OAuthTokenError(OAuthError):
+    """Token exchange/refresh failures, including invalid_grant and bad responses."""
+
+    def __init__(self, message: str, *, provider: str = "antigravity", hint: str = "") -> None:
+        super().__init__(message, code="token_error", provider=provider, hint=hint)
+
+
+class OAuthNetworkError(OAuthError):
+    """Network-level failures (timeouts, connection errors) during OAuth HTTP calls."""
+
+    def __init__(self, message: str, *, provider: str = "antigravity", hint: str = "") -> None:
+        super().__init__(message, code="network_error", provider=provider, hint=hint)
 
 
 def _fetch_credentials_from_public_source() -> tuple[str | None, str | None]:
@@ -106,7 +138,10 @@ def get_client_id() -> str:
     if client_id:
         return client_id
 
-    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+    raise OAuthConfigError(
+        "Could not obtain Antigravity OAuth client ID",
+        hint="Set ANTIGRAVITY_CLIENT_ID env var or add 'antigravity_client_id' to ~/.hive/configuration.json",
+    )
 
 
 def get_client_secret() -> str | None:
@@ -228,9 +263,19 @@ def exchange_code_for_tokens(code: str, redirect_uri: str, client_id: str, clien
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        try:
+            error_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            error_body = ""
+        raise OAuthTokenError(
+            f"Token exchange failed (HTTP {e.code}): {e.reason}{f' — {error_body}' if error_body else ''}",
+            hint="Check for invalid_grant (expired code), redirect_uri_mismatch, or invalid client credentials",
+        ) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise OAuthNetworkError(f"Token exchange failed: {e}") from e
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
-        return None
+        raise OAuthTokenError(f"Token exchange failed: {e}") from e
 
 
 def get_user_email(access_token: str) -> str | None:
@@ -324,9 +369,18 @@ def refresh_access_token(refresh_token: str, client_id: str, client_secret: str 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise OAuthTokenError(
+            f"Token refresh failed (HTTP {e.code}): {e.reason}",
+            hint="The refresh token may be expired or revoked (invalid_grant); re-authenticate",
+        ) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise OAuthNetworkError(f"Token refresh failed: {e}") from e
     except Exception as e:
-        logger.debug(f"Token refresh failed: {e}")
-        return None
+        raise OAuthTokenError(
+            f"Token refresh failed: {e}",
+            hint="The refresh token may be expired or revoked (invalid_grant); re-authenticate",
+        ) from e
 
 
 def cmd_account_add(args: argparse.Namespace) -> int:
@@ -335,7 +389,11 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     First checks if valid credentials already exist. If so, validates them
     and skips OAuth if they work. Otherwise, proceeds with OAuth flow.
     """
-    client_id = get_client_id()
+    try:
+        client_id = get_client_id()
+    except OAuthConfigError as e:
+        logger.error("[%s] %s%s", e.code, e, f" ({e.hint})" if e.hint else "")
+        return 1
     client_secret = get_client_secret()
 
     # Check if credentials already exist
@@ -366,7 +424,18 @@ def cmd_account_add(args: argparse.Namespace) -> int:
             logger.info(f"Found expired credentials for: {email}")
             logger.info("Attempting token refresh...")
 
-            tokens = refresh_access_token(refresh_token, client_id, client_secret)
+            tokens = None
+            try:
+                tokens = refresh_access_token(refresh_token, client_id, client_secret)
+            except OAuthError as e:
+                logger.error(
+                    "Token refresh failed [%s]: %s%s",
+                    e.code,
+                    e,
+                    f" ({e.hint})" if e.hint else "",
+                    exc_info=True,
+                )
+                logger.info("Token refresh failed (%s), proceeding with OAuth...", e.code)
             if tokens:
                 new_access = tokens.get("access_token")
                 expires_in = tokens.get("expires_in", 3600)
@@ -438,7 +507,11 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
     # Exchange code for tokens
     logger.info("Exchanging authorization code for tokens...")
-    tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret)
+    try:
+        tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret)
+    except OAuthError as e:
+        logger.error("Token exchange failed [%s]: %s%s", e.code, e, f" ({e.hint})" if e.hint else "")
+        return 1
 
     if not tokens:
         return 1
