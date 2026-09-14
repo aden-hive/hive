@@ -265,9 +265,7 @@ def create_queen_profile(
         raise ValueError("name is required")
     qid = (queen_id or "").strip() or _slugify_queen_id(name)
     if not _QUEEN_ID_RE.match(qid):
-        raise ValueError(
-            "queen_id must match [a-z0-9][a-z0-9_-]{0,62} (lowercase slug)"
-        )
+        raise ValueError("queen_id must match [a-z0-9][a-z0-9_-]{0,62} (lowercase slug)")
     if qid in DEFAULT_QUEENS or (QUEENS_DIR / qid / "profile.yaml").exists():
         raise FileExistsError(qid)
     profile: dict[str, Any] = {"name": name, "title": (title or "").strip()}

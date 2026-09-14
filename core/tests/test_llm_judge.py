@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from framework.llm.provider import LLMProvider, LLMResponse
 from framework.config import get_aux_max_tokens
+from framework.llm.provider import LLMProvider, LLMResponse
 from framework.testing.llm_judge import LLMJudge
 
 # ============================================================================

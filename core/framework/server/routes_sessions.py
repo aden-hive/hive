@@ -2176,9 +2176,7 @@ async def handle_session_history(request: web.Request) -> web.Response:
     # conversation part of any summary-stale session and rewrites its
     # summary.json — hundreds of ms to seconds of disk+CPU that used to
     # stall every SSE stream on each sidebar refresh.
-    disk_sessions = await asyncio.get_running_loop().run_in_executor(
-        _history_read_executor(), SessionManager.list_cold_sessions
-    )
+    disk_sessions = await asyncio.get_running_loop().run_in_executor(_history_read_executor(), SessionManager.list_cold_sessions)
     for s in disk_sessions:
         if s["session_id"] in live_sessions:
             live = live_sessions[s["session_id"]]
@@ -2229,9 +2227,7 @@ async def handle_list_colony_sessions(request: web.Request) -> web.Response:
 
     # Off-loop for the same reason as handle_session_history: summary
     # rebuilds parse every part file of stale sessions.
-    sessions = await asyncio.get_running_loop().run_in_executor(
-        _history_read_executor(), SessionManager.list_colony_sessions, colony_id
-    )
+    sessions = await asyncio.get_running_loop().run_in_executor(_history_read_executor(), SessionManager.list_colony_sessions, colony_id)
     for s in sessions:
         sid = s.get("session_id")
         if sid in live_sessions:

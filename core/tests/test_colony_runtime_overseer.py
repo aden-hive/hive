@@ -337,7 +337,13 @@ class TestReportToParent:
             deadline = asyncio.get_event_loop().time() + 5.0
             while worker.is_active and asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(0.05)
+
             assert not worker.is_active
+
+            # Allow event bus to process terminal events
+            deadline = asyncio.get_event_loop().time() + 2.0
+            while len(reports) < 1 and asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(0.05)
 
             assert len(reports) >= 1
             r = reports[0]

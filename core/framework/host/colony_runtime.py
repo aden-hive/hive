@@ -1467,9 +1467,7 @@ class ColonyRuntime:
         # default. Skipped entirely when the spawner passed an explicit
         # per-worker budget (whitelisted override) — runtime intent wins.
         if "max_context_tokens" not in (loop_config_overrides or {}):
-            _spawn_loop_config.max_context_tokens = _get_worker_max_ctx(
-                fallback=_spawn_loop_config.max_context_tokens
-            )
+            _spawn_loop_config.max_context_tokens = _get_worker_max_ctx(fallback=_spawn_loop_config.max_context_tokens)
         agent_loop = AgentLoop(
             event_bus=self._scoped_event_bus,
             tool_executor=spawn_executor,

@@ -47,9 +47,7 @@ def _try_ranges(tree: ast.AST):
     for node in ast.walk(tree):
         if isinstance(node, ast.Try):
             body_start = node.body[0].lineno
-            body_end = max(
-                getattr(stmt, "end_lineno", stmt.lineno) for stmt in node.body
-            )
+            body_end = max(getattr(stmt, "end_lineno", stmt.lineno) for stmt in node.body)
             yield node, body_start, body_end
 
 
@@ -65,16 +63,12 @@ def test_framework_crm_imports_are_guarded():
             # handlers), and near the top of that body — a try that does a
             # page of unrelated work before/after the import is the swallowed
             # -context bug this file exists to prevent.
-            directly_guarded = any(
-                body_start <= imp.lineno <= body_end and imp.lineno - body_start <= 2
-                for _, body_start, body_end in tries
-            )
+            directly_guarded = any(body_start <= imp.lineno <= body_end and imp.lineno - body_start <= 2 for _, body_start, body_end in tries)
             if not directly_guarded:
                 rel = path.relative_to(FRAMEWORK_ROOT)
                 offenders.append(f"{rel}:{imp.lineno}")
     assert not offenders, (
         "framework.crm is optional (desktop-only); these imports are not "
         "directly wrapped in their own try block and will either crash or — "
-        "worse — silently abort unrelated work in an outer try:\n  "
-        + "\n  ".join(offenders)
+        "worse — silently abort unrelated work in an outer try:\n  " + "\n  ".join(offenders)
     )
