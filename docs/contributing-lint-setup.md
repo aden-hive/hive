@@ -74,8 +74,6 @@ git commit --no-verify -m "message"
 
 ### VS Code (Recommended)
 
-The repository includes `.vscode/extensions.json` and `.vscode/settings.json`. On first open, VS Code will prompt you to install the recommended Ruff extension.
-
 Once installed, the editor will:
 
 - **Format on save** using ruff
@@ -97,10 +95,6 @@ For any editor, you can always rely on `make lint` and `make format` from the co
 ### Claude Code
 
 The repository includes a `.claude/settings.json` hook that automatically runs `ruff check --fix` and `ruff format` after every file edit made by Claude Code. No setup needed — it works out of the box.
-
-### Codex CLI
-
-Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config). This file is tracked in git. Run `codex` in the repo root to use the configured MCP tools. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
 
 ---
 
