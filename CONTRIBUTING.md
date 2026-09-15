@@ -104,6 +104,11 @@ cd hive
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv sync
+
+# Browser-backed tools (and their tests) need a Chromium build matching the
+# pinned Playwright version. ./quickstart.sh installs this for you; the manual
+# path does not.
+uv run playwright install chromium
 ```
 
 ### Fork and Branch Workflow
@@ -139,7 +144,7 @@ uv sync
 # Run core tests
 uv run pytest core/tests/
 
-# Run tool tests (mocked, no real API calls)
+# Run tool tests (no real API calls; a few browser-backed tests launch Chromium)
 uv run pytest tools/tests/
 
 # Run linter
@@ -148,6 +153,14 @@ uv run ruff check .
 # Run formatter
 uv run ruff format .
 ```
+
+> **`Executable doesn't exist at .../chrome-headless-shell`?** The chart
+> rendering tests (`tools/tests/test_chart_tools_smoke.py`) launch a real
+> browser, so Playwright needs a Chromium build matching its pinned version.
+> Run `uv run playwright install chromium` from `tools/`. This also bites when a
+> preinstalled Chromium is present but built for a different Playwright release
+> — the version must match, not merely exist. Other browser-backed tools, such
+> as `web_scrape`, mock Playwright and run fine without a browser.
 
 ---
 
