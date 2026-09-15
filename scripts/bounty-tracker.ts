@@ -141,12 +141,28 @@ async function getMergedBountyPRs(
 
   const query = `repo:${owner}/${repo} is:pr is:merged ${bountyLabels}${since ? ` merged:>=${since}` : ""}`;
 
-  const result = await githubRequest<{ items: GitHubPR[] }>(
-    `/search/issues?q=${encodeURIComponent(query)}&per_page=100&sort=updated&order=desc`,
-    token
-  );
+  const allItems: GitHubPR[] = [];
+  let page = 1;
 
-  return result.items;
+  while (true) {
+    const result = await githubRequest<{ items: GitHubPR[] }>(
+      `/search/issues?q=${encodeURIComponent(query)}&per_page=100&page=${page}&sort=updated&order=desc`,
+      token
+    );
+
+    allItems.push(...result.items);
+
+    if (result.items.length < 100 || page >= 10) {
+      break;
+    }
+
+    page++;
+
+    // Safety delay to prevent search API abuse
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return allItems;
 }
 
 // ---------------------------------------------------------------------------
