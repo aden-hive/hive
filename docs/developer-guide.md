@@ -26,8 +26,7 @@ Hive is a Python-based system for building goal-driven, self-improving AI agents
 | **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
 | **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`, `.agents`, `.agent` | Shared skills for Claude/Codex/other coding agents | Markdown     |
-| **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
+| **skills**    | `.claude`  | Shared skills for Claude Code             | Markdown     |
 
 ### Key Principles
 
@@ -77,9 +76,6 @@ hive/                                    # Repository root
 │   ├── ISSUE_TEMPLATE/                  # Bug report & feature request templates
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
 │   └── CODEOWNERS                       # Auto-assign reviewers
-│
-├── .codex/                              # Codex CLI project config
-│   └── config.toml                      # Codex MCP server definitions
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -135,7 +131,6 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
-├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
