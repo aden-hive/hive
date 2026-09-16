@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "python",
+      "args": ["-m", "aden_tools", "serve", "filesystem"]
+    },
+    "bash_executor": {
+      "command": "python",
+      "args": ["-m", "aden_tools", "serve", "bash"]
+    },
+    "browser": {
+      "command": "python",
+      "args": ["-m", "gcu", "serve", "browser"]
+    }
+  }
+}
