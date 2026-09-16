@@ -965,7 +965,8 @@ class Orchestrator:
             # Get node implementation to check its type
             branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
-            effective_max_retries = node_spec.max_retries
+            # Normalize to at least 1 attempt, so max_retries=0 still executes once
+            effective_max_retries = max(1, node_spec.max_retries)
             # Only override for actual AgentLoop instances, not custom NodeProtocol impls
             from framework.agent_loop.agent_loop import AgentLoop as _AgentLoop  # noqa: F811
 
@@ -1029,7 +1030,23 @@ class Orchestrator:
                         )
 
                     self.logger.info(f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})")
-                    result = await node_impl.execute(ctx)
+                    
+                    try:
+                        result = await node_impl.execute(ctx)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        import traceback
+                        stack_trace = traceback.format_exc()
+                        self.logger.error(
+                            f"      ✗ Branch {node_spec.name}: unhandled system exception during execution:\n{stack_trace}"
+                        )
+                        result = NodeResult(
+                            success=False,
+                            output={},
+                            error=f"Unhandled system exception: {str(e)}"
+                        )
+
                     last_result = result
 
                     # Ensure L2 entry for this branch node
@@ -1080,7 +1097,12 @@ class Orchestrator:
                         self.logger.info(f"      ✓ Branch {node_spec.name}: success (tokens: {result.tokens_used}, latency: {result.latency_ms}ms)")
                         return branch, result
 
-                    self.logger.warning(f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{effective_max_retries}")
+                    if attempt + 1 < effective_max_retries:
+                        import random
+                        # Exponential backoff with up to 500ms of random jitter
+                        delay = (1.0 * (2 ** attempt)) + random.uniform(0.1, 0.5)
+                        self.logger.warning(f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{effective_max_retries} in {delay:.2f}s")
+                        await asyncio.sleep(delay)
 
                 # All retries exhausted
                 branch.status = "failed"
@@ -1123,6 +1145,9 @@ class Orchestrator:
         failed_branches: list[ParallelBranch] = []
 
         for i, result in enumerate(results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+
             branch = branch_list[i]
 
             if isinstance(result, asyncio.TimeoutError):
@@ -1545,12 +1570,7 @@ class Orchestrator:
                         worker = workers[wid]
 
                         if task.cancelled():
-                            error = "Worker task was cancelled unexpectedly"
-                            failed_workers[wid] = error
-                            self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
-                            if wid in terminal_worker_ids:
-                                completed_terminals.add(wid)
-                            continue
+                            raise asyncio.CancelledError(f"Worker task {wid} was cancelled")
 
                         task_error = None
                         try:
@@ -1739,6 +1759,21 @@ class Orchestrator:
             )
 
         finally:
+            # Cancel and await all outstanding worker and timeout tasks
+            tasks_to_cancel = []
+            for w in workers.values():
+                if w._task is not None and not w._task.done():
+                    w._task.cancel()
+                    tasks_to_cancel.append(w._task)
+            
+            for task in _fanout_branch_tasks.values():
+                if task is not None and not task.done():
+                    task.cancel()
+                    tasks_to_cancel.append(task)
+            
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+
             if has_event_subscription and self._event_bus:
                 if sub_completed:
                     self._event_bus.unsubscribe(sub_completed)
