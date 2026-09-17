@@ -354,6 +354,12 @@ class MCPClient:
                         candidate = cwd_path / arg
                         if candidate.exists():
                             args[i] = str(candidate.resolve())
+                # Same fix as tool_registry._resolve_mcp_server_config: the
+                # child can no longer see cwd, so hand it over via env.
+                # files_server.py reads HIVE_MCP_SERVER_CWD to anchor its
+                # relative-path fallback instead of inheriting this
+                # process's cwd (a config-supplied env value wins).
+                merged_env.setdefault("HIVE_MCP_SERVER_CWD", str(cwd_path))
                 cwd = None
             server_params = StdioServerParameters(
                 command=self.config.command,

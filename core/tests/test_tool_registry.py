@@ -925,6 +925,73 @@ def test_load_mcp_config_handles_invalid_json(tmp_path, caplog):
 # ---------------------------------------------------------------------------
 
 
+def test_resolve_mcp_server_config_windows_preserves_cwd_via_env(tmp_path, monkeypatch):
+    """On Windows, cwd=None (the WinError 267 workaround) must not silently
+    drop the resolved directory.
+
+    Regression for agent-generated files landing in the project root: a
+    stdio server script that falls back to os.getcwd() for relative paths
+    (e.g. files_server.py) previously inherited the *launching* process's
+    cwd instead of the directory this method resolved. It must now be
+    handed over via HIVE_MCP_SERVER_CWD so Windows matches every other
+    platform, which gets the same directory for free via a real cwd.
+    """
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "files_server.py").write_text("# stub")
+
+    # Simulate the Windows branch via the module's own indirection, not the
+    # real os.name — monkeypatching os.name globally makes pathlib construct
+    # WindowsPath objects on this (POSIX) CI runner, which breaks unrelated
+    # to what's being tested here.
+    monkeypatch.setattr("framework.loader.tool_registry._is_windows", lambda: True)
+
+    registry = ToolRegistry()
+    config = registry._resolve_mcp_server_config(
+        {
+            "name": "files-tools",
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "files_server.py", "--stdio"],
+            "cwd": "tools",
+        },
+        tmp_path,
+    )
+
+    assert config["cwd"] is None
+    assert config["env"]["HIVE_MCP_SERVER_CWD"] == str(tools_dir.resolve())
+    assert config["args"][2] == str((tools_dir / "files_server.py").resolve())
+
+
+def test_resolve_mcp_server_config_windows_preserves_existing_env(tmp_path, monkeypatch):
+    """The env injection must merge with, not clobber, a server's own env."""
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "files_server.py").write_text("# stub")
+
+    # Simulate the Windows branch via the module's own indirection, not the
+    # real os.name — monkeypatching os.name globally makes pathlib construct
+    # WindowsPath objects on this (POSIX) CI runner, which breaks unrelated
+    # to what's being tested here.
+    monkeypatch.setattr("framework.loader.tool_registry._is_windows", lambda: True)
+
+    registry = ToolRegistry()
+    config = registry._resolve_mcp_server_config(
+        {
+            "name": "files-tools",
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "files_server.py", "--stdio"],
+            "cwd": "tools",
+            "env": {"SOME_OTHER_VAR": "1"},
+        },
+        tmp_path,
+    )
+
+    assert config["env"]["SOME_OTHER_VAR"] == "1"
+    assert config["env"]["HIVE_MCP_SERVER_CWD"] == str(tools_dir.resolve())
+
+
 def test_resync_returns_false_when_no_clients():
     """resync_mcp_servers_if_needed should return False immediately with no clients."""
     registry = ToolRegistry()

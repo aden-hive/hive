@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 _INPUT_LOG_MAX_LEN = 500
 
+
+def _is_windows() -> bool:
+    """Indirection so tests can simulate the Windows branch without
+    monkeypatching the real os.name — doing that on a POSIX CI runner makes
+    pathlib construct WindowsPath objects on a real POSIX filesystem, which
+    breaks in ways unrelated to what's actually being tested.
+    """
+    return os.name == "nt"
+
 # Tools whose names match this pattern are assumed to return ImageContent.
 # Matched against the bare tool name (case-insensitive). Used to mark MCP
 # tools with produces_image=True so they can be filtered out for text-only
@@ -635,13 +644,20 @@ class ToolRegistry:
             config["cwd"] = str(resolved_cwd)
             return config
 
-        if os.name == "nt":
-            # Windows: cwd=None avoids WinError 267; use absolute script path
+        if _is_windows():
+            # Windows: cwd=None avoids WinError 267; use absolute script path.
+            # subprocess.Popen never receives resolved_cwd this way, so a
+            # server script that falls back to os.getcwd() (e.g. files_server.py
+            # anchoring relative paths when no explicit home is passed) would
+            # otherwise inherit the *launching* Hive process's cwd instead of
+            # resolved_cwd. Pass it through env so Windows resolves the same
+            # anchor every other platform gets via the real cwd.
             config["cwd"] = None
             abs_script = str((resolved_cwd / script_name).resolve())
             args = list(config["args"])
             args[script_idx] = abs_script
             config["args"] = args
+            config["env"] = {**(config.get("env") or {}), "HIVE_MCP_SERVER_CWD": str(resolved_cwd)}
         else:
             config["cwd"] = str(resolved_cwd)
         return config
