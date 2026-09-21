@@ -94,7 +94,14 @@ def print_staging_prompt(worker_identity: str | None = None) -> None:
 
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
-    prompt = _queen_character_core + _queen_role_staging + _queen_tools_staging + _queen_behavior_always + _queen_behavior_staging + wi
+    prompt = (
+        _queen_character_core
+        + _queen_role_staging
+        + _queen_tools_staging
+        + _queen_behavior_always
+        + _queen_behavior_staging
+        + wi
+    )
 
     print("=" * 80)
     print("QUEEN STAGING PHASE PROMPT")
@@ -113,7 +120,14 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
     """
     wi = worker_identity or _DEFAULT_WORKER_IDENTITY
 
-    prompt = _queen_character_core + _queen_role_running + _queen_tools_running + _queen_behavior_always + _queen_behavior_running + wi
+    prompt = (
+        _queen_character_core
+        + _queen_role_running
+        + _queen_tools_running
+        + _queen_behavior_always
+        + _queen_behavior_running
+        + wi
+    )
 
     print("=" * 80)
     print("QUEEN RUNNING PHASE PROMPT")
@@ -125,7 +139,13 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
 
 def print_independent_prompt() -> None:
     """Print the composed independent phase prompt."""
-    prompt = _queen_character_core + _queen_role_independent + _queen_tools_independent + _queen_behavior_always + _queen_behavior_independent
+    prompt = (
+        _queen_character_core
+        + _queen_role_independent
+        + _queen_tools_independent
+        + _queen_behavior_always
+        + _queen_behavior_independent
+    )
 
     print("=" * 80)
     print("QUEEN INDEPENDENT PHASE PROMPT")

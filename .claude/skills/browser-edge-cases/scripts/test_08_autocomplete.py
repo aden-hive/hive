@@ -193,7 +193,9 @@ async def test_autocomplete():
         await bridge.type_text(tab_id, "#search", "Ger", clear_first=True, delay_ms=0)
         await asyncio.sleep(0.5)
 
-        fast_result = await bridge.evaluate(tab_id, "(function() { return document.getElementById('search').value; })()")
+        fast_result = await bridge.evaluate(
+            tab_id, "(function() { return document.getElementById('search').value; })()"
+        )
         fast_value = fast_result.get("result", "")
         print(f"Value after fast typing: '{fast_value}'")
 
@@ -207,7 +209,9 @@ async def test_autocomplete():
         await bridge.type_text(tab_id, "#search", "United", clear_first=True, delay_ms=100)
         await asyncio.sleep(0.5)
 
-        slow_result = await bridge.evaluate(tab_id, "(function() { return document.getElementById('search').value; })()")
+        slow_result = await bridge.evaluate(
+            tab_id, "(function() { return document.getElementById('search').value; })()"
+        )
         slow_value = slow_result.get("result", "")
         print(f"Value after slow typing: '{slow_value}'")
 

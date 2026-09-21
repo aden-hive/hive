@@ -23,7 +23,6 @@ from framework.agents.queen.queen_memory_v2 import (
 from framework.config import (
     _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
-    HIVE_HOME,
     OPENROUTER_API_BASE,
     get_hive_config,
 )
