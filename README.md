@@ -44,6 +44,18 @@ OpenHive is a zero-setup, model-agnostic runtime for **colonies of agents**. A c
 
 The mechanism underneath is **one loop controlling many loops**. Hive has a single execution primitive: the Queen *is* an agent loop, and every worker is a **clone** of it — same tools, same model, its own task. There is no graph to compile and no orchestration boilerplate to write. The colony coordinates through a shared ledger and a persistent plan, with crash-safe state, deep observability, and human oversight built into the one primitive every agent shares. See the **[Architecture Overview](docs/architecture/README.md)** for how it works.
 
+## Business Outcomes
+
+Hive helps teams turn repeatable business processes into observable agent workflows that can run with human oversight. Instead of only automating isolated tasks, teams can use Hive to coordinate multi-step work across tools, files, browser sessions, and APIs while keeping state, recovery, and auditability in one harness.
+
+Common outcomes include:
+
+- Automating customer onboarding and account setup workflows
+- Reducing repetitive operations work across internal tools
+- Scaling support, research, and back-office processes without losing human review
+- Coordinating complex work across multiple specialized agents
+- Moving AI agent prototypes into production with better visibility and failure recovery
+
 ## Features
 
 - ✅ Colonies of agents — a Queen spawns worker clones on demand for parallel, long-running work
