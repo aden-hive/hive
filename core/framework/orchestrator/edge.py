@@ -502,12 +502,28 @@ class GraphSpec(BaseModel):
         if not self.terminal_nodes:
             warnings.append("Graph has no terminal nodes defined in 'terminal_nodes'. Consider adding a termination point where execution ends.")
 
-        # Check edge references
+        # Check for duplicate edge IDs
+        seen_edge_ids: set[str] = set()
+        for edge in self.edges:
+            if edge.id in seen_edge_ids:
+                errors.append(f"Duplicate edge ID '{edge.id}'")
+            seen_edge_ids.add(edge.id)
+
+        # Check edge references, self-loops, and missing condition_expr
         for edge in self.edges:
             if not self.get_node(edge.source):
                 errors.append(f"Edge '{edge.id}' references missing source '{edge.source}'")
             if not self.get_node(edge.target):
                 errors.append(f"Edge '{edge.id}' references missing target '{edge.target}'")
+            if edge.source == edge.target and edge.condition == EdgeCondition.ALWAYS:
+                errors.append(
+                    f"Edge '{edge.id}' is an unconditional self-loop "
+                    f"(source == target == '{edge.source}')"
+                )
+            if edge.condition == EdgeCondition.CONDITIONAL and not edge.condition_expr:
+                errors.append(
+                    f"Edge '{edge.id}' has condition=CONDITIONAL but no condition_expr defined"
+                )
 
         # Check for unreachable nodes
         # Start with main entry node and all entry points (for pause/resume architecture)
