@@ -270,7 +270,7 @@ uv run ruff check . --fix
 Configuration in `pyproject.toml`:
 ```toml
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 ```
 
@@ -798,7 +798,7 @@ Closes #123
 - Write docstrings for classes and public functions
 - Use meaningful variable and function names
 - Keep functions focused and small
-- **Line length**: 100 characters
+- **Line length**: 120 characters
 - **Formatting**: Use `ruff format` (no manual formatting)
 - **Linting**: Use `ruff check` (no warnings tolerated)
 
