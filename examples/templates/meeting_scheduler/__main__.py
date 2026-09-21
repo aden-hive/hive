@@ -29,8 +29,9 @@ def cli():
 @click.option("--attendee", "-a", required=True, help="Attendee email address")
 @click.option("--duration", "-d", type=int, required=True, help="Meeting duration in minutes")
 @click.option("--title", "-t", required=True, help="Meeting title")
+@click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--verbose", "-v", is_flag=True)
-def run(attendee, duration, title, verbose):
+def run(attendee, duration, title, mock, verbose):
     """Execute the scheduler."""
     setup_logging(verbose=verbose)
     result = asyncio.run(
@@ -39,7 +40,8 @@ def run(attendee, duration, title, verbose):
                 "attendee_email": attendee,
                 "meeting_duration_minutes": str(duration),
                 "meeting_title": title,
-            }
+            },
+            mock_mode=mock,
         )
     )
     click.echo(json.dumps({"success": result.success, "output": result.output}, indent=2, default=str))
@@ -47,7 +49,8 @@ def run(attendee, duration, title, verbose):
 
 
 @cli.command()
-def tui():
+@click.option("--mock", is_flag=True, help="Run in mock mode")
+def tui(mock=False):
     """Launch TUI dashboard."""
     from pathlib import Path
     from framework.tui.app import AdenTUI
@@ -64,27 +67,32 @@ def tui():
         mcp_cfg = Path(__file__).parent / "mcp_servers.json"
         if mcp_cfg.exists():
             agent._tool_registry.load_mcp_config(mcp_cfg)
-        llm = LiteLLMProvider(
-            model=agent.config.model,
-            api_key=agent.config.api_key,
-            api_base=agent.config.api_base,
-        )
+        if mock:
+            from framework.llm.mock import MockLLMProvider
+
+            llm = MockLLMProvider()
+        else:
+            llm = LiteLLMProvider(
+                model=agent.config.model,
+                api_key=agent.config.api_key,
+                api_base=agent.config.api_base,
+            )
         runtime = AgentHost(
             graph=agent._build_graph(),
             goal=agent.goal,
             storage_path=storage,
-            entry_points=[
-                EntryPointSpec(
-                    id="start",
-                    name="Start",
-                    entry_node="intake",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                )
-            ],
             llm=llm,
             tools=list(agent._tool_registry.get_tools().values()),
             tool_executor=agent._tool_registry.get_executor(),
+        )
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="start",
+                name="Start",
+                entry_node="intake",
+                trigger_type="manual",
+                isolation_level="isolated",
+            )
         )
         await runtime.start()
         try:

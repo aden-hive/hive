@@ -38,17 +38,18 @@ def cli():
     required=True,
     help="Search query (e.g. 'bakeries in San Francisco')",
 )
+@click.option("--mock", is_flag=True, help="Run in mock mode without making LLM calls")
 @click.option("--quiet", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(query, quiet, verbose, debug):
+def run(query, mock, quiet, verbose, debug):
     """Extract businesses matching a search query."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
     context = {"user_request": query}
 
-    result = asyncio.run(default_agent.run(context))
+    result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data = {
         "success": result.success,
