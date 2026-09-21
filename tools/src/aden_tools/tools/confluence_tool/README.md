@@ -69,6 +69,11 @@ export CONFLUENCE_EMAIL="you@company.com"
 export CONFLUENCE_API_TOKEN="your_api_token_here"
 ```
 
+Alternatively, configure credentials in the Aden credential store:
+- `confluence_domain`
+- `confluence_email`
+- `confluence_token`
+
 > 💡 **Tip**: Make sure the user has permissions to access the spaces and pages you want to interact with.
 
 ## Example Usage
