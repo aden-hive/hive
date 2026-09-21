@@ -13,15 +13,18 @@ Storage convention:
                                    _identity_username: "acme", ... }
 
 Usage:
+    import logging
+    from framework.credentials.local.registry import LocalCredentialRegistry
+    logger = logging.getLogger(__name__)
     registry = LocalCredentialRegistry.default()
 
     # Add a new account
     info, health = registry.save_account("brave_search", "work", "BSA-xxx")
-    print(info.status, info.identity.label)
+    logger.info("Status: %s  label: %s", info.status, info.identity.label)
 
     # List all accounts
     for account in registry.list_accounts():
-        print(f"{account.credential_id}/{account.alias}: {account.status}")
+        logger.info("%s/%s: %s", account.credential_id, account.alias, account.status)
 
     # Get the raw API key for a specific account
     key = registry.get_key("github", "personal")
