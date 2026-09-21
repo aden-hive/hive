@@ -87,27 +87,47 @@ intake → research → compile-report
 ### Basic Usage
 
 ```python
-from framework.runner import AgentRunner
+import asyncio
+from examples.templates.tech_news_reporter.agent import TechNewsReporterAgent
 
-# Load the agent
-runner = AgentRunner.load("examples/templates/tech_news_reporter")
+async def main():
+    # Load the agent
+    agent = TechNewsReporterAgent()
+    
+    # Run with an initial topic
+    result = await agent.run({
+        "user_message": "Find me the latest news about AI startups"
+    })
+    
+    # Access results
+    print(result.output)
+    print(result.success)
 
-# Run with input
-result = await runner.run({"input_key": "value"})
-
-# Access results
-print(result.output)
-print(result.status)
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
+The agent's entry node `intake` can accept an initial user message. If provided, it uses this to guide the research. If omitted, the agent will prompt the user for topics.
 
+```json
+{
+  "user_message": "Find me the latest news about AI startups"
+}
+```
 
 ### Output Schema
 
 Terminal nodes: `compile-report`
+
+The agent outputs the path to the generated HTML report:
+
+```json
+{
+  "report_file": "tech_news_report.html"
+}
+```
 
 ## Version History
 
