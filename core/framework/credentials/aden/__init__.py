@@ -23,7 +23,7 @@ Quick Start:
 
     # Configure (API key loaded from ADEN_API_KEY env var)
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
+        base_url=os.getenv("ADEN_API_URL"),
     ))
 
     provider = AdenSyncProvider(client=client)
