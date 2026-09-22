@@ -7,6 +7,7 @@ reducing subprocess spawning overhead significantly on Windows.
 
 Usage:
     python scripts/check_requirements.py <module1> <module2> ...
+    python scripts/check_requirements.py "module1,module2,module3"
 
 Returns:
     JSON object with import status for each module
@@ -16,6 +17,22 @@ Returns:
 import json
 import sys
 from typing import Dict
+
+
+def normalize_module_inputs(raw_modules: list[str]) -> list[str]:
+    """Split comma-separated inputs, trim values, and remove duplicates."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw_value in raw_modules:
+        for module_name in raw_value.split(","):
+            candidate = module_name.strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            normalized.append(candidate)
+
+    return normalized
 
 
 def check_imports(modules: list[str]) -> Dict[str, str]:
@@ -54,7 +71,10 @@ def main():
         print(json.dumps({"error": "No modules specified"}), file=sys.stderr)
         sys.exit(1)
 
-    modules_to_check = sys.argv[1:]
+    modules_to_check = normalize_module_inputs(sys.argv[1:])
+    if not modules_to_check:
+        print(json.dumps({"error": "No modules specified"}), file=sys.stderr)
+        sys.exit(1)
     results = check_imports(modules_to_check)
 
     # Print results as JSON
