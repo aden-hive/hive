@@ -51,6 +51,48 @@ make help           # Show all available targets
 
 `make check` is the exact set of checks that CI runs. If it passes locally, CI will pass.
 
+
+---
+
+## Running Tests Locally
+
+Hive uses a multi-package layout. Tests inside `core/` expect the
+`core` package to be importable, which requires an explicit
+`PYTHONPATH` when running tests locally.
+
+### Recommended Command
+
+From the repository root:
+
+```bash
+PYTHONPATH=core pytest core
+```
+
+### Common Failure Modes
+
+The following commands may fail and are not supported:
+
+```bash
+pytest
+```
+
+Fails with:
+```bash
+ModuleNotFoundError: No module named 'tests.conftest'
+```
+
+```bash
+cd core && pytest
+```
+
+Fails with:
+```bash
+ModuleNotFoundError: No module named 'core'
+```
+
+These errors occur because the repository is a multi-package layout and
+core is not automatically added to sys.path when running tests locally.
+
 ---
 
 ## Pre-Commit Hooks
