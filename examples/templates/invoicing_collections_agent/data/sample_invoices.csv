@@ -1,0 +1,16 @@
+invoice_id,customer_name,customer_email,amount,issue_date,due_date,status,description
+INV-001,Acme Corp,billing@acme.com,2500.00,2026-02-15,2026-03-01,paid,Website redesign - Phase 1
+INV-002,Acme Corp,billing@acme.com,3200.00,2026-02-20,2026-02-28,unpaid,Website redesign - Phase 2
+INV-003,Globex Inc,ap@globex.com,8750.00,2025-12-01,2026-01-01,unpaid,API integration project
+INV-004,Globex Inc,ap@globex.com,1500.00,2026-02-15,2026-03-05,unpaid,Monthly retainer - March
+INV-005,Initech LLC,accounts@initech.com,12500.00,2025-10-01,2025-11-01,unpaid,Infrastructure migration
+INV-006,Initech LLC,accounts@initech.com,4300.00,2026-01-10,2026-02-10,unpaid,Security audit
+INV-007,Umbrella Co,finance@umbrella.com,950.00,2026-03-01,2026-03-15,paid,Consulting - 2 hours
+INV-008,Umbrella Co,finance@umbrella.com,6100.00,2025-12-15,2026-01-14,unpaid,Data pipeline setup
+INV-009,Soylent Corp,billing@soylent.com,15000.00,2025-09-10,2025-10-10,unpaid,Annual platform license
+INV-010,Soylent Corp,billing@soylent.com,2200.00,2026-02-20,2026-03-10,unpaid,Training workshop
+INV-011,Wayne Enterprises,ap@wayne.com,780.00,2026-02-01,2026-02-15,unpaid,Domain registration bundle
+INV-012,Wayne Enterprises,ap@wayne.com,3400.00,2025-11-01,2025-12-01,unpaid,Quarterly support plan
+INV-013,Stark Industries,invoices@stark.com,4500.00,2026-02-15,2026-03-05,unpaid,ML model deployment
+INV-014,Stark Industries,invoices@stark.com,1100.00,2025-12-10,2026-01-10,unpaid,Monitoring setup
+INV-015,Cyberdyne Systems,ar@cyberdyne.com,3800.00,2026-03-01,2026-03-15,paid,Consulting engagement
