@@ -25,8 +25,11 @@ Use templates when you want to:
 ## How to use a template
 
 ```bash
-# 1. Copy the template
-cp -r examples/templates/marketing_agent exports/my_agent
+# 1. Copy an existing template (for example: job_hunter)
+cp -r examples/templates/job_hunter exports/my_agent
+
+# (Optional) See available templates
+ls examples/templates
 
 # 2. Edit the goal, nodes, and edges in agent.py and nodes/__init__.py
 
