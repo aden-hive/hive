@@ -210,6 +210,82 @@ result = math.sqrt(16)
         assert result.success is False  # imports blocked by validator
 
 
+class TestCodeSandboxSequenceRepetitionBound:
+    """
+    Tests for the sequence-repetition DoS fix.
+
+    code_sandbox.safe_eval/safe_exec run on real eval()/exec() (unlike
+    framework.graph.safe_eval's hand-rolled AST interpreter), so the bound
+    is enforced by rewriting `*`/`*=` in the parsed AST before compiling.
+    """
+
+    def test_blocks_huge_string_repeat_expression(self):
+        result = safe_eval("'a' * 10**10")
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_blocks_huge_list_repeat_expression(self):
+        result = safe_eval("[0] * 10**9")
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_blocks_int_times_seq_order(self):
+        result = safe_eval("n * 'a'", inputs={"n": 10**10})
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_blocks_huge_repeat_in_exec_statement(self):
+        result = safe_exec("x = 'a' * 10**10")
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_blocks_huge_repeat_via_augmented_assign(self):
+        result = safe_exec(
+            "x = 'a' * 1000\nx *= 1000\nx *= 1000\nresult = x"
+        )
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_blocks_nested_repeats_each_step_checked(self):
+        result = safe_eval("('a' * 1000) * 1000 * 1000")
+        assert result.success is False
+        assert "exceeds the maximum" in result.error
+
+    def test_legitimate_small_string_repeat(self):
+        result = safe_eval("'ab' * 5")
+        assert result.success is True
+        assert result.result == "ababababab"
+
+    def test_legitimate_small_list_repeat(self):
+        result = safe_eval("[1, 2] * 3")
+        assert result.success is True
+        assert result.result == [1, 2, 1, 2, 1, 2]
+
+    def test_legitimate_augmented_assign_repeat(self):
+        result = safe_exec("x = 'a' * 10\nx *= 5\nresult = x")
+        assert result.success is True
+        assert result.result == "a" * 50
+
+    def test_negative_multiplier_keeps_normal_semantics(self):
+        result = safe_eval("'a' * -5")
+        assert result.success is True
+        assert result.result == ""
+
+    def test_zero_multiplier_keeps_normal_semantics(self):
+        result = safe_eval("'a' * 0")
+        assert result.success is True
+        assert result.result == ""
+
+    def test_numeric_multiplication_unaffected(self):
+        result = safe_eval("3 * 4")
+        assert result.success is True
+        assert result.result == 12
+
+        result = safe_exec("x = 1 + 2\nresult = x * 3")
+        assert result.success is True
+        assert result.result == 9
+
+
 class TestHybridJudge:
     """Tests for the HybridJudge."""
 

@@ -2,11 +2,52 @@ import ast
 import operator
 from typing import Any, Container, Dict, Optional
 
+# Maximum length of a sequence produced by a repetition operation, e.g.
+# `"a" * n`, `n * [0]`, `(1, 2) * n`. Sequence repetition (str/bytes/
+# bytearray/list/tuple times an int) is otherwise unbounded in Python and
+# can be used to exhaust memory/CPU with a tiny expression, e.g.
+# `'a' * 10**10`. 100_000 elements comfortably covers legitimate uses
+# (building a template string, padding a list) while keeping the worst
+# case cheap to allocate.
+MAX_SEQUENCE_REPEAT_LENGTH = 100_000
+
+# Types that support `*` repetition semantics in Python.
+_REPEATABLE_SEQUENCE_TYPES = (str, bytes, bytearray, list, tuple)
+
+
+def bounded_multiply(a: Any, b: Any) -> Any:
+    """
+    `a * b`, but bounded: if this is a sequence-repetition (str/bytes/
+    bytearray/list/tuple repeated by an int, in either operand order),
+    raise ValueError before the resulting sequence would exceed
+    MAX_SEQUENCE_REPEAT_LENGTH elements.
+
+    The length check happens BEFORE the multiplication is performed, so we
+    never actually allocate the oversized result. Non-sequence multiplication
+    (int/float/etc.) and negative/zero multipliers (which Python already
+    treats as producing an empty sequence) are left with normal semantics.
+    """
+    for seq, count in ((a, b), (b, a)):
+        if isinstance(seq, _REPEATABLE_SEQUENCE_TYPES) and isinstance(count, int):
+            if count > 0:
+                result_length = len(seq) * count
+                if result_length > MAX_SEQUENCE_REPEAT_LENGTH:
+                    raise ValueError(
+                        f"Sequence repetition would produce a result of length "
+                        f"{result_length}, which exceeds the maximum allowed "
+                        f"length of {MAX_SEQUENCE_REPEAT_LENGTH}"
+                    )
+            # Only one side of a valid `seq * int` can be the sequence; stop
+            # once we've identified (and checked) it.
+            break
+    return operator.mul(a, b)
+
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
+    ast.Mult: bounded_multiply,
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,

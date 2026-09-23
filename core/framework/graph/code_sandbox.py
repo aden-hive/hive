@@ -13,11 +13,14 @@ Security measures:
 """
 
 import ast
-import sys
+import copy
 import signal
-from typing import Any
-from dataclasses import dataclass, field
+import sys
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
+
+from framework.graph.safe_eval import bounded_multiply
 
 # Safe builtins whitelist
 SAFE_BUILTINS = {
@@ -139,6 +142,60 @@ class RestrictedImporter:
         return self._cache[name]
 
 
+class _SequenceRepeatGuard(ast.NodeTransformer):
+    """
+    Rewrites `*` / `*=` so sequence-repetition results are bounded.
+
+    CodeSandbox executes code via real `eval`/`exec`, so unlike
+    safe_eval.py's hand-rolled AST interpreter there's no per-operator
+    dispatch table to hook into. Instead, every `BinOp`/`AugAssign` using
+    `Mult` is rewritten, before compilation, into a call to
+    `bounded_multiply` (shared with framework.graph.safe_eval), which
+    enforces MAX_SEQUENCE_REPEAT_LENGTH for str/bytes/bytearray/list/tuple
+    repetition (e.g. `'a' * 10**10`) while leaving ordinary numeric
+    multiplication behaving exactly like `operator.mul`.
+    """
+
+    HELPER_NAME = "__hive_bounded_multiply__"
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Mult):
+            new_node = ast.Call(
+                func=ast.Name(id=self.HELPER_NAME, ctx=ast.Load()),
+                args=[node.left, node.right],
+                keywords=[],
+            )
+            ast.copy_location(new_node, node)
+            return ast.fix_missing_locations(new_node)
+        return node
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> ast.AST:
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Mult):
+            # `target *= value` -> `target = __hive_bounded_multiply__(target, value)`
+            load_target = copy.deepcopy(node.target)
+            load_target.ctx = ast.Load()
+            new_node = ast.Assign(
+                targets=[node.target],
+                value=ast.Call(
+                    func=ast.Name(id=self.HELPER_NAME, ctx=ast.Load()),
+                    args=[load_target, node.value],
+                    keywords=[],
+                ),
+            )
+            ast.copy_location(new_node, node)
+            return ast.fix_missing_locations(new_node)
+        return node
+
+
+def _guard_sequence_repetition(tree: ast.AST) -> ast.AST:
+    """Apply _SequenceRepeatGuard and fix up source locations."""
+    tree = _SequenceRepeatGuard().visit(tree)
+    ast.fix_missing_locations(tree)
+    return tree
+
+
 class CodeValidator:
     """Validates code for safety before execution."""
 
@@ -238,6 +295,10 @@ class CodeSandbox:
         # Add input variables
         namespace.update(inputs)
 
+        # Injected last so it can't be shadowed by a same-named input; used
+        # by code rewritten by _SequenceRepeatGuard to bound `*`/`*=`.
+        namespace[_SequenceRepeatGuard.HELPER_NAME] = bounded_multiply
+
         return namespace
 
     def execute(
@@ -282,8 +343,9 @@ class CodeSandbox:
 
         try:
             with self._timeout_context(self.timeout_seconds):
-                # Compile and execute
-                compiled = compile(code, "<sandbox>", "exec")
+                # Parse, guard sequence-repetition (`*`/`*=`), then compile and execute
+                tree = _guard_sequence_repetition(ast.parse(code, mode="exec"))
+                compiled = compile(tree, "<sandbox>", "exec")
                 exec(compiled, namespace)
 
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -348,9 +410,9 @@ class CodeSandbox:
         """
         inputs = inputs or {}
 
-        # Validate
+        # Validate, then guard sequence-repetition (`*`) before compiling
         try:
-            ast.parse(expression, mode="eval")
+            tree = _guard_sequence_repetition(ast.parse(expression, mode="eval"))
         except SyntaxError as e:
             return SandboxResult(success=False, error=f"Syntax error: {e}")
 
@@ -358,7 +420,8 @@ class CodeSandbox:
 
         try:
             with self._timeout_context(self.timeout_seconds):
-                result = eval(expression, namespace)
+                compiled = compile(tree, "<sandbox>", "eval")
+                result = eval(compiled, namespace)
 
             return SandboxResult(success=True, result=result)
 
