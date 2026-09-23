@@ -22,8 +22,8 @@ from typing import Any, Literal
 
 from framework.config import COLONIES_DIR, QUEENS_DIR
 from framework.host.colony_binding import ColonyBinding
-from framework.server import boot_status
 from framework.host.triggers import TriggerDefinition
+from framework.server import boot_status
 from framework.utils.text import humanize_slug
 
 logger = logging.getLogger(__name__)
