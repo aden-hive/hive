@@ -196,6 +196,51 @@ def _guard_sequence_repetition(tree: ast.AST) -> ast.AST:
     return tree
 
 
+def _reject_reserved_identifiers(tree: ast.AST, reserved: str) -> None:
+    """
+    Raise SecurityError if user source references, rebinds, shadows, or
+    otherwise names a reserved sandbox-internal identifier (currently just
+    _SequenceRepeatGuard.HELPER_NAME).
+
+    Without this, user code could rebind the helper (e.g.
+    `__hive_bounded_multiply__ = lambda a, b: a * b`) and defeat the
+    sequence-repetition bound entirely. MUST be called on the ORIGINAL
+    parsed tree, before _guard_sequence_repetition injects the Call nodes
+    that legitimately reference this name.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == reserved:
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' is not allowed "
+                f"at line {getattr(node, 'lineno', '?')}"
+            )
+        if isinstance(node, ast.arg) and node.arg == reserved:
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' as a parameter "
+                f"name is not allowed at line {getattr(node, 'lineno', '?')}"
+            )
+        if isinstance(node, ast.Attribute) and node.attr == reserved:
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' is not allowed "
+                f"at line {getattr(node, 'lineno', '?')}"
+            )
+        if isinstance(node, ast.keyword) and node.arg == reserved:
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' as a keyword "
+                f"argument is not allowed at line {getattr(node, 'lineno', '?')}"
+            )
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and reserved in node.names:
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' in global/nonlocal "
+                f"is not allowed at line {getattr(node, 'lineno', '?')}"
+            )
+        if isinstance(node, ast.alias) and reserved in (node.name, node.asname):
+            raise SecurityError(
+                f"Use of reserved identifier '{reserved}' in import is not "
+                f"allowed at line {getattr(node, 'lineno', '?')}"
+            )
+
+
 class CodeValidator:
     """Validates code for safety before execution."""
 
@@ -343,8 +388,11 @@ class CodeSandbox:
 
         try:
             with self._timeout_context(self.timeout_seconds):
-                # Parse, guard sequence-repetition (`*`/`*=`), then compile and execute
-                tree = _guard_sequence_repetition(ast.parse(code, mode="exec"))
+                # Parse, reject references to reserved sandbox-internal names,
+                # guard sequence-repetition (`*`/`*=`), then compile and execute
+                parsed = ast.parse(code, mode="exec")
+                _reject_reserved_identifiers(parsed, _SequenceRepeatGuard.HELPER_NAME)
+                tree = _guard_sequence_repetition(parsed)
                 compiled = compile(tree, "<sandbox>", "exec")
                 exec(compiled, namespace)
 
@@ -410,11 +458,16 @@ class CodeSandbox:
         """
         inputs = inputs or {}
 
-        # Validate, then guard sequence-repetition (`*`) before compiling
+        # Validate: reject references to reserved sandbox-internal names,
+        # then guard sequence-repetition (`*`) before compiling
         try:
-            tree = _guard_sequence_repetition(ast.parse(expression, mode="eval"))
+            parsed = ast.parse(expression, mode="eval")
+            _reject_reserved_identifiers(parsed, _SequenceRepeatGuard.HELPER_NAME)
+            tree = _guard_sequence_repetition(parsed)
         except SyntaxError as e:
             return SandboxResult(success=False, error=f"Syntax error: {e}")
+        except SecurityError as e:
+            return SandboxResult(success=False, error=f"Security violation: {e}")
 
         namespace = self._create_namespace(inputs)
 

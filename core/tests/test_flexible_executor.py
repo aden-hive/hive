@@ -286,6 +286,70 @@ class TestCodeSandboxSequenceRepetitionBound:
         assert result.result == 9
 
 
+class TestCodeSandboxHelperIsolation:
+    """
+    Tests that user code cannot reference, read, or rebind the internal
+    `__hive_bounded_multiply__` helper _SequenceRepeatGuard rewrites `*`/`*=`
+    into. Without this, user code could shadow the helper with a no-op and
+    defeat the sequence-repetition bound entirely, e.g.:
+        __hive_bounded_multiply__ = lambda a, b: a * b
+    """
+
+    HELPER_NAME = "__hive_bounded_multiply__"
+
+    def test_rebinding_helper_via_assignment_is_rejected(self):
+        result = safe_exec(
+            f"{self.HELPER_NAME} = lambda a, b: a\nx = len('a' * 10**8)"
+        )
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_reading_helper_directly_is_rejected(self):
+        result = safe_exec(f"x = {self.HELPER_NAME}")
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_reading_helper_in_expression_is_rejected(self):
+        result = safe_eval(self.HELPER_NAME)
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_helper_name_as_lambda_arg_is_rejected(self):
+        result = safe_eval(
+            f"(lambda {self.HELPER_NAME}: {self.HELPER_NAME})(1)"
+        )
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_helper_name_as_function_arg_is_rejected(self):
+        result = safe_exec(
+            f"def f({self.HELPER_NAME}):\n"
+            f"    return {self.HELPER_NAME}\n"
+            f"result = f(1)"
+        )
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_helper_name_as_keyword_argument_is_rejected(self):
+        result = safe_exec(
+            f"def f(**kwargs):\n"
+            f"    return kwargs\n"
+            f"result = f({self.HELPER_NAME}=1)"
+        )
+        assert result.success is False
+        assert "reserved identifier" in result.error
+
+    def test_legitimate_code_without_reserved_name_still_works(self):
+        """Guard doesn't false-positive on ordinary code."""
+        result = safe_exec("x = 'a' * 5\nresult = x")
+        assert result.success is True
+        assert result.result == "aaaaa"
+
+        result = safe_eval("'ab' * 3")
+        assert result.success is True
+        assert result.result == "ababab"
+
+
 class TestHybridJudge:
     """Tests for the HybridJudge."""
 
