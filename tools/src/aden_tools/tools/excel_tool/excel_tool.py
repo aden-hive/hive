@@ -1,5 +1,7 @@
 """Excel Tool - Read and manipulate Excel files (.xlsx, .xlsm)."""
 
+from __future__ import annotations
+
 import os
 from datetime import datetime
 from typing import Any
