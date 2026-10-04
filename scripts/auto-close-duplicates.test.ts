@@ -258,4 +258,61 @@ describe("decideAutoClose", () => {
     );
     expect(result).toBe(null);
   });
+  test("returns null when target state is not exactly 'open' (e.g. uppercase)", async () => {
+    const result = await decideAutoClose(
+      issue(1275),
+      comment("Found a possible duplicate of `#1000`"),
+      async () => ({ state: "OPEN" } as { state: string })
+    );
+    expect(result).toBe(null);
+  });
+});
+
+describe('Research and Summary Agent Pipeline', () => {
+  // ... rest of the Research Agent tests ...
+});
+  let agent: ResearchAgent;
+
+  beforeEach(() => {
+    agent = new ResearchAgent();
+  });
+
+  it('should exercise the Web of Science path and verify citation weighting', async () => {
+    const rawData = "VLA robotics vision with Laplace control systems.";
+    
+    const analysis = await agent.analyticalNode(rawData);
+    
+    // Assert both indexing branches are present
+    expect(analysis.citations).toContain('Scholar');
+    expect(analysis.citations).toContain('Web of Science');
+    
+    // Verify industrial/academic weighting logic
+    // Expecting higher weight for Web of Science vs general web scraping
+    expect(analysis.citationWeights['Web of Science']).toBeGreaterThan(0.7);
+    expect(analysis.conclusions).toMatch(/Industrial|Enterprise/);
+    expect(analysis.feasibility).toBeDefined();
+  });
+
+  it('should generate a valid Markdown summary for MVP planning', async () => {
+    const mockAnalysis = {
+      trends: ['Laplace Transformer Control'],
+      citations: ['Web of Science', 'Scholar'],
+      citationWeights: { 'Web of Science': 0.9 },
+      conclusions: 'Industrial feasibility confirmed.'
+    };
+    
+    const summary = await agent.summaryNode(mockAnalysis);
+    expect(summary).toContain('## MVP Summary');
+    expect(summary).toContain('Industrial');
+  });
+
+  it('should handle search tool failures gracefully using vi.spyOn', async () => {
+    // Corrected to Vitest spyOn logic
+    const gatheringSpy = vi.spyOn(agent, 'gatheringNode')
+      .mockRejectedValue(new Error('Scholar API Timeout'));
+    
+    await expect(agent.run('Robotics Vision')).rejects.toThrow('Scholar API Timeout');
+    gatheringSpy.mockRestore();
+  });
+});
 });
