@@ -137,7 +137,7 @@ def check_anthropic(api_key: str, **_: str) -> dict:
                 "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json",
             },
-            json={"model": "claude-sonnet-4-20250514", "max_tokens": 1, "messages": []},
+            json={"model": "claude-sonnet-4-6", "max_tokens": 1, "messages": []},
         )
     if r.status_code in (200, 400, 429):
         return {"valid": True, "message": "API key valid"}
