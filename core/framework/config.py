@@ -269,7 +269,7 @@ def _get_api_key_from_credential_store(provider: str) -> str | None:
 
 
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-6')."""
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         provider = str(llm["provider"])
@@ -279,7 +279,7 @@ def get_preferred_model() -> str:
             model = model[len("openrouter/") :]
         if model:
             return f"{provider}/{model}"
-    return "anthropic/claude-sonnet-4-20250514"
+    return "anthropic/claude-sonnet-4-6"
 
 
 def get_preferred_worker_model() -> str | None:

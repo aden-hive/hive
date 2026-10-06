@@ -24,7 +24,7 @@ def _load_preferred_model() -> str:
                 return f"{llm['provider']}/{llm['model']}"
         except Exception:
             pass
-    return "anthropic/claude-sonnet-4-20250514"
+    return "anthropic/claude-sonnet-4-6"
 
 
 @dataclass
