@@ -1568,5 +1568,3 @@ These prompts are designed as starting points for building specialized AI agents
 3. **Ensure compliance**: Review all prompts for legal, ethical, and platform ToS compliance
 4. **Test incrementally**: Start with read-only monitoring before enabling write operations
 5. **Monitor continuously**: Track agent performance, error rates, and user feedback
-
-For implementation guidance, refer to the [templates](../templates/) directory for code scaffolds.

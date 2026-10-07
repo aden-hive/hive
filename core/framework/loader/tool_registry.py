@@ -227,6 +227,11 @@ class ToolRegistry:
         # re-probe every credential once per server. Set/cleared by that
         # method; None outside a batch (standalone register calls recompute).
         self._mcp_gate_cred_snapshot: tuple[dict[str, str], set[str]] | None = None
+        # Harness groups registered in-process: group -> (tool names,
+        # catalog entries). Kept apart from MCP bookkeeping so a credential
+        # resync, which tears down and rebuilds every MCP server, leaves
+        # them alone.
+        self._harness_groups: dict[str, tuple[set[str], list[dict[str, Any]]]] = {}
 
     def set_mcp_extra_env(self, env: dict[str, str]) -> None:
         """Attach per-agent env vars to every MCPServerConfig this registry builds.
@@ -798,8 +803,12 @@ class ToolRegistry:
 
         # Compute the admission-gate credential snapshot once for the whole
         # batch — every server's gate would otherwise re-probe every
-        # credential, and no credential change can happen mid-loop.
-        self._mcp_gate_cred_snapshot = self._compute_mcp_gate_cred_snapshot()
+        # credential, and no credential change can happen mid-loop. Harness
+        # groups have no gate, so a batch of only those skips the probe.
+        from framework.tools.harness_tools import HARNESS_GROUP_NAMES
+
+        if any(cfg.get("name") not in HARNESS_GROUP_NAMES for cfg in server_list):
+            self._mcp_gate_cred_snapshot = self._compute_mcp_gate_cred_snapshot()
         try:
             for server_config in server_list:
                 name = server_config.get("name", "unknown")
@@ -872,6 +881,18 @@ class ToolRegistry:
         Returns:
             Number of tools registered from this server
         """
+        from framework.tools.harness_tools import HARNESS_GROUP_NAMES
+
+        if server_config.get("name") in HARNESS_GROUP_NAMES:
+            # Bundled server names are harness groups now: in-process, no
+            # subprocess. Every caller that asks for e.g. "terminal-tools"
+            # lands here, so configs, allowlists and @server refs stay valid.
+            return self._register_harness_group(
+                server_config["name"],
+                preserve_existing_tools=preserve_existing_tools,
+                log_collisions=log_collisions,
+            )
+
         try:
             from framework.loader.mcp_client import MCPClient, MCPServerConfig
             from framework.loader.mcp_connection_manager import MCPConnectionManager
@@ -981,48 +1002,7 @@ class ToolRegistry:
                 ):
                     def executor(inputs: dict) -> Any:
                         try:
-                            # Build base context: session < execution (execution wins)
-                            base_context = dict(registry_ref._session_context)
-                            exec_ctx = _execution_context.get()
-                            if exec_ctx:
-                                base_context.update(exec_ctx)
-
-                            # Only inject context params the tool accepts
-                            filtered_context = {k: v for k, v in base_context.items() if k in tool_params}
-                            # Strip context params from LLM inputs — the framework
-                            # values are authoritative (prevents the LLM from passing
-                            # e.g. data_dir="/data" and overriding the real path).
-                            clean_inputs = {k: v for k, v in inputs.items() if k not in registry_ref.CONTEXT_PARAMS}
-                            merged_inputs = {**clean_inputs, **filtered_context}
-                            # Hand identity down to a terminal tool's subprocess via env,
-                            # so the hive-crm / hive-browser CLIs (which have no execution
-                            # context of their own) can name the caller and target the
-                            # right browser tab group. These are CONTEXT_PARAMS (not tool
-                            # args), routed here rather than passed positionally; gate on
-                            # the tool declaring `env` (the terminal tools) so nothing else
-                            # is touched.
-                            if "env" in tool_params:
-                                injected_env: dict[str, str] = {}
-                                if base_context.get("principal"):
-                                    injected_env["HIVE_PRINCIPAL"] = str(base_context["principal"])
-                                # Browser CLI identity: the session id selects THIS agent's
-                                # tab group (the isolation the CONTEXT_PARAM gave in-process);
-                                # the display name labels the group in the side panel; the
-                                # storage path is where screenshots/snapshots spill. The
-                                # Chrome-connection choice stays a visible --browser-profile
-                                # flag, never injected — injecting it forced every worker
-                                # onto the default profile.
-                                if base_context.get("profile"):
-                                    injected_env["HIVE_BROWSER_SESSION"] = str(base_context["profile"])
-                                if base_context.get("profile_display_name"):
-                                    injected_env["HIVE_BROWSER_PROFILE_DISPLAY_NAME"] = str(base_context["profile_display_name"])
-                                if base_context.get("session_cwd"):
-                                    injected_env["HIVE_STORAGE_PATH"] = str(base_context["session_cwd"])
-                                if injected_env:
-                                    merged_inputs["env"] = {
-                                        **(merged_inputs.get("env") or {}),
-                                        **injected_env,
-                                    }
+                            merged_inputs = registry_ref._prepare_call_inputs(inputs, tool_params)
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # A hive-browser screenshot (run via terminal_exec) writes
                             # its JPEG to disk and prints a pointer; re-inline the image
@@ -1096,6 +1076,144 @@ class ToolRegistry:
                     "script path correct). Worker config uses base_dir = mcp_servers.json parent."
                 )
             return 0
+
+    def _prepare_call_inputs(
+        self,
+        inputs: dict[str, Any],
+        tool_params: set[str],
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Merge framework context into a tool call's LLM-supplied arguments.
+
+        Shared by MCP and harness tools so both see identical context:
+        session < execution context, injected only for params the tool
+        declares, and authoritative over anything the LLM passed for a
+        ``CONTEXT_PARAMS`` key.
+
+        *extra_env* is the agent's identity env. An MCP subprocess already
+        carries it in its own environment; an in-process terminal tool has
+        to receive it through ``env`` or its child processes never see it.
+        """
+        # Build base context: session < execution (execution wins)
+        base_context = dict(self._session_context)
+        exec_ctx = _execution_context.get()
+        if exec_ctx:
+            base_context.update(exec_ctx)
+
+        # Only inject context params the tool accepts
+        filtered_context = {k: v for k, v in base_context.items() if k in tool_params}
+        # Strip context params from LLM inputs — the framework
+        # values are authoritative (prevents the LLM from passing
+        # e.g. data_dir="/data" and overriding the real path).
+        clean_inputs = {k: v for k, v in inputs.items() if k not in self.CONTEXT_PARAMS}
+        merged_inputs = {**clean_inputs, **filtered_context}
+        # Hand identity down to a terminal tool's subprocess via env,
+        # so the hive-crm / hive-browser CLIs (which have no execution
+        # context of their own) can name the caller and target the
+        # right browser tab group. These are CONTEXT_PARAMS (not tool
+        # args), routed here rather than passed positionally; gate on
+        # the tool declaring `env` (the terminal tools) so nothing else
+        # is touched.
+        if "env" in tool_params:
+            injected_env: dict[str, str] = dict(extra_env or {})
+            if base_context.get("principal"):
+                injected_env["HIVE_PRINCIPAL"] = str(base_context["principal"])
+            # Browser CLI identity: the session id selects THIS agent's
+            # tab group (the isolation the CONTEXT_PARAM gave in-process);
+            # the display name labels the group in the side panel; the
+            # storage path is where screenshots/snapshots spill. The
+            # Chrome-connection choice stays a visible --browser-profile
+            # flag, never injected — injecting it forced every worker
+            # onto the default profile.
+            if base_context.get("profile"):
+                injected_env["HIVE_BROWSER_SESSION"] = str(base_context["profile"])
+            if base_context.get("profile_display_name"):
+                injected_env["HIVE_BROWSER_PROFILE_DISPLAY_NAME"] = str(base_context["profile_display_name"])
+            if base_context.get("session_cwd"):
+                injected_env["HIVE_STORAGE_PATH"] = str(base_context["session_cwd"])
+            if injected_env:
+                merged_inputs["env"] = {
+                    **(merged_inputs.get("env") or {}),
+                    **injected_env,
+                }
+        return merged_inputs
+
+    def _register_harness_group(
+        self,
+        group: str,
+        *,
+        preserve_existing_tools: bool = True,
+        log_collisions: bool = False,
+    ) -> int:
+        """Register the in-process tools of harness group *group*.
+
+        Records them in the same server bookkeeping MCP servers use
+        (``_mcp_server_tools`` / ``_mcp_full_catalog``) under the group
+        name — that bookkeeping is what allowlists, ``@server:`` refs,
+        the Tool Library and colony gating read. Idempotent: a second
+        request for the same group (resync replay, duplicate config
+        entries) is a no-op.
+        """
+        if group in self._harness_groups:
+            return 0
+
+        from framework.tools.harness_tools import build_harness_group
+
+        harness_tools = build_harness_group(group, scope_env=lambda: self._mcp_extra_env)
+        self._mcp_server_tools.setdefault(group, set())
+        catalog: list[dict[str, Any]] = []
+        registered: list[str] = []
+        for ht in harness_tools:
+            if preserve_existing_tools and ht.name in self._tools:
+                origin = self._find_mcp_origin_server_for_tool(ht.name)
+                if log_collisions and origin != group:
+                    logger.warning(
+                        "Harness tool '%s' from '%s' shadowed by '%s' (loaded first)",
+                        ht.name,
+                        group,
+                        origin or "<existing>",
+                    )
+                continue
+            tool = self._convert_mcp_tool_to_framework_tool(ht)
+            self.register(ht.name, tool, self._make_harness_executor(ht))
+            self._mcp_server_tools[group].add(ht.name)
+            catalog.append({"name": ht.name, "description": ht.description, "input_schema": ht.input_schema, "provider": None})
+            registered.append(ht.name)
+
+        self._mcp_full_catalog[group] = catalog
+        self._harness_groups[group] = (set(self._mcp_server_tools[group]), list(catalog))
+        logger.info("Harness group '%s' registered %d tool(s): %s", group, len(registered), sorted(registered))
+        return len(registered)
+
+    def _make_harness_executor(self, ht: Any) -> Callable[[dict], Any]:
+        """Executor for an in-process harness tool (context in, MCP-shaped result out)."""
+
+        def _fail(exc: BaseException, inputs: dict) -> dict[str, str]:
+            inputs_str = json.dumps(inputs, default=str)
+            if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+            logger.error("Harness tool '%s' execution failed: %s\nInputs: %s", ht.name, exc, inputs_str, exc_info=exc)
+            return {"error": str(exc)}
+
+        def executor(inputs: dict) -> Any:
+            call_inputs = self._prepare_call_inputs(inputs, ht.params, extra_env=self._mcp_extra_env)
+            try:
+                result = ht.invoke(call_inputs)
+            except Exception as exc:
+                return _fail(exc, inputs)
+            if inspect.isawaitable(result):
+
+                async def _finish() -> Any:
+                    try:
+                        return _maybe_inline_browser_image(ht.name, await result)
+                    except Exception as exc:
+                        return _fail(exc, inputs)
+
+                return _finish()
+            return _maybe_inline_browser_image(ht.name, result)
+
+        return executor
 
     def _find_mcp_origin_server_for_tool(self, tool_name: str) -> str | None:
         for server_name, tool_names in self._mcp_server_tools.items():
@@ -1424,6 +1542,10 @@ class ToolRegistry:
         # Library catalog is rebuilt by register_mcp_server; clear it so
         # stale entries from servers that fail to re-register don't leak.
         self._mcp_full_catalog.clear()
+        # Harness tools never left ``_tools``; put their bookkeeping back.
+        for group, (names, catalog) in self._harness_groups.items():
+            self._mcp_server_tools[group] = set(names)
+            self._mcp_full_catalog[group] = list(catalog)
 
         # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
         self.load_mcp_config(self._mcp_config_path)

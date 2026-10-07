@@ -136,7 +136,7 @@ hive/
 │   └── your_agent/         # Your agents created via files-tools workflow
 │
 ├── examples/
-│   └── templates/          # Pre-built template agents
+│   └── recipes/            # Prompt-only agent recipes
 │
 └── docs/                   # Documentation
 ```

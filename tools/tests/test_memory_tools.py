@@ -61,7 +61,7 @@ def _write_session(
     spilled_files: dict[str, str] | None = None,
 ) -> Path:
     """Materialize a synthetic queen session under HIVE_HOME."""
-    sdir = hive_home / "agents" / "queens" / queen / "sessions" / session
+    sdir = hive_home / "queens" / queen / "sessions" / session
     sdir.mkdir(parents=True, exist_ok=True)
     events_path = sdir / "events.jsonl"
     with events_path.open("w", encoding="utf-8") as f:
@@ -241,7 +241,7 @@ def test_sync_indexes_spilled_tool_result(hive_home: Path):
     from memory_tools import index, paths as P
 
     spill_name = "browser_snapshot_4.txt"
-    sdir = hive_home / "agents" / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
+    sdir = hive_home / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
     spill_abs = sdir / "data" / spill_name
     full_body = "needle_in_a_haystack " + ("x" * 200)
     placeholder = (

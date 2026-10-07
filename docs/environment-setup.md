@@ -264,7 +264,7 @@ hive/
 │   └── your_agent_name/     # Created via files-tools workflow
 │
 └── examples/
-    └── templates/           # Pre-built template agents
+    └── recipes/             # Prompt-only agent recipes
 ```
 
 ## Virtual Environment Setup

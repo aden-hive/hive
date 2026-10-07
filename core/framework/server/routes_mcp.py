@@ -42,48 +42,33 @@ def _registry() -> MCPRegistry:
 
 
 def _package_builtin_servers() -> list[dict[str, Any]]:
-    """Return the package-baked queen MCP servers from ``queen/mcp_servers.json``.
+    """Return Hive's built-in tool groups as non-removable server rows.
 
-    Those servers are loaded directly by ``ToolRegistry.load_mcp_config``
-    at queen boot and never go through ``MCPRegistry.list_installed``,
-    so the raw registry view shows them as missing. Surface them here so
-    the Tool Library reflects what the queen actually talks to.
+    Hive's own tools (terminal, files, charts, memory, core) run in-process
+    as harness groups (``framework.tools.harness_tools``), not as MCP
+    servers, so ``MCPRegistry.list_installed`` never shows them. Surface
+    them here so the Tool Library reflects everything the queen loads.
 
-    Entries carry ``source: "built-in"`` and are NOT removable / toggleable
-    — editing them requires changing the repo file.
+    Entries carry ``source: "built-in"`` and ``transport: "harness"`` and
+    are NOT removable / toggleable.
     """
-    import json
-    from pathlib import Path
+    from framework.tools.harness_tools import HARNESS_GROUPS
 
-    import framework.agents.queen as _queen_pkg
-
-    path = Path(_queen_pkg.__file__).parent / "mcp_servers.json"
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-
-    out: list[dict[str, Any]] = []
-    for name, cfg in data.items():
-        if not isinstance(cfg, dict):
-            continue
-        out.append(
-            {
-                "name": name,
-                "source": "built-in",
-                "transport": cfg.get("transport", "stdio"),
-                "description": cfg.get("description", "") or "",
-                "enabled": True,
-                "last_health_status": None,
-                "last_error": None,
-                "last_health_check_at": None,
-                "tool_count": None,
-                "removable": False,
-            }
-        )
-    return out
+    return [
+        {
+            "name": name,
+            "source": "built-in",
+            "transport": "harness",
+            "description": description,
+            "enabled": True,
+            "last_health_status": None,
+            "last_error": None,
+            "last_health_check_at": None,
+            "tool_count": None,
+            "removable": False,
+        }
+        for name, description in HARNESS_GROUPS.items()
+    ]
 
 
 def _server_to_summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -134,15 +119,13 @@ async def handle_list_servers(request: web.Request) -> web.Response:
       ``~/.hive/mcp_registry/installed.json``. These carry
       ``source: "local"`` (user-added) or ``source: "registry"``
       (installed from the remote registry).
-    - Repo-baked queen servers from
-      ``core/framework/agents/queen/mcp_servers.json``. These are loaded
-      directly by the queen's ``ToolRegistry`` at boot and never touch
-      ``MCPRegistry``; we surface them here so the UI reflects what the
-      queen really talks to. They are not removable from the UI because
-      editing them requires changing the repo.
+    - Hive's built-in tool groups (terminal, files, charts, memory, core).
+      They run in-process as harness tools and never touch ``MCPRegistry``;
+      we surface them here so the UI reflects everything the queen loads.
+      They are not removable from the UI.
 
-    If a name collides between the two sources, the registry entry wins
-    because that's the one the user has customized.
+    If a name collides between the two sources, the registry row is shown,
+    though at load time the built-in harness group of that name wins.
     """
     reg = _registry()
     registry_entries = [_server_to_summary(e) for e in reg.list_installed()]

@@ -564,13 +564,11 @@ async def materialize_queen_identity(
 
 
 _SCOPE_SENSITIVE_MCP_SERVERS: frozenset[str] = frozenset({"memory-tools"})
-"""MCP servers whose subprocesses bind to a queen/colony scope via env vars
-(e.g. memory-tools reads HIVE_QUEEN_ID at startup). The bare bootstrap
-registry is queen-agnostic, so spawning these here would pool a stale
-empty-env subprocess that later queen sessions would silently inherit
-(returning ``scope_unbound`` from every tool call). Real queen sessions
-load these servers through queen_orchestrator's slow path with the right
-env injected, so skipping them in the bootstrap is safe."""
+"""Tool groups that only work bound to a queen/colony scope (memory-tools
+scopes ``search_messages`` by the registry's HIVE_QUEEN_ID). The bare
+bootstrap registry is queen-agnostic, so it leaves them out rather than
+list tools that would answer ``scope_unbound``. Real queen sessions load
+them through queen_orchestrator's slow path with their identity set."""
 
 
 def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]]]]:
@@ -747,11 +745,12 @@ async def create_queen(
         # Build fresh (slow path - for backwards compatibility)
         boot_status.report("Starting tool servers", "MCP discovery")
         queen_registry = ToolRegistry()
-        # Inject the queen's identity into every MCP subprocess this
-        # registry spawns. The memory-tools server reads HIVE_QUEEN_ID
-        # to scope `search_messages` to this queen's own history (the
-        # model never picks the scope itself). Set BEFORE MCP servers
-        # are registered, since env is captured at MCPClient construction.
+        # The queen's identity, handed to every tool this registry runs:
+        # memory-tools reads HIVE_QUEEN_ID to scope `search_messages` to
+        # this queen's own history (the model never picks the scope
+        # itself), terminal children inherit it, and user MCP subprocesses
+        # get it in their env. Set BEFORE servers are registered, since
+        # env is captured at MCPClient construction.
         queen_registry.set_mcp_extra_env({"HIVE_QUEEN_ID": session.queen_name or "default"})
         import framework.agents.queen as _queen_pkg
 

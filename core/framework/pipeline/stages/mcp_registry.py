@@ -44,9 +44,9 @@ class McpRegistryStage(PipelineStage):
         from framework.loader.mcp_registry import MCPRegistry
         from framework.orchestrator.files import FILES_MCP_SERVER_NAME
 
-        # Bundled defaults (hive_tools / files-tools / shell-tools) are seeded
-        # inside MCPRegistry.initialize(); resolve_for_agent below will find
-        # them even on a fresh HIVE_HOME.
+        # Hive's own groups (hive_tools / files-tools / terminal-tools …) are
+        # in-process harness tools: resolve_for_agent synthesises them on
+        # request, with no installed.json entry and no subprocess.
         registry = MCPRegistry()
         mcp_loaded = False
 

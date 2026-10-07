@@ -495,15 +495,7 @@ We provide **100+ sample prompts** covering real-world use cases.
 - Categories: Marketing, Sales, Operations, Engineering, Finance
 - Copy-paste ready for quick experimentation
 
-**2. Template Agents** (`/examples/templates/`)
-- Competitive Intelligence Agent
-- Deep Research Agent
-- Tech News Reporter
-- Vulnerability Assessment
-- Email Inbox Management
-- Job Hunter
-
-**3. Exported Agents** (`/exports/`)
+**2. Exported Agents** (`/exports/`)
 - 17+ production agents built by the community
 - AI Outreach Architect
 - Financial AI Auditor

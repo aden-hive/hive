@@ -1,7 +1,7 @@
 """Path resolution for memory-tools.
 
 Source layout (read-only):
-    $HIVE_HOME/agents/queens/<queen_id>/sessions/<session>/
+    $HIVE_HOME/queens/<queen_id>/sessions/<session>/
         events.jsonl
         data/<tool>_<n>.txt          # spilled tool result bodies
     $HIVE_HOME/colonies/<colony>/sessions/<session>/
@@ -41,7 +41,10 @@ def hive_home() -> Path:
 def scope_root(scope: Scope) -> Path:
     """Source root for a given scope."""
     if scope == "queens":
-        return hive_home() / "agents" / "queens"
+        # v3 layout (framework.config.queen_sessions_dir). The v2
+        # ``agents/queens`` tree is migrated away, so searching it finds
+        # nothing on any current install.
+        return hive_home() / "queens"
     return hive_home() / "colonies"
 
 
