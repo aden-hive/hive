@@ -6,8 +6,10 @@ account of what it did.
 
 Sessions are written in the formats the runtime itself reads:
 
-* past sessions: ``events.jsonl`` under ``$HIVE_HOME/queens/<id>/sessions/``,
-  the event shapes the bus persists (what ``search_messages`` indexes);
+* past sessions: ``events.jsonl`` under ``$HIVE_HOME/queens/<id>/sessions/``
+  (a DM) or ``$HIVE_HOME/colonies/<c>/queens/<id>/sessions/`` (a colony's
+  overseer session), the event shapes the bus persists — what
+  ``search_messages`` indexes;
 * in-progress sessions: a conversation store written through the real
   ``NodeConversation`` / ``FileConversationStore`` API, which the queen
   restores on resume.
@@ -229,37 +231,48 @@ def past_session(
     *,
     started_at: datetime,
     turns: list[tuple[str, str]],
+    colony: str | None = None,
 ) -> str:
-    """Write a finished DM session's ``events.jsonl``. Returns the session id.
+    """Write a finished session's ``events.jsonl``. Returns the session id.
 
-    *turns* are ``(role, text)`` pairs; role is ``user`` or ``assistant``.
+    *turns* are ``(role, text)`` pairs. Roles: ``user``, ``assistant``, and
+    ``worker_tool`` — a tool result from one of the colony's workers, which
+    the runtime logs into the overseer session under a ``worker:`` stream.
+    With *colony*, the session is that colony's (overseen by *queen_id*).
     """
     session_id = f"session_{started_at:%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}"
-    session_dir = hive_home / "queens" / queen_id / "sessions" / session_id
+    owner = hive_home / "colonies" / colony if colony else hive_home
+    session_dir = owner / "queens" / queen_id / "sessions" / session_id
     session_dir.mkdir(parents=True)
+    worker_stream = f"worker:session_{started_at:%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}"
     events: list[dict[str, Any]] = []
     t = started_at
     for iteration, (role, text) in enumerate(turns):
         t += timedelta(minutes=2)
+        stream = "queen"
         if role == "user":
             etype, data = "client_input_received", {"content": text, "image_count": 0}
+        elif role == "worker_tool":
+            stream = worker_stream
+            etype, data = "tool_call_completed", {"tool_use_id": f"call_{iteration}", "tool_name": "terminal_exec", "result": text, "is_error": False}
         else:
             etype, data = "client_output_delta", {"content": text, "snapshot": text, "iteration": iteration, "inner_turn": 0}
         events.append(
             {
                 "type": etype,
-                "stream_id": "queen",
+                "stream_id": stream,
                 "node_id": "queen",
                 "execution_id": session_id,
                 "data": data,
                 "timestamp": t.isoformat(),
                 "correlation_id": None,
-                "colony_id": None,
+                "colony_id": colony,
                 "seq": len(events) + 1,
             }
         )
     (session_dir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
-    (session_dir / "meta.json").write_text(json.dumps({"phase": "independent", "queen_id": queen_id}), encoding="utf-8")
+    meta = {"phase": "colony", "colony_id": colony} if colony else {"phase": "independent"}
+    (session_dir / "meta.json").write_text(json.dumps({**meta, "queen_id": queen_id}), encoding="utf-8")
     return session_id
 
 

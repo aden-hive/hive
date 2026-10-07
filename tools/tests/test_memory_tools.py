@@ -440,3 +440,78 @@ def test_search_messages_context_narrow_only_hit(hive_home: Path, bind_queen):
     m = res["matches"][0]
     assert len(m["turn"]) == 1
     assert m["turn"][0]["is_hit"] is True
+
+
+# ── Colony scope (v3: colonies/<c>/queens/<q>/sessions/<s>) ────────────
+
+
+def _write_colony_session(hive_home: Path, *, colony: str, queen: str, session: str, events: list[dict]) -> None:
+    sdir = hive_home / "colonies" / colony / "queens" / queen / "sessions" / session
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+
+
+def test_colony_search_spans_every_overseer_queen(hive_home: Path, bind_colony):
+    """A colony can be overseen by more than one queen; its memory is all of them."""
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("kick off the COLONY_NEEDLE migration"), *_assistant_deltas("Starting it.")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_tech",
+        session="session_20260602_090000_bbbb",
+        events=[_user_event("status of COLONY_NEEDLE?"), *_assistant_deltas("Done.")],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="COLONY_NEEDLE")
+
+    assert "error" not in result, result
+    assert {m["session"] for m in result["matches"]} == {"session_20260601_090000_aaaa", "session_20260602_090000_bbbb"}
+
+
+def test_colony_search_finds_worker_tool_results(hive_home: Path, bind_colony):
+    """Workers' tool results are logged in the overseer session's events."""
+    worker_result = _tool_event(tool_name="terminal_exec", result="deployed build WORKER_NEEDLE-42 to staging")
+    worker_result["stream_id"] = "worker:session_20260601_091500_cccc"
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("ship it"), worker_result],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="WORKER_NEEDLE-42", role="tool")
+
+    assert result.get("total_matches") == 1, result
+
+
+def test_colony_and_queen_memories_stay_separate(hive_home: Path, bind_colony, bind_queen):
+    _write_session(
+        hive_home,
+        queen="queen_ops",
+        session="session_20260601_080000_dddd",
+        events=[_user_event("private DM about DM_ONLY_NEEDLE")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("colony work on COLONY_ONLY_NEEDLE")],
+    )
+
+    bind_colony("acme")
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 1
+
+    bind_queen("queen_ops")
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 1

@@ -31,6 +31,7 @@ class Spec:
     seed: Callable[[Path, Path], Any] | None = None
     resume: Callable[[Path], Awaitable[None]] | None = None
     queen_id: str = "queen_technology"
+    colony: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +168,38 @@ def _check_memory_recall(run: Any) -> None:
     assert "tuesday" in text and "02:00" in run.text, f"wrong or missing window. {run.summary()}"
 
 
+def _seed_colony_history(_workdir: Path, home: Path) -> None:
+    now = datetime.now().replace(microsecond=0)
+    synthetic.past_session(
+        home,
+        "queen_technology",
+        colony="checkout_perf",
+        started_at=now - timedelta(days=6),
+        turns=[
+            ("user", "Run the load test against the checkout service and tell me where it breaks."),
+            (
+                "worker_tool",
+                "k6 run checkout.js: ramp 500->3000 rps. p95 latency 412ms at 2000 rps. Error budget (0.5% 5xx) "
+                "exhausted at 2400 rps; connection pool saturation in payments-db at that point.",
+            ),
+            ("assistant", "The load test is done; I've filed the results with the team."),
+        ],
+    )
+    # A DM the colony must not see: different service, different numbers.
+    synthetic.past_session(
+        home,
+        "queen_technology",
+        started_at=now - timedelta(days=2),
+        turns=[("user", "Separate thing: the search service load test broke at 900 rps."), ("assistant", "Noted.")],
+    )
+
+
+def _check_colony_memory(run: Any) -> None:
+    assert run.called("search_messages"), f"answered without searching memory. {run.summary()}"
+    assert "2400" in run.text.replace(",", ""), f"wrong or missing rate. {run.summary()}"
+    assert "900" not in run.text, f"used the queen's DM memory, not the colony's. {run.summary()}"
+
+
 async def _resume_ledger_setup(workdir: Path) -> None:
     await synthetic.in_progress_session(
         workdir,
@@ -286,6 +319,16 @@ SPECS: tuple[Spec, ...] = (
         ),
         seed=_seed_past_sessions,
         check=_check_memory_recall,
+    ),
+    Spec(
+        id="colony_memory_recall",
+        turns=(
+            "This colony load-tested the checkout service a few days ago. At what request rate did we exhaust "
+            "the error budget? Check the colony's history rather than guessing.",
+        ),
+        seed=_seed_colony_history,
+        colony="checkout_perf",
+        check=_check_colony_memory,
     ),
     Spec(
         id="resume_in_progress_session",

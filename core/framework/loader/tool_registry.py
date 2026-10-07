@@ -220,6 +220,7 @@ class ToolRegistry:
         # here (not on the process-wide os.environ) so parallel workers
         # in the same interpreter don't clobber each other's identity.
         self._mcp_extra_env: dict[str, str] = {}
+        self._identity_env_provider: Callable[[], dict[str, str]] | None = None
         # Agent dir for re-loading registry MCP after credential resync.
         self._mcp_registry_agent_path: Path | None = None
         # Transient (tool_provider_map, live_providers) snapshot reused across
@@ -241,6 +242,22 @@ class ToolRegistry:
         from one worker race with MCP spawns from another.
         """
         self._mcp_extra_env = dict(env)
+
+    def set_identity_env_provider(self, provider: Callable[[], dict[str, str]]) -> None:
+        """Supply identity env that is re-read on every tool call.
+
+        For identity that changes during a session: a queen DM that binds
+        to a colony must start searching that colony's memory on its next
+        call, not after a restart. Merged over ``set_mcp_extra_env``'s
+        static values wherever identity env is used.
+        """
+        self._identity_env_provider = provider
+
+    def _identity_env(self) -> dict[str, str]:
+        """The agent's identity env as of now (static env + provider)."""
+        if self._identity_env_provider is None:
+            return self._mcp_extra_env
+        return {**self._mcp_extra_env, **self._identity_env_provider()}
 
     def register(
         self,
@@ -901,7 +918,7 @@ class ToolRegistry:
             # server's own env so MCP subprocesses receive the identity
             # of the worker that spawned them (instead of whichever
             # worker most recently wrote to os.environ).
-            merged_env = {**self._mcp_extra_env, **(server_config.get("env") or {})}
+            merged_env = {**self._identity_env(), **(server_config.get("env") or {})}
             config = MCPServerConfig(
                 name=server_config["name"],
                 transport=server_config["transport"],
@@ -1160,7 +1177,7 @@ class ToolRegistry:
 
         from framework.tools.harness_tools import build_harness_group
 
-        harness_tools = build_harness_group(group, scope_env=lambda: self._mcp_extra_env)
+        harness_tools = build_harness_group(group, scope_env=self._identity_env)
         self._mcp_server_tools.setdefault(group, set())
         catalog: list[dict[str, Any]] = []
         registered: list[str] = []
@@ -1197,7 +1214,7 @@ class ToolRegistry:
             return {"error": str(exc)}
 
         def executor(inputs: dict) -> Any:
-            call_inputs = self._prepare_call_inputs(inputs, ht.params, extra_env=self._mcp_extra_env)
+            call_inputs = self._prepare_call_inputs(inputs, ht.params, extra_env=self._identity_env())
             try:
                 result = ht.invoke(call_inputs)
             except Exception as exc:

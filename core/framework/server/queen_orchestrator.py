@@ -565,7 +565,7 @@ async def materialize_queen_identity(
 
 _SCOPE_SENSITIVE_MCP_SERVERS: frozenset[str] = frozenset({"memory-tools"})
 """Tool groups that only work bound to a queen/colony scope (memory-tools
-scopes ``search_messages`` by the registry's HIVE_QUEEN_ID). The bare
+scopes ``search_messages`` by the session's queen or colony). The bare
 bootstrap registry is queen-agnostic, so it leaves them out rather than
 list tools that would answer ``scope_unbound``. Real queen sessions load
 them through queen_orchestrator's slow path with their identity set."""
@@ -728,13 +728,12 @@ async def create_queen(
     from framework.llm.capabilities import supports_image_tool_results
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
+    from framework.server import boot_status
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         normalize_legacy_phase,
         register_queen_lifecycle_tools,
     )
-
-    from framework.server import boot_status
 
     # ---- Tool registry ------------------------------------------------
     # Use pre-loaded cached registry if available (fast path)
@@ -745,13 +744,22 @@ async def create_queen(
         # Build fresh (slow path - for backwards compatibility)
         boot_status.report("Starting tool servers", "MCP discovery")
         queen_registry = ToolRegistry()
-        # The queen's identity, handed to every tool this registry runs:
-        # memory-tools reads HIVE_QUEEN_ID to scope `search_messages` to
-        # this queen's own history (the model never picks the scope
-        # itself), terminal children inherit it, and user MCP subprocesses
-        # get it in their env. Set BEFORE servers are registered, since
-        # env is captured at MCPClient construction.
-        queen_registry.set_mcp_extra_env({"HIVE_QUEEN_ID": session.queen_name or "default"})
+
+        # The session's identity, handed to every tool this registry runs.
+        # memory-tools scopes `search_messages` by it (the model never picks
+        # the scope): a DM searches the queen's own history; once the
+        # session is bound to a colony, the colony's — its overseer
+        # sessions, which also log what its workers' tools returned. Workers
+        # run on this registry too, so they get the colony scope as well.
+        # Re-read per call, because a live session can bind or unbind a
+        # colony. Set BEFORE servers are registered: user MCP subprocesses
+        # capture it in their env at spawn.
+        def _session_identity() -> dict[str, str]:
+            if session.colony_id:
+                return {"HIVE_COLONY_NAME": session.colony_id}
+            return {"HIVE_QUEEN_ID": session.queen_name or "default"}
+
+        queen_registry.set_identity_env_provider(_session_identity)
         import framework.agents.queen as _queen_pkg
 
         queen_pkg_dir = Path(_queen_pkg.__file__).parent

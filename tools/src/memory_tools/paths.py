@@ -1,12 +1,15 @@
 """Path resolution for memory-tools.
 
-Source layout (read-only):
+Source layout (read-only, v3 — framework.config):
     $HIVE_HOME/queens/<queen_id>/sessions/<session>/
         events.jsonl
         data/<tool>_<n>.txt          # spilled tool result bodies
-    $HIVE_HOME/colonies/<colony>/sessions/<session>/
-        events.jsonl
-        data/...
+    $HIVE_HOME/colonies/<colony>/queens/<queen_id>/sessions/<session>/
+        events.jsonl                 # the overseer queen's session; worker
+        data/...                     # tool results are logged here too
+
+A colony's sessions are the union of its overseer queens' session dirs.
+Session ids are globally unique, so a session resolves by id alone.
 
 Index layout (read/write — built lazily by index.sync_scope):
     $HIVE_HOME/.message_index/
@@ -52,16 +55,34 @@ def owner_dir(scope: Scope, owner: str) -> Path:
     return scope_root(scope) / owner
 
 
-def sessions_dir(scope: Scope, owner: str) -> Path:
-    return owner_dir(scope, owner) / "sessions"
+def session_roots(scope: Scope, owner: str) -> list[Path]:
+    """Directories holding *owner*'s ``session_*`` dirs.
+
+    A queen has one; a colony has one per queen that has overseen it.
+    """
+    if scope == "queens":
+        return [owner_dir(scope, owner) / "sessions"]
+    queens = owner_dir(scope, owner) / "queens"
+    if not queens.is_dir():
+        return []
+    return sorted(q / "sessions" for q in queens.iterdir() if (q / "sessions").is_dir())
+
+
+def session_dir(scope: Scope, owner: str, session: str) -> Path:
+    """The directory of one session (may not exist if the id is unknown)."""
+    roots = session_roots(scope, owner)
+    for root in roots:
+        if (root / session).is_dir():
+            return root / session
+    return (roots[0] if roots else owner_dir(scope, owner) / "sessions") / session
 
 
 def events_jsonl(scope: Scope, owner: str, session: str) -> Path:
-    return sessions_dir(scope, owner) / session / "events.jsonl"
+    return session_dir(scope, owner, session) / "events.jsonl"
 
 
 def session_data_dir(scope: Scope, owner: str, session: str) -> Path:
-    return sessions_dir(scope, owner) / session / "data"
+    return session_dir(scope, owner, session) / "data"
 
 
 # ── Index paths ────────────────────────────────────────────────────────
@@ -143,11 +164,9 @@ def list_sessions(
     until: datetime | None = None,
 ) -> list[str]:
     """Return session ids under ``owner``, optionally filtered."""
-    sd = sessions_dir(scope, owner)
-    if not sd.exists():
-        return []
     out: list[str] = []
-    for entry in os.scandir(sd):
+    entries = [entry for root in session_roots(scope, owner) if root.exists() for entry in os.scandir(root)]
+    for entry in entries:
         if not entry.is_dir() or not entry.name.startswith("session_"):
             continue
         if session_filter is not None and entry.name != session_filter:

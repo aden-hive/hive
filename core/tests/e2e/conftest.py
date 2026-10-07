@@ -132,9 +132,11 @@ class _QueenDriver:
         if event.type == self._types.CLIENT_INPUT_REQUESTED:
             self._parked.set()
 
-    async def start(self, *, first_message: str | None, resume: bool) -> None:
+    async def start(self, *, first_message: str | None, resume: bool, colony: str | None = None) -> None:
         from framework.agents.queen.queen_profiles import DEFAULT_QUEENS
+        from framework.host.colony_binding import ColonyBinding
         from framework.server.queen_orchestrator import create_queen
+        from framework.server.session_manager import _ensure_minimal_colony
 
         T = self._types
         self.session.event_bus.subscribe(
@@ -143,6 +145,12 @@ class _QueenDriver:
         )
         if resume:
             self.session.queen_resume_from = self.session.id
+        if colony:
+            # The server's own fresh-colony bootstrap (session_manager.create_session).
+            self.session.worker_path = _ensure_minimal_colony(colony, queen_name=self.queen_id)
+            self.session.colony_id = colony
+            self.session.binding = ColonyBinding.for_name(colony)
+            self.session.mode = "colony"
         manager = MagicMock()
         manager._subscribe_worker_handoffs = MagicMock()
         mark = len(self.events)
@@ -154,7 +162,8 @@ class _QueenDriver:
             queen_dir=self.workdir,
             queen_profile=DEFAULT_QUEENS[self.queen_id],
             initial_prompt=first_message,
-            initial_phase="independent",
+            # A colony-bound session derives its phase from the binding.
+            initial_phase=None if colony else "independent",
         )
         if first_message is not None:
             await self._wait_turn(first_message, mark, started)
@@ -233,12 +242,14 @@ def run_queen(live_endpoint, hive_home, tmp_path, monkeypatch):
     * *resume(workdir)*: async; writes an in-progress conversation into the
       queen's session dir, which the queen then restores instead of
       starting fresh.
+    * *colony*: boot the session bound to this colony (created minimal,
+      as the server does for a fresh colony).
     """
     from framework.agents.queen import queen_memory_v2
 
     monkeypatch.setattr(queen_memory_v2, "MEMORIES_DIR", hive_home / "memories")
 
-    async def _run(turns: list[str], *, queen_id: str = "queen_technology", seed=None, resume=None) -> QueenRun:
+    async def _run(turns: list[str], *, queen_id: str = "queen_technology", seed=None, resume=None, colony=None) -> QueenRun:
         workdir = tmp_path / "queen"
         workdir.mkdir(parents=True, exist_ok=True)
         truth = seed(workdir, hive_home) if seed is not None else None
@@ -248,10 +259,10 @@ def run_queen(live_endpoint, hive_home, tmp_path, monkeypatch):
         driver = _QueenDriver(live_endpoint, workdir, queen_id)
         try:
             if resume is not None:
-                await driver.start(first_message=None, resume=True)
+                await driver.start(first_message=None, resume=True, colony=colony)
                 pending = list(turns)
             else:
-                await driver.start(first_message=turns[0], resume=False)
+                await driver.start(first_message=turns[0], resume=False, colony=colony)
                 pending = list(turns[1:])
             for message in pending:
                 await driver.send(message)
@@ -272,3 +283,32 @@ def run_queen(live_endpoint, hive_home, tmp_path, monkeypatch):
         return run
 
     return _run
+
+
+# ---------------------------------------------------------------------------
+# LongMemEval run directory + report (test_longmemeval.py)
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Fixed once in the controller, before xdist spawns workers, so every
+    # worker appends to the same results file.
+    if not os.environ.get("HIVE_LME_RUN_DIR"):
+        from tests.e2e import longmemeval
+
+        os.environ["HIVE_LME_RUN_DIR"] = str(longmemeval.DATA_DIR / "runs" / time.strftime("%Y%m%d-%H%M%S"))
+
+
+def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> None:
+    if hasattr(config, "workerinput"):
+        return  # xdist worker; the controller reports
+    results = Path(os.environ.get("HIVE_LME_RUN_DIR", "")) / "results.jsonl"
+    if not results.is_file():
+        return
+    from tests.e2e import longmemeval
+
+    report = longmemeval.summarize(results)
+    (results.parent / "summary.txt").write_text(f"{report}\n", encoding="utf-8")
+    terminalreporter.write_sep("=", "LongMemEval-S")
+    terminalreporter.write_line(report)
+    terminalreporter.write_line(f"results: {results.parent}")

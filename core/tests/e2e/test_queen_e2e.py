@@ -15,6 +15,6 @@ pytestmark = [pytest.mark.live, pytest.mark.asyncio]
 
 @pytest.mark.parametrize("spec", SPECS, ids=[s.id for s in SPECS])
 async def test_spec(spec: Spec, run_queen) -> None:
-    run = await run_queen(list(spec.turns), queen_id=spec.queen_id, seed=spec.seed, resume=spec.resume)
+    run = await run_queen(list(spec.turns), queen_id=spec.queen_id, seed=spec.seed, resume=spec.resume, colony=spec.colony)
     assert len(run.turns) == len(spec.turns), run.summary()
     spec.check(run)

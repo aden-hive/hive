@@ -109,3 +109,30 @@ def test_group_registration_is_idempotent_and_survives_resync(registry, monkeypa
         registry._mcp_clients = []
     assert "terminal_exec" in registry.get_server_tool_names("terminal-tools")
     assert "terminal-tools" in registry.get_full_mcp_catalog()
+
+
+def test_memory_scope_follows_a_live_colony_binding(_isolate_hive_home_autouse, monkeypatch):
+    """A DM that binds to a colony mid-session searches the colony's memory on
+    its next call; its workers share the registry, so they do too."""
+    home = _isolate_hive_home_autouse
+    monkeypatch.setenv("HIVE_HOME", str(home))
+
+    def write(session_dir, text):
+        session_dir.mkdir(parents=True)
+        event = {"type": "client_input_received", "data": {"content": text}}
+        (session_dir / "events.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+    write(home / "queens" / "queen_ops" / "sessions" / "session_20260601_080000_aaaa", "DM_FACT")
+    write(home / "colonies" / "acme" / "queens" / "queen_ops" / "sessions" / "session_20260601_090000_bbbb", "COLONY_FACT")
+
+    session = {"colony_id": None}
+    reg = ToolRegistry()
+    reg.set_identity_env_provider(lambda: {"HIVE_COLONY_NAME": session["colony_id"]} if session["colony_id"] else {"HIVE_QUEEN_ID": "queen_ops"})
+    reg.load_registry_servers([{"name": "memory-tools", "transport": "harness"}])
+
+    def hits(pattern):
+        return json.loads(_call(reg, "search_messages", pattern=pattern).content).get("total_matches")
+
+    assert (hits("DM_FACT"), hits("COLONY_FACT")) == (1, 0)
+    session["colony_id"] = "acme"
+    assert (hits("DM_FACT"), hits("COLONY_FACT")) == (0, 1)
