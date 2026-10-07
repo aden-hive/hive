@@ -755,6 +755,9 @@ class AgentLoop(AgentProtocol):
         # event emitted at receive time, so the drain can emit a matching
         # CLIENT_INPUT_COMMITTED carrying the true injection time.
         self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None, str | None]] = asyncio.Queue()
+        # Text of real user messages queued but not yet drained, so the
+        # USER_PROMPT_SUBMIT reminders can see what the user is asking.
+        self._pending_user_texts: list[str] = []
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Queen input blocking state
         self._input_ready = asyncio.Event()
@@ -869,6 +872,7 @@ class AgentLoop(AgentProtocol):
             ColonyWorkerSnapshotReminderSource,
         )
         from framework.agent_loop.idle_nudge import IdleNudgeSource
+        from framework.agent_loop.past_conversations_reminder import PastConversationsReminderSource
         from framework.agent_loop.stream_stall import StreamStallSource
         from framework.agent_loop.tool_skill_reminders import (
             SearchableToolsReminderSource,
@@ -884,6 +888,7 @@ class AgentLoop(AgentProtocol):
         self._reminder_hub.register(TaskReminderSource())
         self._reminder_hub.register(ColonyParallelNudgeSource())
         self._reminder_hub.register(ActiveWorkersReminderSource())
+        self._reminder_hub.register(PastConversationsReminderSource())
         # Queen-only: the searchable-tools manifest + skills catalog ride the
         # conversation as <system-reminder>s Self-skip for non-queen streams.
         self._reminder_hub.register(SearchableToolsReminderSource())
@@ -1512,7 +1517,7 @@ class AgentLoop(AgentProtocol):
             # fires before the injection queue is drained) — "cowork style":
             # the queen reads the frame first, then the user's latest message.
             await self._run_hooks("session_start", conversation, trigger=initial_message)
-            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation)
+            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation, user_text=initial_message or None)
 
             if initial_message:
                 # Stamp with arrival time so the conversation has a
@@ -1812,7 +1817,9 @@ class AgentLoop(AgentProtocol):
             # ordering is async-single-loop so there is no real race.
             will_drain = not self._injection_queue.empty()
             if will_drain:
-                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation)
+                user_text = "\n".join(self._pending_user_texts) or None
+                self._pending_user_texts.clear()
+                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation, user_text=user_text)
             logger.debug("[AgentLoop.execute] iteration=%d: draining injection queue...", iteration)
             drained_injections = await self._drain_injection_queue(conversation, ctx)
             logger.debug(
@@ -3531,6 +3538,8 @@ class AgentLoop(AgentProtocol):
             # answered (in-app or via a routed messaging reply).
             self._escalation_source.reset()
             self._notify_sentinel_local_resume()
+            if content:
+                self._pending_user_texts.append(content)
         try:
             await self._injection_queue.put((content, is_client_input, image_content, correlation_id))
             logger.debug("[AgentLoop.inject_event] Message queued successfully")
@@ -6978,6 +6987,8 @@ class AgentLoop(AgentProtocol):
         point: ReminderPoint,
         ctx: AgentContext,
         conversation: NodeConversation,
+        *,
+        user_text: str | None = None,
     ) -> bool:
         """Fire a reminder lifecycle point that injects as a user message.
 
@@ -6992,7 +7003,7 @@ class AgentLoop(AgentProtocol):
         reminder the agent would not read until the user next speaks.
         """
         try:
-            block, energized = await self._reminder_hub.fire_energized(point, ctx)
+            block, energized = await self._reminder_hub.fire_energized(point, ctx, user_text=user_text)
             if block:
                 await conversation.add_user_message(block)
                 self._bump("reminders_injected")

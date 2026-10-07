@@ -571,6 +571,13 @@ list tools that would answer ``scope_unbound``. Real queen sessions load
 them through queen_orchestrator's slow path with their identity set."""
 
 
+def _recall_past_conversations(queen_id: str, text: str, current_session: str) -> str | None:
+    """Excerpts of *queen_id*'s earlier sessions related to *text*, or None."""
+    from memory_tools.recall import recall_block
+
+    return recall_block("queens", queen_id, text, exclude_session=current_session)
+
+
 def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]]]]:
     """Build a Queen ``ToolRegistry`` and a (server_name → tools) catalog.
 
@@ -1857,6 +1864,12 @@ async def create_queen(
                 # when no colony runtime has been bound yet (independent
                 # phase or pre-fork).
                 active_workers_provider=lambda: session.colony.get_active_streams() if getattr(session, "colony", None) is not None else [],
+                # Excerpts of this queen's earlier sessions related to the
+                # user's message, injected before each turn so recalling
+                # history doesn't hinge on the queen deciding to search.
+                # Same scope search_messages uses; the live session is
+                # excluded (it's already in context).
+                past_conversation_recall_provider=lambda text: _recall_past_conversations(session.queen_name or "default", text, queen_dir.name),
                 # Resolves the on-disk colony binding for tool-budget
                 # checkpoint reminders (tracker + fleet snapshots).
                 # Returns None for an independent-mode queen (no colony
@@ -2071,6 +2084,12 @@ async def create_queen(
                 queen_memory_dir=queen_mem_dir,
                 queen_id=session.queen_name,
             )
+            # Dated timeline of what the user mentions (search_timeline):
+            # extracted in the background as the session goes, and for a
+            # few recent earlier sessions that predate it.
+            from framework.agents.queen.timeline import subscribe_timeline_triggers
+
+            _reflection_subs += await subscribe_timeline_triggers(session.event_bus, queen_dir, session.llm)
             session.memory_reflection_subs = _reflection_subs
 
             # Set initial user message based on mode:

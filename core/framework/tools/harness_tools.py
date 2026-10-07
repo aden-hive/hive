@@ -276,9 +276,11 @@ def _charts(mcp: _Collector, scope_env: ScopeEnvGetter) -> None:  # noqa: ARG001
 
 
 def _memory(mcp: _Collector, scope_env: ScopeEnvGetter) -> None:
+    from memory_tools.timeline import register_search_timeline
     from memory_tools.tool import register_search_messages
 
     register_search_messages(mcp, scope_env=scope_env)
+    register_search_timeline(mcp, scope_env=scope_env)
 
 
 class _LazyCredentials:

@@ -177,6 +177,10 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
         # and tool result bodies. Never includes tool names, tool inputs,
         # reasoning, finish reasons, token counts, or timestamps.
         "search_messages",
+        # Dated events / facts / plans the user mentioned, extracted per
+        # session (framework.agents.queen.timeline). For when / how many /
+        # what changed questions that raw-text search answers badly.
+        "search_timeline",
     ],
     # BI / financial chart + diagram rendering. Calling chart_render
     # both embeds the chart live in chat and produces a downloadable PNG.
@@ -388,6 +392,8 @@ _CATEGORY_ADDITIONS: dict[str, dict[str, str]] = {
     # name now-removed browser_* tools — so they regain the browser capability.
     "browser_core": {"browser_setup": "0.3.0"},
     "file_ops": {"attach_file": "0.2.19"},
+    # The dated timeline next to search_messages ships in 0.7.2.
+    "context_awareness": {"search_timeline": "0.7.2"},
     # image_generate shipped in 0.2.27 but "media" was only in three visual
     # roles' defaults, so the other ten queens could see the image-generation
     # skill while the tool it documents was filtered out of their allowlist.

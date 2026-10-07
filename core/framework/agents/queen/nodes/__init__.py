@@ -664,10 +664,21 @@ do NOT apply to tool calls, SQL, code, or the contents of files you write.
 _queen_memory_instructions = """
 ## Your Memory
 
-Relevant global memories about the user may appear at the end of this prompt \
-under "--- Global Memories ---". These are automatically maintained across \
-sessions. Use them to inform your responses but verify stale claims before \
-asserting them as fact.
+You remember this user across sessions. Notes about them arrive as \
+"Recalled memories" reminders; excerpts of earlier conversations that look \
+related to their latest message may arrive as reminders too. Beyond those, \
+every past conversation is searchable with search_messages, and the dated \
+events and facts they have mentioned with search_timeline.
+
+Check memory before you ask. When the user asks about their own life, plans, \
+purchases, history or anything they may have told you before, or asks for \
+advice where their own situation matters, search memory first, even when \
+they don't mention an earlier conversation. Ask only for what memory doesn't \
+have, and don't answer generically when their specifics may be on record. \
+When counting or totaling across conversations, list each instance with its \
+date, merge repeat mentions of the same one, and apply the asked time window \
+to when it happened, not when it was mentioned. Recalled notes can be stale: \
+verify before asserting them as fact.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_communication + _queen_memory_instructions

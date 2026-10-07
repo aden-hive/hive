@@ -22,8 +22,8 @@ from typing import Any, Literal
 
 from framework.config import COLONIES_DIR, QUEENS_DIR
 from framework.host.colony_binding import ColonyBinding
-from framework.server import boot_status
 from framework.host.triggers import TriggerDefinition
+from framework.server import boot_status
 from framework.utils.text import humanize_slug
 
 logger = logging.getLogger(__name__)
@@ -1302,6 +1302,17 @@ class SessionManager:
                 logger.info("Session '%s': shutdown reflection spawned", session_id)
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
+
+                # Extract the timeline items for user messages that arrived
+                # since the last background run, so none are lost at stop.
+                from framework.agents.queen.timeline import update_session_timeline
+
+                timeline_task = asyncio.create_task(
+                    update_session_timeline(session.llm, session.queen_dir),
+                    name=f"shutdown-timeline-{session_id}",
+                )
+                self._background_tasks.add(timeline_task)
+                timeline_task.add_done_callback(self._background_tasks.discard)
             except RuntimeError as exc:
                 # Most common when a session is stopped after the event loop
                 # has closed (e.g. during server shutdown or from an atexit

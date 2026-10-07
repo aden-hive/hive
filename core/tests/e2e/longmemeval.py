@@ -191,6 +191,24 @@ def seed_haystack(hive_home: Path, item: dict[str, Any], queen_id: str = QUEEN_I
     return mapping
 
 
+async def build_timelines(hive_home: Path, *, api_base: str, api_key: str, model: str, queen_id: str = QUEEN_ID) -> int:
+    """Extract the seeded sessions' timelines, as production would have when they happened.
+
+    Cached by session content under ``$HIVE_LME_DATA/timeline_cache/<model>``,
+    so only the first run over a session pays for the extraction.
+    """
+    from framework.agents.queen.timeline import backfill_timelines
+    from framework.llm.litellm import LiteLLMProvider
+
+    llm = LiteLLMProvider(model=f"openai/{model}", api_key=api_key, api_base=api_base)
+    return await backfill_timelines(
+        llm,
+        hive_home / "queens" / queen_id / "sessions",
+        cache_dir=DATA_DIR / "timeline_cache" / re.sub(r"[^\w.-]", "_", model),
+        concurrency=int(os.environ.get("HIVE_LME_TIMELINE_CONCURRENCY", "4")),
+    )
+
+
 def freeze_clock(monkeypatch: Any, when: datetime) -> None:
     """Make the queen believe it is *when* (naive local time)."""
     import importlib
@@ -298,7 +316,7 @@ def run_dir() -> Path:
 
 def record(item: dict[str, Any], run: Any, verdict: Verdict, session_map: dict[str, str]) -> dict[str, Any]:
     """Append one result line and save the transcript. Returns the line."""
-    searches = run.called("search_messages")
+    searches = run.called("search_messages") + run.called("search_timeline")
     seen = " ".join(_full_result(c.result) for c in searches)
     abstention = "_abs" in item["question_id"]
     # Abstention questions have no evidence to find: their answer sessions
@@ -315,7 +333,7 @@ def record(item: dict[str, Any], run: Any, verdict: Verdict, session_map: dict[s
         "judge": verdict.raw,
         "judge_model": verdict.judge_model,
         "searched": bool(searches),
-        "search_calls": [c.input for c in searches],
+        "search_calls": [{"tool": c.name, **c.input} for c in searches],
         # Did any evidence session show up in what search returned? Splits
         # "never found it" from "found it and still answered wrong".
         "evidence_retrieved": any(sid in seen for sid in evidence) if evidence else None,
@@ -334,6 +352,29 @@ def record(item: dict[str, Any], run: Any, verdict: Verdict, session_map: dict[s
     return line
 
 
+def record_error(item: dict[str, Any], exc: BaseException) -> None:
+    """Append a miss for a question that never got a gradable answer."""
+    line = {
+        "question_id": item["question_id"],
+        "question_type": item["question_type"],
+        "abstention": "_abs" in item["question_id"],
+        "question": item["question"],
+        "answer": item["answer"],
+        "hypothesis": "",
+        "correct": False,
+        "judge": "",
+        "judge_model": "",
+        "searched": False,
+        "search_calls": [],
+        "evidence_retrieved": None,
+        "tools": [],
+        "seconds": 0,
+        "error": f"{type(exc).__name__}: {exc}"[:500],
+    }
+    with (run_dir() / "results.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(line, default=str) + "\n")
+
+
 def summarize(path: Path) -> str:
     """Per-type accuracy, plus how often the queen searched and found the evidence."""
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -346,8 +387,9 @@ def summarize(path: Path) -> str:
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         groups[r["question_type"]].append(r)
+    judge_model = next((r["judge_model"] for r in rows if r.get("judge_model")), "?")
     lines = [
-        f"LongMemEval-S through Hive - {len(rows)} question(s), judge {rows[0]['judge_model']}",
+        f"LongMemEval-S through Hive - {len(rows)} question(s), judge {judge_model}",
         f"{'type':28} {'n':>4} {'correct':>8} {'searched':>9} {'evidence':>9}",
     ]
     for qtype in sorted(groups) + ["ALL"]:
@@ -361,6 +403,12 @@ def summarize(path: Path) -> str:
     abstain = [r for r in rows if r["abstention"]]
     if abstain:
         lines.append(f"abstention questions: {pct(sum(r['correct'] for r in abstain), len(abstain)).strip()} of {len(abstain)}")
+    errors = [r for r in rows if r.get("error")]
+    if errors:
+        lines.append(f"no gradable answer (timeout/error, counted wrong): {len(errors)}")
     lines.append(f"median seconds per question: {statistics.median(r['seconds'] for r in rows):.0f}")
-    lines.append("searched = called search_messages; evidence = an answer session appeared in search results")
+    lines.append(
+        "searched = called search_messages or search_timeline; evidence = an answer session appeared in their results "
+        "(auto-injected excerpts don't count, so 'correct' can exceed both)"
+    )
     return "\n".join(lines)
