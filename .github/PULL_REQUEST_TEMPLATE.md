@@ -25,7 +25,7 @@ Fixes #(issue number)
 Describe the tests you ran to verify your changes:
 
 - [ ] Unit tests pass (`make test`)
-- [ ] Lint passes (`make check`)
+- [ ] Lint/format checks pass (`make check`)
 - [ ] Manual testing performed
 
 ## Checklist

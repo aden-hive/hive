@@ -15,9 +15,11 @@ Usage:
     python mcp_server.py --stdio
 
 Environment Variables:
-    MCP_PORT              - Server port (default: 4001)
-    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
-    BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
+    MCP_PORT                  - Server port (default: 4001)
+    INCLUDE_UNVERIFIED_TOOLS  - Set to "true", "1", or "yes" to also load
+                                unverified/community tool integrations (default: off)
+    ANTHROPIC_API_KEY         - Required at startup for testing/LLM nodes
+    BRAVE_SEARCH_API_KEY      - Required for web_search tool (validated at agent load time)
 
 Note:
     Two-tier credential validation:
@@ -62,24 +64,11 @@ if "--stdio" in sys.argv:
     rich.console.Console.__init__ = _patched_console_init
 
 from fastmcp import FastMCP  # noqa: E402
-from starlette.requests import Request  # noqa: E402
-from starlette.responses import PlainTextResponse  # noqa: E402
 
 from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential store with access to both env vars AND encrypted store
-# This allows using Aden-synced credentials from ~/.hive/credentials
-try:
-    from framework.credentials import CredentialStore
-
-    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
-    credentials = CredentialStoreAdapter(store)
-    logger.info("Using CredentialStoreAdapter with encrypted storage")
-except Exception as e:
-    # Fall back to env-only adapter if encrypted storage fails
-    credentials = CredentialStoreAdapter.with_env_storage()
-    logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
+credentials = CredentialStoreAdapter.default()
 
 # Tier 1: Validate startup-required credentials (if any)
 try:
@@ -92,22 +81,16 @@ except CredentialError as e:
 mcp = FastMCP("tools")
 
 # Register all tools with the MCP server, passing credential store
-tools = register_all_tools(mcp, credentials=credentials)
+include_unverified = os.getenv("INCLUDE_UNVERIFIED_TOOLS", "").lower() in ("true", "1", "yes")
+tools = register_all_tools(mcp, credentials=credentials, include_unverified=include_unverified)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:
     logger.info(f"Registered {len(tools)} tools: {tools}")
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> PlainTextResponse:
-    """Health check endpoint for container orchestration."""
-    return PlainTextResponse("OK")
-
-
-@mcp.custom_route("/", methods=["GET"])
-async def index(request: Request) -> PlainTextResponse:
-    """Landing page for browser visits."""
-    return PlainTextResponse("Welcome to the Hive MCP Server")
+@mcp.resource("health://status")
+def health_check() -> str:
+    return "OK"
 
 
 def main() -> None:

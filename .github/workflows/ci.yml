@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-
+    
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,23 +21,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+        run: uv sync --project core --group dev
 
       - name: Ruff lint
         run: |
-          ruff check core/
-          ruff check tools/
+          uv run --project core ruff check core/
+          uv run --project core ruff check tools/
 
       - name: Ruff format
         run: |
-          ruff format --check core/
-          ruff format --check tools/
+          uv run --project core ruff format --check core/
+          uv run --project core ruff format --check tools/
 
   test:
     name: Test Python Framework
@@ -52,22 +53,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
-      - name: Run tests
+      - name: Install dependencies and run tests
+        working-directory: core
         run: |
-          cd core
-          pytest tests/ -v
+          uv sync
+          uv run pytest tests/ -v --ignore=tests/dummy_agents
 
   test-tools:
-    name: Test Tools
-    runs-on: ubuntu-latest
+    name: Test Tools (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -78,13 +81,23 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
-      - name: Install dependencies and run tests
+      - name: Install dependencies
+        working-directory: tools
+        run: uv sync --extra dev
+
+      - name: Install and verify ripgrep
+        run: uv run --no-sync scripts/ensure_ripgrep.py --install
+
+      - name: Install browser and run tests
+        working-directory: tools
         run: |
-          cd tools
-          uv sync --extra dev
-          uv pip install --python .venv/bin/python -e ../core
-          uv run --extra dev pytest tests/ -v
+          # chart_tools renders ECharts/Mermaid via Playwright (headless
+          # Chromium); install the browser so those smoke tests can run.
+          uv run playwright install chromium
+          uv run pytest tests/ -v
 
   validate:
     name: Validate Agent Exports
@@ -97,13 +110,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+            
       - name: Install dependencies
+        working-directory: core
         run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync
 
       - name: Validate exported agents
         run: |
@@ -126,7 +142,7 @@ jobs:
           for agent_dir in "${agent_dirs[@]}"; do
             if [ -f "$agent_dir/agent.json" ]; then
               echo "Validating $agent_dir"
-              python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              uv run python -c "import json; json.load(open('$agent_dir/agent.json'))"
               validated=$((validated + 1))
             fi
           done

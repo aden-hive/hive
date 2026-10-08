@@ -131,11 +131,11 @@ Getting an AI agent working in a demo is easy. Getting it to work reliably in pr
 
 **Best for:** Reactive systems, integrations
 
-### Pattern 4: Full Platform (Aden)
+### Pattern 4: Full Platform (Hive)
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                    Aden Platform                       │
+│                    Hive Platform                       │
 │                                                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
 │  │ Coding Agent │  │Worker Agents │  │  Dashboard  │ │
@@ -448,7 +448,7 @@ async def execute_agent(task, user):
 
 ## Framework Comparison: Production Readiness
 
-| Feature | DIY | LangChain | CrewAI | Aden |
+| Feature | DIY | LangChain | CrewAI | Hive |
 |---------|-----|-----------|--------|------|
 | Retry logic | Build | Partial | Basic | Built-in |
 | Circuit breakers | Build | No | No | Built-in |
@@ -456,7 +456,7 @@ async def execute_agent(task, user):
 | Monitoring | Build | LangSmith | Build | Built-in |
 | Cost control | Build | No | No | Built-in |
 | HITL | Build | Build | Basic | Native |
-| Self-healing | Build | No | No | Native |
+| Self-improving (reflexion, memory, playbooks) | Build | No | No | Native |
 | Dashboard | Build | LangSmith | No | Built-in |
 
 ---
@@ -543,7 +543,7 @@ Production AI agents require:
 4. **Cost Control**: Budgets, tracking, degradation
 5. **Human Oversight**: HITL, escalation, override
 
-Frameworks like Aden provide many of these out of the box. For other frameworks, you'll need to build this infrastructure yourself.
+Frameworks like Hive provide many of these out of the box. For other frameworks, you'll need to build this infrastructure yourself.
 
 The gap between demo and production is significant—plan for it from the start.
 

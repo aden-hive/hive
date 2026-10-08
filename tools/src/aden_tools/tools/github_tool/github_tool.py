@@ -175,6 +175,7 @@ class _GitHubClient:
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict[str, Any]:
         """List issues for a repository."""
@@ -183,6 +184,7 @@ class _GitHubClient:
         params = {
             "state": state,
             "per_page": min(limit, 100),
+            "page": max(1, page),
         }
 
         response = httpx.get(
@@ -275,6 +277,7 @@ class _GitHubClient:
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict[str, Any]:
         """List pull requests for a repository."""
@@ -283,6 +286,7 @@ class _GitHubClient:
         params = {
             "state": state,
             "per_page": min(limit, 100),
+            "page": max(1, page),
         }
 
         response = httpx.get(
@@ -400,6 +404,200 @@ class _GitHubClient:
         )
         return self._handle_response(response)
 
+    # --- Stargazers ---
+
+    def list_stargazers(
+        self,
+        owner: str,
+        repo: str,
+        page: int = 1,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        """List users who starred a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params = {
+            "per_page": min(limit, 100),
+            "page": max(1, page),
+        }
+
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/stargazers",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Users ---
+
+    def get_user_profile(
+        self,
+        username: str,
+    ) -> dict[str, Any]:
+        """Get a user's public profile."""
+        username = _sanitize_path_param(username, "username")
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/users/{username}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_user_emails(
+        self,
+        username: str,
+    ) -> dict[str, Any]:
+        """Find a user's email addresses from their public activity.
+
+        The /users/{username} endpoint only returns the public email
+        (which most users leave blank). This method also checks the
+        user's recent public events for commit-author emails.
+        """
+        username = _sanitize_path_param(username, "username")
+
+        emails: dict[str, str] = {}  # email -> source
+
+        # 1. Check profile for public email
+        profile = self.get_user_profile(username)
+        if isinstance(profile, dict) and "error" not in profile:
+            if profile.get("email"):
+                emails[profile["email"]] = "profile"
+
+        # 2. Check recent public events for commit emails
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/users/{username}/events/public",
+            headers=self._headers,
+            params={"per_page": 30},
+            timeout=30.0,
+        )
+        if response.status_code == 200:
+            for event in response.json():
+                if event.get("type") != "PushEvent":
+                    continue
+                for commit in event.get("payload", {}).get("commits", []):
+                    author = commit.get("author", {})
+                    email = author.get("email", "")
+                    if email and "@" in email and "noreply" not in email.lower():
+                        emails[email] = "commit"
+
+        return {
+            "username": username,
+            "emails": [{"email": e, "source": s} for e, s in emails.items()],
+            "total": len(emails),
+        }
+
+    # --- Commits ---
+
+    def list_commits(
+        self,
+        owner: str,
+        repo: str,
+        sha: str | None = None,
+        author: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        """List commits for a repository.
+
+        API ref: GET /repos/{owner}/{repo}/commits
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params: dict[str, Any] = {"per_page": min(limit, 100)}
+        if sha:
+            params["sha"] = sha
+        if author:
+            params["author"] = author
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Releases ---
+
+    def create_release(
+        self,
+        owner: str,
+        repo: str,
+        tag_name: str,
+        name: str | None = None,
+        body: str | None = None,
+        draft: bool = False,
+        prerelease: bool = False,
+        target_commitish: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new release.
+
+        API ref: POST /repos/{owner}/{repo}/releases
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        payload: dict[str, Any] = {
+            "tag_name": tag_name,
+            "draft": draft,
+            "prerelease": prerelease,
+        }
+        if name:
+            payload["name"] = name
+        if body:
+            payload["body"] = body
+        if target_commitish:
+            payload["target_commitish"] = target_commitish
+
+        response = httpx.post(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/releases",
+            headers=self._headers,
+            json=payload,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Actions / Workflow Runs ---
+
+    def list_workflow_runs(
+        self,
+        owner: str,
+        repo: str,
+        workflow_id: str | None = None,
+        branch: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """List workflow runs for a repository.
+
+        API ref: GET /repos/{owner}/{repo}/actions/runs
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params: dict[str, Any] = {"per_page": min(limit, 100)}
+        if branch:
+            params["branch"] = branch
+        if status:
+            params["status"] = status
+
+        if workflow_id:
+            url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
+        else:
+            url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/runs"
+
+        response = httpx.get(
+            url,
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -407,27 +605,25 @@ def register_tools(
 ) -> None:
     """Register GitHub tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get GitHub token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("github", account)
             token = credentials.get("github")
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('github'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('github'), got {type(token).__name__}")
             return token
         return os.getenv("GITHUB_TOKEN")
 
-    def _get_client() -> _GitHubClient | dict[str, str]:
+    def _get_client(account: str = "") -> _GitHubClient | dict[str, str]:
         """Get a GitHub client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "GitHub credentials not configured",
                 "help": (
-                    "Set GITHUB_TOKEN environment variable "
-                    "or configure via credential store. "
-                    "Get a token at https://github.com/settings/tokens"
+                    "Set GITHUB_TOKEN environment variable or configure via credential store. Get a token at https://github.com/settings/tokens"
                 ),
             }
         return _GitHubClient(token)
@@ -440,6 +636,7 @@ def register_tools(
         visibility: str = "all",
         sort: str = "updated",
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List repositories for a user or the authenticated user.
@@ -453,7 +650,7 @@ def register_tools(
         Returns:
             Dict with list of repositories or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -467,6 +664,7 @@ def register_tools(
     def github_get_repo(
         owner: str,
         repo: str,
+        account: str = "",
     ) -> dict:
         """
         Get information about a specific repository.
@@ -478,7 +676,7 @@ def register_tools(
         Returns:
             Dict with repository information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -493,6 +691,7 @@ def register_tools(
         query: str,
         sort: str | None = None,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         Search for repositories on GitHub.
@@ -505,7 +704,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -522,7 +721,9 @@ def register_tools(
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List issues for a repository.
@@ -531,16 +732,17 @@ def register_tools(
             owner: Repository owner
             repo: Repository name
             state: Issue state ("open", "closed", "all")
-            limit: Maximum number of issues to return (1-100, default 30)
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of issues per page (1-100, default 30)
 
         Returns:
             Dict with list of issues or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
-            return client.list_issues(owner, repo, state, limit)
+            return client.list_issues(owner, repo, state, page, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -551,6 +753,7 @@ def register_tools(
         owner: str,
         repo: str,
         issue_number: int,
+        account: str = "",
     ) -> dict:
         """
         Get a specific issue.
@@ -563,7 +766,7 @@ def register_tools(
         Returns:
             Dict with issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -581,6 +784,7 @@ def register_tools(
         body: str | None = None,
         labels: list[str] | None = None,
         assignees: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a new issue in a repository.
@@ -596,7 +800,7 @@ def register_tools(
         Returns:
             Dict with created issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -615,6 +819,7 @@ def register_tools(
         body: str | None = None,
         state: str | None = None,
         labels: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Update an existing issue.
@@ -631,7 +836,7 @@ def register_tools(
         Returns:
             Dict with updated issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -648,7 +853,9 @@ def register_tools(
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List pull requests for a repository.
@@ -657,16 +864,17 @@ def register_tools(
             owner: Repository owner
             repo: Repository name
             state: PR state ("open", "closed", "all")
-            limit: Maximum number of PRs to return (1-100, default 30)
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of PRs per page (1-100, default 30)
 
         Returns:
             Dict with list of pull requests or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
-            return client.list_pull_requests(owner, repo, state, limit)
+            return client.list_pull_requests(owner, repo, state, page, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -677,6 +885,7 @@ def register_tools(
         owner: str,
         repo: str,
         pull_number: int,
+        account: str = "",
     ) -> dict:
         """
         Get a specific pull request.
@@ -689,7 +898,7 @@ def register_tools(
         Returns:
             Dict with pull request information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -708,6 +917,7 @@ def register_tools(
         base: str,
         body: str | None = None,
         draft: bool = False,
+        account: str = "",
     ) -> dict:
         """
         Create a new pull request.
@@ -724,7 +934,7 @@ def register_tools(
         Returns:
             Dict with created pull request information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -740,6 +950,7 @@ def register_tools(
     def github_search_code(
         query: str,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         Search code across GitHub.
@@ -751,7 +962,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -768,6 +979,7 @@ def register_tools(
         owner: str,
         repo: str,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List branches for a repository.
@@ -780,7 +992,7 @@ def register_tools(
         Returns:
             Dict with list of branches or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -795,6 +1007,7 @@ def register_tools(
         owner: str,
         repo: str,
         branch: str,
+        account: str = "",
     ) -> dict:
         """
         Get information about a specific branch.
@@ -807,11 +1020,211 @@ def register_tools(
         Returns:
             Dict with branch information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
             return client.get_branch(owner, repo, branch)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Stargazers ---
+
+    @mcp.tool()
+    def github_list_stargazers(
+        owner: str,
+        repo: str,
+        page: int = 1,
+        limit: int = 30,
+        account: str = "",
+    ) -> dict:
+        """
+        List users who starred a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of stargazers per page (1-100, default 30)
+
+        Returns:
+            Dict with list of stargazers or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_stargazers(owner, repo, page, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Users ---
+
+    @mcp.tool()
+    def github_get_user_profile(
+        username: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get a GitHub user's public profile including name, bio, company, location, and email.
+
+        Args:
+            username: GitHub username
+
+        Returns:
+            Dict with user profile information or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_user_profile(username)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_get_user_emails(
+        username: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Find a GitHub user's email addresses from their public activity.
+
+        Checks both the user's profile (public email) and their recent
+        push events for commit-author emails. Filters out noreply addresses.
+
+        Args:
+            username: GitHub username
+
+        Returns:
+            Dict with emails list (each with email and source), total count
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_user_emails(username)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Commits ---
+
+    @mcp.tool()
+    def github_list_commits(
+        owner: str,
+        repo: str,
+        sha: str | None = None,
+        author: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 30,
+        account: str = "",
+    ) -> dict:
+        """
+        List commits for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            sha: Branch name or commit SHA to list commits from (default: default branch)
+            author: GitHub username or email to filter commits by author
+            since: ISO 8601 date to list commits after (e.g. "2024-01-01T00:00:00Z")
+            until: ISO 8601 date to list commits before
+            limit: Maximum number of commits to return (1-100, default 30)
+
+        Returns:
+            Dict with list of commits or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_commits(owner, repo, sha, author, since, until, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Releases ---
+
+    @mcp.tool()
+    def github_create_release(
+        owner: str,
+        repo: str,
+        tag_name: str,
+        name: str | None = None,
+        body: str | None = None,
+        draft: bool = False,
+        prerelease: bool = False,
+        target_commitish: str | None = None,
+        account: str = "",
+    ) -> dict:
+        """
+        Create a new release for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            tag_name: The name of the tag for the release (e.g. "v1.0.0")
+            name: Release title (optional, defaults to tag_name)
+            body: Release notes in Markdown (optional)
+            draft: True to create as unpublished draft
+            prerelease: True to mark as pre-release
+            target_commitish: Branch or commit SHA to tag (default: default branch)
+
+        Returns:
+            Dict with created release information or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_release(owner, repo, tag_name, name, body, draft, prerelease, target_commitish)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Actions / Workflow Runs ---
+
+    @mcp.tool()
+    def github_list_workflow_runs(
+        owner: str,
+        repo: str,
+        workflow_id: str | None = None,
+        branch: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+        account: str = "",
+    ) -> dict:
+        """
+        List GitHub Actions workflow runs for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            workflow_id: Filter by workflow file name or ID (e.g. "ci.yml")
+            branch: Filter by branch name
+            status: Filter by status ("completed", "in_progress", "queued",
+                "success", "failure", "cancelled")
+            limit: Maximum number of runs to return (1-100, default 20)
+
+        Returns:
+            Dict with workflow runs or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_workflow_runs(owner, repo, workflow_id, branch, status, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

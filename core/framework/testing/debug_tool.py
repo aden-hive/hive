@@ -73,7 +73,9 @@ class DebugTool:
 
         Args:
             test_storage: Storage for test and result data
-            runtime_storage: Optional FileStorage for Runtime data
+            runtime_storage: Optional storage backend for Runtime data.
+                Must expose a synchronous ``load_run_sync(run_id)`` method
+                (e.g. ``ConcurrentStorage``).
         """
         self.test_storage = test_storage
         self.runtime_storage = runtime_storage
@@ -233,20 +235,16 @@ class DebugTool:
             return {}
 
         try:
-            run = self.runtime_storage.load_run(run_id)
+            # Use the synchronous loader — _get_runtime_data is not async
+            # and ConcurrentStorage.load_run() is a coroutine.
+            run = self.runtime_storage.load_run_sync(run_id)
             if not run:
                 return {"error": f"Run {run_id} not found"}
 
             return {
                 "execution_path": run.metrics.nodes_executed if hasattr(run, "metrics") else [],
-                "decisions": [
-                    d.model_dump() if hasattr(d, "model_dump") else str(d)
-                    for d in getattr(run, "decisions", [])
-                ],
-                "problems": [
-                    p.model_dump() if hasattr(p, "model_dump") else str(p)
-                    for p in getattr(run, "problems", [])
-                ],
+                "decisions": [d.model_dump() if hasattr(d, "model_dump") else str(d) for d in getattr(run, "decisions", [])],
+                "problems": [p.model_dump() if hasattr(p, "model_dump") else str(p) for p in getattr(run, "problems", [])],
                 "status": run.status.value if hasattr(run, "status") else "unknown",
             }
         except Exception as e:
@@ -268,20 +266,13 @@ class DebugTool:
 
         if failures_by_category["implementation_error"]:
             suggestions.append(
-                f"Found {len(failures_by_category['implementation_error'])} implementation errors. "
-                "Fix agent node/edge code and re-run Eval."
+                f"Found {len(failures_by_category['implementation_error'])} implementation errors. Fix agent node/edge code and re-run Eval."
             )
 
         if failures_by_category["edge_case"]:
-            suggestions.append(
-                f"Found {len(failures_by_category['edge_case'])} edge cases. "
-                "These are new scenarios - add tests for them."
-            )
+            suggestions.append(f"Found {len(failures_by_category['edge_case'])} edge cases. These are new scenarios - add tests for them.")
 
         if failures_by_category["uncategorized"]:
-            suggestions.append(
-                f"Found {len(failures_by_category['uncategorized'])} uncategorized failures. "
-                "Manual review required."
-            )
+            suggestions.append(f"Found {len(failures_by_category['uncategorized'])} uncategorized failures. Manual review required.")
 
         return suggestions

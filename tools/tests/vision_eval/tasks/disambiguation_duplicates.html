@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Identical duplicates</title>
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 160px);
+    grid-template-rows: repeat(3, 90px);
+    gap: 14px;
+    margin: 24px auto;
+    width: max-content;
+  }
+  .grid button {
+    width: 160px;
+    height: 90px;
+    background: #3a5fb8;
+    color: #ffffff;
+    border: 0;
+    border-radius: 8px;
+    font: 600 18px sans-serif;
+    cursor: pointer;
+    position: relative;
+  }
+  .grid button span {
+    position: absolute;
+    bottom: 6px;
+    right: 8px;
+    font: 600 11px sans-serif;
+    color: rgba(255, 255, 255, 0.85);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Disambiguation · Identical duplicates</h1>
+  <p class="instruction">Twelve identical blue buttons in a 4×3 grid. Each has a tiny number label in the lower-right corner (1 through 12). <strong>Click button 7.</strong></p>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+  (function () {
+    const grid = document.getElementById("grid");
+    for (let i = 1; i <= 12; i++) {
+      const btn = document.createElement("button");
+      btn.dataset.n = String(i);
+      btn.innerHTML = "Action <span>" + i + "</span>";
+      grid.appendChild(btn);
+    }
+    document.addEventListener("DOMContentLoaded", function () {
+      Eval.requireClickOn(function () {
+        return grid.querySelector('button[data-n="7"]');
+      }, { allowRetry: true });
+    });
+  })();
+</script>
+</body>
+</html>

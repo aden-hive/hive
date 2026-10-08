@@ -26,12 +26,95 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any
 
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
     from framework.credentials import CredentialStore
+
+logger = logging.getLogger(__name__)
+
+
+# Worker profiles inject their per-provider account aliases into this
+# ContextVar before each tool turn. When a tool calls
+# ``credentials.get_by_alias(provider, "")`` (or ``credentials.get(name)``),
+# the adapter consults the map and, if the provider has a binding, uses
+# that alias for the lookup. An explicit non-empty alias on the call wins.
+# Keys are credential ids (matching ``CredentialSpec.credential_id``);
+# values are the account alias to route to.
+_active_account_overrides: ContextVar[dict[str, str] | None] = ContextVar("hive_credential_account_overrides", default=None)
+
+
+@contextmanager
+def account_overrides(overrides: dict[str, str] | None):
+    """Bind ``overrides`` for the duration of the ``with`` block.
+
+    Used by the colony runtime to pin a worker's MCP tool calls to its
+    profile's aliases. Empty / ``None`` is a no-op so callers can safely
+    pass through unbound profiles without conditional logic.
+    """
+    if not overrides:
+        yield
+        return
+    token = _active_account_overrides.set(dict(overrides))
+    try:
+        yield
+    finally:
+        _active_account_overrides.reset(token)
+
+
+# Marks the current execution as a queen turn so the credential adapter
+# refuses to silently pick an account when more than one is authorized
+# for a provider. Queens have no ``worker.json`` profile to pin a
+# default account, so the right behavior is to "pressure back" and
+# force the LLM to pass ``account=<alias>``. Workers leave this False
+# and keep their existing fallthrough semantics.
+_strict_account_mode: ContextVar[bool] = ContextVar("hive_credential_strict_account_mode", default=False)
+
+
+@contextmanager
+def queen_strict_account_mode():
+    """Enable strict-account-mode for the duration of the ``with`` block.
+
+    Queen execution paths wrap ``agent_loop.execute()`` with this so
+    multi-account ambiguity surfaces as an ``AccountSelectionRequiredError``
+    the LLM can recover from, instead of a silent first-account-wins.
+    """
+    token = _strict_account_mode.set(True)
+    try:
+        yield
+    finally:
+        _strict_account_mode.reset(token)
+
+
+def is_strict_account_mode() -> bool:
+    """True when the current task is running under queen strict mode.
+
+    Read from the parent's tool-dispatch path so it can pre-flight
+    multi-account ambiguity for OAuth tools BEFORE handing them off to
+    the stdio MCP subprocess (where this ContextVar is invisible).
+    """
+    return _strict_account_mode.get()
+
+
+# Process-wide memoization for CredentialStoreAdapter.default().
+#
+# Without this, every caller (e.g. each MCP server registration in
+# tool_registry._build_mcp_admission_gate) rebuilds a fresh CredentialStore +
+# AdenSyncProvider and re-runs sync_all() against the Aden server. On a typical
+# `hive open` startup that meant 4 full syncs (one per MCP server + the parent
+# bootstrap), each round-tripping every credential. The cache key includes the
+# specs identity and ADEN_API_KEY so a deliberate change still rebuilds.
+_DEFAULT_ADAPTER_CACHE: dict[tuple[int, str | None], Any] = {}
+
+
+def _reset_default_adapter_cache() -> None:
+    """Clear the memoized default adapter. Intended for tests."""
+    _DEFAULT_ADAPTER_CACHE.clear()
 
 
 class CredentialStoreAdapter:
@@ -85,7 +168,7 @@ class CredentialStoreAdapter:
 
     # --- Existing CredentialManager API ---
 
-    def get(self, name: str) -> str | None:
+    def get(self, name: str, account: str | None = None) -> str | None:
         """
         Get a credential value by logical name.
 
@@ -94,17 +177,134 @@ class CredentialStoreAdapter:
 
         Args:
             name: Logical credential name (e.g., "brave_search")
+            account: Optional alias for per-call routing to a specific named local
+                account (e.g. "work"). When provided, looks up the named account
+                from LocalCredentialRegistry before falling through to the store.
+                This mirrors the ``account=`` routing available for Aden credentials.
 
         Returns:
             The credential value, or None if not set
 
         Raises:
             KeyError: If the credential name is not in specs
+            CredentialExpiredError: If the credential is expired and refresh failed.
+                Tool runners catch this and emit a structured ``credential_expired``
+                tool result so the agent can ask the user to reauthorize.
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
 
-        return self._store.get(name)
+        if account is None:
+            # No explicit caller-supplied alias — check whether the active
+            # worker profile has pinned this credential to a specific
+            # account. Falls through to the unaliased default lookup when
+            # no profile binding exists.
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(name)
+                if bound_alias:
+                    aliased = self.get_by_alias(name, bound_alias)
+                    if aliased is not None:
+                        return aliased
+
+            # Queen strict mode — when more than one account is authorized
+            # for this provider and no worker-profile override resolved,
+            # refuse to silently pick the first-indexed credential. The
+            # tool runner converts the raised exception into a structured
+            # ``account_selection_required`` tool result so the queen LLM
+            # can ask the user which account to use.
+            if _strict_account_mode.get():
+                spec = self._specs.get(name)
+                provider_name = getattr(spec, "aden_provider_name", "") or name
+                try:
+                    accounts = self._store.list_accounts(provider_name)
+                except Exception:
+                    # Best-effort: if listing fails we'd rather fall through
+                    # to the default lookup than hide a real error from the
+                    # LLM behind an account-selection prompt.
+                    accounts = []
+                # Collected/BYOK local accounts also count toward ambiguity —
+                # otherwise the local fallback below could silently pick one
+                # (or fail) when several exist, defeating strict mode.
+                local_accounts = []
+                try:
+                    from framework.credentials.local.registry import LocalCredentialRegistry
+
+                    local_accounts = LocalCredentialRegistry.default().list_accounts(name)
+                except Exception:
+                    local_accounts = []
+                if len(accounts) + len(local_accounts) > 1:
+                    from framework.credentials.models import (
+                        AccountSelectionRequiredError,
+                    )
+
+                    raise AccountSelectionRequiredError(
+                        credential_id=name,
+                        provider=provider_name,
+                        message=(f"Multiple {provider_name} accounts are authorized; specify which one to use via account=<alias>."),
+                        available_accounts=[
+                            {
+                                "alias": acct.get("alias", ""),
+                                "identity": acct.get("identity", {}) or {},
+                            }
+                            for acct in accounts
+                        ]
+                        + [
+                            {
+                                "alias": la.alias,
+                                "identity": la.identity.to_dict(),
+                            }
+                            for la in local_accounts
+                        ],
+                    )
+
+        if account is not None:
+            try:
+                from framework.credentials.local.registry import LocalCredentialRegistry
+
+                key = LocalCredentialRegistry.default().get_key(name, account)
+                if key is not None:
+                    return key
+            except Exception:
+                pass  # Fall through to standard store lookup
+
+        try:
+            value = self._store.get(name, raise_on_refresh_failure=True)
+        except Exception as exc:
+            # CredentialExpiredError must propagate for the tool runner to
+            # convert into a structured result. Only enrich help_url here
+            # so the runner does not need to import specs.
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
+
+        if value is None and account is None:
+            # No Aden/store credential resolved. Fall back to a single
+            # collected local account (LocalCredentialRegistry) so a provider
+            # tool that calls get(name) without an alias still resolves the
+            # one stored key. Stays None when 0 or >1 local accounts exist —
+            # the multi-account case must be disambiguated with account=.
+            local = self._single_local_account_key(name)
+            if local is not None:
+                return local
+        return value
+
+    def _single_local_account_key(self, name: str) -> str | None:
+        """Return the key of the sole local account for ``name``, else None."""
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            registry = LocalCredentialRegistry.default()
+            accounts = registry.list_accounts(name)
+            if len(accounts) == 1:
+                return registry.get_key(name, accounts[0].alias)
+        except Exception:
+            return None
+        return None
 
     def get_spec(self, name: str) -> CredentialSpec:
         """Get the spec for a credential."""
@@ -272,6 +472,181 @@ class CredentialStoreAdapter:
         """Resolve credential templates in query parameters."""
         return self._store.resolve_params(params)
 
+    def list_accounts(self, provider_name: str) -> list[dict]:
+        """List all accounts for a provider type."""
+        return self._store.list_accounts(provider_name)
+
+    def get_all_account_info(self) -> list[dict]:
+        """Collect all accounts across all configured providers.
+
+        Includes both Aden OAuth accounts and named local API key accounts.
+        Deduplicates by (provider, alias) to avoid listing the same account
+        twice when it appears in both stores.
+        """
+        accounts: list[dict] = []
+        seen_specs: set[str] = set()
+        seen_accounts: set[tuple[str, str]] = set()
+        lookup_counts: dict[str, int] = {}
+
+        for name, spec in self._specs.items():
+            cred_id = spec.credential_id or name
+            # ``_store.list_accounts`` keys by the OAuth provider name
+            # (``notion``), not the credential_id (``notion_token``).
+            # Notion is the canonical example where the two diverge —
+            # using cred_id silently returned no accounts and made
+            # Notion look permanently disconnected.
+            provider = getattr(spec, "aden_provider_name", "") or cred_id
+            if cred_id in seen_specs:
+                continue
+            # Isolate each provider: a single unreadable credential (e.g. a
+            # stale .enc encrypted with an old HIVE_CREDENTIAL_KEY) must not
+            # abort enumeration — otherwise one bad file blanks every account
+            # on the Integrations page / browse / queen prompt.
+            try:
+                if not self.is_available(name):
+                    continue
+                provider_accts = self._store.list_accounts(provider)
+            except Exception:
+                logger.debug("get_all_account_info: skipping unreadable provider %s", provider, exc_info=True)
+                continue
+            seen_specs.add(cred_id)
+            lookup_counts[provider] = len(provider_accts)
+            for acct in provider_accts:
+                key = (acct.get("provider", ""), acct.get("alias", ""))
+                if key not in seen_accounts:
+                    seen_accounts.add(key)
+                    accounts.append(acct)
+
+        # Diagnostic: per-provider account counts. A provider that should
+        # be connected but shows 0 here points at a provider-index key
+        # mismatch between the spec and what Aden returned. Debug-level
+        # since this is fired on every /credentials/oauth-status poll.
+        logger.debug("get_all_account_info: per-provider account counts=%s", lookup_counts)
+
+        # Include named local API key accounts
+        for acct in self.list_local_accounts():
+            key = (acct.get("provider", ""), acct.get("alias", ""))
+            if key not in seen_accounts:
+                seen_accounts.add(key)
+                accounts.append(acct)
+
+        return accounts
+
+    def get_tool_provider_map(self) -> dict[str, str]:
+        """Map tool names to provider names for account routing.
+
+        Returns:
+            Dict mapping tool_name -> provider_name
+            (e.g. {"gmail_list_messages": "google", "slack_send_message": "slack"})
+        """
+        return dict(self._tool_to_cred)
+
+    def get_by_alias(self, provider_name: str, alias: str) -> str | None:
+        """Resolve a specific account's token by alias.
+
+        When ``alias`` is empty, falls back to the active worker profile's
+        binding (if any). MCP tools default ``account=""`` so this lets a
+        worker profile pin a default account without requiring the agent
+        to supply it on every call.
+
+        Raises:
+            CredentialExpiredError: If the matched credential is expired and
+                refresh failed.
+        """
+        if not alias:
+            overrides = _active_account_overrides.get()
+            if overrides:
+                bound_alias = overrides.get(provider_name)
+                if bound_alias:
+                    alias = bound_alias
+        if not alias:
+            return None
+        cred = self._store.get_credential_by_alias(provider_name, alias)
+        if cred is None:
+            # Locally-collected accounts (LocalCredentialRegistry) live
+            # outside the Aden store index, so get_credential_by_alias misses
+            # them. Resolve directly so MCP tools that route via
+            # get_by_alias(provider, account) can use a collected key.
+            try:
+                from framework.credentials.local.registry import LocalCredentialRegistry
+
+                local_key = LocalCredentialRegistry.default().get_key(provider_name, alias)
+                if local_key is not None:
+                    return local_key
+            except Exception:
+                pass
+            return None
+        # Re-fetch through get_credential so refresh-on-access fires with
+        # raise_on_refresh_failure semantics. Aliased lookups otherwise skip
+        # the refresh path.
+        try:
+            refreshed = self._store.get_credential(cred.id, raise_on_refresh_failure=True)
+        except Exception as exc:
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(provider_name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
+        return refreshed.get_default_key() if refreshed else None
+
+    def get_by_identity(self, provider_name: str, label: str) -> str | None:
+        """Alias for get_by_alias (backward compat)."""
+        return self.get_by_alias(provider_name, label)
+
+    # --- Local credential registry ---
+
+    def list_local_accounts(self, credential_id: str | None = None) -> list[dict]:
+        """
+        List named local API key accounts from LocalCredentialRegistry.
+
+        Args:
+            credential_id: If given, filter to this credential type only.
+
+        Returns:
+            List of account dicts (same shape as Aden account dicts, source='local').
+        """
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            registry = LocalCredentialRegistry.default()
+            return [info.to_account_dict() for info in registry.list_accounts(credential_id)]
+        except Exception:
+            return []
+
+    def activate_local_account(self, credential_id: str, alias: str) -> bool:
+        """
+        Inject a named local account's API key into the environment for this session.
+
+        This enables session-level routing: select an account → inject its key as
+        the env var that tools already read. No tool signature changes required.
+
+        Args:
+            credential_id: Logical credential name (e.g. "brave_search").
+            alias: Account alias (e.g. "work").
+
+        Returns:
+            True if the key was found and injected, False otherwise.
+        """
+        import os
+
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            key = LocalCredentialRegistry.default().get_key(credential_id, alias)
+            if key is None:
+                return False
+
+            spec = self._specs.get(credential_id)
+            if spec is None:
+                return False
+
+            os.environ[spec.env_var] = key
+            return True
+        except Exception:
+            return False
+
     @property
     def store(self) -> CredentialStore:
         """Access the underlying credential store for advanced operations."""
@@ -347,6 +722,119 @@ class CredentialStoreAdapter:
         return "\n".join(lines)
 
     # --- Factory Methods ---
+
+    @classmethod
+    def default(
+        cls,
+        specs: dict[str, CredentialSpec] | None = None,
+    ) -> CredentialStoreAdapter:
+        """Create adapter with encrypted storage primary and env var fallback.
+
+        When ADEN_API_KEY is set, builds the store with AdenSyncProvider and
+        AdenCachedStorage so that OAuth credentials (Google, HubSpot, Slack)
+        auto-refresh via the Aden server.  Non-Aden credentials (brave_search,
+        anthropic, resend) still resolve from environment variables.
+
+        When ADEN_API_KEY is not set, behaves identically to before.
+        """
+        import logging
+        import os
+
+        from framework.credentials import CredentialStore
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
+
+        log = logging.getLogger(__name__)
+
+        if specs is None:
+            from . import CREDENTIAL_SPECS
+
+            specs = CREDENTIAL_SPECS
+
+        # Return memoized instance when available. The full default() body —
+        # provider construction + sync_all() — is expensive (network round-trip
+        # per credential). Multiple call sites (notably the MCP admission gate
+        # in tool_registry, which fires once per server) hit this on startup.
+        cache_key = (id(specs), os.environ.get("ADEN_API_KEY"))
+        cached = _DEFAULT_ADAPTER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        env_mapping = {name: spec.env_var for name, spec in specs.items()}
+
+        # --- Aden sync branch ---
+        # Note: we don't use CredentialStore.with_aden_sync() here because it
+        # only wraps EncryptedFileStorage.  We need CompositeStorage (encrypted
+        # + env var fallback) so non-Aden credentials like brave_search still
+        # resolve from environment variables.
+        aden_api_key = os.environ.get("ADEN_API_KEY")
+        if aden_api_key:
+            try:
+                from framework.credentials.aden import (
+                    AdenCachedStorage,
+                    AdenClientConfig,
+                    AdenCredentialClient,
+                    AdenSyncProvider,
+                )
+
+                # Local storage: encrypted primary + env var fallback
+                encrypted = EncryptedFileStorage()
+                env = EnvVarStorage(env_mapping)
+                local_composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+
+                # Aden components
+                # Use 5-second timeout to avoid blocking on slow/failed requests
+                client = AdenCredentialClient(
+                    AdenClientConfig(
+                        base_url=os.environ.get("ADEN_API_URL", "https://app.open-hive.com"),
+                        timeout=5.0,
+                    )
+                )
+                provider = AdenSyncProvider(client=client)
+
+                # AdenCachedStorage wraps composite, giving Aden priority
+                cached_storage = AdenCachedStorage(
+                    local_storage=local_composite,
+                    aden_provider=provider,
+                    cache_ttl_seconds=300,
+                )
+
+                store = CredentialStore(
+                    storage=cached_storage,
+                    providers=[provider],
+                    auto_refresh=True,
+                )
+
+                # Initial sync: populate local cache from Aden
+                try:
+                    synced = provider.sync_all(store)
+                    log.info("Aden credential sync complete: %d credentials synced", synced)
+                except Exception as e:
+                    log.warning("Aden initial sync failed (will retry on access): %s", e)
+
+                instance = cls(store=store, specs=specs)
+                _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+                return instance
+
+            except Exception as e:
+                log.warning("Aden credential sync unavailable, falling back to default storage: %s", e)
+
+        # --- Default branch (no ADEN_API_KEY or Aden setup failed) ---
+        try:
+            encrypted = EncryptedFileStorage()
+            env = EnvVarStorage(env_mapping)
+            composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+            store = CredentialStore(storage=composite)
+        except Exception as e:
+            log.warning("Encrypted credential storage unavailable, falling back to env vars: %s", e)
+            store = CredentialStore.with_env_storage(env_mapping)
+
+        instance = cls(store=store, specs=specs)
+        _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+        return instance
 
     @classmethod
     def for_testing(

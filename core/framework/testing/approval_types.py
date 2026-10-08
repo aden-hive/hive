@@ -6,13 +6,13 @@ programmatic/MCP-based approval.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ApprovalAction(str, Enum):
+class ApprovalAction(StrEnum):
     """Actions a user can take on a generated test."""
 
     APPROVE = "approve"  # Accept as-is
@@ -61,9 +61,7 @@ class ApprovalResult(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
     @classmethod
-    def success_result(
-        cls, test_id: str, action: ApprovalAction, message: str | None = None
-    ) -> "ApprovalResult":
+    def success_result(cls, test_id: str, action: ApprovalAction, message: str | None = None) -> "ApprovalResult":
         """Create a successful result."""
         return cls(
             test_id=test_id,

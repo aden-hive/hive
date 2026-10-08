@@ -11,6 +11,7 @@ Auto-detection: If provider="auto", tries Brave first (backward compatible), the
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -35,27 +36,35 @@ def register_tools(
         cse_id: str,
     ) -> dict:
         """Execute search using Google Custom Search API."""
-        response = httpx.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={
-                "key": api_key,
-                "cx": cse_id,
-                "q": query,
-                "num": min(num_results, 10),
-                "lr": f"lang_{language}",
-                "gl": country,
-            },
-            timeout=30.0,
-        )
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            response = httpx.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": api_key,
+                    "cx": cse_id,
+                    "q": query,
+                    "num": min(num_results, 10),
+                    "lr": f"lang_{language}",
+                    "gl": country,
+                },
+                timeout=30.0,
+            )
 
-        if response.status_code == 401:
-            return {"error": "Invalid Google API key"}
-        elif response.status_code == 403:
-            return {"error": "Google API key not authorized or quota exceeded"}
-        elif response.status_code == 429:
-            return {"error": "Google rate limit exceeded. Try again later."}
-        elif response.status_code != 200:
-            return {"error": f"Google API request failed: HTTP {response.status_code}"}
+            if response.status_code == 429 and attempt < max_retries:
+                time.sleep(2**attempt)
+                continue
+
+            if response.status_code == 401:
+                return {"error": "Invalid Google API key"}
+            elif response.status_code == 403:
+                return {"error": "Google API key not authorized or quota exceeded"}
+            elif response.status_code == 429:
+                return {"error": "Google rate limit exceeded. Try again later."}
+            elif response.status_code != 200:
+                return {"error": f"Google API request failed: HTTP {response.status_code}"}
+
+            break
 
         data = response.json()
         results = []
@@ -82,26 +91,34 @@ def register_tools(
         api_key: str,
     ) -> dict:
         """Execute search using Brave Search API."""
-        response = httpx.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            params={
-                "q": query,
-                "count": min(num_results, 20),
-                "country": country,
-            },
-            headers={
-                "X-Subscription-Token": api_key,
-                "Accept": "application/json",
-            },
-            timeout=30.0,
-        )
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            response = httpx.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={
+                    "q": query,
+                    "count": min(num_results, 20),
+                    "country": country,
+                },
+                headers={
+                    "X-Subscription-Token": api_key,
+                    "Accept": "application/json",
+                },
+                timeout=30.0,
+            )
 
-        if response.status_code == 401:
-            return {"error": "Invalid Brave API key"}
-        elif response.status_code == 429:
-            return {"error": "Brave rate limit exceeded. Try again later."}
-        elif response.status_code != 200:
-            return {"error": f"Brave API request failed: HTTP {response.status_code}"}
+            if response.status_code == 429 and attempt < max_retries:
+                time.sleep(2**attempt)
+                continue
+
+            if response.status_code == 401:
+                return {"error": "Invalid Brave API key"}
+            elif response.status_code == 429:
+                return {"error": "Brave rate limit exceeded. Try again later."}
+            elif response.status_code != 200:
+                return {"error": f"Brave API request failed: HTTP {response.status_code}"}
+
+            break
 
         data = response.json()
         results = []

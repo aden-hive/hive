@@ -40,7 +40,7 @@ Register an MCP server as a tool source for your agent.
     "command": "python",
     "args": "[\"mcp_server.py\", \"--stdio\"]",
     "cwd": "../tools",
-    "description": "Aden tools for web search and file operations"
+    "description": "Hive tools for web search and file operations"
   }
 }
 ```
@@ -70,19 +70,18 @@ Register an MCP server as a tool source for your agent.
     "command": "python",
     "args": ["mcp_server.py", "--stdio"],
     "cwd": "../tools",
-    "description": "Aden tools..."
+    "description": "Hive tools..."
   },
-  "tools_discovered": 6,
+  "tools_discovered": 5,
   "tools": [
     "web_search",
     "web_scrape",
     "file_read",
     "file_write",
-    "pdf_read",
-    "example_tool"
+    "pdf_read"
   ],
   "total_mcp_servers": 1,
-  "note": "MCP server 'tools' registered with 6 tools. These tools can now be used in llm_tool_use nodes."
+  "note": "MCP server 'tools' registered with 5 tools. These tools can now be used in event_loop nodes."
 }
 ```
 
@@ -103,7 +102,7 @@ List all registered MCP servers.
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
       "cwd": "../tools",
-      "description": "Aden tools..."
+      "description": "Hive tools..."
     }
   ],
   "total": 1
@@ -149,7 +148,7 @@ List tools available from registered MCP servers.
     ]
   },
   "total_tools": 6,
-  "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes"
+  "note": "Use these tool names in the 'tools' parameter when adding event_loop nodes"
 }
 ```
 
@@ -246,7 +245,7 @@ Here's a complete workflow for building an agent with MCP tools:
     "node_id": "web-searcher",
     "name": "Web Search",
     "description": "Search the web for information",
-    "node_type": "llm_tool_use",
+    "node_type": "event_loop",
     "input_keys": "[\"query\"]",
     "output_keys": "[\"search_results\"]",
     "system_prompt": "Search for {query} using the web_search tool",
@@ -285,7 +284,7 @@ When you export an agent with registered MCP servers, an `mcp_servers.json` file
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
       "cwd": "../tools",
-      "description": "Aden tools for web search and file operations"
+      "description": "Hive tools for web search and file operations"
     }
   ]
 }

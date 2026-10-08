@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Rasterized labels</title>
+<style>
+  .row { display: flex; gap: 18px; margin: 24px auto; width: max-content; }
+  .btn {
+    width: 180px; height: 70px;
+    background: #f0f0f0;
+    border: 1px solid #aaa;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .btn canvas { display: block; }
+  .btn:hover { background: #e6e6e6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Disambiguation · Rasterized labels</h1>
+  <p class="instruction">Five buttons. The labels are <em>rendered as pixels onto canvases</em> — there is no DOM text to read. <strong>Click the button labeled "Confirm".</strong></p>
+</header>
+<div class="row" id="row"></div>
+<script>
+  (function () {
+    const labels = ["Reject", "Cancel", "Confirm", "Pause", "Reset"];
+    const row = document.getElementById("row");
+    labels.forEach(function (label) {
+      const wrap = document.createElement("div");
+      wrap.className = "btn";
+      wrap.dataset.label = label;
+      const c = document.createElement("canvas");
+      c.width = 160; c.height = 50;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#222";
+      ctx.font = "600 22px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, 80, 27);
+      wrap.appendChild(c);
+      row.appendChild(wrap);
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+      Eval.requireClickOn(function () {
+        return row.querySelector('[data-label="Confirm"]');
+      }, { allowRetry: true });
+    });
+  })();
+</script>
+</body>
+</html>

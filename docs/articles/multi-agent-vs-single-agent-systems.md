@@ -107,18 +107,18 @@ Multiple specialized agents collaborate, each handling specific tasks or domains
 | LangChain | Excellent | Basic | Manual chains |
 | CrewAI | Good | Excellent | Role-based crews |
 | AutoGen | Good | Excellent | Conversation-based |
-| Aden | Excellent | Excellent | Goal-driven + Self-improving |
+| Hive | Excellent | Excellent | Goal-driven + Self-improving |
 
 ---
 
-## Aden's Hybrid Approach
+## Hive's Hybrid Approach
 
-Aden takes a unique approach by combining both paradigms:
+Hive takes a unique approach by combining both paradigms:
 
 ### The Two-Agent Core
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                      Aden System                           │
+│                      Hive System                           │
 │                                                            │
 │  ┌──────────────────┐     ┌──────────────────────────┐   │
 │  │   Coding Agent   │     │     Worker Agents        │   │
@@ -144,7 +144,7 @@ Aden takes a unique approach by combining both paradigms:
 3. **Best of Both**: Simple development (goal-based) with multi-agent power
 4. **Self-Improving**: The system evolves based on execution feedback
 
-### When Aden Shines
+### When Hive Shines
 - You want multi-agent power without multi-agent complexity
 - Your system needs to improve itself over time
 - You need production controls (budgets, HITL, monitoring)
@@ -212,7 +212,7 @@ Topic → Researcher Agent → Writer Agent → Editor Agent → Report
 ```
 
 ### Example 3: E-commerce Order Processing
-**Recommended: Multi-Agent with Aden**
+**Recommended: Multi-Agent with Hive**
 
 Why: Multiple systems, needs reliability, self-improvement valuable
 ```
@@ -222,7 +222,7 @@ Payment → Finance Agent ─┘
 ```
 
 ### Example 4: Code Review Assistant
-**Recommended: Hybrid (Aden)**
+**Recommended: Hybrid (Hive)**
 
 Why: Needs specialization but also coordination
 ```
@@ -276,7 +276,7 @@ PR → Coding Agent generates → [Security Agent, Style Agent, Logic Agent]
 - Reliability through redundancy matters
 - System complexity warrants specialization
 
-**Choose Aden's Hybrid Approach when:**
+**Choose Hive's Hybrid Approach when:**
 - You want multi-agent power with single-agent simplicity
 - Self-improvement is valuable
 - Production controls are essential

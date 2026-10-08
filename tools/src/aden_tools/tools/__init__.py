@@ -7,12 +7,16 @@ Usage:
     from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.with_env_storage()
+    credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
+
+    # To also load unverified (community/new) integrations:
+    register_all_tools(mcp, credentials=credentials, include_unverified=True)
 """
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
@@ -20,34 +24,352 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
-# Import register_tools from each tool module
-from .csv_tool import register_tools as register_csv
-from .email_tool import register_tools as register_email
-from .example_tool import register_tools as register_example
-from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
-from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
-from .file_system_toolkits.execute_command_tool import (
-    register_tools as register_execute_command,
-)
-from .file_system_toolkits.grep_search import register_tools as register_grep_search
-from .file_system_toolkits.list_dir import register_tools as register_list_dir
-from .file_system_toolkits.replace_file_content import (
-    register_tools as register_replace_file_content,
-)
 
-# Import file system toolkits
-from .file_system_toolkits.view_file import register_tools as register_view_file
-from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+# ---------------------------------------------------------------------------
+# Verified tools (stable, on main)
+# ---------------------------------------------------------------------------
+# File system: one canonical module for read/write/edit/search/patch.
+# Shell: still its own toolkit.
+from .account_info_tool import register_tools as register_account_info
+
+# ---------------------------------------------------------------------------
+# Unverified tools (new integrations, pending review)
+# ---------------------------------------------------------------------------
+from .airtable_tool import register_tools as register_airtable
+from .apify_tool import register_tools as register_apify
+from .apollo_tool import register_tools as register_apollo
+from .arxiv_tool import register_tools as register_arxiv
+from .asana_tool import register_tools as register_asana
+from .attach_file_tool import register_tools as register_attach_file
+from .attio_tool import register_tools as register_attio
+from .aws_s3_tool import register_tools as register_aws_s3
+from .azure_sql_tool import register_tools as register_azure_sql
+from .bigquery_tool import register_tools as register_bigquery
+from .brevo_tool import register_tools as register_brevo
+from .calcom_tool import register_tools as register_calcom
+from .calendar_tool import register_tools as register_calendar
+from .calendly_tool import register_tools as register_calendly
+from .cloudflare_tool import register_tools as register_cloudflare
+from .cloudinary_tool import register_tools as register_cloudinary
+from .confluence_tool import register_tools as register_confluence
+from .csv_tool import register_tools as register_csv
+from .databricks_tool import register_tools as register_databricks
+from .discord_tool import register_tools as register_discord
+from .dns_security_scanner import register_tools as register_dns_security_scanner
+from .docker_hub_tool import register_tools as register_docker_hub
+from .duckduckgo_tool import register_tools as register_duckduckgo
+from .email_tool import register_tools as register_email
+from .exa_search_tool import register_tools as register_exa_search
+from .excel_tool import register_tools as register_excel
+from .freshdesk_tool import register_tools as register_freshdesk
 from .github_tool import register_tools as register_github
+from .gitlab_tool import register_tools as register_gitlab
+from .gmail_tool import register_tools as register_gmail
+from .google_analytics_tool import register_tools as register_google_analytics
+from .google_docs_tool import register_tools as register_google_docs
+from .google_maps_tool import register_tools as register_google_maps
+from .google_search_console_tool import register_tools as register_google_search_console
+from .google_sheets_tool import register_tools as register_google_sheets
+from .greenhouse_tool import register_tools as register_greenhouse
+from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
+from .huggingface_tool import register_tools as register_huggingface
+
+# image_generate routes through the Hive LLM proxy and is billed to the user's
+# credits like an LLM call. It is credential-less (auth is the runtime's
+# HIVE_API_KEY proxy token), so it MUST be verified — the queen MCP admission
+# gate drops credential-less tools that are absent from the verified manifest.
+from .image_gen_tool import register_tools as register_image_gen
+from .intercom_tool import register_tools as register_intercom
+from .jira_tool import register_tools as register_jira
+from .kafka_tool import register_tools as register_kafka
+from .langfuse_tool import register_tools as register_langfuse
+from .linear_tool import register_tools as register_linear
+from .lusha_tool import register_tools as register_lusha
+from .mattermost_tool import register_tools as register_mattermost
+from .microsoft_graph_tool import register_tools as register_microsoft_graph
+from .mongodb_tool import register_tools as register_mongodb
+from .n8n_tool import register_tools as register_n8n
+from .news_tool import register_tools as register_news
+from .notion_tool import register_tools as register_notion
+from .obsidian_tool import register_tools as register_obsidian
+from .pagerduty_tool import register_tools as register_pagerduty
 from .pdf_read_tool import register_tools as register_pdf_read
-from .web_scrape_tool import register_tools as register_web_scrape
+from .pinecone_tool import register_tools as register_pinecone
+from .pipedrive_tool import register_tools as register_pipedrive
+from .plaid_tool import register_tools as register_plaid
+from .port_scanner import register_tools as register_port_scanner
+from .postgres_tool import register_tools as register_postgres
+from .powerbi_tool import register_tools as register_powerbi
+from .prometheus_tool import register_tools as register_prometheus
+from .pushover_tool import register_tools as register_pushover
+from .quickbooks_tool import register_tools as register_quickbooks
+from .razorpay_tool import register_tools as register_razorpay
+from .reddit_tool import register_tools as register_reddit
+from .redis_tool import register_tools as register_redis
+from .redshift_tool import register_tools as register_redshift
+from .risk_scorer import register_tools as register_risk_scorer
+from .salesforce_tool import register_tools as register_salesforce
+from .sap_tool import register_tools as register_sap
+
+# Email senders: a unified send_email/list_senders/pick_sender/send_campaign
+# surface over the team's cloud-configured sender pool. Credential-less at the
+# MCP layer (secrets/tokens come from the sender registry, not the per-tool
+# credential store), so it MUST be verified — the queen admission gate drops
+# credential-less tools absent from the verified manifest.
+from .senders_tool import register_tools as register_senders
+from .serpapi_tool import register_tools as register_serpapi
+from .shopify_tool import register_tools as register_shopify
+from .similarweb_tool import register_tools as register_similarweb
+from .slack_tool import register_tools as register_slack
+from .snowflake_tool import register_tools as register_snowflake
+from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .stripe_tool import register_tools as register_stripe
+from .subdomain_enumerator import register_tools as register_subdomain_enumerator
+from .supabase_tool import register_tools as register_supabase
+from .tech_stack_detector import register_tools as register_tech_stack_detector
+from .telegram_tool import register_tools as register_telegram
+from .terraform_tool import register_tools as register_terraform
+from .time_tool import register_tools as register_time
+from .tines_tool import register_tools as register_tines
+from .trello_tool import register_tools as register_trello
+from .twilio_tool import register_tools as register_twilio
+from .twitter_tool import register_tools as register_twitter
+from .vercel_tool import register_tools as register_vercel
+from .vision_tool import register_tools as register_vision
+from .wandb_tool import register_tools as register_wandb
+
+try:
+    from .web_scrape_tool import register_tools as register_web_scrape
+except ImportError:
+    # playwright not installed - web_scrape_tool unavailable
+    register_web_scrape = None  # type: ignore
 from .web_search_tool import register_tools as register_web_search
+from .wikipedia_tool import register_tools as register_wikipedia
+from .yahoo_finance_tool import register_tools as register_yahoo_finance
+from .youtube_tool import register_tools as register_youtube
+from .youtube_transcript_tool import register_tools as register_youtube_transcript
+from .zendesk_tool import register_tools as register_zendesk
+from .zoho_crm_tool import register_tools as register_zoho_crm
+from .zoom_tool import register_tools as register_zoom
+
+# Tool names registered by `_register_verified()`. Populated on first call.
+# Consumed by the `__aden_verified_manifest` sentinel tool so downstream
+# registries (e.g. the queen's MCP loader) can gate free/credential-less tools
+# on whether they have been promoted to verified status.
+_VERIFIED_TOOL_NAMES: set[str] = set()
+
+
+def _email_senders_enabled() -> bool:
+    """Whether the email-senders suite should be registered. Default: no.
+
+    Reads ``HIVE_EMAIL_SENDERS``, which the runtime publishes into the
+    environment every MCP subprocess inherits. Env is the only channel:
+    ``aden_tools`` deliberately knows nothing about configuration.json —
+    the runtime resolves the flag (env > config file > off) and hands us
+    the answer, exactly as ``INCLUDE_UNVERIFIED_TOOLS`` works.
+
+    Absent env means off, which is also what a bare ``python
+    mcp_server.py`` gets: the suite is opt-in everywhere, not just in the
+    desktop.
+    """
+    raw = os.getenv("HIVE_EMAIL_SENDERS", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _register_verified(
+    mcp: FastMCP,
+    credentials: CredentialStoreAdapter | None = None,
+) -> None:
+    """Register verified (stable) tools."""
+    _verified_before = set(mcp._tool_manager._tools.keys())
+    # --- No credentials ---
+    if register_web_scrape:
+        register_web_scrape(mcp)
+    register_pdf_read(mcp)
+    register_attach_file(mcp)
+    register_time(mcp)
+    register_wikipedia(mcp)
+    register_arxiv(mcp)
+    # Credential-less: bills via the Hive proxy using the runtime's HIVE_API_KEY.
+    register_image_gen(mcp)
+    # Credential-less: senders resolve secrets/tokens from the cloud sender
+    # registry, so a queen that has them needs no per-tool credential (an
+    # empty pool self-describes). Gated OFF by default: senders are an
+    # advanced developer feature, opted into in the desktop's Settings →
+    # Developer, which writes `email_senders` to configuration.json and
+    # republishes it as HIVE_EMAIL_SENDERS (framework.config
+    # .sync_email_senders_env). Not registering is the whole gate — the
+    # tools are then absent from the MCP catalog, so no prompt manifest,
+    # tool search, allowlist or allow-all fallback can surface them, and
+    # the model has no way to learn the feature exists.
+    if _email_senders_enabled():
+        register_senders(mcp)
+
+    # Tools that need credentials (pass credentials if provided)
+    # web_search supports multiple providers (Google, Brave) with auto-detection
+    register_web_search(mcp, credentials=credentials)
+    register_github(mcp, credentials=credentials)
+    # email supports multiple providers (Gmail, Resend)
+    register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
+    register_hubspot(mcp, credentials=credentials)
+    register_intercom(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_google_analytics(mcp, credentials=credentials)
+    register_google_docs(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
+    register_google_sheets(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
+
+    # --- File system + shell ---
+    # Coding roles can opt into structured edits. read_file ships alongside
+    # edit_file because it records the state used by the stale-edit guard.
+    from aden_tools.file_ops import register_file_tools
+
+    register_file_tools(mcp, tool_names={"read_file", "edit_file"})
+    register_csv(mcp)
+    register_excel(mcp)
+
+    # --- Security scanning (no credentials) ---
+    register_ssl_tls_scanner(mcp)
+    register_http_headers_scanner(mcp)
+    register_dns_security_scanner(mcp)
+    register_port_scanner(mcp)
+    register_tech_stack_detector(mcp)
+    register_subdomain_enumerator(mcp)
+    register_risk_scorer(mcp)
+
+    # --- Credentials required ---
+    register_web_search(mcp, credentials=credentials)
+    register_github(mcp, credentials=credentials)
+    register_email(mcp, credentials=credentials)
+    register_gmail(mcp, credentials=credentials)
+    register_hubspot(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_google_docs(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
+    register_notion(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
+
+    _VERIFIED_TOOL_NAMES.update(set(mcp._tool_manager._tools.keys()) - _verified_before)
+
+
+def _register_manifest(mcp: FastMCP) -> None:
+    """Expose the verified-tool manifest as a sentinel MCP tool.
+
+    Registered after both verified and unverified passes so the manifest tool
+    itself never appears in `_VERIFIED_TOOL_NAMES`. Downstream registries call
+    this to decide whether a credential-less tool is safe to admit.
+    """
+
+    @mcp.tool(name="__aden_verified_manifest")
+    def aden_verified_manifest() -> list[str]:
+        """Return tool names registered by `_register_verified()`."""
+        return sorted(_VERIFIED_TOOL_NAMES)
+
+
+def _register_unverified(
+    mcp: FastMCP,
+    credentials: CredentialStoreAdapter | None = None,
+) -> None:
+    """Register unverified (new/community) tools."""
+    # --- No credentials ---
+    register_duckduckgo(mcp)
+    register_yahoo_finance(mcp)
+    register_youtube_transcript(mcp)
+
+    # --- Credentials required ---
+    register_airtable(mcp, credentials=credentials)
+    register_apify(mcp, credentials=credentials)
+    register_asana(mcp, credentials=credentials)
+    register_attio(mcp, credentials=credentials)
+    register_aws_s3(mcp, credentials=credentials)
+    register_azure_sql(mcp, credentials=credentials)
+    register_intercom(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_stripe(mcp, credentials=credentials)
+    register_postgres(mcp, credentials=credentials)
+    register_calendly(mcp, credentials=credentials)
+    register_cloudflare(mcp, credentials=credentials)
+    register_cloudinary(mcp, credentials=credentials)
+    register_confluence(mcp, credentials=credentials)
+    register_databricks(mcp, credentials=credentials)
+    register_docker_hub(mcp, credentials=credentials)
+    register_gitlab(mcp, credentials=credentials)
+    register_google_analytics(mcp, credentials=credentials)
+    register_google_search_console(mcp, credentials=credentials)
+    register_google_sheets(mcp, credentials=credentials)
+    register_greenhouse(mcp, credentials=credentials)
+    register_huggingface(mcp, credentials=credentials)
+    register_jira(mcp, credentials=credentials)
+    register_kafka(mcp, credentials=credentials)
+    register_langfuse(mcp, credentials=credentials)
+    register_linear(mcp, credentials=credentials)
+    register_lusha(mcp, credentials=credentials)
+    register_mattermost(mcp, credentials=credentials)
+    register_microsoft_graph(mcp, credentials=credentials)
+    register_mongodb(mcp, credentials=credentials)
+    register_n8n(mcp, credentials=credentials)
+    register_obsidian(mcp, credentials=credentials)
+    register_pagerduty(mcp, credentials=credentials)
+    register_pinecone(mcp, credentials=credentials)
+    register_pipedrive(mcp, credentials=credentials)
+    register_plaid(mcp, credentials=credentials)
+    register_powerbi(mcp, credentials=credentials)
+    register_prometheus(mcp, credentials=credentials)
+    register_pushover(mcp, credentials=credentials)
+    register_quickbooks(mcp, credentials=credentials)
+    register_reddit(mcp, credentials=credentials)
+    register_redis(mcp, credentials=credentials)
+    register_redshift(mcp, credentials=credentials)
+    register_salesforce(mcp, credentials=credentials)
+    register_sap(mcp, credentials=credentials)
+    register_shopify(mcp, credentials=credentials)
+    register_similarweb(mcp, credentials=credentials)
+    register_snowflake(mcp, credentials=credentials)
+    register_supabase(mcp, credentials=credentials)
+    register_terraform(mcp, credentials=credentials)
+    register_tines(mcp, credentials=credentials)
+    register_trello(mcp, credentials=credentials)
+    register_twilio(mcp, credentials=credentials)
+    register_twitter(mcp, credentials=credentials)
+    register_vercel(mcp, credentials=credentials)
+    register_youtube(mcp, credentials=credentials)
+    register_zendesk(mcp, credentials=credentials)
+    register_zoho_crm(mcp, credentials=credentials)
+    register_zoom(mcp, credentials=credentials)
+    register_wandb(mcp, credentials=credentials)
+    register_freshdesk(mcp, credentials=credentials)
 
 
 def register_all_tools(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
+    include_unverified: bool = False,
 ) -> list[str]:
     """
     Register all tools with a FastMCP server.
@@ -56,80 +378,20 @@ def register_all_tools(
         mcp: FastMCP server instance
         credentials: Optional CredentialStoreAdapter instance.
                      If not provided, tools fall back to direct os.getenv() calls.
+        include_unverified: If True, also register unverified/community tools.
+                           Defaults to False for production safety.
 
     Returns:
         List of registered tool names
     """
-    # Tools that don't need credentials
-    register_example(mcp)
-    register_web_scrape(mcp)
-    register_pdf_read(mcp)
+    _register_verified(mcp, credentials=credentials)
 
-    # Tools that need credentials (pass credentials if provided)
-    # web_search supports multiple providers (Google, Brave) with auto-detection
-    register_web_search(mcp, credentials=credentials)
-    register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
-    register_email(mcp, credentials=credentials)
-    register_hubspot(mcp, credentials=credentials)
+    if include_unverified:
+        _register_unverified(mcp, credentials=credentials)
 
-    # Register file system toolkits
-    register_view_file(mcp)
-    register_write_to_file(mcp)
-    register_list_dir(mcp)
-    register_replace_file_content(mcp)
-    register_apply_diff(mcp)
-    register_apply_patch(mcp)
-    register_grep_search(mcp)
-    register_execute_command(mcp)
-    register_csv(mcp)
+    _register_manifest(mcp)
 
-    return [
-        "example_tool",
-        "web_search",
-        "web_scrape",
-        "pdf_read",
-        "view_file",
-        "write_to_file",
-        "list_dir",
-        "replace_file_content",
-        "apply_diff",
-        "apply_patch",
-        "grep_search",
-        "execute_command_tool",
-        "csv_read",
-        "csv_write",
-        "csv_append",
-        "csv_info",
-        "csv_sql",
-        "github_list_repos",
-        "github_get_repo",
-        "github_search_repos",
-        "github_list_issues",
-        "github_get_issue",
-        "github_create_issue",
-        "github_update_issue",
-        "github_list_pull_requests",
-        "github_get_pull_request",
-        "github_create_pull_request",
-        "github_search_code",
-        "github_list_branches",
-        "github_get_branch",
-        "send_email",
-        "send_budget_alert_email",
-        "hubspot_search_contacts",
-        "hubspot_get_contact",
-        "hubspot_create_contact",
-        "hubspot_update_contact",
-        "hubspot_search_companies",
-        "hubspot_get_company",
-        "hubspot_create_company",
-        "hubspot_update_company",
-        "hubspot_search_deals",
-        "hubspot_get_deal",
-        "hubspot_create_deal",
-        "hubspot_update_deal",
-    ]
+    return list(mcp._tool_manager._tools.keys())
 
 
 __all__ = ["register_all_tools"]

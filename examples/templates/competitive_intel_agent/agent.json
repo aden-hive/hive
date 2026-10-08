@@ -1,0 +1,403 @@
+{
+  "agent": {
+    "id": "competitive_intel_agent",
+    "name": "Competitive Intelligence Report",
+    "version": "1.0.0",
+    "description": "Monitor competitor websites, news sources, and GitHub repositories to produce a structured weekly digest with key insights, detailed findings per competitor, and 30-day trend analysis."
+  },
+  "graph": {
+    "id": "competitive_intel_agent-graph",
+    "goal_id": "competitive-intelligence-report",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Competitor Intake",
+        "description": "Collect competitor list, focus areas, and report preferences from the user",
+        "node_type": "event_loop",
+        "input_keys": [
+          "competitors_input"
+        ],
+        "output_keys": [
+          "competitors",
+          "focus_areas",
+          "report_frequency",
+          "has_github_competitors"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "web-scraper",
+        "name": "Website Monitor",
+        "description": "Scrape competitor websites for pricing, features, and announcements",
+        "node_type": "event_loop",
+        "input_keys": [
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "web_findings"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "news-search",
+        "name": "News & Press Monitor",
+        "description": "Search for competitor mentions in news, press releases, and industry publications",
+        "node_type": "event_loop",
+        "input_keys": [
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "news_findings"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "github-monitor",
+        "name": "GitHub Activity Monitor",
+        "description": "Track public GitHub repository activity for competitors with GitHub presence",
+        "node_type": "event_loop",
+        "input_keys": [
+          "competitors"
+        ],
+        "output_keys": [
+          "github_findings"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "github_list_repos",
+          "github_get_repo",
+          "github_search_repos"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "aggregator",
+        "name": "Data Aggregator",
+        "description": "Combine findings from all sources, deduplicate, and structure for analysis",
+        "node_type": "event_loop",
+        "input_keys": [
+          "competitors",
+          "web_findings",
+          "news_findings",
+          "github_findings"
+        ],
+        "output_keys": [
+          "aggregated_findings",
+          "github_findings"
+        ],
+        "nullable_output_keys": [
+          "github_findings"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "save_data",
+          "load_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "analysis",
+        "name": "Insight Analysis",
+        "description": "Extract key insights, detect trends, and compare with historical data",
+        "node_type": "event_loop",
+        "input_keys": [
+          "aggregated_findings",
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "key_highlights",
+          "trend_analysis",
+          "detailed_findings"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "load_data",
+          "save_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "report",
+        "name": "Report Generator",
+        "description": "Generate and deliver the competitive intelligence digest as an HTML report",
+        "node_type": "event_loop",
+        "input_keys": [
+          "key_highlights",
+          "trend_analysis",
+          "detailed_findings",
+          "competitors"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": null,
+        "tools": [
+          "save_data",
+          "load_data",
+          "serve_file_to_user",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-web-scraper",
+        "source": "intake",
+        "target": "web-scraper",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "web-scraper-to-news-search",
+        "source": "web-scraper",
+        "target": "news-search",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "news-search-to-github-monitor",
+        "source": "news-search",
+        "target": "github-monitor",
+        "condition": "conditional",
+        "condition_expr": "str(has_github_competitors).lower() == 'true'",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "news-search-to-aggregator-skip-github",
+        "source": "news-search",
+        "target": "aggregator",
+        "condition": "conditional",
+        "condition_expr": "str(has_github_competitors).lower() != 'true'",
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "github-monitor-to-aggregator",
+        "source": "github-monitor",
+        "target": "aggregator",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "aggregator-to-analysis",
+        "source": "aggregator",
+        "target": "analysis",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "analysis-to-report",
+        "source": "analysis",
+        "target": "report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Monitor competitor websites, news sources, and GitHub repositories to produce a structured weekly digest with key insights, detailed findings per competitor, and 30-day trend analysis.",
+    "created_at": "2026-02-22T21:09:31.647779"
+  },
+  "goal": {
+    "id": "competitive-intelligence-report",
+    "name": "Competitive Intelligence Report",
+    "description": "Monitor competitor websites, news sources, and GitHub repositories to produce a structured weekly digest with key insights, detailed findings per competitor, and 30-day trend analysis.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "sc-source-coverage",
+        "description": "Check multiple source types per competitor",
+        "metric": "sources_per_competitor",
+        "target": ">=3",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-findings-structured",
+        "description": "All findings structured with competitor, category, update, source, and date",
+        "metric": "findings_structured",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-historical-comparison",
+        "description": "Uses stored data to compare with previous reports for trend analysis",
+        "metric": "historical_comparison",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-report-delivered",
+        "description": "User receives a formatted, readable competitive intelligence digest",
+        "metric": "report_delivered",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-no-fabrication",
+        "description": "Never fabricate findings, news, or data",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      },
+      {
+        "id": "c-source-attribution",
+        "description": "Every finding must include a source URL",
+        "constraint_type": "hard",
+        "category": "quality",
+        "check": ""
+      },
+      {
+        "id": "c-recency",
+        "description": "Prioritize findings from the past 7 days; include up to 30 days",
+        "constraint_type": "soft",
+        "category": "quality",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-22 21:09:31.601236",
+    "updated_at": "2026-02-22 21:09:31.601240"
+  },
+  "required_tools": [
+    "github_get_repo",
+    "github_search_repos",
+    "list_data_files",
+    "github_list_repos",
+    "serve_file_to_user",
+    "save_data",
+    "web_search",
+    "load_data",
+    "web_scrape"
+  ],
+  "metadata": {
+    "created_at": "2026-02-22T21:09:31.647803",
+    "node_count": 7,
+    "edge_count": 7
+  }
+}

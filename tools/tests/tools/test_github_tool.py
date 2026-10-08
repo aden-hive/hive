@@ -172,9 +172,7 @@ class TestGitHubClient:
         }
         mock_post.return_value = mock_response
 
-        result = self.client.create_issue(
-            "owner", "repo", "New Issue", body="Description", labels=["bug"]
-        )
+        result = self.client.create_issue("owner", "repo", "New Issue", body="Description", labels=["bug"])
 
         assert result["success"] is True
         assert result["data"]["number"] == 42
@@ -239,9 +237,7 @@ class TestGitHubClient:
         }
         mock_post.return_value = mock_response
 
-        result = self.client.create_pull_request(
-            "owner", "repo", "New PR", "feature-branch", "main", body="PR description"
-        )
+        result = self.client.create_pull_request("owner", "repo", "New PR", "feature-branch", "main", body="PR description")
 
         assert result["success"] is True
         assert result["data"]["number"] == 10

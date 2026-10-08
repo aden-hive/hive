@@ -13,6 +13,10 @@ out/
 .env
 .env.local
 .env.*.local
+.venv
+/venv
+tools/src/uv.lock
+
 
 # User configuration (copied from .example)
 config.yaml
@@ -46,6 +50,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+vite.config.d.ts
 
 # Python
 __pycache__/
@@ -54,7 +59,6 @@ __pycache__/
 *.egg-info/
 .eggs/
 *.egg
-uv.lock
 
 # Generated runtime data
 core/data/
@@ -66,7 +70,19 @@ tmp/
 temp/
 
 exports/*
+exports.old*
+artifacts/*
 
-.agent-builder-sessions/*
+.claude/settings.local.json
 
-.venv
+docs/github-issues/*
+core/tests/*dumps/*
+
+screenshots/*
+
+.gemini/*
+.coverage
+
+temp/
+# Agent runtime scratch output — never commit
+data/

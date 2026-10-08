@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Configuration &mdash; Compaction Pipeline Analysis</title>
+  <link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumbs">
+    <a href="./index.html">Compaction Analysis</a> &nbsp;/&nbsp; <span>Configuration</span>
+  </div>
+  <nav>
+    <a href="./index.html">Overview</a>
+    <a href="./triggers.html">Triggers</a>
+    <a href="./pipeline.html">Pipeline</a>
+    <a href="./transformations.html">Transformations</a>
+    <a class="active" href="./configuration.html">Configuration</a>
+    <a href="./audit.html">Audit</a>
+  </nav>
+</header>
+
+<h1>Configuration reference</h1>
+<p class="lede">
+  Every environment variable, configuration field, and module constant that affects compaction. Defaults
+  reflect the working tree at the time of writing; values can be overridden per-loop, per-conversation,
+  or via the user&rsquo;s <code class="inline">~/.hive/configuration.json</code>.
+</p>
+
+<h2>Master table</h2>
+<table>
+  <thead><tr>
+    <th>Knob</th>
+    <th>Layer</th>
+    <th>Default</th>
+    <th>Source</th>
+    <th>Effect</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td><code>HIVE_COMPACTION_DEBUG</code></td>
+      <td>env var</td>
+      <td><em>unset</em></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L827">compaction.py:827</a></td>
+      <td>When set to any non-empty value, every compaction pass writes a markdown debug log to <code>$HIVE_HOME/compaction_log/</code> with per-message inventory and compression stats.</td>
+    </tr>
+    <tr>
+      <td><code>HIVE_HOME</code></td>
+      <td>env var</td>
+      <td><code>~/.hive</code></td>
+      <td><a class="src-ref" href="../../core/framework/config.py#L33-L40">config.py:33-40</a></td>
+      <td>Root directory for all runtime state, including the <code>compaction_log/</code> subdirectory the debug flag writes into. Set by the Electron desktop shell to the platform userData dir so the desktop app does not share state with an OSS install.</td>
+    </tr>
+    <tr>
+      <td><code>llm.max_context_tokens</code></td>
+      <td><code>~/.hive/configuration.json</code></td>
+      <td><code>32_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/config.py#L395-L401">config.py:395-401</a></td>
+      <td>Global default for the agent&rsquo;s context window. Overridable per loop via <code>LoopConfig.max_context_tokens</code>.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.max_context_tokens</code></td>
+      <td>LoopConfig</td>
+      <td><code>32_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L63">types.py:63</a></td>
+      <td>Hard token ceiling used by <code>needs_compaction()</code> and <code>usage_ratio()</code>.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.compaction_buffer_tokens</code></td>
+      <td>LoopConfig</td>
+      <td><code>8_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L64-L71">types.py:64-71</a></td>
+      <td>Fixed component of the hybrid buffer (absolute floor). Combines additively with the ratio.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.compaction_buffer_ratio</code></td>
+      <td>LoopConfig</td>
+      <td><code>0.15</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L72-L85">types.py:72-85</a></td>
+      <td>Ratio component of the hybrid buffer. Scales with window size so the trigger stays meaningful on huge windows.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.compaction_warning_buffer_tokens</code></td>
+      <td>LoopConfig</td>
+      <td><code>12_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L86-L88">types.py:86-88</a></td>
+      <td>Soft warning threshold; fires one buffer earlier than hard compaction for telemetry/UI.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.spillover_dir</code></td>
+      <td>LoopConfig</td>
+      <td><code>None</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L111">types.py:111</a></td>
+      <td>Used by tool-result truncation (<code>truncate_tool_result</code>) and by the emergency summary&rsquo;s file listing. No longer used by Stage 2 since the structure-preserving stage was removed on 2026-05-12.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.store_prefix</code></td>
+      <td>LoopConfig</td>
+      <td><code>""</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L89">types.py:89</a></td>
+      <td>Prefix used by the conversation store when persisting compacted parts.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.max_tool_result_chars</code></td>
+      <td>LoopConfig</td>
+      <td><code>8_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L97-L110">types.py:97-110</a></td>
+      <td>Per-tool-result hard truncation (the full payload is spilled to disk). Tuned 30k &rarr; 12k &rarr; 8k to reduce per-turn density.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.max_retained_screenshots</code></td>
+      <td>LoopConfig</td>
+      <td><code>2</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L113-L128">types.py:113-128</a></td>
+      <td>Max inline base64 screenshots kept in history per turn. Older messages get <code>image_content</code> nulled by <code>evict_old_images()</code>.</td>
+    </tr>
+    <tr>
+      <td><code>LoopConfig.max_output_value_chars</code></td>
+      <td>LoopConfig</td>
+      <td><code>2_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L130-L131">types.py:130-131</a></td>
+      <td>Spills large <code>set_output</code> values to disk above this size; the in-context value is replaced with a path reference.</td>
+    </tr>
+    <tr>
+      <td><code>NodeConversation.compaction_threshold</code></td>
+      <td>Conversation init</td>
+      <td><code>0.8</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L430">conversation.py:430</a></td>
+      <td>Legacy multiplicative trigger. Used only when both <code>buffer_tokens</code> and <code>buffer_ratio</code> are explicitly <code>None</code>. Old call sites keep behaving identically.</td>
+    </tr>
+    <tr>
+      <td><code>NodeConversation.compaction_buffer_tokens</code></td>
+      <td>Conversation init</td>
+      <td><code>None</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L434">conversation.py:434</a></td>
+      <td>Per-conversation override. Persisted to <code>meta.json</code> so a restored conversation keeps its trigger.</td>
+    </tr>
+    <tr>
+      <td><code>NodeConversation.compaction_buffer_ratio</code></td>
+      <td>Conversation init</td>
+      <td><code>None</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L435">conversation.py:435</a></td>
+      <td>Per-conversation override.</td>
+    </tr>
+    <tr>
+      <td><code>NodeConversation.compaction_warning_buffer_tokens</code></td>
+      <td>Conversation init</td>
+      <td><code>None</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L436">conversation.py:436</a></td>
+      <td>Per-conversation override.</td>
+    </tr>
+    <tr>
+      <td><code>LLM_COMPACT_CHAR_LIMIT</code></td>
+      <td>Module constant</td>
+      <td><code>240_000</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L30">compaction.py:30</a></td>
+      <td>Formatted-message char ceiling before <code>llm_compact()</code> proactively splits the input in half. Also re-exported as <code>AgentLoop._LLM_COMPACT_CHAR_LIMIT</code> at <a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L4213">agent_loop.py:4213</a>.</td>
+    </tr>
+    <tr>
+      <td><code>LLM_COMPACT_MAX_DEPTH</code></td>
+      <td>Module constant</td>
+      <td><code>10</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L31">compaction.py:31</a></td>
+      <td>Recursion depth cap for binary-search splitting. Raises <code>RuntimeError</code> if exceeded.</td>
+    </tr>
+    <tr>
+      <td><code>MICROCOMPACT_KEEP_RECENT</code></td>
+      <td>Module constant</td>
+      <td><code>2</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L68-L79">compaction.py:68-79</a></td>
+      <td>How many recent compactable tool results microcompact keeps. Tuned 8 &rarr; 4 &rarr; 2.</td>
+    </tr>
+    <tr>
+      <td><code>MAX_CONSECUTIVE_FAILURES</code></td>
+      <td>Module constant</td>
+      <td><code>3</code></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L82">compaction.py:82</a></td>
+      <td>After N failed LLM compactions in a row, skip Stage 2 entirely and fall through to Stage 3 emergency summary.</td>
+    </tr>
+    <tr>
+      <td><code>COMPACTABLE_TOOLS</code></td>
+      <td>Module constant</td>
+      <td><em>frozenset of 16 tools</em></td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L39-L66">compaction.py:39-66</a></td>
+      <td>Allowlist of tool names whose results can be cleared by microcompact/prune. Bar for inclusion: &ldquo;old result has no irreversible value&rdquo;.</td>
+    </tr>
+    <tr>
+      <td><code>_TC_ARG_LIMIT</code></td>
+      <td>Removed</td>
+      <td>&mdash;</td>
+      <td>was conversation.py:210</td>
+      <td>Removed 2026-05-12 along with <code>_compact_tool_calls()</code>. Existing archived sessions may still contain <code>{"_compacted": "&hellip;"}</code> sentinels emitted before removal.</td>
+    </tr>
+    <tr>
+      <td><code>_COMPACTION_TIMEOUT_SECONDS</code></td>
+      <td>Module-local</td>
+      <td><code>180.0</code></td>
+      <td><a class="src-ref" href="../../core/framework/server/routes_execution.py#L1689">routes_execution.py:1689</a></td>
+      <td>Wall-clock budget for the background fork-and-compact LLM call. Past this the colony falls back to the raw transcript.</td>
+    </tr>
+    <tr>
+      <td><code>hive.context-preservation</code> warn-at</td>
+      <td>Skill config</td>
+      <td><code>45</code> (percent)</td>
+      <td><a class="src-ref" href="../../core/framework/skills/defaults.py#L23-L27">defaults.py:23-27</a></td>
+      <td>The default skill that nudges the agent to start condensing scratch notes. Override via skills config <code>warn_at_usage_ratio</code> (float 0&ndash;1).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Environment variables in detail</h2>
+
+<h3><code>HIVE_COMPACTION_DEBUG</code></h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L825-L828">core/framework/agent_loop/internals/compaction.py:825-828</a>
+<pre class="code"><code><span class="k">await</span> <span class="f">publish_context_usage</span>(event_bus, ctx, conversation, <span class="s">"post_compaction"</span>)
+
+<span class="k">if</span> os.environ.<span class="f">get</span>(<span class="s">"HIVE_COMPACTION_DEBUG"</span>):
+    <span class="f">write_compaction_debug_log</span>(ctx, before_pct, after_pct, level, pre_inventory)</code></pre>
+<p>
+  The check is &ldquo;is the variable set to <em>any</em> non-empty value?&rdquo; &mdash;
+  <code class="inline">HIVE_COMPACTION_DEBUG=0</code> still enables it. The log file is written under
+  <code class="inline">$HIVE_HOME/compaction_log/</code> with a timestamp + node id; see
+  <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L700-L765">compaction.py:700-765</a>
+  for the markdown layout (ranked message table with content sizes, large-message previews, etc.).
+</p>
+
+<h3><code>HIVE_HOME</code></h3>
+<a class="src-ref" href="../../core/framework/config.py#L25-L43">core/framework/config.py:25-43</a>
+<pre class="code"><code><span class="c"># The runtime normally stores state in ``~/.hive/``. When the runtime is
+# spawned by the Electron desktop shell, the shell passes ``HIVE_HOME`` as
+# an env var pointing at the platform-native userData directory (e.g.
+# ``~/Library/Application Support/Hive/`` on macOS), so the desktop app
+# does NOT share state with an OSS ``hive`` install on the same machine.</span>
+
+
+<span class="k">def</span> <span class="f">_resolve_hive_home</span>() -&gt; Path:
+    override = os.environ.<span class="f">get</span>(<span class="s">"HIVE_HOME"</span>)
+    <span class="k">if</span> override:
+        <span class="k">return</span> <span class="f">Path</span>(override).<span class="f">expanduser</span>()
+    <span class="k">return</span> Path.<span class="f">home</span>() / <span class="s">".hive"</span>
+
+
+HIVE_HOME = <span class="f">_resolve_hive_home</span>()
+QUEENS_DIR = HIVE_HOME / <span class="s">"agents"</span> / <span class="s">"queens"</span>
+COLONIES_DIR = HIVE_HOME / <span class="s">"colonies"</span>
+MEMORIES_DIR = HIVE_HOME / <span class="s">"memories"</span></code></pre>
+
+<h2>Global configuration file (<code>~/.hive/configuration.json</code>)</h2>
+<a class="src-ref" href="../../core/framework/config.py#L395-L401">core/framework/config.py:395-401</a>
+<pre class="code"><code>DEFAULT_MAX_CONTEXT_TOKENS = <span class="n">32_000</span>
+
+
+<span class="k">def</span> <span class="f">get_max_context_tokens</span>() -&gt; <span class="k">int</span>:
+    <span class="s">"""Return the configured max_context_tokens, falling back to DEFAULT_MAX_CONTEXT_TOKENS."""</span>
+    <span class="k">return</span> <span class="f">get_hive_config</span>().<span class="f">get</span>(<span class="s">"llm"</span>, {}).<span class="f">get</span>(<span class="s">"max_context_tokens"</span>, DEFAULT_MAX_CONTEXT_TOKENS)</code></pre>
+<pre class="code"><code><span class="c">// ~/.hive/configuration.json (example)</span>
+{
+  <span class="s">"llm"</span>: {
+    <span class="s">"max_context_tokens"</span>: <span class="n">180000</span>,
+    <span class="s">"max_tokens"</span>: <span class="n">8192</span>
+  }
+}</code></pre>
+<p>
+  Resolution priority for <code class="inline">max_context_tokens</code>:
+  <code class="inline">LoopConfig.max_context_tokens</code> (per-loop) takes precedence over the
+  configuration.json value, which itself overrides <code class="inline">DEFAULT_MAX_CONTEXT_TOKENS</code>.
+</p>
+
+<h2>LoopConfig field-by-field</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/types.py#L48-L131">core/framework/agent_loop/internals/types.py:48-131</a>
+<pre class="code"><code><span class="k">@dataclass</span>
+<span class="k">class</span> LoopConfig:
+    <span class="s">"""Configuration for the event loop."""</span>
+
+    max_iterations: int = <span class="n">50</span>
+    <span class="c"># 0 (or any non-positive value) disables the per-turn hard limit.</span>
+    max_tool_calls_per_turn: int = <span class="n">0</span>
+    judge_every_n_turns: int = <span class="n">1</span>
+    stall_detection_threshold: int = <span class="n">3</span>
+    stall_similarity_threshold: float = <span class="n">0.85</span>
+    max_context_tokens: int = <span class="n">32_000</span>
+    <span class="c"># Headroom reserved for the NEXT turn's input + output so that
+    # proactive compaction always finishes before the hard context limit
+    # is hit mid-stream. Scaled to match Claude Code's 13k-buffer-on-
+    # 200k-window ratio (~6.5%) applied to hive's default 32k window,
+    # with extra margin because hive's token estimator is char-based
+    # and less tight than Anthropic's own counting.</span>
+    compaction_buffer_tokens: int = <span class="n">8_000</span>
+    <span class="c"># Ratio-based component of the hybrid compaction buffer. Effective
+    # headroom reserved before compaction fires is
+    #   compaction_buffer_tokens + compaction_buffer_ratio * max_context_tokens
+    # ... Defaults: 8k + 15%.
+    # On 32k that's a 12.8k buffer (~60% trigger); on 200k it's 38k
+    # (~81% trigger); on 1M it's 158k (~84% trigger).</span>
+    compaction_buffer_ratio: float = <span class="n">0.15</span>
+    <span class="c"># Warning is emitted one buffer earlier so the user/telemetry gets
+    # a "we're close" signal without triggering a compaction pass.</span>
+    compaction_warning_buffer_tokens: int = <span class="n">12_000</span>
+    store_prefix: str = <span class="s">""</span>
+
+    <span class="c"># Tool result context management.
+    # Lowered from 30_000 → 12_000 to reduce per-turn request density.</span>
+    max_tool_result_chars: int = <span class="n">8_000</span>
+    spillover_dir: str | <span class="k">None</span> = <span class="k">None</span>
+
+    <span class="c"># Image retention in conversation history.
+    # ... Raise this only if you genuinely need longer visual history AND
+    # you know your provider is using native image tokenization.</span>
+    max_retained_screenshots: int = <span class="n">2</span>
+
+    <span class="c"># set_output value spilling.</span>
+    max_output_value_chars: int = <span class="n">2_000</span></code></pre>
+
+<h2>NodeConversation per-conversation overrides</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L426-L476">core/framework/agent_loop/conversation.py:426-476</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">__init__</span>(
+    self,
+    system_prompt: str = <span class="s">""</span>,
+    max_context_tokens: int = <span class="n">32000</span>,
+    compaction_threshold: float = <span class="n">0.8</span>,
+    output_keys: list[str] | <span class="k">None</span> = <span class="k">None</span>,
+    store: ConversationStore | <span class="k">None</span> = <span class="k">None</span>,
+    run_id: str | <span class="k">None</span> = <span class="k">None</span>,
+    compaction_buffer_tokens: int | <span class="k">None</span> = <span class="k">None</span>,
+    compaction_buffer_ratio: float | <span class="k">None</span> = <span class="k">None</span>,
+    compaction_warning_buffer_tokens: int | <span class="k">None</span> = <span class="k">None</span>,
+) -&gt; <span class="k">None</span>:
+    self._system_prompt = system_prompt
+    ...
+    self._max_context_tokens = max_context_tokens
+    self._compaction_threshold = compaction_threshold
+    <span class="c"># Buffer-based compaction trigger (Gap 7). When set, takes
+    # precedence over the multiplicative compaction_threshold ...</span>
+    self._compaction_buffer_tokens = compaction_buffer_tokens
+    self._compaction_buffer_ratio = compaction_buffer_ratio
+    self._compaction_warning_buffer_tokens = compaction_warning_buffer_tokens
+    ...
+    <span class="c"># Re-entrancy guard for proactive microcompaction triggered from
+    # add_tool_result. microcompact() itself mutates _messages, and
+    # while it doesn't currently call back into add_tool_result, the
+    # guard keeps future refactors from looping.</span>
+    self._microcompact_inflight: bool = <span class="k">False</span></code></pre>
+<p>
+  When a conversation is restored from a store, the buffer settings are read from
+  <code class="inline">meta.json</code> so the trigger behaves the same as the run that created it.
+</p>
+
+<h2>Effective trigger by window size</h2>
+<p>Using the LoopConfig defaults <code class="inline">8_000 + 0.15&times;window</code>:</p>
+<table>
+  <thead><tr>
+    <th>Window</th>
+    <th>Effective buffer</th>
+    <th>Trigger fires at</th>
+    <th>As percent</th>
+    <th>Headroom for next turn</th>
+  </tr></thead>
+  <tbody>
+    <tr><td>32k</td><td>12.8k</td><td>19.2k</td><td>60%</td><td>~12.8k tokens</td></tr>
+    <tr><td>64k</td><td>17.6k</td><td>46.4k</td><td>~73%</td><td>~17.6k</td></tr>
+    <tr><td>128k</td><td>27.2k</td><td>100.8k</td><td>~79%</td><td>~27.2k</td></tr>
+    <tr><td>136k (Sonnet 4.6)</td><td>28.4k</td><td>107.6k</td><td>~79%</td><td>~28.4k</td></tr>
+    <tr><td>200k</td><td>38k</td><td>162k</td><td>81%</td><td>~38k</td></tr>
+    <tr><td>872k (Opus 4.6)</td><td>138.8k</td><td>733.2k</td><td>~84%</td><td>~138.8k</td></tr>
+    <tr><td>1M</td><td>158k</td><td>842k</td><td>~84%</td><td>~158k</td></tr>
+  </tbody>
+</table>
+
+<h2>Model-specific behavior &mdash; what does NOT exist</h2>
+<div class="callout">
+  <div class="label">There is no model-specific compaction code</div>
+  Compaction does not branch on the model name. The only model-dependent input is
+  <code class="inline">max_context_tokens</code>, which the LLM wrapper supplies from
+  <code class="inline">core/framework/llm/model_catalog.json</code>. Switching from Sonnet to Opus
+  changes the absolute trigger but not the algorithm. Likewise, there is no &ldquo;use this prompt for
+  Haiku&rdquo; branch &mdash; the Stage 2 summary prompt is the same for every provider.
+</div>
+
+<h2>How to widen or effectively disable compaction</h2>
+<p>There is no first-class &ldquo;off&rdquo; switch. Compaction is a safety mechanism &mdash; without it,
+the agent silently exceeds the provider&rsquo;s window and 400-errors mid-stream. Practical ways to soften
+or widen it:</p>
+
+<h3>Raise <code>max_context_tokens</code></h3>
+<p>Most direct way. The trigger is relative to this value via the hybrid buffer, so increasing it
+proportionally raises both the absolute fire point and the absolute headroom reserve. Override via the
+global config file:</p>
+<pre class="code"><code><span class="c">// ~/.hive/configuration.json</span>
+{ <span class="s">"llm"</span>: { <span class="s">"max_context_tokens"</span>: <span class="n">872000</span> } }</code></pre>
+
+<h3>Shrink the buffer</h3>
+<p>Set <code class="inline">LoopConfig.compaction_buffer_ratio = 0.05</code> (5%) instead of 0.15 to push
+the trigger from ~81% to ~93% on a 200k window. Risk: less headroom for the next turn&rsquo;s LLM call
+plus tool results, increasing the chance Checkpoint&nbsp;3 (pre-send guard) has to fire mid-iteration.</p>
+
+<h3>Setting <code>max_context_tokens=0</code></h3>
+<p>The conversation treats this as &ldquo;unlimited&rdquo; and
+<code class="inline">needs_compaction()</code> always returns False. The pre-send guard
+(<code class="inline">usage_ratio() &gt;= 1.0</code>) also short-circuits because
+<code class="inline">usage_ratio()</code> returns 0.0. <strong>Do not do this in production</strong>
+unless you have an external truncation strategy &mdash; the provider will still reject oversize requests.</p>
+
+<h3>Disabling LLM compaction specifically</h3>
+<p>Stage 2 is skipped automatically if <code class="inline">ctx.llm is None</code> at
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L297">compaction.py:297</a>.
+There&rsquo;s no separate config flag for this; setting up a node without an LLM context handle is the
+mechanism. The pipeline still runs Stages 0&ndash;1 and then falls through to Stage&nbsp;3 emergency
+if needed.</p>
+
+<h2>Where each value flows in the runtime</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L4217-L4241">core/framework/agent_loop/agent_loop.py:4217-4241</a>
+<pre class="code"><code><span class="k">async def</span> <span class="f">_compact</span>(
+    self,
+    ctx: AgentContext,
+    conversation: NodeConversation,
+    accumulator: OutputAccumulator | <span class="k">None</span> = <span class="k">None</span>,
+) -&gt; <span class="k">None</span>:
+    <span class="s">"""Compact conversation history to stay within token budget."""</span>
+    <span class="k">return await</span> <span class="f">compact</span>(
+        ctx=ctx,
+        conversation=conversation,
+        accumulator=accumulator,
+        config=self._config,
+        event_bus=self._event_bus,
+        char_limit=self._LLM_COMPACT_CHAR_LIMIT,
+        max_depth=self._LLM_COMPACT_MAX_DEPTH,
+    )</code></pre>
+<p>
+  <code class="inline">self._config</code> is the live <code class="inline">LoopConfig</code> &mdash; its
+  <code class="inline">max_context_tokens</code>, <code class="inline">spillover_dir</code>,
+  buffer fields, and tool/screenshot caps reach every stage through this single argument.
+  <code class="inline">self._event_bus</code> is what carries the
+  <code class="inline">CONTEXT_COMPACTED</code> event to the desktop UI.
+</p>
+
+<h2>Per-conversation persistence</h2>
+<p>
+  The three compaction buffer fields on <code class="inline">NodeConversation</code>
+  (<code class="inline">compaction_buffer_tokens</code>, <code class="inline">compaction_buffer_ratio</code>,
+  <code class="inline">compaction_warning_buffer_tokens</code>) are serialized into
+  <code class="inline">meta.json</code> when the conversation is persisted, so a restored conversation
+  uses the same trigger it was originally configured with &mdash; even if the global default has since
+  changed. See the serialization/restore path in the same file. Default-restore behavior at
+  <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1698">conversation.py:1698</a>
+  falls back to <code class="inline">0.8</code> for the legacy threshold if buffers are absent.
+</p>
+
+<footer class="botline">
+  Back to: <a href="./index.html">Overview</a> &middot;
+  <a href="./triggers.html">Triggers</a> &middot;
+  <a href="./pipeline.html">Pipeline</a> &middot;
+  <a href="./transformations.html">Transformations</a>
+</footer>
+
+</div>
+</body>
+</html>

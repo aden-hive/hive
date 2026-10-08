@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Tiny target</title>
+<style>
+  .field {
+    position: relative;
+    width: 880px;
+    height: 520px;
+    margin: 16px auto;
+    border: 1px solid #ccc;
+    background-image:
+      radial-gradient(circle at 20% 30%, #d9d9d9 0 6px, transparent 7px),
+      radial-gradient(circle at 70% 50%, #c9c9c9 0 5px, transparent 6px),
+      radial-gradient(circle at 40% 80%, #cccccc 0 7px, transparent 8px),
+      radial-gradient(circle at 85% 20%, #d0d0d0 0 6px, transparent 7px),
+      radial-gradient(circle at 15% 70%, #e0e0e0 0 8px, transparent 9px),
+      repeating-linear-gradient(45deg, #f4f4f4 0 6px, #ececec 6px 12px);
+  }
+  /* Lots of decoy red-ish dots that are NOT the target. */
+  .decoy { position: absolute; border-radius: 50%; opacity: 0.5; }
+  .decoy.a { left: 10%; top: 20%; width: 14px; height: 14px; background: #f3a0a0; }
+  .decoy.b { left: 60%; top: 12%; width: 11px; height: 11px; background: #e87878; }
+  .decoy.c { left: 30%; top: 65%; width: 18px; height: 18px; background: #e3a3a3; }
+  .decoy.d { left: 78%; top: 78%; width: 13px; height: 13px; background: #d98e8e; }
+  .decoy.e { left: 45%; top: 30%; width: 9px;  height: 9px;  background: #ec8b8b; }
+  /* The real target: a pure red 8x8 square. */
+  #target {
+    position: absolute;
+    left: 552px; /* exact pixels for repeatability */
+    top: 268px;
+    width: 8px;
+    height: 8px;
+    background: #ff0000;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Precision · Tiny target</h1>
+  <p class="instruction">Click the solid <strong>pure-red 8×8 pixel</strong> square. The pinkish dots are decoys. Only the saturated red square counts.</p>
+</header>
+<div class="field" aria-hidden="true">
+  <span class="decoy a"></span>
+  <span class="decoy b"></span>
+  <span class="decoy c"></span>
+  <span class="decoy d"></span>
+  <span class="decoy e"></span>
+  <button id="target" aria-label="target"></button>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    Eval.requireClickOn(function () { return document.getElementById("target"); }, { allowRetry: true });
+  });
+</script>
+</body>
+</html>

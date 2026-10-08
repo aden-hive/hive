@@ -1,6 +1,6 @@
 # GitHub Tool
 
-Interact with GitHub repositories, issues, and pull requests within the Aden agent framework.
+Interact with GitHub repositories, issues, and pull requests within the Hive framework.
 
 ## Installation
 
@@ -14,7 +14,7 @@ You need a GitHub Personal Access Token (PAT) to use this tool.
 
 1. Go to https://github.com/settings/tokens
 2. Click "Generate new token" → "Generate new token (classic)"
-3. Give your token a descriptive name (e.g., "Aden Agent Framework")
+3. Give your token a descriptive name (e.g., "Hive")
 4. Select the following scopes:
    - `repo` - Full control of private repositories (includes all repo scopes)
    - `read:org` - Read org and team membership (optional, for org access)

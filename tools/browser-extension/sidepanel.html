@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --bg:hsl(40 30% 96%); --card:hsl(0 0% 100%); --fg:hsl(40 8% 13%);
+    --muted:hsl(40 6% 47%); --faint:hsl(40 6% 62%);
+    --hair:hsl(40 14% 89%); --hair-strong:hsl(40 12% 84%);
+    --amber:hsl(45 88% 49%);
+    --ok:hsl(150 34% 41%); --warn:hsl(38 78% 46%); --bad:hsl(2 60% 53%);
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --radius:11px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    display:flex;flex-direction:column;width:100%;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    background:var(--bg);color:var(--fg);font-size:12.5px;line-height:1.45;
+    letter-spacing:-.1px;-webkit-font-smoothing:antialiased;
+  }
+
+  /* ── Scrollable content ────────────────────────────────── */
+  .content{flex:1 1 auto;overflow-y:auto;padding:18px 16px 16px;animation:fadeIn .2s ease both}
+  .content::-webkit-scrollbar{width:9px}
+  .content::-webkit-scrollbar-thumb{background:hsl(40 14% 82%);border-radius:5px;border:2px solid var(--bg)}
+  .lbl{
+    font-family:inherit;font-size:11px;font-weight:600;
+    color:var(--muted);letter-spacing:-.1px;
+    text-transform:capitalize;margin-bottom:10px;
+  }
+  /* Subtle "Hive's tab groups live in another window" hint — only shown in the
+     side panel of NON-anchor windows. */
+  .anchor-pill{
+    display:inline-flex;align-items:center;gap:4px;
+    margin-left:7px;padding:1px 7px;border-radius:999px;
+    font-size:9.5px;font-weight:600;letter-spacing:0;text-transform:none;
+    vertical-align:middle;white-space:nowrap;position:relative;cursor:help;
+    color:var(--faint);background:transparent;border:1px solid var(--hair);
+  }
+  /* Author rule for display beats the UA [hidden] stylesheet, so make the
+     hidden attribute explicitly win — otherwise pill.hidden=true won't hide. */
+  .anchor-pill[hidden]{display:none}
+  .anchor-pill::before{content:"⌖";font-size:10px;line-height:1;opacity:.6}
+  /* Hover bubble — same look as the agents-section ? tooltip. Right-aligned to
+     the pill so it grows LEFT into the panel instead of off the right edge
+     (the pill sits well into a narrow side panel). */
+  .anchor-pill > .help-pop{
+    position:absolute;top:calc(100% + 8px);right:0;left:auto;transform:translateY(-4px);
+    opacity:0;pointer-events:none;z-index:20;
+    background:hsl(40 8% 13%);color:var(--card);
+    font-family:var(--mono);font-size:10px;line-height:1.45;font-weight:400;
+    padding:7px 9px;border-radius:6px;
+    width:max-content;max-width:208px;text-align:left;
+    /* The pill is white-space:nowrap; without resetting it the bubble text
+       won't wrap and overflows its max-width box, clipping off the panel. */
+    white-space:normal;
+    transition:opacity .12s ease, transform .12s ease;
+    text-transform:none;letter-spacing:0;
+  }
+  .anchor-pill > .help-pop::after{
+    content:"";position:absolute;bottom:100%;right:16px;left:auto;transform:translateX(50%);
+    border:5px solid transparent;border-bottom-color:hsl(40 8% 13%);
+  }
+  .anchor-pill:hover > .help-pop{opacity:1;transform:translateY(0)}
+
+  /* ── Connection rail ─────────────────────────────────── */
+  .conn{--accent:var(--ok)}
+  .substatus{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px}
+  .substatus:empty{display:none}
+
+  .rail{display:flex;align-items:center;justify-content:center;gap:6px;margin:12px 2px 4px}
+  /* The connection view is a calm 2-node Hive ↔ Browser. The Bridge is an
+     internal hop, so its node and second link stay hidden in every state; on
+     failure the nodes + connector turn red and the fix-hint text names the
+     cause. A fixed-width connector keeps the two icons centered instead of
+     stretching them to the panel corners. */
+  #node-bridge,
+  #line-bb{display:none}
+  #line-hb{flex:0 0 auto;width:116px;min-width:0}
+  .end{
+    display:flex;flex-direction:column;align-items:center;gap:7px;
+    width:54px;position:relative;cursor:default;
+  }
+  .glyph{width:30px;height:30px;display:grid;place-items:center;position:relative}
+  .hex{width:28px;height:28px;display:block;flex:none}
+  .bridge-icon{
+    width:24px;height:14px;border:1.5px solid var(--fg);border-radius:3px;
+    position:relative;background:var(--card);
+  }
+  .bridge-icon::before,.bridge-icon::after{
+    content:"";position:absolute;top:50%;width:5px;height:1.5px;
+    background:var(--fg);transform:translateY(-50%);
+  }
+  .bridge-icon::before{left:-6px}
+  .bridge-icon::after{right:-6px}
+  .brz{
+    width:22px;height:17px;border:1.5px solid var(--fg);border-radius:4px;
+    position:relative;
+  }
+  .brz::before{
+    content:"";position:absolute;top:0;left:0;right:0;height:5px;
+    background:var(--fg);border-radius:2.5px 2.5px 0 0;
+  }
+  .cap{font-size:9.5px;color:var(--faint);font-weight:500;white-space:nowrap}
+
+  .warn-mark{
+    position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;
+    background:var(--bad);border:1.5px solid var(--bg);display:none;
+  }
+  .end.warn .warn-mark{display:block;background:var(--warn)}
+  .end.fail .warn-mark{display:block;background:var(--bad)}
+  .end.warn .hex,.end.fail .hex{filter:grayscale(.6) opacity(.7)}
+  .end.warn .bridge-icon,.end.warn .brz,
+  .end.fail .bridge-icon,.end.fail .brz{opacity:.55}
+
+  .line{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:5px;
+    position:relative;cursor:default;min-width:64px;
+    height:30px;align-self:flex-start;
+  }
+  .line .dot{width:3px;height:3px;border-radius:50%;background:var(--faint);flex:none}
+  .line .check{
+    width:14px;height:14px;border-radius:50%;background:var(--ok);
+    display:flex;align-items:center;justify-content:center;
+    color:white;font-size:10px;font-weight:900;flex:none;line-height:1;
+    position:relative;box-shadow:0 1px 4px hsl(150 34% 41% / .3);
+  }
+  .line .check::after{
+    content:"";position:absolute;inset:-1px;border-radius:50%;
+    border:1.5px solid var(--ok);opacity:0;
+    animation:check-wave 2.6s ease-out infinite;
+  }
+  /* Respect users who set reduce-motion: stop the pulsing ring. */
+  @media (prefers-reduced-motion: reduce){
+    .line .check::after{animation:none}
+  }
+  @keyframes check-wave{
+    0%{transform:scale(.85);opacity:.55}
+    100%{transform:scale(2.4);opacity:0}
+  }
+  .line.warn .check{background:var(--warn)}
+  .line.warn .check::after{border-color:var(--warn)}
+  .line.fail .check{background:var(--bad)}
+  .line.fail .check::after{display:none}
+  .line.fail .dot{opacity:.25}
+  /* "Checking" — rendered before the first poll resolves. Greyscale so we
+     never claim healthy when we don't yet know. JS removes it once /status
+     has answered (success OR failure). */
+  .line.checking .check{background:hsl(40 8% 70%);box-shadow:none}
+  .line.checking .check::after{display:none}
+  .end.checking .hex,
+  .end.checking .bridge-icon,
+  .end.checking .brz{opacity:.45;filter:grayscale(.7)}
+
+  /* Floating popup tooltip. Anchored BELOW the trigger because the side
+     panel often runs short on space above the rail (header chrome, narrow
+     panel height), and a popup above had room to clip even with edge
+     anchoring on the sides. Below the rail there's always section content
+     it can overlay. First and last rail elements still get edge-anchored
+     horizontal variants so they don't overflow the panel's left/right
+     edges. max-width wraps long detail rather than letting it force
+     overflow. */
+  .tip{
+    position:absolute;top:calc(100% + 10px);left:50%;
+    transform:translate(-50%, -4px);opacity:0;pointer-events:none;
+    background:hsl(40 8% 13%);color:var(--card);
+    font-family:var(--mono);font-size:10px;line-height:1.45;
+    padding:7px 9px;border-radius:6px;
+    width:max-content;max-width:240px;
+    transition:opacity .12s ease, transform .12s ease;z-index:20;
+    text-align:left;
+  }
+  /* Arrow points up at the trigger above. */
+  .tip::after{
+    content:"";position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-bottom-color:hsl(40 8% 13%);
+  }
+  .tip .head{font-weight:700;letter-spacing:.5px;text-transform:lowercase;opacity:.8;margin-bottom:2px}
+  .tip .v{color:var(--faint)}
+  .end:hover .tip,.line:hover .tip{opacity:1;transform:translate(-50%, 0)}
+
+  /* Edge-anchor the leftmost element's popup so it extends rightward and
+     doesn't clip past the panel's left edge. Arrow shifts to keep
+     pointing at the trigger glyph. */
+  .rail > :first-child .tip{
+    left:0;right:auto;transform:translate(0, -4px);
+  }
+  .rail > :first-child:hover .tip{transform:translate(0, 0)}
+  .rail > :first-child .tip::after{left:22px;transform:none}
+
+  /* Symmetric for the rightmost element. */
+  .rail > :last-child .tip{
+    left:auto;right:0;transform:translate(0, -4px);
+  }
+  .rail > :last-child:hover .tip{transform:translate(0, 0)}
+  .rail > :last-child .tip::after{left:auto;right:22px;transform:none}
+
+  /* ── Section frame ─────────────────────────────────── */
+  .section{margin-top:24px}
+
+  details.section summary{
+    list-style:none;cursor:pointer;outline:none;
+    display:flex;align-items:center;gap:6px;
+    padding:4px 6px;margin:0 -6px;
+    border-radius:6px;transition:background-color .12s ease;
+  }
+  details.section summary::-webkit-details-marker{display:none}
+  details.section summary:hover{background:hsl(40 22% 95%)}
+  details.section[open] summary{margin-bottom:6px}
+  details.section summary .count{
+    font-weight:400;color:var(--faint);font-size:11px;
+    letter-spacing:0;text-transform:none;
+  }
+
+  /* Inline ? affordance next to a section heading. Hover reveals a bubble
+     that matches the rail's .tip aesthetic but anchors to the inline icon
+     instead of a rail item. Don't toggle <details> when the user clicks
+     the ? itself — it's a help hint, not a section toggle. */
+  .help-tip{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:13px;height:13px;margin-left:2px;
+    border-radius:50%;background:hsl(40 22% 90%);color:hsl(40 8% 40%);
+    font-family:var(--mono);font-size:9px;font-weight:600;
+    cursor:help;position:relative;user-select:none;line-height:1;
+    letter-spacing:0;text-transform:none;
+  }
+  /* Anchor: bubble extends 20% of its width to the left of the ? and 80%
+     to the right. translateX(-20%) of the bubble shifts it from a centered
+     position so the 80/20 split lands on the trigger's center. The arrow
+     at left:20% then sits at the same horizontal as the trigger, so it
+     points straight up at the ? regardless of how much text the bubble
+     wraps (the translation and arrow position both scale with width). */
+  .help-tip > .help-pop{
+    position:absolute;top:calc(100% + 8px);left:50%;right:auto;
+    transform:translate(-20%,-4px);
+    opacity:0;pointer-events:none;z-index:20;
+    background:hsl(40 8% 13%);color:var(--card);
+    font-family:var(--mono);font-size:10px;line-height:1.45;font-weight:400;
+    padding:7px 9px;border-radius:6px;
+    width:max-content;max-width:220px;text-align:left;
+    transition:opacity .12s ease, transform .12s ease;
+    text-transform:none;letter-spacing:0;
+  }
+  .help-tip > .help-pop::after{
+    content:"";position:absolute;bottom:100%;left:20%;right:auto;
+    transform:translateX(-50%);
+    border:5px solid transparent;border-bottom-color:hsl(40 8% 13%);
+  }
+  .help-tip:hover > .help-pop,
+  .help-tip:focus-within > .help-pop{opacity:1;transform:translate(-20%,0)}
+  details.section summary::after{
+    content:"";width:5px;height:5px;flex:none;
+    border-right:1.5px solid var(--muted);
+    border-bottom:1.5px solid var(--muted);
+    transform:rotate(-45deg);
+    transition:transform .15s ease;margin-left:auto;
+  }
+  details.section[open] summary::after{transform:rotate(45deg)}
+
+  /* ── Current tab card ─────────────────────────────── */
+  .tab-card{
+    border:1px solid var(--hair);border-radius:var(--radius);padding:11px 12px;
+    background:var(--card);
+  }
+  .tab-row{display:flex;align-items:flex-start;gap:9px}
+  .favicon{
+    width:16px;height:16px;flex:none;border-radius:3px;margin-top:1px;
+    background:hsl(40 8% 78%);
+    background-size:cover;background-position:center;
+  }
+  .tab-col{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+  .tab-title{
+    font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .tab-url{
+    font-family:var(--mono);font-size:10.5px;color:var(--faint);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .tab-control{
+    margin-top:10px;padding-top:9px;border-top:1px solid var(--hair);
+    display:flex;align-items:center;gap:8px;
+  }
+  .tab-control .ctrl-dot{width:7px;height:7px;border-radius:2px;flex:none}
+  .tab-control .ctrl-text{font-size:11.5px;flex:1;min-width:0}
+  .tab-control .ctrl-text .label{color:var(--faint);font-size:10.5px}
+  .tab-control .ctrl-text .agent{font-weight:600}
+  .tab-control .uncontrolled{color:var(--muted);font-style:italic}
+  .btn-sm{
+    font-family:inherit;font-size:11px;font-weight:600;padding:5px 10px;
+    border-radius:7px;border:1px solid var(--hair);background:var(--card);
+    color:var(--fg);cursor:pointer;white-space:nowrap;
+  }
+  .btn-sm.primary{background:var(--fg);color:var(--card);border-color:var(--fg)}
+  .btn-sm:disabled{cursor:default;opacity:.45;pointer-events:none}
+  /* Compact button for inline profile actions (Edit / Set as default). */
+  .btn-xs{
+    font-family:inherit;font-size:10px;font-weight:600;padding:3px 8px;
+    border-radius:6px;border:1px solid var(--hair);background:var(--card);
+    color:var(--muted);cursor:pointer;white-space:nowrap;flex:none;
+  }
+  .btn-xs:hover{color:var(--fg);border-color:var(--hair-strong)}
+  .btn-xs:disabled{cursor:default;opacity:.45;pointer-events:none}
+
+  .ctrl-text .warning{font-size:10.5px;color:var(--bad);margin-top:3px;font-weight:500}
+
+  /* ── This-profile card ───────────────────────────────── */
+  .profile-card{display:flex;flex-direction:column;gap:8px}
+  .profile-row{display:flex;align-items:center;gap:6px}
+  .profile-row[hidden]{display:none}
+  #profile-label{
+    flex:1;min-width:0;font-family:var(--mono);font-size:12px;
+    padding:5px 8px;border-radius:7px;border:1px solid var(--hair);
+    background:var(--card);color:var(--fg);
+  }
+  /* Read-only inline id (default view; the pen reveals the input). Subdued —
+     it's a quiet reference, not a heading; editing it is the prominent action. */
+  .profile-id{
+    min-width:0;font-family:inherit;font-size:12px;font-weight:500;
+    color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .profile-id.unset{color:var(--faint)}
+  /* Tiny borderless pen, sits just right of the id. */
+  .icon-btn{
+    flex:none;display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;padding:0;border:none;border-radius:5px;
+    background:transparent;color:var(--faint);cursor:pointer;line-height:0;
+  }
+  .icon-btn:hover{color:var(--fg);background:hsl(40 22% 92%)}
+  /* Default toggle — quiet star, no box, consistent with the panel. */
+  .star-btn{
+    flex:none;display:inline-flex;align-items:center;gap:4px;margin-left:auto;
+    padding:2px 6px;border:none;border-radius:999px;background:transparent;
+    color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;
+  }
+  .star-btn:hover{color:var(--fg)}
+  .star-btn.is-default{color:var(--amber)}
+  .profile-hint{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+
+  /* ── Per-tab blocker banner ────────────────────────────
+     Rendered inside the tab card, above the controlled-by row. The
+     focused-tab health probe (/tabs/{id}/health) populates it; the most
+     common case in the wild is foreign_extension_frame from Calendly on
+     LinkedIn. Visual weight matches fix-hint so users associate them as
+     the same class of "actionable blocker", but kept *inside* the tab
+     card so it travels with the tab the user is looking at. */
+  .blocker-banner{
+    margin-top:10px;padding:9px 11px;line-height:1.45;
+    font-size:11.5px;color:var(--fg);
+    background:hsl(2 60% 97%);border:1px solid hsl(2 50% 88%);
+    border-radius:7px;
+  }
+  .blocker-banner .blk-head{
+    display:block;font-size:9.5px;font-weight:700;color:var(--bad);
+    text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;
+  }
+  .blocker-banner .blk-body{color:var(--fg);margin-bottom:6px}
+  .blocker-banner .blk-hint{
+    font-size:11px;color:var(--muted);font-style:italic;
+    padding:6px 8px;background:hsl(40 22% 97%);
+    border-radius:5px;margin-bottom:7px;
+  }
+  .blocker-banner .blk-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+  /* ── Fix-hint callout ──────────────────────────────── */
+  .fix-hint{
+    margin-top:9px;padding:9px 11px;line-height:1.45;
+    font-size:11.5px;color:var(--fg);
+    background:hsl(2 60% 97%);border:1px solid hsl(2 50% 88%);
+    border-radius:7px;
+  }
+  .fix-hint .head{
+    display:block;font-size:9.5px;font-weight:700;color:var(--bad);
+    text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;
+  }
+  .fix-hint .actions{margin-top:9px;display:flex;gap:6px}
+  .fix-hint.severity-warn{background:hsl(38 78% 97%);border-color:hsl(38 60% 86%)}
+  .fix-hint.severity-warn .head{color:var(--warn)}
+
+  /* ── Action history (nested in tab card) ────────────── */
+  .tab-card details.tab-history{
+    margin-top:10px;padding-top:9px;border-top:1px solid var(--hair);
+  }
+  .tab-card details.tab-history summary{
+    list-style:none;cursor:pointer;outline:none;
+    display:flex;align-items:center;gap:6px;
+    font-size:11.5px;font-weight:600;color:var(--fg);
+    padding:2px 4px;margin:0 -4px;border-radius:5px;
+    transition:background-color .12s ease;
+  }
+  .tab-card details.tab-history summary::-webkit-details-marker{display:none}
+  .tab-card details.tab-history summary:hover{background:hsl(40 22% 96%)}
+  .tab-card details.tab-history summary .count{font-weight:400;color:var(--faint);font-size:11px}
+  .tab-card details.tab-history summary::after{
+    content:"";width:5px;height:5px;flex:none;
+    border-right:1.5px solid var(--muted);
+    border-bottom:1.5px solid var(--muted);
+    transform:rotate(-45deg);
+    transition:transform .15s ease;margin-left:auto;
+  }
+  .tab-card details.tab-history[open] summary::after{transform:rotate(45deg)}
+  .tab-card .hist-list{
+    border:none;border-radius:0;background:transparent;margin-top:8px;
+  }
+  .tab-card .hist-list .hist-row{padding-left:0;padding-right:0}
+  .tab-card .hist-list .hist-foot{background:transparent;padding-left:0;padding-right:0}
+
+  /* ── Hand-over popover ──────────────────────────────── */
+  .popover{
+    margin-top:8px;border:1px solid var(--hair-strong);border-radius:9px;
+    background:var(--card);box-shadow:0 6px 20px hsl(0 0% 0% / .08);
+    overflow:hidden;
+  }
+  .pop-head{
+    padding:8px 11px;font-family:var(--mono);font-size:10px;color:var(--faint);
+    text-transform:lowercase;letter-spacing:.5px;border-bottom:1px solid var(--hair);
+  }
+  .pop-item{
+    display:flex;align-items:center;gap:9px;padding:8px 11px;cursor:pointer;
+    transition:background-color .12s ease;
+  }
+  .pop-item:hover{background:hsl(40 22% 97%)}
+  .pop-item+.pop-item{border-top:1px solid var(--hair)}
+  .pop-item .pdot{width:7px;height:7px;border-radius:2px;flex:none}
+  .pop-item .nm{
+    font-size:11.5px;font-weight:600;flex:1;min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .pop-item .role{font-size:10px;color:var(--faint);font-family:var(--mono)}
+  .pop-empty{padding:13px 11px;color:var(--faint);text-align:center;font-style:italic}
+
+  /* ── History rows ───────────────────────────────────── */
+  .hist-list{border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden;background:var(--card)}
+  .hist-row{
+    display:grid;grid-template-columns:50px 64px 1fr;gap:8px;
+    padding:7px 12px;align-items:baseline;font-size:11px;
+  }
+  .hist-row+.hist-row{border-top:1px solid var(--hair)}
+  .hist-row .t{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .hist-row .verb{
+    font-family:var(--mono);font-size:10px;font-weight:600;
+    text-transform:lowercase;
+  }
+  .hist-row.failed{opacity:.55}
+  .hist-row .verb.navigate{color:hsl(210 60% 42%)}
+  .hist-row .verb.click{color:hsl(150 40% 36%)}
+  .hist-row .verb.type,.hist-row .verb.key{color:hsl(38 70% 38%)}
+  .hist-row .verb.scroll,.hist-row .verb.wait,
+  .hist-row .verb.drag,.hist-row .verb.select,
+  .hist-row .verb.dialog,.hist-row .verb.focus,
+  .hist-row .verb.open,.hist-row .verb.close{color:var(--muted)}
+  .hist-row .body{
+    min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    color:var(--fg);
+  }
+  .hist-foot{
+    padding:8px 12px;display:flex;justify-content:flex-end;
+    border-top:1px solid var(--hair);background:hsl(40 22% 98%);
+  }
+  .hist-foot .more{
+    font-size:11px;font-weight:600;color:var(--fg);cursor:pointer;
+    background:none;border:none;padding:0;
+  }
+  .hist-foot .more .n{
+    color:var(--faint);font-family:var(--mono);font-weight:400;margin-right:6px;
+  }
+  .hist-empty{padding:18px 12px;text-align:center;color:var(--faint);font-style:italic}
+
+  /* ── Agents list ────────────────────────────────────── */
+  .ag-card{
+    border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden;
+    background:var(--card);
+  }
+  .ag{
+    display:grid;grid-template-columns:8px 1fr auto;
+    gap:10px;padding:10px 12px;align-items:center;
+    cursor:pointer;transition:background-color .12s ease;
+  }
+  .ag:hover{background:hsl(40 22% 97%)}
+  .ag+.ag{border-top:1px solid var(--hair)}
+  .ag .dot{width:7px;height:7px;border-radius:2px;align-self:start;margin-top:4px}
+  .ag .col{display:flex;flex-direction:column;min-width:0}
+  .ag .nm{
+    font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .ag .sub{
+    font-size:10.5px;color:var(--faint);margin-top:1px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+  }
+  .ag .right{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+  .badge{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.4px;
+    text-transform:lowercase;padding:2px 7px;border-radius:999px;
+    border:1px solid var(--hair);color:var(--muted);white-space:nowrap;
+  }
+  .badge.working{color:var(--ok);border-color:hsl(150 30% 80%);background:hsl(150 40% 96%)}
+  .badge.working::before{
+    content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
+    background:var(--ok);margin-right:5px;vertical-align:middle;
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce){
+    .badge.working::before{animation:none}
+  }
+  .badge.waiting{color:var(--warn);border-color:hsl(38 60% 80%);background:hsl(38 70% 97%)}
+  .badge.idle{color:var(--faint)}
+  .badge.blocked{color:var(--bad);border-color:hsl(2 40% 84%);background:hsl(2 60% 97%)}
+  .ag .when{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .empty-card{padding:13px;color:var(--faint);text-align:center;font-style:italic}
+
+  /* ── Footer ─────────────────────────────────────────── */
+  footer{
+    flex-shrink:0;padding:10px 16px;border-top:1px solid var(--hair);
+    display:flex;justify-content:center;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:10px;color:var(--muted);
+  }
+  footer .sep{color:var(--faint);opacity:.6}
+  footer .v.disconnected{color:var(--faint);opacity:.7}
+  footer a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--hair-strong)}
+  footer a:hover{color:var(--fg)}
+
+  @keyframes pulse{50%{opacity:.35}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+</style>
+</head>
+<body>
+  <main class="content">
+    <section class="conn">
+      <div class="lbl">connection</div>
+      <div class="substatus" id="substatus"></div>
+      <div class="fix-hint" id="fix-hint" style="display:none"></div>
+
+      <div class="rail">
+        <div class="end checking" id="node-hive">
+          <div class="glyph">
+            <svg class="hex" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M64 26.25L73.875 32V43.5L64 49.25L54.125 43.5V32L64 26.25ZM64 52.75L73.875 58.5V70L64 75.75L54.125 70V58.5L64 52.75ZM64 79.25L73.875 85V96.5L64 102.25L54.125 96.5V85L64 79.25ZM41.125 39.75L51 45.5V57L41.125 62.75L31.25 57V45.5L41.125 39.75ZM86.875 39.75L96.75 45.5V57L86.875 62.75L77 57V45.5L86.875 39.75ZM41.125 66.25L51 72V83.5L41.125 89.25L31.25 83.5V72L41.125 66.25ZM86.875 66.25L96.75 72V83.5L86.875 89.25L77 83.5V72L86.875 66.25Z" stroke="#D19A35" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+            </svg>
+            <div class="warn-mark"></div>
+          </div>
+          <div class="cap">Hive</div>
+          <div class="tip" id="tip-hive"><div class="head">hive</div><div class="tip-body">—</div></div>
+        </div>
+        <div class="line checking" id="line-hb">
+          <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          <div class="check">·</div>
+          <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          <div class="tip" id="tip-hb"><div class="head">hive ↔ bridge</div><div class="tip-body">In-process link.</div></div>
+        </div>
+        <div class="end checking" id="node-bridge">
+          <div class="glyph"><div class="bridge-icon"></div><div class="warn-mark"></div></div>
+          <div class="cap">Bridge</div>
+          <div class="tip" id="tip-bridge"><div class="head">bridge</div><div class="tip-body">—</div></div>
+        </div>
+        <div class="line checking" id="line-bb">
+          <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          <div class="check">·</div>
+          <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          <div class="tip" id="tip-bb"><div class="head">bridge ↔ browser</div><div class="tip-body">—</div></div>
+        </div>
+        <div class="end checking" id="node-browser">
+          <div class="glyph"><div class="brz"></div><div class="warn-mark"></div></div>
+          <div class="cap">Browser</div>
+          <div class="tip" id="tip-browser"><div class="head">browser</div><div class="tip-body">—</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="profile-section">
+      <div class="lbl">this browser profile<span class="help-tip" tabindex="0" aria-label="browser profile help" onclick="event.preventDefault();event.stopPropagation();">?<span class="help-pop">The routing label workers target to act in THIS Chrome profile. "Set as default" makes it the profile Hive uses when a task doesn't name one.</span></span></div>
+      <div class="profile-card">
+        <div class="profile-row" id="profile-view">
+          <span class="profile-id unset" id="profile-id">unnamed</span>
+          <button class="icon-btn" id="profile-edit" title="Rename this profile" aria-label="Rename this profile">
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 2.9l2.5 2.5"/><path d="M11.4 2.1a1.1 1.1 0 0 1 1.6 0l.9.9a1.1 1.1 0 0 1 0 1.6L5.6 13H3v-2.6z"/></svg>
+          </button>
+          <button class="star-btn" id="profile-default">☆ default</button>
+        </div>
+        <div class="profile-row" id="profile-edit-row" hidden>
+          <input id="profile-label" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="profile label" maxlength="64" />
+          <button class="btn-sm primary" id="profile-save" disabled>Save</button>
+          <button class="btn-xs" id="profile-cancel">Cancel</button>
+        </div>
+        <span class="profile-hint" id="profile-hint"></span>
+      </div>
+    </section>
+
+    <section class="section" id="tab-section">
+      <div class="lbl">current browser tab
+        <span class="anchor-pill" id="anchor-pill" hidden>anchored elsewhere<span class="help-pop">Hive opens its agents' tab groups in another window of this profile.</span></span>
+      </div>
+      <div class="tab-card" id="tab-card"></div>
+    </section>
+
+    <details class="section" id="agents-section" open>
+      <summary class="lbl">agents <span class="count" id="agents-count"></span><span class="help-tip" tabindex="0" aria-label="agents list help" onclick="event.preventDefault();event.stopPropagation();">?<span class="help-pop">Only agents with an open browser page show up. Ask the queen to open one.</span></span></summary>
+      <div class="ag-card" id="agents"></div>
+    </details>
+  </main>
+
+  <footer>
+    <span class="v" id="bridge-version">Bridge —</span>
+    <span class="sep">·</span>
+    <span class="v" id="runtime-version">Runtime —</span>
+    <span class="sep">·</span>
+    <a href="https://open-hive.com" target="_blank" rel="noreferrer">open-hive.com</a>
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

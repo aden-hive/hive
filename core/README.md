@@ -1,203 +1,82 @@
-# Framework
+# Core Framework
 
-A goal-driven agent runtime with Builder-friendly observability.
+The core runtime that powers Hive [colonies of agents](../docs/key_concepts/colony.md): the `AgentLoop` primitive, the `ColonyRuntime`, the Queen/worker model, and the HTTP server + CLI that drive them.
 
 ## Overview
 
-Framework provides a runtime framework that captures **decisions**, not just actions. This enables a "Builder" LLM to analyze and improve agent behavior by understanding:
+Hive has a single execution primitive — the **`AgentLoop`** (`framework/agent_loop/agent_loop.py`), a multi-turn streaming LLM loop. A **Queen** is a long-lived `AgentLoop`; every **worker** is a bounded clone of it. The **`ColonyRuntime`** (`framework/host/colony_runtime.py`) spawns and schedules those clones and collects their results. There are no graphs, nodes, or edges — a colony coordinates through a shared SQLite **tracker**, a persistent **task plan**, an **event bus**, and a **reminder hub**.
 
-- What the agent was trying to accomplish
-- What options it considered
-- What it chose and why
-- What happened as a result
+For the full design, read the **[Architecture Overview](../docs/architecture/README.md)** and the [key concepts](../docs/key_concepts/colony.md).
 
-## Installation
+## Setup
 
-```bash
-pip install -e .
-```
-
-## MCP Server Setup
-
-The framework includes an MCP (Model Context Protocol) server for building agents. To set up the MCP server:
-
-### Automated Setup
-
-**Using bash (Linux/macOS):**
-```bash
-./setup_mcp.sh
-```
-
-**Using Python (cross-platform):**
-```bash
-python setup_mcp.py
-```
-
-The setup script will:
-1. Install the framework package
-2. Install MCP dependencies (mcp, fastmcp)
-3. Create/verify `.mcp.json` configuration
-4. Test the MCP server module
-
-### Manual Setup
-
-If you prefer manual setup:
+Hive uses a `uv` workspace layout and is **not** installed with `pip install`. Use the quickstart from the repo root:
 
 ```bash
-# Install framework
-pip install -e .
-
-# Install MCP dependencies
-pip install mcp fastmcp
-
-# Test the server
-python -m framework.mcp.agent_builder_server
+./quickstart.sh          # macOS/Linux
+.\quickstart.ps1         # Windows (PowerShell)
 ```
 
-### Using with MCP Clients
+This creates the framework venv (`core/.venv`), the tools venv (`tools/.venv`), and the encrypted credential store, then opens the dashboard.
 
-To use the agent builder with Claude Desktop or other MCP clients, add this to your MCP client configuration:
+## Running
 
-```json
-{
-  "mcpServers": {
-    "agent-builder": {
-      "command": "python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/goal-agent"
-    }
-  }
-}
-```
-
-The MCP server provides tools for:
-- Creating agent building sessions
-- Defining goals with success criteria
-- Adding nodes (llm_generate, llm_tool_use, router, function)
-- Connecting nodes with edges
-- Validating and exporting agent graphs
-- Testing nodes and full agent graphs
-
-## Quick Start
-
-### Calculator Agent
-
-Run an LLM-powered calculator:
+Everything runs through the `hive` CLI (from the project root):
 
 ```bash
-# Single calculation
-python -m framework calculate "2 + 3 * 4"
+hive open                          # start the server and open the dashboard
+hive serve --port 8787             # start the HTTP API server only
 
-# Interactive mode
-python -m framework interactive
+hive queen list                    # list the built-in Queen personas
+hive queen show <queen_id>         # inspect a Queen profile
+hive queen sessions <queen_id>     # list a Queen's sessions
 
-# Analyze runs with Builder
-python -m framework analyze calculator
+hive colony list                   # list colonies on disk
+hive colony info <name>            # inspect a colony (tracker, workers, plan)
+hive colony delete <name>          # delete a colony
+
+hive session list [--cold]         # list live (or on-disk) sessions
+hive session stop <session_id>     # stop a live session
+hive chat <session_id> "message"   # send a message to a live Queen
 ```
 
-### Using the Runtime
+Subsystems: `hive skill ...` (manage skills), `hive mcp ...` (manage MCP servers), `hive debugger` (LLM debug log viewer). Run `hive --help` for the full list.
 
-```python
-from framework import Runtime
+## On-disk layout (`HIVE_HOME`)
 
-runtime = Runtime("/path/to/storage")
-
-# Start a run
-run_id = runtime.start_run("my_goal", "Description of what we're doing")
-
-# Record a decision
-decision_id = runtime.decide(
-    intent="Choose how to process the data",
-    options=[
-        {"id": "fast", "description": "Quick processing", "pros": ["Fast"], "cons": ["Less accurate"]},
-        {"id": "thorough", "description": "Detailed processing", "pros": ["Accurate"], "cons": ["Slower"]},
-    ],
-    chosen="thorough",
-    reasoning="Accuracy is more important for this task"
-)
-
-# Record the outcome
-runtime.record_outcome(
-    decision_id=decision_id,
-    success=True,
-    result={"processed": 100},
-    summary="Processed 100 items with detailed analysis"
-)
-
-# End the run
-runtime.end_run(success=True, narrative="Successfully processed all data")
-```
-
-### Testing Agents
-
-The framework includes a goal-based testing framework for validating agent behavior.
-
-Tests are generated using MCP tools (`generate_constraint_tests`, `generate_success_tests`) which return guidelines. Claude writes tests directly using the Write tool based on these guidelines.
-
-```bash
-# Run tests against an agent
-python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
-
-# Debug failed tests
-python -m framework test-debug <agent_path> <test_name>
-
-# List tests for a goal
-python -m framework test-list <goal_id>
-```
-
-For detailed testing workflows, see the [testing-agent skill](../.claude/skills/testing-agent/SKILL.md).
-
-### Analyzing Agent Behavior with Builder
-
-The BuilderQuery interface allows you to analyze agent runs and identify improvements:
-
-```python
-from framework import BuilderQuery
-
-query = BuilderQuery("/path/to/storage")
-
-# Find patterns across runs
-patterns = query.find_patterns("my_goal")
-print(f"Success rate: {patterns.success_rate:.1%}")
-
-# Analyze a failure
-analysis = query.analyze_failure("run_123")
-print(f"Root cause: {analysis.root_cause}")
-print(f"Suggestions: {analysis.suggestions}")
-
-# Get improvement recommendations
-suggestions = query.suggest_improvements("my_goal")
-for s in suggestions:
-    print(f"[{s['priority']}] {s['recommendation']}")
-```
-
-## Architecture
+State lives under `HIVE_HOME` (defaults to the platform app-data dir; override with the `HIVE_HOME` env var):
 
 ```
-┌─────────────────┐
-│  Human Engineer │  ← Supervision, approval
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Builder LLM   │  ← Analyzes runs, suggests improvements
-│  (BuilderQuery) │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Agent LLM     │  ← Executes tasks, records decisions
-│    (Runtime)    │
-└─────────────────┘
+$HIVE_HOME/
+  agents/queens/<queen_id>/     # Queen profiles + sessions
+  colonies/<name>/              # one directory per colony
+    worker.json                 #   the colony's worker spec (clone template)
+    data/tracker.db             #   the colony's shared SQLite ledger
+  memories/                     # scoped Queen memory (global / colony / queen)
+  credentials/                  # encrypted credential store
 ```
 
-## Key Concepts
+A colony is self-contained in its directory, which is what makes it portable (export/import as a tarball).
 
-- **Decision**: The atomic unit of agent behavior. Captures intent, options, choice, and reasoning.
-- **Run**: A complete execution with all decisions and outcomes.
-- **Runtime**: Interface agents use to record their behavior.
-- **BuilderQuery**: Interface Builder uses to analyze agent behavior.
+## Key modules
+
+| Area | Path |
+| --- | --- |
+| Agent loop (the one primitive) | `framework/agent_loop/agent_loop.py` |
+| Colony runtime (spawn/schedule/collect) | `framework/host/colony_runtime.py`, `framework/host/worker.py` |
+| Colony identity/binding | `framework/host/colony_binding.py` |
+| Queen (agent, personas, phases, memory) | `framework/agents/queen/` |
+| Tracker (shared ledger) | `framework/tools/tracker_tools.py`, `framework/host/tracker_db.py` |
+| Task plan | `framework/tasks/` |
+| Reminder hub | `framework/agent_loop/reminders.py` |
+| LLM providers | `framework/llm/` |
+| HTTP server / control plane | `framework/server/` |
 
 ## Requirements
 
 - Python 3.11+
-- pydantic >= 2.0
-- anthropic >= 0.40.0 (for LLM-powered agents)
+- An LLM provider (Anthropic, OpenAI, Google Gemini, OpenRouter, Hive LLM, or any LiteLLM-compatible provider — including local models via Ollama)
+
+## Testing
+
+The framework includes a goal-based testing harness for validating agent behavior. See the [Developer Guide](../docs/developer-guide.md) for workflows.

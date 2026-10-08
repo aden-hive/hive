@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Partially occluded</title>
+<style>
+  .stage { position: relative; width: 720px; height: 420px; margin: 24px auto; background: #fff; border: 1px solid #ccc; }
+  #target {
+    position: absolute;
+    left: 220px;
+    top: 160px;
+    width: 200px;
+    height: 56px;
+    background: #2d72d9;
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    font: 600 16px sans-serif;
+    cursor: pointer;
+  }
+  /* Overlay that covers ~70% of the target, leaving only the bottom-left corner exposed. */
+  .overlay {
+    position: absolute;
+    left: 240px;     /* starts 20px inside the target */
+    top: 150px;
+    width: 240px;
+    height: 80px;
+    background: rgba(255, 220, 80, 0.95);
+    border: 1px dashed #c9a800;
+    pointer-events: none; /* clicks pass through to the button */
+    display: flex; align-items: center; justify-content: center;
+    color: #555;
+    font: 14px sans-serif;
+  }
+  /* Decoy buttons that are fully visible — those should NOT be clicked. */
+  .decoy {
+    position: absolute;
+    width: 140px;
+    height: 40px;
+    background: #2d72d9;
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    font: 600 14px sans-serif;
+  }
+  .decoy.x { left: 40px;  top: 40px;  }
+  .decoy.y { left: 540px; top: 60px;  }
+  .decoy.z { left: 60px;  top: 340px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Precision · Partially occluded</h1>
+  <p class="instruction">Click the <strong>"Continue"</strong> button. It is partially covered by a translucent yellow note — only the bottom-left corner of the button is exposed. The other blue buttons on the page are decoys.</p>
+</header>
+<div class="stage">
+  <button class="decoy x">Skip</button>
+  <button class="decoy y">Cancel</button>
+  <button class="decoy z">Reset</button>
+  <button id="target">Continue</button>
+  <div class="overlay">overlapping note</div>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // Allow clicks on the exposed bottom-left of the target. Use the
+    // target's full rect — any click on the visible corner counts.
+    Eval.requireClickOn(function () { return document.getElementById("target"); }, { allowRetry: true });
+  });
+</script>
+</body>
+</html>

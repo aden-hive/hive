@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Cross-tab handoff</title>
+<style>
+  .panel { width: 460px; margin: 24px auto; }
+  .link {
+    display: inline-block;
+    background: #2d72d9; color: white;
+    padding: 10px 14px; border-radius: 4px;
+    text-decoration: none; font: 600 14px sans-serif;
+    margin-bottom: 18px;
+  }
+  .field {
+    display: flex; gap: 10px; align-items: center;
+    margin-top: 14px;
+  }
+  .field label { font: 600 14px sans-serif; }
+  .field input {
+    padding: 8px 12px; border: 1px solid #888; border-radius: 4px;
+    font: 18px monospace; width: 120px; letter-spacing: 4px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Multi-step · Cross-tab handoff</h1>
+  <p class="instruction">
+    Open the link below in a <strong>new tab</strong>. The new tab will show a 4-digit code.
+    Read the code visually, switch back to this tab, and <strong>type it into the input below</strong>.
+  </p>
+</header>
+<div class="panel">
+  <a id="open" class="link" href="/task/multistep_tab_handoff_code" target="_blank" rel="noopener">Open code page →</a>
+  <div class="field">
+    <label for="code">Code:</label>
+    <input id="code" type="text" inputmode="numeric" maxlength="4" autocomplete="off">
+  </div>
+</div>
+<script>
+  (function () {
+    // Generate a 4-digit code and stash it for the sibling tab to read.
+    function gen() {
+      return String(1000 + Math.floor(Math.random() * 9000));
+    }
+    let code = localStorage.getItem("vision_eval_code");
+    if (!code || !/^\d{4}$/.test(code)) {
+      code = gen();
+      localStorage.setItem("vision_eval_code", code);
+    }
+    const input = document.getElementById("code");
+    // Evaluate every *new* completed 4-digit value. Typing 4-2-1-7,
+    // clearing, then typing 5-2-1-7 should be two misses, not one.
+    // Once the correct code is entered we lock and stop evaluating so
+    // the queen can leave the page without piling on noise.
+    let succeeded = false;
+    let lastEvaluated = "";
+    input.addEventListener("input", function () {
+      if (succeeded) return;
+      const v = (input.value || "").trim();
+      if (v.length !== 4) return;
+      if (v === lastEvaluated) return;
+      lastEvaluated = v;
+      if (v === code) {
+        Eval.markSuccess({ code: code });
+        succeeded = true;
+      } else {
+        Eval.markMiss({ entered: v, code: code });
+      }
+    });
+  })();
+</script>
+</body>
+</html>

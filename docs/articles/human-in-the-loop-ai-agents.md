@@ -237,8 +237,8 @@ user_proxy = UserProxyAgent(
 )
 ```
 
-### Aden HITL
-Aden has native support for HITL with:
+### Hive HITL
+Hive has native support for HITL with:
 
 ```python
 # Goal definition includes HITL requirements
@@ -253,7 +253,7 @@ Create a customer response system that:
 4. Learns from approved/rejected responses
 """
 
-# Aden creates intervention nodes automatically
+# Hive creates intervention nodes automatically
 # Dashboard shows pending approvals
 # Configurable timeout and escalation policies
 ```
@@ -415,8 +415,8 @@ audit_log = {
 3. **Collaborative interfaces** - Better human-AI interaction
 4. **Gradual autonomy** - Systems earn more independence
 
-### Aden's Approach
-Aden is built around native HITL:
+### Hive's Approach
+Hive is built around native HITL:
 - Intervention nodes are first-class citizens
 - Dashboard for managing approvals
 - Configurable policies per agent

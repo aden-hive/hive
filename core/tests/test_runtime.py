@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from framework import Runtime
+from framework import DecisionTracker as Runtime
 from framework.schemas.decision import DecisionType
 
 
@@ -38,15 +38,20 @@ class TestRuntimeBasics:
         assert runtime.current_run is None
 
     def test_run_saved_on_end(self, tmp_path: Path):
-        """Run is saved to storage when ended."""
+        """Run is persisted to disk when ended.
+
+        ConcurrentStorage.save_run_sync() writes to runs/{run_id}.json
+        via an atomic temp-file+rename.  This is the primary guardrail
+        ensuring end_run() does not silently discard completed runs.
+        """
         runtime = Runtime(tmp_path)
 
         run_id = runtime.start_run("test_goal", "Test")
         runtime.end_run(success=True)
 
-        # Check file exists
+        # ConcurrentStorage writes to {base_path}/runs/{run_id}.json
         run_file = tmp_path / "runs" / f"{run_id}.json"
-        assert run_file.exists()
+        assert run_file.exists(), f"Expected persisted run at {run_file}"
 
 
 class TestDecisionRecording:
@@ -341,6 +346,7 @@ class TestConvenienceMethods:
 class TestNarrativeGeneration:
     """Test automatic narrative generation."""
 
+    @pytest.mark.skip(reason="save_run() and get_runs_by_goal() are deprecated. New sessions use unified storage at sessions/{session_id}/state.json")
     def test_default_narrative_success(self, tmp_path: Path):
         """Test default narrative for successful run."""
         runtime = Runtime(tmp_path)
@@ -360,6 +366,7 @@ class TestNarrativeGeneration:
         run = runtime.storage.load_run(runtime.storage.get_runs_by_goal("test_goal")[0])
         assert "completed successfully" in run.narrative
 
+    @pytest.mark.skip(reason="save_run() and get_runs_by_goal() are deprecated. New sessions use unified storage at sessions/{session_id}/state.json")
     def test_default_narrative_failure(self, tmp_path: Path):
         """Test default narrative for failed run."""
         runtime = Runtime(tmp_path)

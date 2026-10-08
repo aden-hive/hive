@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Code page</title>
+<style>
+  body { background: #111; color: #fafafa; }
+  .wrap {
+    height: 70vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .label { color: #888; font: 14px sans-serif; letter-spacing: 0.1em; text-transform: uppercase; }
+  .code { font: 900 96px monospace; letter-spacing: 18px; color: #ffe066; margin-top: 8px; }
+  .hint { color: #666; font: 13px sans-serif; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="label">your code is</div>
+  <div id="code" class="code">— — — —</div>
+  <div class="hint">Switch back to the first tab and type these four digits.</div>
+</div>
+<script>
+  (function () {
+    const code = localStorage.getItem("vision_eval_code");
+    document.getElementById("code").textContent = (code && /^\d{4}$/.test(code))
+      ? code.split("").join(" ")
+      : "no code yet";
+  })();
+</script>
+</body>
+</html>

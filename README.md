@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
+  <img width="100%" alt="Hive Banner" src="https://asset.acho.io/github/img/banner.gif" />
 </p>
 
 <p align="center">
@@ -13,165 +13,181 @@
   <a href="docs/i18n/ko.md">한국어</a>
 </p>
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
-[![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
-[![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
-[![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
+<p align="center">
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 License" /></a>
+  <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
+  <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Twitter Follow" /></a>
+  <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
+  <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
+</p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Goal--Driven-Development-purple?style=flat-square" alt="Goal-Driven" />
+  <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
   <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
+  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
+
+<p align="center"><em>The agent harness for production workloads — state management, failure recovery, observability, and human oversight so your agents actually run.</em></p>
 
 ## Overview
 
-Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+OpenHive is a zero-setup, model-agnostic runtime for **colonies of agents**. A colony is a group of specialized agents that work together to run one business process: a **Queen** — the persistent, client-facing lead — plus however many **worker** agents the job needs. You describe the outcome; the Queen does the work, then grows a colony around it to run that work reliably and at scale.
+
+The mechanism underneath is **one loop controlling many loops**. Hive has a single execution primitive: the Queen *is* an agent loop, and every worker is a **clone** of it — same tools, same model, its own task. There is no graph to compile and no orchestration boilerplate to write. The colony coordinates through a shared ledger and a persistent plan, with crash-safe state, deep observability, and human oversight built into the one primitive every agent shares. See the **[Architecture Overview](docs/architecture/README.md)** for how it works.
+
+## Features
+
+- ✅ Colonies of agents — a Queen spawns worker clones on demand for parallel, long-running work
+- ✅ One primitive, many loops — no graph to wire; the Queen grows the colony at runtime
+- ✅ Shared tracker ledger + persistent task plan for coordination without a data buffer
+- ✅ Queen personas with CEO-style routing and evolving, scoped memory
+- ✅ Crash-safe park/resume, cost enforcement, and out-of-band human-in-the-loop (Sentinel)
+- ✅ Zero Setup — no technical configuration required
+- ✅ General Compute Use and Browser Use with Native Extension
+- ✅ Custom Model Support
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token)based on how much you think a job is going to be replaced by AI.
+
+https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
+
+
 ## Who Is Hive For?
 
-Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+Hive is the multi-agent harness layer for teams moving AI agents from prototype to production. Single agents like Openclaw and Cowork can finish personal jobs pretty well but lack the rigor to fulfil business processes. 
 
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Prefer **goal-driven development** over hardcoded workflows
-- Need **self-healing and adaptive agents** that improve over time
+- Need a **runtime that handles state, recovery, and parallel execution** at scale
+- Need **adaptive agents that improve over time** through reflexion, memory, and learned skills
 - Require **human-in-the-loop control**, observability, and cost limits
-- Plan to run agents in **production environments**
+- Plan to run agents in **production** where uptime, cost, and auditability matter
 
 Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
 
 ## When Should You Use Hive?
 
-Use Hive when you need:
+Use Hive when the bottleneck is no longer the model but the harness around it:
 
-- Long-running, autonomous agents
-- Multi-agent coordination
-- Continuous improvement based on failures
-- Strong monitoring, safety, and budget controls
-- A framework that evolves with your goals
-
-
-## What is Aden
-
-<p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
-</p>
-
-Aden is a platform for building, deploying, operating, and adapting AI agents:
-
-- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
-- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
-- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
-- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+- Long-running agents that need **state persistence and crash recovery**
+- Production workloads requiring **cost enforcement, observability, and audit trails**
+- Agents that **improve over time** through reflexion, scoped memory, and learned skills
+- Parallel, multi-agent work coordinated through a **shared tracker ledger and persistent plan**
+- A framework that **scales with model improvements** rather than fighting them
 
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
-- **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
-<!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
-- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
+- **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
+- **[Report Issues](https://github.com/aden-hive/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
 ### Prerequisites
 
-- [Python 3.11+](https://www.python.org/downloads/) for agent development
-- Claude Code or Cursor for utilizing agent skills
+- Python 3.11+ for agent development
+- An LLM provider that powers the agents
+- **ripgrep (required for full search):** Quickstart installs and verifies `rg`; the tools container also includes it. To repair an existing installation, run `uv run scripts/ensure_ripgrep.py --install`. Windows uses `winget install --exact --id BurntSushi.ripgrep.MSVC --source winget --scope user` (Scoop/Chocolatey are alternatives). A custom installation can be selected with `HIVE_RIPGREP_PATH` set to the absolute executable path. Missing `rg` makes `terminal_rg` fail explicitly unless approximate search is requested with `allow_fallback=True`.
+
+> **Windows Users:** Native Windows is supported via `quickstart.ps1` and `hive.ps1`. Run these in PowerShell 5.1+. WSL is also an option but not required.
 
 ### Installation
 
+> **Note**
+> Hive uses a `uv` workspace layout and is not installed with `pip install`.
+> Running `pip install -e .` from the repository root will create a placeholder package and Hive will not function correctly.
+> Please use the quickstart script below to set up the environment.
+
 ```bash
 # Clone the repository
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
 
-# Run quickstart setup
+# Run quickstart setup (macOS/Linux)
 ./quickstart.sh
+
+# Windows (PowerShell)
+.\quickstart.ps1
 ```
 
 This sets up:
-- **framework** - Core agent runtime and graph executor (in `core/.venv`)
+
+- **framework** - Core agent runtime and colony runtime (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
-- All required Python dependencies
+- **credential store** - Encrypted API key storage (`~/.hive/credentials`)
+- **LLM provider** - Interactive default model configuration, including Hive LLM and OpenRouter
+- All required Python dependencies with `uv`
+
+- Finally, it will open the Hive interface in your browser
+
+> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
 ### Build Your First Agent
 
-```bash
-# Build an agent using Claude Code
-claude> /building-agents-construction
+Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
 
-# Test your agent
-claude> /testing-agent
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
 
-# Run your agent
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
-```
+### Use Template Agents
 
-**[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
+Click "Try a sample agent" and check the templates. You can run a template directly or choose to build your version on top of the existing template.
 
-### Cursor IDE Support
+### Run Agents
 
-Skills are also available in Cursor. To enable:
+Now you can run an agent by selecting the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
 
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/building-agents-construction`)
+<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
 
-## Features
+## Integration
 
-- **Goal-Driven Development** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
-- **Adaptiveness** - Framework captures failures, calibrates according to the objectives, and evolves the agent graph
-- **Dynamic Node Connections** - No predefined edges; connection code is generated by any capable LLM based on your goals
-- **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
-- **Human-in-the-Loop** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
-- **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
-- **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
-- **Production-Ready** - Self-hostable, built for scale and reliability
+<a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
+Hive is built to be model-agnostic and system-agnostic.
 
-## Why Aden
+- **LLM flexibility** - Hive Framework supports Anthropic, OpenAI, OpenRouter, Hive LLM, and other hosted or local models through LiteLLM-compatible providers.
+- **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
-Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
+## Why Hive
+
+As models improve, the upper bound of what agents can do rises — but their reliability and production value are determined by the harness. Hive focuses on running real business processes rather than generic agents. Instead of making you hand-wire a workflow graph, define every agent interaction, and handle failures reactively, Hive flips the paradigm: **you describe the outcome, the Queen does the work first, then grows a colony to scale it** — an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
 
 ```mermaid
 flowchart LR
-    GOAL["Define Goal"] --> GEN["Auto-Generate Graph"]
-    GEN --> EXEC["Execute Agents"]
-    EXEC --> MON["Monitor & Observe"]
-    MON --> CHECK{{"Pass?"}}
+    GOAL["Describe Outcome"] --> PILOT["Queen Pilots<br/>(does one unit herself)"]
+    PILOT --> SYS["Systematize<br/>(skill + playbook)"]
+    SYS --> FAN["Fan Out<br/>(spawn worker clones)"]
+    FAN --> CONV["Converge<br/>(shared tracker ledger)"]
+    CONV --> CHECK{{"Done?"}}
     CHECK -- "Yes" --> DONE["Deliver Result"]
-    CHECK -- "No" --> EVOLVE["Evolve Graph"]
-    EVOLVE --> EXEC
+    CHECK -- "No" --> FAN
 
     GOAL -.- V1["Natural Language"]
-    GEN -.- V2["Instant Architecture"]
-    EXEC -.- V3["Easy Integrations"]
-    MON -.- V4["Full visibility"]
-    EVOLVE -.- V5["Adaptability"]
+    PILOT -.- V2["Prove the path"]
+    SYS -.- V3["Repeatable process"]
+    FAN -.- V4["Parallel at scale"]
+    CONV -.- V5["Resume by construction"]
     DONE -.- V6["Reliable outcomes"]
 
     style GOAL fill:#ffbe42,stroke:#cc5d00,stroke-width:2px,color:#333
-    style GEN fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
-    style EXEC fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style MON fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style PILOT fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
+    style SYS fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style FAN fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style CONV fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
     style CHECK fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
     style DONE fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#fff
-    style EVOLVE fill:#e8763d,stroke:#cc5d00,stroke-width:2px,color:#fff
     style V1 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
     style V2 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
     style V3 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
@@ -180,161 +196,25 @@ flowchart LR
     style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
 ```
 
-### The Aden Advantage
-
-| Traditional Frameworks     | Aden                                   |
-| -------------------------- | -------------------------------------- |
-| Hardcode agent workflows   | Describe goals in natural language     |
-| Manual graph definition    | Auto-generated agent graphs            |
-| Reactive error handling    | Outcome-evaluation and adaptiveness               |
-| Static tool configurations | Dynamic SDK-wrapped nodes              |
-| Separate monitoring setup  | Built-in real-time observability       |
-| DIY budget management      | Integrated cost controls & degradation |
-
 ### How It Works
 
-1. **Define Your Goal** → Describe what you want to achieve in plain English
-2. **Coding Agent Generates** → Creates the agent graph, connection code, and test cases
-3. **Workers Execute** → SDK-wrapped nodes run with full observability and tool access
-4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
-5. **Adaptiveness** → On failure, the system evolves the graph and redeploys automatically
-
-## Run pre-built Agents (Coming Soon)
-
-### Run a sample agent
-Aden Hive provides a list of featured agents that you can use and build on top of.
-
-### Run an agent shared by others
-Put the agent in `exports/` and run `PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'`
-
-
-For building and running goal-driven agents with the framework:
-
-```bash
-# One-time setup
-./quickstart.sh
-
-# This sets up:
-# - framework package (core runtime)
-# - aden_tools package (MCP tools)
-# - All Python dependencies
-
-# Build new agents using Claude Code skills
-claude> /building-agents-construction
-
-# Test agents
-claude> /testing-agent
-
-# Run agents
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
-```
-
-See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
+1. **[Describe the outcome](docs/key_concepts/goals_outcome.md)** → Say what you want in plain English; a CEO-style router picks the right [Queen](docs/key_concepts/queen.md)
+2. **Queen pilots** → She does one unit of the work herself, proving the path and recording it in the shared tracker
+3. **[Systematize](docs/key_concepts/improvement.md)** → She factors the proven protocol into a skill + playbook — a repeatable process
+4. **[Fan out](docs/key_concepts/colony.md)** → `run_worker` spawns [worker clones](docs/key_concepts/worker_agent.md) that run in parallel and report back
+5. **Converge & monitor** → Workers write results to the tracker; the Queen validates via SQL, with real-time metrics, budget enforcement, and crash-safe resume
 
 ## Documentation
 
-- **[Developer Guide](DEVELOPER.md)** - Comprehensive guide for developers
+- **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
-## Roadmap
-
-Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [ROADMAP.md](ROADMAP.md) for details.
-
-```mermaid
-flowchart TD
-subgraph Foundation
-    direction LR
-    subgraph arch["Architecture"]
-        a1["Node-Based Architecture"]:::done
-        a2["Python SDK"]:::done
-        a3["LLM Integration"]:::done
-        a4["Communication Protocol"]:::done
-    end
-    subgraph ca["Coding Agent"]
-        b1["Goal Creation Session"]:::done
-        b2["Worker Agent Creation"]
-        b3["MCP Tools"]:::done
-    end
-    subgraph wa["Worker Agent"]
-        c1["Human-in-the-Loop"]:::done
-        c2["Callback Handlers"]:::done
-        c3["Intervention Points"]:::done
-        c4["Streaming Interface"]
-    end
-    subgraph cred["Credentials"]
-        d1["Setup Process"]:::done
-        d2["Pluggable Sources"]:::done
-        d3["Enterprise Secrets"]
-        d4["Integration Tools"]:::done
-    end
-    subgraph tools["Tools"]
-        e1["File Use"]:::done
-        e2["Memory STM/LTM"]:::done
-        e3["Web Search/Scraper"]:::done
-        e4["CSV/PDF"]:::done
-        e5["Excel/Email"]
-    end
-    subgraph core["Core"]
-        f1["Eval System"]
-        f2["Pydantic Validation"]:::done
-        f3["Documentation"]:::done
-        f4["Adaptiveness"]
-        f5["Sample Agents"]
-    end
-end
-
-subgraph Expansion
-    direction LR
-    subgraph intel["Intelligence"]
-        g1["Guardrails"]
-        g2["Streaming Mode"]
-        g3["Image Generation"]
-        g4["Semantic Search"]
-    end
-    subgraph mem["Memory Iteration"]
-        h1["Message Model & Sessions"]
-        h2["Storage Migration"]
-        h3["Context Building"]
-        h4["Proactive Compaction"]
-        h5["Token Tracking"]
-    end
-    subgraph evt["Event System"]
-        i1["Event Bus for Nodes"]
-    end
-    subgraph cas["Coding Agent Support"]
-        j1["Claude Code"]
-        j2["Cursor"]
-        j3["Opencode"]
-        j4["Antigravity"]
-    end
-    subgraph plat["Platform"]
-        k1["JavaScript/TypeScript SDK"]
-        k2["Custom Tool Integrator"]
-        k3["Windows Support"]
-    end
-    subgraph dep["Deployment"]
-        l1["Self-Hosted"]
-        l2["Cloud Services"]
-        l3["CI/CD Pipeline"]
-    end
-    subgraph tmpl["Templates"]
-        m1["Sales Agent"]
-        m2["Marketing Agent"]
-        m3["Analytics Agent"]
-        m4["Training Agent"]
-        m5["Smart Form Agent"]
-    end
-end
-
-classDef done fill:#9e9e9e,color:#fff,stroke:#757575
-```
 ## Contributing
+We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework ([check #2805](https://github.com/aden-hive/hive/issues/2805)). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework ([check #2805](https://github.com/adenhq/hive/issues/2805)). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work. 
+**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work.
 
 1. Find or create an issue and get assigned
 2. Fork the repository
@@ -367,13 +247,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Frequently Asked Questions (FAQ)
 
-**Q: Does Hive depend on LangChain or other agent frameworks?**
-
-No. Hive is built from the ground up with no dependencies on LangChain, CrewAI, or other agent frameworks. The framework is designed to be lean and flexible, generating agent graphs dynamically rather than relying on predefined components.
-
 **Q: What LLM providers does Hive support?**
 
-Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, OpenRouter, and Hive LLM. Simply set the appropriate API key environment variable and specify the model name. See [docs/configuration.md](docs/configuration.md) for provider-specific configuration examples.
 
 **Q: Can I use Hive with local AI models like Ollama?**
 
@@ -381,39 +257,23 @@ Yes! Hive supports local models through LiteLLM. Simply use the model name forma
 
 **Q: What makes Hive different from other agent frameworks?**
 
-Hive generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, evolves the agent graph, and redeploys. This self-improving loop is unique to Aden.
+Hive runs **colonies of agents**, not single agents or hand-wired agent graphs. Most frameworks make you compile a graph of distinct nodes and edges; Hive has one execution primitive — the Queen *is* an agent loop, and every worker is a [clone](docs/key_concepts/the_loop.md) of it. Orchestration is a runtime `run_worker` fan-out, not a compiled DAG, and the colony coordinates through a [shared tracker ledger](docs/key_concepts/coordination.md) instead of a data buffer. On top of that "one loop, many loops" core, Hive is a production harness — crash-safe park/resume, cost enforcement, real-time observability, and out-of-band human-in-the-loop — inherited by every agent because there is only one kind of agent. See the [Architecture Overview](docs/architecture/README.md).
 
 **Q: Is Hive open-source?**
 
 Yes, Hive is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
 
-**Q: Does Hive collect data from users?**
-
-Hive collects telemetry data for monitoring and observability purposes, including token usage, latency metrics, and cost tracking. Content capture (prompts and responses) is configurable and stored with team-scoped data isolation. All data stays within your infrastructure when self-hosted.
-
-**Q: What deployment options does Hive support?**
-
-Hive supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
-
-**Q: Can Hive handle complex, production-scale use cases?**
-
-Yes. Hive is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
-
 **Q: Does Hive support human-in-the-loop workflows?**
 
-Yes, Hive fully supports human-in-the-loop workflows through intervention nodes that pause execution for human input. These include configurable timeouts and escalation policies, allowing seamless collaboration between human experts and AI agents.
-
-**Q: What monitoring and debugging tools does Hive provide?**
-
-Hive includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and MCP tools for agent execution, including file operations, web search, data processing, and more.
+Yes. A Queen escalates to a human out-of-band through **Sentinel** — an account-bound Slack/Telegram channel. The agent loop parks (persisting its state to disk), notifies the human, and resumes exactly where it left off when they reply. Because escalation isn't a node in a graph, any agent in a colony can pause for human judgment at any point, with configurable timeouts and escalation policies. See the [Architecture Overview](docs/architecture/README.md#reliability-is-in-the-primitive).
 
 **Q: What programming languages does Hive support?**
 
 The Hive framework is built in Python. A JavaScript/TypeScript SDK is on the roadmap.
 
-**Q: Can Aden agents interact with external tools and APIs?**
+**Q: Can Hive agents interact with external tools and APIs?**
 
-Yes. Aden's SDK-wrapped nodes provide built-in tool access, and the framework supports flexible tool ecosystems. Agents can integrate with external APIs, databases, and services through the node architecture.
+Yes. Every agent in a colony has built-in tool access, and Hive connects to external APIs, databases, and services through MCP — including 100+ integration tools plus General Compute Use and Browser Use via the native extension. Because the Queen and her workers share one tool surface, a capability you add is available to the whole colony.
 
 **Q: How does cost control work in Hive?**
 
@@ -421,23 +281,21 @@ Hive provides granular budget controls including spending limits, throttles, and
 
 **Q: Where can I find examples and documentation?**
 
-Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [DEVELOPER.md](DEVELOPER.md) guide.
+Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [developer guide](docs/developer-guide.md).
 
 **Q: How can I contribute to Aden?**
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-**Q: When will my team start seeing results from Aden's adaptive agents?**
+## Star History
 
-Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
-
-**Q: How does Hive compare to other agent frameworks?**
-
-Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
-
-**Q: Does Aden offer enterprise support?**
-
-For enterprise inquiries, contact the Aden team through [adenhq.com](https://adenhq.com) or join our [Discord community](https://discord.com/invite/MXE49hrKDk) for support and discussions.
+<a href="https://www.star-history.com/?type=date&repos=aden-hive%2Fhive">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+ </picture>
+</a>
 
 ---
 

@@ -21,15 +21,30 @@ dependencies = [
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "pypdf>=4.0.0",
+    "pdfplumber>=0.11.9",
+    "reportlab>=4.0.0",
+    "pypdfium2>=4.0.0",
     "pandas>=2.0.0",
     "jsonpath-ng>=1.6.0",
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
     "playwright>=1.40.0",
-    "playwright-stealth>=1.0.5",
-    "litellm>=1.81.0",
+    "playwright-stealth>=2.0.0",
+    "litellm==1.83.4",
+    "dnspython>=2.4.0",
     "resend>=2.0.0",
+    "asana>=3.2.0",
+    "google-analytics-data>=0.18.0",
+    "framework",
+    "stripe>=14.3.0",
+    "arxiv>=2.1.0",
+    "requests>=2.31.0",
+    "websockets>=12.0",
+    "psycopg2-binary>=2.9.0",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+    "fpdf2>=2.7.0",
 ]
 
 [project.optional-dependencies]
@@ -40,30 +55,58 @@ dev = [
 sandbox = [
     "RestrictedPython>=7.0",
 ]
+browser = [
+    "pillow>=10.0.0",
+]
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
 ]
+excel = [
+    "openpyxl>=3.1.0",
+]
 sql = [
     "duckdb>=1.0.0",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.0.0",
+]
+databricks = [
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
+    "openpyxl>=3.1.0",
+    "google-cloud-bigquery>=3.0.0",
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
+
+[project.scripts]
+# The browser CLI that replaces the browser_* MCP tools. Invoked by agents via
+# terminal_exec (always with --json); a `python -m gcu.cli` fallback is documented.
+hive-browser = "gcu.cli:main"
+
+[tool.uv.sources]
+framework = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aden_tools"]
+# `gcu` ships the browser CLI (`hive-browser`) + the gcu MCP server; it must be
+# packaged for the console script to resolve in a built wheel (dev/editable
+# installs already expose it via the src path).
+packages = ["src/aden_tools", "src/gcu"]
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 150
 
 lint.select = [
   "B",   # bugbear errors
@@ -89,6 +132,14 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = [
+    "ty>=0.0.13",
+    "ruff>=0.14.14",
+    "duckdb>=1.4.4",
+]

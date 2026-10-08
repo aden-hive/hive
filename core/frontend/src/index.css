@@ -1,0 +1,458 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-sidebar-bg: hsl(var(--sidebar-bg));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-item-hover: hsl(var(--sidebar-item-hover));
+  --color-sidebar-active-bg: hsl(var(--sidebar-active-bg));
+  --color-sidebar-section-text: hsl(var(--sidebar-section-text));
+  --color-sidebar-muted: hsl(var(--sidebar-muted));
+  --color-status-online: hsl(var(--status-online));
+  --color-status-offline: hsl(var(--status-offline));
+  --color-badge-unread: hsl(var(--badge-unread));
+  --color-badge-unread-text: hsl(var(--badge-unread-text));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Density toggle — scales the root font-size so every rem-based
+ * Tailwind class (text, padding, gap, etc.) grows together. Compact is
+ * the visual baseline (matches the previous app-wide size). Spacious
+ * opts in to ~12% more breathing room across the entire UI. Fixed-pixel
+ * widths (e.g. modal max-w-[680px]) stay constant — the text inside
+ * them gets a touch larger; tested layouts can absorb it. */
+:root[data-density="spacious"] {
+  font-size: 18px;
+}
+
+/* Lots of components (notably the sidebar) pin font-size to literal
+ * pixel values via Tailwind arbitrary classes like ``text-[12.5px]``.
+ * Those don't follow the root rem scale, so spacious mode would leave
+ * them stuck at compact sizing. Mirror the ~12.5% bump on the common
+ * pixel sizes so every text surface grows together. */
+:root[data-density="spacious"] .text-\[9px\]      { font-size: 10.125px; }
+:root[data-density="spacious"] .text-\[9\.5px\]   { font-size: 10.6875px; }
+:root[data-density="spacious"] .text-\[10px\]     { font-size: 11.25px; }
+:root[data-density="spacious"] .text-\[10\.5px\]  { font-size: 11.8125px; }
+:root[data-density="spacious"] .text-\[11px\]     { font-size: 12.375px; }
+:root[data-density="spacious"] .text-\[11\.5px\]  { font-size: 12.9375px; }
+:root[data-density="spacious"] .text-\[12px\]     { font-size: 13.5px; }
+:root[data-density="spacious"] .text-\[12\.5px\]  { font-size: 14.0625px; }
+:root[data-density="spacious"] .text-\[13px\]     { font-size: 14.625px; }
+:root[data-density="spacious"] .text-\[13\.5px\]  { font-size: 15.1875px; }
+:root[data-density="spacious"] .text-\[14px\]     { font-size: 15.75px; }
+
+@layer base {
+  :root {
+    --background: 40 28% 95.3%;
+    --foreground: 36 14% 3.7%;
+    --card: 0 0% 100%;
+    --card-foreground: 40 7% 14.5%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 36 14% 3.7%;
+    --primary: 30 73% 41%;
+    --primary-foreground: 0 0% 4.3%;
+    --secondary: 38 22% 92.2%;
+    --secondary-foreground: 40 7% 14.5%;
+    --muted: 37 17% 88.4%;
+    --muted-foreground: 32 8% 44%;
+    --accent: 37 17% 88.4%;
+    --accent-foreground: 40 7% 14.5%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 37 14% 85.5%;
+    --input: 36 13% 80.8%;
+    --ring: 30 73% 41%;
+    --radius: 0.5rem;
+
+    /* Sidebar */
+    --sidebar-bg: 40 28% 95.3%;
+    --sidebar-border: 37 14% 85.5%;
+    --sidebar-item-hover: 38 22% 92.2%;
+    --sidebar-active-bg: 30 73% 41% / 0.12;
+    --sidebar-section-text: 32 8% 44%;
+    --sidebar-muted: 32 6% 50%;
+
+    /* Status indicators */
+    --status-online: 142 71% 45%;
+    --status-offline: 0 0% 70%;
+    --badge-unread: 25 95% 55%;
+    --badge-unread-text: 0 0% 100%;
+
+    /* Agent graph node status colors */
+    --node-running: 45 95% 42%;
+    --node-looping: 38 90% 42%;
+    --node-complete: 43 70% 38%;
+    --node-pending: 35 15% 72%;
+    --node-pending-bg: 35 10% 94%;
+    --node-pending-border: 35 10% 80%;
+    --node-error: 0 65% 50%;
+
+    /* Agent graph trigger node colors */
+    --trigger-bg: 210 25% 94%;
+    --trigger-border: 210 20% 78%;
+    --trigger-text: 210 30% 35%;
+    --trigger-icon: 210 40% 40%;
+
+    /* Draft graph chrome colors */
+    --draft-edge: 220 10% 75%;
+    --draft-edge-arrow: 220 10% 65%;
+    --draft-edge-label: 220 10% 50%;
+    --draft-back-edge: 220 10% 80%;
+    --draft-group-fill: 220 10% 96%;
+    --draft-group-stroke: 220 10% 72%;
+    --draft-chrome-text: 220 10% 45%;
+    --draft-chrome-text-dim: 220 10% 55%;
+    --draft-node-text: 0 0% 25%;
+    --draft-node-text-hover: 0 0% 10%;
+
+    /* Sub-agent mux pane colors */
+    --mux-title-bg: 220 10% 95%;
+    --mux-title-border: 220 10% 88%;
+    --mux-body-bg: 0 0% 98%;
+    --mux-grid-bg: 0 0% 93%;
+    --mux-frame-border: 220 10% 85%;
+    --mux-frame-bg: 0 0% 97%;
+    --mux-dim-text: 0 0% 45%;
+    --mux-content-text: 0 0% 15%;
+    --mux-waiting-text: 0 0% 70%;
+    --mux-overlay-bg: 0 0% 100% / 0.82;
+    --mux-finished-check: 142 50% 40%;
+
+    /* Trigger status colors */
+    --trigger-status-active: 142 40% 45%;
+    --trigger-status-inactive: 210 20% 55%;
+    --trigger-active-bg: 210 30% 90%;
+    --trigger-active-border: 210 40% 60%;
+    --trigger-active-text: 210 40% 30%;
+    --trigger-active-icon: 210 50% 45%;
+  }
+
+  .dark {
+    --background: 0 0% 4.3%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 6.7%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 6.7%;
+    --popover-foreground: 0 0% 93%;
+    --primary: 45 93% 47%;
+    --primary-foreground: 0 0% 4.3%;
+    --secondary: 0 0% 8.6%;
+    --secondary-foreground: 0 0% 80%;
+    --muted: 0 0% 10.9%;
+    --muted-foreground: 0 0% 54%;
+    --accent: 0 0% 10.9%;
+    --accent-foreground: 0 0% 93%;
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 11.8%;
+    --input: 0 0% 16.5%;
+    --ring: 45 93% 47%;
+
+    /* Sidebar */
+    --sidebar-bg: 0 0% 4.3%;
+    --sidebar-border: 0 0% 11.8%;
+    --sidebar-item-hover: 0 0% 8.6%;
+    --sidebar-active-bg: 45 93% 47% / 0.12;
+    --sidebar-section-text: 0 0% 54%;
+    --sidebar-muted: 0 0% 45%;
+
+    /* Status indicators */
+    --status-online: 142 71% 45%;
+    --status-offline: 0 0% 40%;
+    --badge-unread: 25 95% 55%;
+    --badge-unread-text: 0 0% 100%;
+
+    /* Agent graph node status colors */
+    --node-running: 45 95% 58%;
+    --node-looping: 38 90% 55%;
+    --node-complete: 43 70% 45%;
+    --node-pending: 35 15% 28%;
+    --node-pending-bg: 0 0% 8%;
+    --node-pending-border: 0 0% 16%;
+    --node-error: 0 65% 55%;
+
+    /* Agent graph trigger node colors */
+    --trigger-bg: 0 0% 8%;
+    --trigger-border: 0 0% 20%;
+    --trigger-text: 0 0% 60%;
+    --trigger-icon: 0 0% 50%;
+
+    /* Draft graph chrome colors */
+    --draft-edge: 0 0% 22%;
+    --draft-edge-arrow: 0 0% 28%;
+    --draft-edge-label: 0 0% 38%;
+    --draft-back-edge: 0 0% 18%;
+    --draft-group-fill: 0 0% 9%;
+    --draft-group-stroke: 0 0% 25%;
+    --draft-chrome-text: 0 0% 45%;
+    --draft-chrome-text-dim: 0 0% 38%;
+    --draft-node-text: 0 0% 78%;
+    --draft-node-text-hover: 0 0% 92%;
+
+    /* Sub-agent mux pane colors */
+    --mux-title-bg: 0 0% 5%;
+    --mux-title-border: 0 0% 12%;
+    --mux-body-bg: 0 0% 3.5%;
+    --mux-grid-bg: 0 0% 7%;
+    --mux-frame-border: 0 0% 12%;
+    --mux-frame-bg: 0 0% 3.5%;
+    --mux-dim-text: 0 0% 33%;
+    --mux-content-text: 0 0% 80%;
+    --mux-waiting-text: 0 0% 20%;
+    --mux-overlay-bg: 0 0% 3.5% / 0.82;
+    --mux-finished-check: 142 50% 40%;
+
+    /* Trigger status colors */
+    --trigger-status-active: 140 40% 50%;
+    --trigger-status-inactive: 0 0% 35%;
+    --trigger-active-bg: 0 0% 12%;
+    --trigger-active-border: 0 0% 25%;
+    --trigger-active-text: 0 0% 65%;
+    --trigger-active-icon: 0 0% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    line-height: 1.55;
+  }
+
+  ::selection {
+    background: hsl(var(--primary));
+    color: hsl(0 0% 4.3%);
+  }
+
+  /* User chat bubbles have a primary-colored background, so the default
+     accent selection is invisible. Use an inverted selection instead. */
+  .bg-primary ::selection {
+    background: hsl(0 0% 100% / 0.4);
+    color: hsl(0 0% 0%);
+  }
+
+  h1, h2, h3 {
+    font-family: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.028em;
+    line-height: 1.1;
+  }
+
+  code, pre, .mono, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-feature-settings: "calt" 0;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  textarea {
+    padding: 0;
+    margin: 0;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:active {
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Webkit (Chrome/Safari/Edge) — thin overlay track */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Light mode adjustments */
+:root:not(.dark) *:hover,
+:root:not(.dark) *:active {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+:root:not(.dark) *:hover::-webkit-scrollbar-thumb,
+:root:not(.dark) *:active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+:root:not(.dark) *::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Keep scrollbar-hide for elements that truly need no scrollbar (e.g. tab bars) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Pulse ring animation for SVG elements */
+@keyframes pulse-ring {
+  0% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.05); }
+  100% { opacity: 0.25; transform: scale(1); }
+}
+
+/* Slide-in animation */
+@keyframes slide-in-from-right {
+  from { transform: translateX(10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-in.slide-in-from-right {
+  animation: slide-in-from-right 0.2s ease-out;
+}
+
+/* Slide-up animation for question widget */
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-in.slide-in-from-bottom {
+  animation: slide-in-from-bottom 0.25s ease-out;
+}
+
+/* Home status line shimmer */
+@keyframes queen-debate-line {
+  0%, 100% {
+    opacity: 0.72;
+    transform: translateY(0);
+    background-position: 0% 50%;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+    background-position: 100% 50%;
+  }
+}
+
+.queen-debate-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  color: hsl(var(--muted-foreground));
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--muted-foreground) / 0.75),
+    hsl(var(--primary) / 0.95),
+    hsl(var(--muted-foreground) / 0.75)
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: queen-debate-line 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queen-debate-line {
+    animation: none;
+    background-image: none;
+    color: hsl(var(--muted-foreground));
+  }
+}
+
+/* Gentle downward bob to draw attention to the "install extension" CTA
+ * (the browser-bridge Connect button) without it being distracting. */
+@keyframes download-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(2px); }
+}
+.animate-download-bob {
+  animation: download-bob 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-download-bob {
+    animation: none;
+  }
+}
+
+/* Marquee for the browser-tab badge: when a tab title is too long for the
+ * cramped header chip, scroll it horizontally like a carousel. The track holds
+ * two copies of the title and shifts by exactly one (-50%) for a seamless loop;
+ * duration is set inline per title length. Honours reduced-motion. */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
+
+/* Chat search highlights — painted on top of already-rendered markdown
+ * via the CSS Custom Highlight API. ChatPanel registers two highlight
+ * names: `hive-search-match` for non-current matches and
+ * `hive-search-current` for the match the user is focused on. */
+::highlight(hive-search-match) {
+  background-color: hsl(var(--primary) / 0.22);
+  color: inherit;
+  border-radius: 2px;
+}
+::highlight(hive-search-current) {
+  background-color: hsl(var(--primary) / 0.55);
+  color: hsl(var(--primary-foreground));
+  border-radius: 2px;
+}

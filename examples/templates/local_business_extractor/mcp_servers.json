@@ -1,0 +1,14 @@
+{
+  "hive_tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "mcp_server.py", "--stdio"],
+    "cwd": "../../../tools"
+  },
+  "gcu-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+    "cwd": "../../../tools"
+  }
+}

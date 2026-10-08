@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import SecretStr
 
 from .models import (
+    CredentialExpiredError,
     CredentialKey,
     CredentialObject,
     CredentialRefreshError,
@@ -123,9 +124,7 @@ class CredentialStore:
         """
         return self._providers.get(provider_id)
 
-    def get_provider_for_credential(
-        self, credential: CredentialObject
-    ) -> CredentialProvider | None:
+    def get_provider_for_credential(self, credential: CredentialObject) -> CredentialProvider | None:
         """
         Get the appropriate provider for a credential.
 
@@ -177,6 +176,8 @@ class CredentialStore:
         self,
         credential_id: str,
         refresh_if_needed: bool = True,
+        *,
+        raise_on_refresh_failure: bool = False,
     ) -> CredentialObject | None:
         """
         Get a credential by ID.
@@ -184,6 +185,11 @@ class CredentialStore:
         Args:
             credential_id: The credential identifier
             refresh_if_needed: If True, refresh expired credentials
+            raise_on_refresh_failure: If True, raise ``CredentialExpiredError``
+                when refresh fails instead of silently returning the stale
+                credential. Tool-execution call sites should pass True so the
+                agent gets a structured "reauth needed" signal rather than a
+                later 401 from the provider.
 
         Returns:
             CredentialObject or None if not found
@@ -193,7 +199,7 @@ class CredentialStore:
             cached = self._get_from_cache(credential_id)
             if cached is not None:
                 if refresh_if_needed and self._should_refresh(cached):
-                    return self._refresh_credential(cached)
+                    return self._refresh_credential(cached, raise_on_failure=raise_on_refresh_failure)
                 return cached
 
             # Load from storage
@@ -203,30 +209,42 @@ class CredentialStore:
 
             # Refresh if needed
             if refresh_if_needed and self._should_refresh(credential):
-                credential = self._refresh_credential(credential)
+                credential = self._refresh_credential(credential, raise_on_failure=raise_on_refresh_failure)
 
             # Cache
             self._add_to_cache(credential)
 
             return credential
 
-    def get_key(self, credential_id: str, key_name: str) -> str | None:
+    def get_key(
+        self,
+        credential_id: str,
+        key_name: str,
+        *,
+        raise_on_refresh_failure: bool = False,
+    ) -> str | None:
         """
         Convenience method to get a specific key value.
 
         Args:
             credential_id: The credential identifier
             key_name: The key within the credential
+            raise_on_refresh_failure: See ``get_credential``.
 
         Returns:
             The key value or None if not found
         """
-        credential = self.get_credential(credential_id)
+        credential = self.get_credential(credential_id, raise_on_refresh_failure=raise_on_refresh_failure)
         if credential is None:
             return None
         return credential.get_key(key_name)
 
-    def get(self, credential_id: str) -> str | None:
+    def get(
+        self,
+        credential_id: str,
+        *,
+        raise_on_refresh_failure: bool = False,
+    ) -> str | None:
         """
         Legacy compatibility: get the primary key value.
 
@@ -235,11 +253,12 @@ class CredentialStore:
 
         Args:
             credential_id: The credential identifier
+            raise_on_refresh_failure: See ``get_credential``.
 
         Returns:
             The primary key value or None
         """
-        credential = self.get_credential(credential_id)
+        credential = self.get_credential(credential_id, raise_on_refresh_failure=raise_on_refresh_failure)
         if credential is None:
             return None
         return credential.get_default_key()
@@ -362,6 +381,59 @@ class CredentialStore:
         """
         return self._storage.list_all()
 
+    def list_accounts(self, provider_name: str) -> list[dict[str, Any]]:
+        """List all accounts for a provider type with their identities.
+
+        Args:
+            provider_name: Provider type name (e.g. "google", "slack").
+
+        Returns:
+            List of dicts with credential_id, provider, alias, identity, label.
+        """
+        if hasattr(self._storage, "load_all_for_provider"):
+            creds = self._storage.load_all_for_provider(provider_name)
+        else:
+            cred = self.get_credential(provider_name)
+            creds = [cred] if cred else []
+        return [
+            {
+                "credential_id": c.id,
+                "provider": provider_name,
+                "alias": c.alias,
+                "identity": c.identity.to_dict(),
+            }
+            for c in creds
+        ]
+
+    def get_credential_by_alias(self, provider_name: str, alias: str) -> CredentialObject | None:
+        """Find a credential by provider name and alias.
+
+        Args:
+            provider_name: Provider type name (e.g. "google").
+            alias: User-set alias from the Aden platform.
+
+        Returns:
+            CredentialObject if found, None otherwise.
+        """
+        # LLMs sometimes pass "provider/alias" as the alias (e.g. "google/wrok"
+        # instead of just "wrok").  Strip the provider prefix when present.
+        if alias.startswith(f"{provider_name}/"):
+            alias = alias[len(provider_name) + 1 :]
+
+        if hasattr(self._storage, "load_by_alias"):
+            return self._storage.load_by_alias(provider_name, alias)
+
+        # Scan fallback for storage backends without alias index
+        if hasattr(self._storage, "load_all_for_provider"):
+            for cred in self._storage.load_all_for_provider(provider_name):
+                if cred.alias == alias:
+                    return cred
+        return None
+
+    def get_credential_by_identity(self, provider_name: str, label: str) -> CredentialObject | None:
+        """Alias for get_credential_by_alias (backward compat)."""
+        return self.get_credential_by_alias(provider_name, label)
+
     def is_available(self, credential_id: str) -> bool:
         """
         Check if a credential is available.
@@ -373,6 +445,10 @@ class CredentialStore:
             True if credential exists and is accessible
         """
         return self.get_credential(credential_id, refresh_if_needed=False) is not None
+
+    def exists(self, credential_id: str) -> bool:
+        """Check if a credential exists in storage without triggering provider fetches."""
+        return self._storage.exists(credential_id)
 
     # --- Validation ---
 
@@ -453,8 +529,20 @@ class CredentialStore:
 
         return provider.should_refresh(credential)
 
-    def _refresh_credential(self, credential: CredentialObject) -> CredentialObject:
-        """Refresh a credential using its provider."""
+    def _refresh_credential(
+        self,
+        credential: CredentialObject,
+        *,
+        raise_on_failure: bool = False,
+    ) -> CredentialObject:
+        """Refresh a credential using its provider.
+
+        When ``raise_on_failure`` is True, a refresh failure raises
+        ``CredentialExpiredError`` carrying provider/alias/help_url metadata
+        for the caller (typically the tool runner) to surface a reauth
+        request. Otherwise, the stale credential is returned to preserve
+        legacy best-effort behavior.
+        """
         provider = self.get_provider_for_credential(credential)
         if provider is None:
             logger.warning(f"No provider found for credential '{credential.id}'")
@@ -473,6 +561,13 @@ class CredentialStore:
 
         except CredentialRefreshError as e:
             logger.error(f"Failed to refresh credential '{credential.id}': {e}")
+            if raise_on_failure:
+                raise CredentialExpiredError(
+                    credential_id=credential.id,
+                    message=(f"OAuth token for '{credential.id}' is expired and refresh failed: {e}. Reauthorization required."),
+                    provider=credential.provider_type,
+                    alias=credential.alias,
+                ) from e
             return credential
 
     def refresh_credential(self, credential_id: str) -> CredentialObject | None:
@@ -616,7 +711,7 @@ class CredentialStore:
     @classmethod
     def with_aden_sync(
         cls,
-        base_url: str = "https://api.adenhq.com",
+        base_url: str | None = None,
         cache_ttl_seconds: int = 300,
         local_path: str | None = None,
         auto_sync: bool = True,
@@ -647,23 +742,65 @@ class CredentialStore:
             token = store.get_key("hubspot", "access_token")
         """
         import os
-        from pathlib import Path
 
         from .storage import EncryptedFileStorage
 
         # Determine local storage path
         if local_path is None:
-            local_path = str(Path.home() / ".hive" / "credentials")
+            from framework.config import HIVE_HOME
+
+            local_path = str(HIVE_HOME / "credentials")
+
+        # Check if Aden is configured
+        if not os.environ.get("ADEN_API_KEY"):
+            logger.info("ADEN_API_KEY not set, using local-only credential storage")
+            return cls(storage=EncryptedFileStorage(base_path=local_path), **kwargs)
+
+        built = cls._build_aden_backend(base_url, cache_ttl_seconds, local_path)
+        if built is None:
+            logger.warning("Aden components unavailable, using local storage")
+            return cls(storage=EncryptedFileStorage(base_path=local_path), **kwargs)
+
+        cached_storage, provider = built
+        store = cls(
+            storage=cached_storage,
+            providers=[provider],
+            auto_refresh=True,
+            **kwargs,
+        )
+
+        # Initial sync
+        if auto_sync:
+            synced = provider.sync_all(store)
+            logger.info(f"Synced {synced} credentials from Aden server")
+
+        return store
+
+    @staticmethod
+    def _build_aden_backend(
+        base_url: str | None,
+        cache_ttl_seconds: int,
+        local_path: str,
+    ) -> tuple[Any, CredentialProvider] | None:
+        """Build the ``(AdenCachedStorage, AdenSyncProvider)`` pair.
+
+        Shared by :meth:`with_aden_sync` (build-time) and
+        :meth:`enable_aden_sync` (in-place upgrade). Returns ``None`` when
+        the Aden components can't be constructed.
+        """
+        import os
+
+        from .storage import EncryptedFileStorage
 
         local_storage = EncryptedFileStorage(base_path=local_path)
 
-        # Check if Aden is configured
-        api_key = os.environ.get("ADEN_API_KEY")
-        if not api_key:
-            logger.info("ADEN_API_KEY not set, using local-only credential storage")
-            return cls(storage=local_storage, **kwargs)
+        # Honor ADEN_API_URL when no explicit base_url was passed. The
+        # legacy default (https://api.adenhq.com) was a stale brand alias;
+        # the canonical host is app.open-hive.com, and local dev points
+        # this at http://localhost:8889.
+        if base_url is None:
+            base_url = os.environ.get("ADEN_API_URL", "https://app.open-hive.com")
 
-        # Try to setup Aden sync
         try:
             from .aden import (
                 AdenCachedStorage,
@@ -672,37 +809,64 @@ class CredentialStore:
                 AdenSyncProvider,
             )
 
-            # Create Aden client
             client = AdenCredentialClient(AdenClientConfig(base_url=base_url))
-
-            # Create sync provider
             provider = AdenSyncProvider(client=client)
-
-            # Use cached storage for offline resilience
             cached_storage = AdenCachedStorage(
                 local_storage=local_storage,
                 aden_provider=provider,
                 cache_ttl_seconds=cache_ttl_seconds,
             )
-
-            store = cls(
-                storage=cached_storage,
-                providers=[provider],
-                auto_refresh=True,
-                **kwargs,
-            )
-
-            # Initial sync
-            if auto_sync:
-                synced = provider.sync_all(store)
-                logger.info(f"Synced {synced} credentials from Aden server")
-
-            return store
-
+            return cached_storage, provider
         except ImportError:
-            logger.warning("Aden components not available, using local storage")
-            return cls(storage=local_storage, **kwargs)
-
+            logger.warning("Aden components not available")
+            return None
         except Exception as e:
-            logger.warning(f"Failed to setup Aden sync: {e}. Using local storage.")
-            return cls(storage=local_storage, **kwargs)
+            logger.warning(f"Failed to build Aden backend: {e}")
+            return None
+
+    def enable_aden_sync(
+        self,
+        base_url: str | None = None,
+        cache_ttl_seconds: int | None = None,
+        local_path: str | None = None,
+    ) -> int:
+        """Upgrade this store in place to sync credentials from Aden.
+
+        The desktop runtime is spawned before the user's ``ADEN_API_KEY``
+        exists, so the store is first built local-only. When the key
+        later arrives (``POST /api/credentials``), this swaps an
+        ``AdenCachedStorage`` backend + ``AdenSyncProvider`` onto the
+        *existing* instance — so every component already holding this
+        store (SessionManager, tool registries) gains Aden sync without a
+        process restart — then runs a full initial sync.
+
+        No-op (returns 0) when ``ADEN_API_KEY`` is unset or the Aden
+        components can't be built. Safe to call repeatedly.
+
+        Returns the number of credentials synced.
+        """
+        import os
+
+        if not os.environ.get("ADEN_API_KEY"):
+            logger.info("enable_aden_sync: ADEN_API_KEY not set; staying local-only")
+            return 0
+
+        if local_path is None:
+            from framework.config import HIVE_HOME
+
+            local_path = str(HIVE_HOME / "credentials")
+
+        built = self._build_aden_backend(base_url, cache_ttl_seconds or self._cache_ttl, local_path)
+        if built is None:
+            return 0
+
+        cached_storage, provider = built
+        with self._lock:
+            self._storage = cached_storage
+            self.register_provider(provider)
+            self._auto_refresh = True
+            self._cache.clear()
+
+        synced = provider.sync_all(self)
+        logger.info("enable_aden_sync: Aden sync activated, synced %d credential(s)", synced)
+        return synced

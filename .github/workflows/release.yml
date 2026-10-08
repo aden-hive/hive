@@ -21,18 +21,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: |
           cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync
 
       - name: Run tests
         run: |
           cd core
-          pytest tests/ -v
+          uv run pytest tests/ -v
 
       - name: Generate changelog
         id: changelog

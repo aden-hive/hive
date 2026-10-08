@@ -16,7 +16,6 @@
 
 # Shell scripts (must use LF)
 *.sh text eol=lf
-quickstart.sh text eol=lf
 
 # PowerShell scripts (Windows-friendly)
 *.ps1 text eol=lf
@@ -122,3 +121,8 @@ CODE_OF_CONDUCT* text
 *.db binary
 *.sqlite binary
 *.sqlite3 binary
+
+# Lockfiles — mark generated so GitHub collapses them in PR diffs
+*.lock            linguist-generated=true -diff
+package-lock.json linguist-generated=true -diff
+uv.lock           linguist-generated=true -diff

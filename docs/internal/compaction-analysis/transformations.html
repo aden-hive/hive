@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Transformations &mdash; Compaction Pipeline Analysis</title>
+  <link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumbs">
+    <a href="./index.html">Compaction Analysis</a> &nbsp;/&nbsp; <span>Transformations</span>
+  </div>
+  <nav>
+    <a href="./index.html">Overview</a>
+    <a href="./triggers.html">Triggers</a>
+    <a href="./pipeline.html">Pipeline</a>
+    <a class="active" href="./transformations.html">Transformations</a>
+    <a href="./configuration.html">Configuration</a>
+    <a href="./audit.html">Audit</a>
+  </nav>
+</header>
+
+<h1>What gets compacted away &mdash; and what stays</h1>
+<p class="lede">
+  Compaction is not symmetric: some categories of content are protected at every level, others get
+  truncated, others get moved to disk with a recovery hint, and the rest get summarized or dropped.
+  This page enumerates the exact rules and shows before/after examples.
+</p>
+
+<div class="callout warn">
+  <div class="label">2026-05-12 update</div>
+  The structure-preserving stage and its tool-call-argument compaction helper
+  (<code class="inline">_compact_tool_calls</code>, the
+  <code class="inline">{"_compacted": "&hellip;"}</code> sentinel) were removed from the pipeline.
+  See <a href="./audit.html">Audit</a> for the rationale. The dedicated discussion of those
+  artefacts below is retained because <em>existing on-disk session data</em> still contains them
+  and you may need to understand what you&rsquo;re reading. New compactions do not produce them.
+</div>
+
+<h2>Always preserved (across every level)</h2>
+<table>
+  <thead><tr><th>Category</th><th>Why</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Recent messages</td>
+      <td>The N most recent messages are kept verbatim (<code>keep_recent</code> = 2 in Stage 2 LLM summary, 1 in Stage 3 emergency). The agent needs the immediate-prior tool result and assistant turn to continue coherently.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1219-L1296">conversation.py:1219-1296</a></td>
+    </tr>
+    <tr>
+      <td>Transition markers</td>
+      <td><code>is_transition_marker=True</code> messages are never pruned and are always kept structurally. They sit at phase boundaries and are how the agent finds its position in a continuous-mode workflow.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1079-L1080">conversation.py:1079</a> &middot; <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1385-L1388">1385</a></td>
+    </tr>
+    <tr>
+      <td>Error tool results</td>
+      <td>A pruned error result tempts the model to re-call the failing tool. Keeping the error in context makes the cost of the retry visible.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1084-L1085">conversation.py:1084</a></td>
+    </tr>
+    <tr>
+      <td>Skill content</td>
+      <td><code>is_skill_content=True</code> tool results carry activated SKILL.md instructions. Compacting them would let the agent forget a skill mid-task &mdash; the AS-10 invariant.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1086-L1087">conversation.py:1086</a></td>
+    </tr>
+    <tr>
+      <td>Current-phase messages</td>
+      <td>In continuous mode, every message tagged with the active <code>phase_id</code> is exempt from pruning regardless of token pressure.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1096-L1098">conversation.py:1096</a></td>
+    </tr>
+    <tr>
+      <td>Tiny tool results (&lt;100 chars)</td>
+      <td>Usually <code>set_output</code> acks. Pruning saves nothing but might confuse the model into thinking the call failed.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1090-L1094">conversation.py:1090-1094</a></td>
+    </tr>
+    <tr>
+      <td>Already-pruned messages</td>
+      <td>Content starting with <code>"Pruned tool result"</code> or <code>"[Pruned tool result"</code> is skipped &mdash; the placeholder is already minimal.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1088-L1089">conversation.py:1088</a></td>
+    </tr>
+    <tr>
+      <td>Output-key values</td>
+      <td>Before discarding old messages in <code>compact()</code>, the conversation extracts any <code>output_keys</code> values found and re-injects them as <em>PRESERVED VALUES</em> at the top of the new summary message.</td>
+      <td><a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1266-L1276">conversation.py:1266-1276</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Discarded, replaced, or rewritten</h2>
+<table>
+  <thead><tr><th>Category</th><th>What happens</th><th>Stage</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Old compactable tool results (read_file, browser_snapshot, etc.)</td>
+      <td>Content replaced with <code>"Old tool result (N chars) at /path. Use terminal_rg ..."</code>. Tool_use_id, seq, role preserved so the API invariants hold.</td>
+      <td>Stage 0 (microcompact)</td>
+    </tr>
+    <tr>
+      <td>Older non-error, non-skill tool results</td>
+      <td>Content replaced with <code>"Pruned tool result (N chars) cleared from context. Full data saved at: /path. Read with read_file(...)."</code>.</td>
+      <td>Stage 1 (prune)</td>
+    </tr>
+    <tr>
+      <td>Old freeform user / assistant text</td>
+      <td>Spilled to a numbered file <code>conversation_N.md</code> on disk; original messages removed and replaced with a single injected reference message at the head of the conversation.</td>
+      <td>Historical (former Stage 2 structure-preserving &mdash; removed 2026-05-12)</td>
+    </tr>
+    <tr>
+      <td>Old non-set_output tool-call pairs (aggressive mode only)</td>
+      <td>Collapsed into a single tool-call history block: <code>read_file (3x): /a, /b, /c</code>. Only set_output pairs, error results, and skill content survive in aggressive mode.</td>
+      <td>Historical (former Stage 2 aggressive mode &mdash; removed 2026-05-12)</td>
+    </tr>
+    <tr>
+      <td>All old messages</td>
+      <td>Replaced wholesale by a single LLM-generated summary message (Stage 2) or a deterministic state-dump (Stage 3). Recent N messages kept after the summary.</td>
+      <td>Stage 2 / 3</td>
+    </tr>
+    <tr>
+      <td>Oversized tool-call arguments (&gt;200 chars)</td>
+      <td>Replaced with JSON sentinel <code>{"_compacted": "key=val..."}</code>. Tool name, id, type preserved.</td>
+      <td>Historical (former Stage 2 rewrites &mdash; removed 2026-05-12)</td>
+    </tr>
+    <tr>
+      <td>Inline images (base64 screenshots)</td>
+      <td>Stripped to <code>[image]</code> markers before the LLM summary call. The accompanying text (url, dimensions) is preserved so the model still knows a screenshot happened.</td>
+      <td>Stage 2 (LLM compact, depth=0)</td>
+    </tr>
+    <tr>
+      <td>Old <code>image_content</code> in conversation history</td>
+      <td><code>evict_old_images()</code> keeps only the <code>max_retained_screenshots</code> most recent inline screenshots; older messages get their <code>image_content</code> nulled (text stays).</td>
+      <td>Per-turn (not part of the main pipeline)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Tool-call argument compaction (the &ldquo;_compacted&rdquo; sentinel) &mdash; historical</h2>
+<div class="callout warn">
+  <div class="label">Removed 2026-05-12</div>
+  <code class="inline">_compact_tool_calls</code> and the <code class="inline">_TC_ARG_LIMIT</code>
+  constant were removed when the structure-preserving stage was deleted (see <a href="./audit.html">Audit</a>).
+  The subsection below is retained so readers inspecting archived sessions can recognise the
+  sentinel pattern. New compactions never emit it.
+</div>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L210-L258">core/framework/agent_loop/conversation.py:210-258</a>
+<pre class="code"><code>_TC_ARG_LIMIT = <span class="n">200</span>  <span class="c"># max chars per tool_call argument after compaction</span>
+
+
+<span class="k">def</span> <span class="f">_compact_tool_calls</span>(tool_calls: list[dict[str, Any]]) -&gt; list[dict[str, Any]]:
+    <span class="s">"""Truncate tool_call arguments to save context tokens during compaction.
+
+    Preserves ``id``, ``type``, and ``function.name`` exactly.  When arguments
+    exceed ``_TC_ARG_LIMIT``, replaces the full JSON string with a compact
+    **valid** JSON summary.  The Anthropic API parses tool_call arguments and
+    rejects requests with malformed JSON (e.g. unterminated strings), so we
+    must never produce broken JSON here.
+    """</span>
+    compact = []
+    <span class="k">for</span> tc <span class="k">in</span> tool_calls:
+        func = tc.<span class="f">get</span>(<span class="s">"function"</span>, {})
+        args = func.<span class="f">get</span>(<span class="s">"arguments"</span>, <span class="s">""</span>)
+        <span class="k">if</span> <span class="f">len</span>(args) &gt; _TC_ARG_LIMIT:
+            <span class="c"># Build a valid JSON summary instead of slicing mid-string.</span>
+            <span class="k">try</span>:
+                parsed = json.<span class="f">loads</span>(args)
+                <span class="k">if</span> <span class="f">isinstance</span>(parsed, dict):
+                    summary_parts = []
+                    <span class="k">for</span> k, v <span class="k">in</span> parsed.<span class="f">items</span>():
+                        v_str = <span class="f">str</span>(v)
+                        <span class="k">if</span> <span class="f">len</span>(v_str) &gt; <span class="n">60</span>:
+                            v_str = v_str[:<span class="n">60</span>] + <span class="s">"..."</span>
+                        summary_parts.<span class="f">append</span>(<span class="s">f"{k}={v_str}"</span>)
+                    summary = <span class="s">", "</span>.<span class="f">join</span>(summary_parts)
+                    <span class="k">if</span> <span class="f">len</span>(summary) &gt; _TC_ARG_LIMIT:
+                        summary = summary[:_TC_ARG_LIMIT] + <span class="s">"..."</span>
+                    args = json.<span class="f">dumps</span>({<span class="s">"_compacted"</span>: summary})
+                <span class="k">else</span>:
+                    args = json.<span class="f">dumps</span>({<span class="s">"_compacted"</span>: <span class="f">str</span>(parsed)[:_TC_ARG_LIMIT]})
+            <span class="k">except</span> (json.JSONDecodeError, TypeError):
+                <span class="c"># Args were already invalid JSON &mdash; wrap the preview safely</span>
+                args = json.<span class="f">dumps</span>({<span class="s">"_compacted"</span>: args[:_TC_ARG_LIMIT]})
+        compact.<span class="f">append</span>(
+            {
+                <span class="s">"id"</span>: tc.<span class="f">get</span>(<span class="s">"id"</span>, <span class="s">""</span>),
+                <span class="s">"type"</span>: tc.<span class="f">get</span>(<span class="s">"type"</span>, <span class="s">"function"</span>),
+                <span class="s">"function"</span>: {
+                    <span class="s">"name"</span>: func.<span class="f">get</span>(<span class="s">"name"</span>, <span class="s">""</span>),
+                    <span class="s">"arguments"</span>: args,
+                },
+            }
+        )
+    <span class="k">return</span> compact</code></pre>
+
+<div class="two-col">
+  <div>
+    <h4>Before</h4>
+    <pre class="code"><code>{
+  <span class="s">"id"</span>: <span class="s">"call_8tDl..."</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"web_scrape"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"url\": \"https://example.com/very/long/path/...\", \"selector\": \"main article p, .content&gt;div&gt;p\", \"limit\": 50000, \"follow_links\": false, \"timeout\": 30}"</span>
+  }
+}</code></pre>
+  </div>
+  <div>
+    <h4>After (arguments &gt; 200 chars)</h4>
+    <pre class="code"><code>{
+  <span class="s">"id"</span>: <span class="s">"call_8tDl..."</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"web_scrape"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"url=https://example.com/very/long/path/..., selector=main article p, .content&gt;div&gt;p, limit=50000, follow_li...\"}"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+<div class="callout">
+  <div class="label">Why a JSON sentinel rather than a slice</div>
+  Direct truncation at 200 chars would frequently produce mid-string JSON like
+  <code class="inline">"arguments": "{\"url\": \"https://exa</code> &mdash; the Anthropic API rejects that
+  as malformed. Wrapping the preview in a valid object guarantees the request will at least serialize
+  correctly. The function&rsquo;s exception arm at <code class="inline">conversation.py:245-247</code>
+  handles the case where the source arguments were already broken JSON to begin with.
+</div>
+
+<h2>Spillover file format (historical)</h2>
+<div class="callout warn">
+  <div class="label">Removed 2026-05-12</div>
+  Numbered <code class="inline">conversation_N.md</code> spillover files were produced by the
+  structure-preserving stage. New compactions do not produce them. Existing on-disk archives may
+  still contain them; the format below documents what you&rsquo;re looking at when you find one.
+</div>
+<p>
+  The format is intentionally prose, not JSON or bracketed structure:
+</p>
+<pre class="code"><code><span class="c">## Compacted conversation (messages 1-12)</span>
+
+[user] (seq=0): Hi, please analyse the attached log file for memory issues.
+
+[assistant] (seq=1): I'll start by examining the file structure to identify ...
+
+[user] (seq=4): That looks promising. Can you also check the GC pause distribution?
+
+[assistant] (seq=5): Good idea. Let me extract the GC events ...</code></pre>
+
+<p>The reference message that takes the place of those freeform messages:</p>
+<pre class="code"><code>Previous conversation saved at: /home/timothy/.hive/agents/.../data/conversation_1.md
+Read the full transcript with read_file('conversation_1.md').
+
+TOOLS ALREADY CALLED:
+  read_file (3x):
+    - /tmp/server.log
+    - /tmp/gc.log
+    - /etc/jvm.conf
+  web_search (1x):
+    - "G1GC pause analysis"</code></pre>
+<p>
+  In aggressive mode this is followed by a fuller tool-call history extracted from the collapsed pairs,
+  built by <code class="inline">extract_tool_call_history()</code> at
+  <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L261-L324">conversation.py:261-324</a>.
+</p>
+
+<h2>Image stripping in LLM compaction</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L381-L409">core/framework/agent_loop/internals/compaction.py:381-409</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">strip_images_from_messages</span>(messages: list[Message]) -&gt; list[Message]:
+    <span class="s">"""Strip image_content from messages before LLM summarisation.
+
+    Images/documents are replaced with ``[image]`` markers so the summary
+    notes they existed without wasting tokens sending binary data to the
+    compaction LLM.  Returns a new list (original messages are not mutated).
+    """</span>
+    stripped: list[Message] = []
+    <span class="k">for</span> msg <span class="k">in</span> messages:
+        <span class="k">if</span> msg.image_content:
+            n_images = <span class="f">len</span>(msg.image_content)
+            marker = <span class="s">" "</span>.<span class="f">join</span>(<span class="s">"[image]"</span> <span class="k">for</span> _ <span class="k">in</span> <span class="f">range</span>(n_images))
+            content = <span class="s">f"{msg.content}\n{marker}"</span> <span class="k">if</span> msg.content <span class="k">else</span> marker
+            stripped.<span class="f">append</span>(
+                <span class="f">Message</span>(
+                    seq=msg.seq, role=msg.role, content=content,
+                    tool_use_id=msg.tool_use_id, tool_calls=msg.tool_calls,
+                    is_error=msg.is_error, phase_id=msg.phase_id,
+                    is_transition_marker=msg.is_transition_marker,
+                    image_content=<span class="k">None</span>,  <span class="c"># stripped</span>
+                )
+            )
+        <span class="k">else</span>:
+            stripped.<span class="f">append</span>(msg)
+    <span class="k">return</span> stripped</code></pre>
+<div class="callout">
+  <div class="label">Why this matters separately from compaction</div>
+  Each full-page screenshot can cost ~250k tokens on providers that bill image content as text (gemini and
+  most non-Anthropic providers). Four screenshots can push a session past gemini&rsquo;s 1M-token window and
+  trigger garbage output. Stripping them before the compaction LLM call avoids paying those tokens twice
+  &mdash; once to fit them into the conversation, again to feed them to the summarizer.
+  <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1147-L1170">conversation.py:1147-1170</a>
+  documents the parallel per-turn <code class="inline">evict_old_images()</code> path.
+</div>
+
+<h2>Worked before/after example (historical structure-preserving behavior)</h2>
+<div class="callout warn">
+  <div class="label">Archival reference</div>
+  This diagram shows what compaction <em>used to</em> do under the structure-preserving stage:
+  emptied assistant <code>content</code>, <code>_compacted</code> tool-call args, and an injected
+  &ldquo;Previous conversation saved at: &hellip;&rdquo; reference message. Sessions compacted before
+  2026-05-12 look like the &ldquo;After&rdquo; column. Current Stage 2 LLM summary instead replaces
+  the discarded prefix with a single prose summary message; see <a href="./pipeline.html">Pipeline</a>.
+</div>
+
+<div class="two-col">
+  <div>
+    <h4>Before</h4>
+    <div class="msg-list">
+      <div class="msg cut"><span class="role user">user</span> &ldquo;Please analyse server.log&rdquo;</div>
+      <div class="msg cut"><span class="role assistant">assistant</span> &ldquo;I&rsquo;ll start by reading the file&hellip;&rdquo; &nbsp; <em>tool_calls=[read_file]</em></div>
+      <div class="msg cut"><span class="role tool">tool</span> &lt;50 KB log content&gt;</div>
+      <div class="msg cut"><span class="role assistant">assistant</span> &ldquo;Found memory issues in the GC&hellip;&rdquo;</div>
+      <div class="msg cut"><span class="role user">user</span> &ldquo;Also check pause distribution&rdquo;</div>
+      <div class="msg cut"><span class="role assistant">assistant</span> &ldquo;Running a ripgrep&hellip;&rdquo; &nbsp; <em>tool_calls=[terminal_rg]</em></div>
+      <div class="msg cut"><span class="role tool">tool</span> &lt;12 KB rg output&gt;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> &ldquo;Significant pauses cluster around&hellip;&rdquo;</div>
+      <div class="msg kept"><span class="role user">user</span> &ldquo;Recommend G1 tunings&rdquo;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> &ldquo;Considering the data&hellip;&rdquo;</div>
+    </div>
+  </div>
+  <div>
+    <h4>After (Stage 2 LLM summary, keep_recent=2)</h4>
+    <div class="msg-list">
+      <div class="msg injected"><span class="role user">user</span> &ldquo;Previous conversation saved at: &hellip;/conversation_1.md. Read the full transcript with read_file(&lsquo;conversation_1.md&rsquo;).&rdquo;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> <em>tool_calls=[read_file(args=_compacted)]</em> <span style="color:#94a3b8">// content emptied, tool_calls preserved</span></div>
+      <div class="msg kept"><span class="role tool">tool</span> &ldquo;Pruned tool result (50,234 chars) cleared from context. Full data saved at: &hellip;/server.log_truncated.txt&rdquo;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> <em>tool_calls=[terminal_rg(args=_compacted)]</em></div>
+      <div class="msg kept"><span class="role tool">tool</span> &ldquo;Pruned tool result (12,890 chars) cleared&hellip;&rdquo;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> &ldquo;Significant pauses cluster around&hellip;&rdquo;</div>
+      <div class="msg kept"><span class="role user">user</span> &ldquo;Recommend G1 tunings&rdquo;</div>
+      <div class="msg kept"><span class="role assistant">assistant</span> &ldquo;Considering the data&hellip;&rdquo;</div>
+    </div>
+  </div>
+</div>
+<p>
+  The two old user messages and the two text-only assistant messages were the freeform content saved to
+  <code class="inline">conversation_1.md</code>. The two assistant&shy;-with&shy;-tool_calls messages and
+  their tool result pairs survived as structure (their bulky content was already replaced by Stage&nbsp;1
+  prune placeholders). Note the role of the injected reference: it&rsquo;s a <strong>user</strong>
+  message at seq just below the first kept structural message &mdash; using <code class="inline">role="user"</code>
+  ensures the LLM treats it as input it must respect, not as something it generated.
+</p>
+
+<h2>The <code>compact()</code> message-replacement summary path</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1247-L1295">core/framework/agent_loop/conversation.py:1247-1295</a>
+<pre class="code"><code><span class="k">if</span> split <span class="k">is None</span>:
+    <span class="c"># Fallback: use keep_recent (non-phase or single-phase conversation)</span>
+    keep_recent = <span class="f">max</span>(<span class="n">0</span>, <span class="f">min</span>(keep_recent, total - <span class="n">1</span>))
+    split = total - keep_recent <span class="k">if</span> keep_recent &gt; <span class="n">0</span> <span class="k">else</span> total
+
+<span class="c"># Advance split past orphaned tool results at the boundary.
+# Tool-role messages reference a tool_use from the preceding
+# assistant message; if that assistant message falls into the
+# compacted (old) portion the tool_result becomes invalid.</span>
+<span class="k">while</span> split &lt; total <span class="k">and</span> self._messages[split].role == <span class="s">"tool"</span>:
+    split += <span class="n">1</span>
+
+<span class="c"># Nothing to compact</span>
+<span class="k">if</span> split == <span class="n">0</span>:
+    <span class="k">return</span>
+
+old_messages = <span class="f">list</span>(self._messages[:split])
+recent_messages = <span class="f">list</span>(self._messages[split:])
+
+<span class="c"># Extract protected values from messages being discarded</span>
+<span class="k">if</span> self._output_keys:
+    protected = self.<span class="f">_extract_protected_values</span>(old_messages)
+    <span class="k">if</span> protected:
+        lines = [<span class="s">"PRESERVED VALUES (do not lose these):"</span>]
+        <span class="k">for</span> k, v <span class="k">in</span> protected.<span class="f">items</span>():
+            lines.<span class="f">append</span>(<span class="s">f"- {k}: {v}"</span>)
+        lines.<span class="f">append</span>(<span class="s">""</span>)
+        lines.<span class="f">append</span>(<span class="s">"CONVERSATION SUMMARY:"</span>)
+        lines.<span class="f">append</span>(summary)
+        summary = <span class="s">"\n"</span>.<span class="f">join</span>(lines)
+
+<span class="c"># Determine summary seq</span>
+<span class="k">if</span> recent_messages:
+    summary_seq = recent_messages[<span class="n">0</span>].seq - <span class="n">1</span>
+<span class="k">else</span>:
+    summary_seq = self._next_seq
+    self._next_seq += <span class="n">1</span>
+
+summary_msg = <span class="f">Message</span>(seq=summary_seq, role=<span class="s">"user"</span>, content=summary, run_id=self._run_id)</code></pre>
+<div class="callout ok">
+  <div class="label">Two safety invariants enforced here</div>
+  <ol>
+    <li><strong>No orphaned tool results.</strong> The split point is advanced past any tool-role messages that would otherwise lose their parent assistant message. A tool result without its tool call would be rejected by the API.</li>
+    <li><strong>Output values are protected.</strong> If the node has declared <code>output_keys</code> and any of those values are already set in the messages being discarded, they&rsquo;re extracted and prefixed to the summary as <code>PRESERVED VALUES</code> so the running <code>OutputAccumulator</code> doesn&rsquo;t lose them.</li>
+  </ol>
+</div>
+
+<h2>Compaction labels in telemetry</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L781-L794">core/framework/agent_loop/internals/compaction.py:781-794</a>
+<pre class="code"><code><span class="c"># Determine label from what happened</span>
+<span class="k">if</span> after_pct &gt;= before_pct - <span class="n">1</span>:
+    level = <span class="s">"prune_only"</span>
+<span class="k">elif</span> ratio_after &lt;= <span class="n">0.6</span>:
+    level = <span class="s">"llm"</span>
+<span class="k">else</span>:
+    level = <span class="s">"structural"</span>
+
+logger.<span class="f">info</span>(
+    <span class="s">"Compaction complete (%s): %d%% -&gt; %d%%"</span>,
+    level,
+    before_pct,
+    after_pct,
+)</code></pre>
+<p>
+  Three labels surface to the runtime logger and event bus:
+  <code class="inline">prune_only</code> means the cheaper stages were enough (or the LLM stage was bypassed),
+  <code class="inline">structural</code> is a legacy label from when the structure-preserving stage existed; it survives in the labelling code for backwards compatibility but new pipelines do not produce it,
+  and <code class="inline">llm</code> means a successful LLM summary call drove usage to 60% or lower.
+</p>
+
+<footer class="botline">
+  Next: <a href="./configuration.html">Configuration &rarr;</a> &mdash; every knob and env var.
+</footer>
+
+</div>
+</body>
+</html>

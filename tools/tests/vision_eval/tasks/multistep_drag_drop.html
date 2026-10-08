@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Drag and drop</title>
+<style>
+  .stage { display: flex; gap: 60px; justify-content: center; margin-top: 24px; }
+  .col { display: flex; flex-direction: column; gap: 18px; }
+  .piece {
+    width: 100px; height: 100px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font: 700 30px sans-serif;
+    cursor: grab;
+    user-select: none;
+  }
+  .piece.circle { border-radius: 50%; }
+  .piece.dragging { opacity: 0.6; cursor: grabbing; }
+  .zone {
+    width: 140px; height: 140px;
+    border: 3px dashed #888;
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    color: #888;
+    font: 12px sans-serif;
+    text-align: center;
+  }
+  .zone.over { border-color: #2bb04a; background: #eaffea; }
+  .zone.filled { border-style: solid; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Multi-step · Drag and drop</h1>
+  <p class="instruction">Drag the <strong>red circle</strong> into the <strong>square dashed zone labeled "Circle here"</strong>. (Two other zones are decoys.)</p>
+</header>
+<div class="stage">
+  <div class="col">
+    <div class="piece" data-id="red-square" style="background:#cc3344">A</div>
+    <div class="piece circle" data-id="red-circle" style="background:#cc3344">B</div>
+    <div class="piece" data-id="blue-square" style="background:#3366cc">C</div>
+  </div>
+  <div class="col">
+    <div class="zone" data-accept="red-square">Square here</div>
+    <div class="zone" data-accept="red-circle">Circle here</div>
+    <div class="zone" data-accept="blue-square">Other here</div>
+  </div>
+</div>
+<script>
+  (function () {
+    let dragId = null;
+    // Each (piece, zone) pair emits at most one event. Repeating the same
+    // wrong drop is silent (no duplicate spam), but any *new* wrong drop
+    // adds a miss — and the correct drop adds a success. So a queen who
+    // misroutes twice before getting it right scores pass-with-2-misses.
+    const seen = new Set();
+    document.querySelectorAll(".piece").forEach(function (p) {
+      p.setAttribute("draggable", "true");
+      p.addEventListener("dragstart", function (e) {
+        dragId = p.dataset.id;
+        p.classList.add("dragging");
+        e.dataTransfer.setData("text/plain", dragId);
+        e.dataTransfer.effectAllowed = "move";
+      });
+      p.addEventListener("dragend", function () {
+        p.classList.remove("dragging");
+      });
+    });
+    document.querySelectorAll(".zone").forEach(function (z) {
+      z.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        z.classList.add("over");
+      });
+      z.addEventListener("dragleave", function () {
+        z.classList.remove("over");
+      });
+      z.addEventListener("drop", function (e) {
+        e.preventDefault();
+        z.classList.remove("over");
+        const id = dragId || e.dataTransfer.getData("text/plain");
+        z.classList.add("filled");
+        z.textContent = id;
+        const key = id + "->" + z.dataset.accept;
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (z.dataset.accept === "red-circle" && id === "red-circle") {
+          Eval.markSuccess({ piece: id, zone: z.dataset.accept });
+        } else {
+          Eval.markMiss({ piece: id, zone: z.dataset.accept });
+        }
+      });
+    });
+  })();
+</script>
+</body>
+</html>

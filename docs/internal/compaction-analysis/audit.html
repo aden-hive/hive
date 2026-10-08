@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Session Audit &mdash; Compaction Pipeline Analysis</title>
+  <link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumbs">
+    <a href="./index.html">Compaction Analysis</a> &nbsp;/&nbsp; <span>Audit</span>
+  </div>
+  <nav>
+    <a href="./index.html">Overview</a>
+    <a href="./triggers.html">Triggers</a>
+    <a href="./pipeline.html">Pipeline</a>
+    <a href="./transformations.html">Transformations</a>
+    <a href="./configuration.html">Configuration</a>
+    <a class="active" href="./audit.html">Audit</a>
+  </nav>
+</header>
+
+<h1>Session audit: <code>session_20260508_102516_c8fd6fa7</code></h1>
+<p class="lede">
+  An audit of one real production session whose compaction output looks structurally damaging.
+  Each finding is backed by the actual file on disk plus the exact source line that produces the
+  behavior. Five distinct problem classes identified.
+</p>
+
+<div class="callout ok">
+  <div class="label">Status &mdash; 2026-05-12: Direction A applied</div>
+  Direction A from <a href="#section-9">Section 9</a> was acted on: the structure-preserving
+  compaction stage was removed from the pipeline. Specifically &mdash;
+  <ul style="margin: 8px 0 0">
+    <li>The Stage 2 call was removed from the orchestrator
+      (<code class="inline">compaction.py</code>); the pipeline is now Stage 0 microcompact &rarr;
+      Stage 1 prune &rarr; Stage 2 LLM summary &rarr; Stage 3 emergency.</li>
+    <li><code class="inline">NodeConversation.compact_preserving_structure</code> and the
+      <code class="inline">_compact_tool_calls</code> / <code class="inline">_TC_ARG_LIMIT</code>
+      helper + constant were deleted from <code class="inline">conversation.py</code>.</li>
+    <li>The seven tests in <code class="inline">TestAggressiveStructuralCompaction</code> and the
+      <code class="inline">_build_tool_heavy_conversation</code> helper were removed from
+      <code class="inline">test_node_conversation.py</code>. The remaining 102 conversation tests
+      pass.</li>
+    <li>The descriptive pages of this docset (Overview, Pipeline, Transformations, Configuration)
+      were updated to reflect the new four-stage pipeline. This audit page is preserved verbatim
+      below as the historical record that motivated the change.</li>
+  </ul>
+  Existing on-disk session data that predates this change &mdash; including the session under audit
+  here &mdash; still contains the <code class="inline">{"_compacted": "&hellip;"}</code> sentinels
+  and the <code class="inline">conversation_N.md</code> spillover chain documented below. Newly
+  compacted sessions do not produce either.
+</div>
+
+<div class="callout danger">
+  <div class="label">Bottom line</div>
+  <strong>96 of 614 conversation parts (15.6%) have their tool-call arguments destroyed</strong>
+  by the 200-character cap in <code class="inline">_compact_tool_calls()</code>. The session has
+  cascaded through <strong>four successive structural compactions</strong>, each writing a new
+  <code class="inline">conversation_N.md</code> that only references the previous one. At least
+  one tool call (<code class="inline">excel_write</code> at seq 69) has been compacted twice,
+  showing the wrapper is not idempotent. Content-bearing tools (<code class="inline">write_file</code>,
+  <code class="inline">terminal_exec</code> with heredocs, <code class="inline">excel_write</code>,
+  <code class="inline">chart_render</code>) lose their payloads &mdash; the agent can no longer
+  audit or replay what it did.
+</div>
+
+<h2>1. The session under audit</h2>
+<table>
+  <thead><tr><th>Field</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Queen</td><td><code>queen_finance_fundraising</code></td></tr>
+    <tr><td>Session ID</td><td><code>session_20260508_102516_c8fd6fa7</code></td></tr>
+    <tr><td>Time span</td><td>2026-05-08 10:25 PDT &rarr; 16:36 PDT (~6 hours, financial analysis task)</td></tr>
+    <tr><td>Conversation parts</td><td>614 JSON files in <code>conversations/parts/</code></td></tr>
+    <tr><td>Spillover files (chain depth)</td><td>4 &mdash; <code>conversation_1.md</code> &rarr; <code>conversation_2.md</code> &rarr; <code>conversation_3.md</code> &rarr; <code>conversation_4.md</code></td></tr>
+    <tr><td>Parts with destroyed args</td><td><strong>96</strong> (15.6%)</td></tr>
+    <tr><td>Structural compactions observed</td><td>at least 4 (one per spillover file)</td></tr>
+    <tr><td>Last compaction&rsquo;s reference (part 0)</td><td>points to <code>conversation_4.md</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Destroyed-args breakdown by tool</h3>
+<table>
+  <thead><tr><th>Tool</th><th>Count</th><th>What was lost</th></tr></thead>
+  <tbody>
+    <tr><td><code>chart_render</code></td><td>72</td><td>Full echarts/matplotlib JSON specs (typically 3&ndash;15 KB each).</td></tr>
+    <tr><td><code>task_create_batch</code></td><td>12</td><td>The batch payload &mdash; the list of tasks the agent dispatched.</td></tr>
+    <tr><td><code>terminal_exec</code></td><td>8</td><td>Most are <code>cat &lt;&lt; 'PYEOF' &gt; /tmp/&hellip;</code> heredocs that wrote Python files.</td></tr>
+    <tr><td><code>write_file</code></td><td>3</td><td>The <code>content</code> field &mdash; the actual file body the agent wrote.</td></tr>
+    <tr><td><code>excel_write</code></td><td>1</td><td>The spreadsheet structure passed to <code>excel_write</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>2. The 200-character tool-call argument cap</h2>
+<p>
+  All 96 destroyed arguments share the same root cause: the constant <code class="inline">_TC_ARG_LIMIT = 200</code>
+  inside <code class="inline">_compact_tool_calls()</code>.
+</p>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L210-L258">core/framework/agent_loop/conversation.py:210-258</a>
+<pre class="code"><code>_TC_ARG_LIMIT = <span class="n">200</span>  <span class="c"># max chars per tool_call argument after compaction</span>
+
+
+<span class="k">def</span> <span class="f">_compact_tool_calls</span>(tool_calls: list[dict[str, Any]]) -&gt; list[dict[str, Any]]:
+    <span class="s">"""Truncate tool_call arguments to save context tokens during compaction.
+
+    Preserves ``id``, ``type``, and ``function.name`` exactly.  When arguments
+    exceed ``_TC_ARG_LIMIT``, replaces the full JSON string with a compact
+    **valid** JSON summary.
+    """</span>
+    compact = []
+    <span class="k">for</span> tc <span class="k">in</span> tool_calls:
+        func = tc.<span class="f">get</span>(<span class="s">"function"</span>, {})
+        args = func.<span class="f">get</span>(<span class="s">"arguments"</span>, <span class="s">""</span>)
+        <span class="k">if</span> <span class="f">len</span>(args) &gt; _TC_ARG_LIMIT:                                  <span class="c"># &lt;-- the trigger</span>
+            <span class="k">try</span>:
+                parsed = json.<span class="f">loads</span>(args)
+                <span class="k">if</span> <span class="f">isinstance</span>(parsed, dict):
+                    summary_parts = []
+                    <span class="k">for</span> k, v <span class="k">in</span> parsed.<span class="f">items</span>():
+                        v_str = <span class="f">str</span>(v)
+                        <span class="k">if</span> <span class="f">len</span>(v_str) &gt; <span class="n">60</span>:                                <span class="c"># &lt;-- inner per-value cap</span>
+                            v_str = v_str[:<span class="n">60</span>] + <span class="s">"..."</span>
+                        summary_parts.<span class="f">append</span>(<span class="s">f"{k}={v_str}"</span>)
+                    summary = <span class="s">", "</span>.<span class="f">join</span>(summary_parts)
+                    <span class="k">if</span> <span class="f">len</span>(summary) &gt; _TC_ARG_LIMIT:
+                        summary = summary[:_TC_ARG_LIMIT] + <span class="s">"..."</span>     <span class="c"># &lt;-- outer cap again</span>
+                    args = json.<span class="f">dumps</span>({<span class="s">"_compacted"</span>: summary})</code></pre>
+<p>
+  So an argument like <code class="inline">chart_render(spec=&lt;5 KB JSON&gt;)</code> survives as
+  <code class="inline">"spec={\"title\": {\"text\": \"ISRG vs TEM vs OSCR— 1-Year Per..."</code>
+  &mdash; the first 60 chars of the value, repeat for the next key, total capped at 200. For
+  content-bearing tools this is unrecoverable destruction.
+</p>
+
+<h3>The worst cases observed</h3>
+
+<h4>Case A &mdash; <code>write_file</code> at seq 187: Python file body destroyed</h4>
+<a class="src-ref" href="#">conversations/parts/0000000187.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">187</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_49ed3430be8d44f8b36b1084"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"write_file"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"path=/tmp/render_charts.py, content=import json\\nimport subprocess\\nimport sys\\n\\n# Read specs\\nmu = ...\"}"</span>
+  }
+}]}</code></pre>
+<div class="callout danger">
+  <div class="label">Why this is severe</div>
+  The <code class="inline">content</code> parameter of <code class="inline">write_file</code> is the
+  file body. After compaction the agent has no way to recover what was written to
+  <code class="inline">/tmp/render_charts.py</code> &mdash; if the file is deleted, overwritten, or
+  the session forks to a new colony, the work is lost. The same shape recurs at seq 399 and seq 528
+  (another <code class="inline">write_file</code> for <code class="inline">/tmp/build_3_dcf.py</code>).
+</div>
+
+<h4>Case B &mdash; <code>excel_write</code> at seq 69: <em>double</em> compaction</h4>
+<a class="src-ref" href="#">conversations/parts/0000000069.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">69</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_31b0b325b5584d7382a7e423"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"excel_write"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"_compacted=path=ISRG_DCF_Model.xlsx, columns=['Sheet', 'Section', 'Line...\"}"</span>
+  }
+}]}</code></pre>
+<div class="callout warn">
+  <div class="label">Look closely: the value starts with <code>_compacted=path=&hellip;</code></div>
+  The leading <code class="inline">_compacted=</code> inside the value means the wrapper sees an
+  already-compacted argument string and wraps it a second time. After the first compaction the args
+  were <code class="inline">{"_compacted": "path=ISRG_DCF_Model.xlsx, columns=&hellip;"}</code>. On the
+  second pass, the loader parsed that into <code class="inline">{"_compacted": "path=&hellip;"}</code>,
+  walked the dict, emitted <code class="inline">"_compacted=path=&hellip;"</code> as a key=value pair,
+  and re-wrapped. Section 3 below digs into the idempotency bug.
+</div>
+
+<h4>Case C &mdash; <code>terminal_exec</code> at seq 7: full heredoc-Python script gone</h4>
+<a class="src-ref" href="#">conversations/parts/0000000007.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">7</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_c245f9d1610c4867bd06ae7c"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"terminal_exec"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"command=cat &lt;&lt; 'PYEOF' &gt; /tmp/stock_chart.py\\nimport json\\n\\n# Parse th..., shell=True, timeout_sec=10\"}"</span>
+  }
+}]}</code></pre>
+<p>
+  The agent ran a heredoc command that piped a Python program into <code class="inline">/tmp/stock_chart.py</code>.
+  After compaction we see only the first ~60 chars of the heredoc body. The Python program is gone
+  from history. The same pattern shows up at seq 530 (a write_file precedes a follow-up
+  <code class="inline">terminal_exec</code> at seq 530 which itself escaped compaction because it&rsquo;s
+  in the most recent window).
+</p>
+
+<h4>Case D &mdash; <code>chart_render</code> at seq 9: full chart spec gone</h4>
+<a class="src-ref" href="#">conversations/parts/0000000009.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">9</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_f4cca53557104364aa243420"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"chart_render"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"kind=echarts, title=isrg-tem-oscr-stock-comparison, width=1400, height=750, dpi=200, spec={\\n  \\\"title\\\": {\\n    \\\"text\\\": \\\"ISRG vs TEM vs OSCR \\u2014 1-Year Per...\"}"</span>
+  }
+}]}</code></pre>
+<p>
+  The chart_render spec is the entire chart definition. Looking at the data directory,
+  <code class="inline">chart_render_*</code> output files run 2.5&ndash;13&nbsp;KB each. All 72 of these
+  in the session have lost their input specs to the 200-char cap.
+</p>
+
+<h4>Case E &mdash; <code>task_create_batch</code> at seq 15: batch payload gone</h4>
+<a class="src-ref" href="#">conversations/parts/0000000015.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">15</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_6893a77fafd2413c9b708098"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"task_create_batch"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"tasks=[{'subject': 'Chart 1: ISRG 12-month price with volume overl...\"}"</span>
+  }
+}]}</code></pre>
+<p>
+  The agent dispatched a batch of tasks; after compaction we know only the partial subject of task&nbsp;1.
+  Tasks 2&ndash;N are unidentifiable from the conversation alone.
+</p>
+
+<h4>Case F &mdash; <code>write_file</code> at seq 528 (late session)</h4>
+<a class="src-ref" href="#">conversations/parts/0000000528.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">528</span>, <span class="s">"role"</span>: <span class="s">"assistant"</span>, <span class="s">"content"</span>: <span class="s">""</span>, <span class="s">"tool_calls"</span>: [{
+  <span class="s">"id"</span>: <span class="s">"call_7d3c779524c747ea9d6888f6"</span>,
+  <span class="s">"type"</span>: <span class="s">"function"</span>,
+  <span class="s">"function"</span>: {
+    <span class="s">"name"</span>: <span class="s">"write_file"</span>,
+    <span class="s">"arguments"</span>: <span class="s">"{\"_compacted\": \"content=import openpyxl\\nfrom openpyxl.styles import Font, PatternFil..., path=/tmp/build_3_dcf.py\"}"</span>
+  }
+}]}</code></pre>
+<p>
+  Important: seq 528 is in the upper third of the session, only a handful of turns before the most
+  recent structural compaction at part 0. The damage is not limited to old messages &mdash; it
+  reaches anything outside the most-recent <code class="inline">keep_recent=4</code> window at the
+  moment compaction fires. See <a href="#recent-not-safe">Section&nbsp;5</a>.
+</p>
+
+<h2>3. The double-compaction idempotency bug</h2>
+<p>
+  The wrapper at <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L213-L258">conversation.py:213-258</a>
+  decides whether to compact purely from <code class="inline">len(args) &gt; _TC_ARG_LIMIT</code>.
+  There is no check for an existing <code class="inline">{"_compacted": "&hellip;"}</code> envelope,
+  so each successive structural-compaction pass that runs against the same message wraps the args
+  again.
+</p>
+<p>
+  The <code class="inline">excel_write</code> at seq 69 is the smoking gun:
+</p>
+<pre class="code"><code><span class="c"># After first compaction:</span>
+{<span class="s">"_compacted"</span>: <span class="s">"path=ISRG_DCF_Model.xlsx, columns=['Sheet', 'Section', 'Line', 'Value'...]"</span>}
+
+<span class="c"># After second compaction (this is what's on disk):</span>
+{<span class="s">"_compacted"</span>: <span class="s">"_compacted=path=ISRG_DCF_Model.xlsx, columns=['Sheet', 'Section', 'Line..."</span>}
+<span class="c">#               ^^^^^^^^^^^                                                                ^^^
+#               The PREVIOUS sentinel got walked as a dict key on the second pass.            Truncated again,
+#               losing the tail.</span></code></pre>
+<p>
+  After N successive compactions a content-bearing tool call has N envelopes of sentinel wrapper
+  around what is now a 60-character glimpse of the original. With this session at four compactions
+  deep, anything compacted on pass 1 is also two-deep wrapped if it survived past pass 2&rsquo;s
+  <code class="inline">keep_recent</code> boundary.
+</p>
+
+<h2>4. The conversation_N.md cascade</h2>
+<p>
+  Part 0 of the live conversation is the reference message injected by the most recent structural
+  compaction. It points at <code class="inline">conversation_4.md</code>:
+</p>
+<a class="src-ref" href="#">conversations/parts/0000000000.json</a>
+<pre class="code"><code>{<span class="s">"seq"</span>: <span class="n">0</span>, <span class="s">"role"</span>: <span class="s">"user"</span>,
+ <span class="s">"content"</span>: <span class="s">"Previous conversation saved at: /home/timothy/.config/Hive/users/8630de5bd303be8b/agents/queens/queen_finance_fundraising/sessions/session_20260508_102516_c8fd6fa7/data/conversation_4.md\nRead the full transcript with read_file('conversation_4.md')."</span>}</code></pre>
+<p>
+  But <code class="inline">conversation_4.md</code> itself begins by pointing at <code class="inline">conversation_3.md</code>,
+  which points at <code class="inline">conversation_2.md</code>, which points at <code class="inline">conversation_1.md</code>:
+</p>
+<div class="diagram">
+<svg viewBox="0 0 880 240" role="img" aria-label="conversation_N spill chain">
+  <defs>
+    <marker id="caud" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #fef3c7; stroke: #d97706; stroke-width: 1.5; }
+    .first { fill: #dcfce7; stroke: #16a34a; stroke-width: 1.5; }
+    .live { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; }
+    .label { font: 13px ui-sans-serif, system-ui, sans-serif; fill: #111827; }
+    .title { font: 13px ui-sans-serif, system-ui, sans-serif; fill: #111827; font-weight: 600; }
+    .small { font: 11px ui-monospace, monospace; fill: #475569; }
+    .ed { stroke: #dc2626; stroke-width: 1.4; fill: none; }
+  </style>
+
+  <rect class="live" x="20" y="60" width="160" height="80" rx="8"/>
+  <text class="title" x="100" y="84" text-anchor="middle">parts/0000000000.json</text>
+  <text class="small" x="100" y="104" text-anchor="middle">role=user (injected)</text>
+  <text class="small" x="100" y="122" text-anchor="middle">"Previous conversation</text>
+  <text class="small" x="100" y="135" text-anchor="middle">saved at: ...conv_4.md"</text>
+
+  <line class="ed" x1="180" y1="100" x2="220" y2="100" marker-end="url(#caud)"/>
+
+  <rect class="box" x="220" y="60" width="140" height="80" rx="8"/>
+  <text class="title" x="290" y="84" text-anchor="middle">conversation_4.md</text>
+  <text class="small" x="290" y="104" text-anchor="middle">11,112 bytes</text>
+  <text class="small" x="290" y="122" text-anchor="middle">"saved at: ...conv_3.md"</text>
+
+  <line class="ed" x1="360" y1="100" x2="400" y2="100" marker-end="url(#caud)"/>
+
+  <rect class="box" x="400" y="60" width="140" height="80" rx="8"/>
+  <text class="title" x="470" y="84" text-anchor="middle">conversation_3.md</text>
+  <text class="small" x="470" y="104" text-anchor="middle">16,989 bytes</text>
+  <text class="small" x="470" y="122" text-anchor="middle">"saved at: ...conv_2.md"</text>
+
+  <line class="ed" x1="540" y1="100" x2="580" y2="100" marker-end="url(#caud)"/>
+
+  <rect class="box" x="580" y="60" width="140" height="80" rx="8"/>
+  <text class="title" x="650" y="84" text-anchor="middle">conversation_2.md</text>
+  <text class="small" x="650" y="104" text-anchor="middle">2,410 bytes</text>
+  <text class="small" x="650" y="122" text-anchor="middle">"saved at: ...conv_1.md"</text>
+
+  <line class="ed" x1="720" y1="100" x2="760" y2="100" marker-end="url(#caud)"/>
+
+  <rect class="first" x="760" y="60" width="100" height="80" rx="8"/>
+  <text class="title" x="810" y="84" text-anchor="middle">conv_1.md</text>
+  <text class="small" x="810" y="104" text-anchor="middle">128 bytes</text>
+  <text class="small" x="810" y="122" text-anchor="middle">original user</text>
+  <text class="small" x="810" y="135" text-anchor="middle">prompt</text>
+
+  <text class="small" x="440" y="40" text-anchor="middle" style="fill:#dc2626; font-weight:600">Four sequential read_file calls required to recover the head of conversation.</text>
+  <text class="small" x="440" y="190" text-anchor="middle">Each read_file result is itself a tool result that counts against the current context budget.</text>
+  <text class="small" x="440" y="208" text-anchor="middle">Recovery of full history is therefore both costly and self-defeating &mdash; reading the chain may itself trigger compaction.</text>
+</svg>
+</div>
+
+<h3>The first file (head of conversation)</h3>
+<pre class="code"><code><span class="c">## Compacted conversation (messages 1-11)</span>
+
+[user] (seq=0): [2026-05-08 10:25 PDT] user_request: chart isrg vs tem vs oscr stocks</code></pre>
+<p>
+  That single line is the original user prompt. To reach it the agent has to traverse four
+  intermediate files. Compare with the head of each later file:
+</p>
+<pre class="code"><code><span class="c">conversation_2.md (head)</span>
+## Compacted conversation (messages 1-51)
+
+[user] (seq=0): Previous conversation saved at: .../conversation_1.md
+Read the full transcript with read_file('conversation_1.md').
+
+<span class="c">conversation_3.md (head)</span>
+## Compacted conversation (messages 1-330)
+
+[user] (seq=0): Previous conversation saved at: .../conversation_2.md
+Read the full transcript with read_file('conversation_2.md').
+
+<span class="c">conversation_4.md (head)</span>
+## Compacted conversation (messages 1-521)
+
+[user] (seq=0): Previous conversation saved at: .../conversation_3.md
+Read the full transcript with read_file('conversation_3.md').</code></pre>
+
+<h3>Why this happens</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1460-L1486">core/framework/agent_loop/conversation.py:1460-1486</a>
+<pre class="code"><code><span class="c"># Write freeform text to a numbered conversation file</span>
+spill_path = <span class="f">Path</span>(spillover_dir)
+spill_path.<span class="f">mkdir</span>(parents=<span class="k">True</span>, exist_ok=<span class="k">True</span>)
+
+<span class="c"># Find next conversation file number</span>
+existing = <span class="f">sorted</span>(spill_path.<span class="f">glob</span>(<span class="s">"conversation_*.md"</span>))
+next_n = <span class="f">len</span>(existing) + <span class="n">1</span>
+conv_filename = <span class="s">f"conversation_{next_n}.md"</span>
+
+<span class="k">if</span> freeform_lines:
+    header = <span class="s">f"## Compacted conversation (messages 1-{split})\n\n"</span>
+    conv_text = header + <span class="s">"\n\n"</span>.<span class="f">join</span>(freeform_lines)
+    (spill_path / conv_filename).<span class="f">write_text</span>(conv_text, encoding=<span class="s">"utf-8"</span>)
+<span class="k">else</span>:
+    conv_filename = <span class="s">""</span>
+<span class="c"># ...</span>
+ref_parts.<span class="f">append</span>(
+    <span class="s">f"Previous conversation saved at: {full_path}\n"</span>
+    <span class="s">f"Read the full transcript with read_file('{conv_filename}')."</span>
+)</code></pre>
+<p>
+  Every structural compaction allocates a fresh file. The new file&rsquo;s contents are drawn from
+  <em>the current live conversation</em>, which already starts with the previous compaction&rsquo;s
+  reference message at seq 0. The reference is included as-is in the new spill file, producing the
+  chain. The injected reference message in the new live conversation only mentions the latest file.
+  There is no merge step, no dereferencing, no flattening.
+</p>
+
+<h2 id="recent-not-safe">5. &ldquo;Recent&rdquo; doesn&rsquo;t mean &ldquo;safe&rdquo;</h2>
+<p>
+  Distribution of the 96 destroyed args across the session:
+</p>
+<table>
+  <thead><tr><th>Sequence range</th><th>Destroyed-arg count</th></tr></thead>
+  <tbody>
+    <tr><td>0&ndash;99</td><td>20</td></tr>
+    <tr><td>100&ndash;199</td><td>22</td></tr>
+    <tr><td>200&ndash;299</td><td>18</td></tr>
+    <tr><td>300&ndash;399</td><td>14</td></tr>
+    <tr><td>400&ndash;499</td><td>13</td></tr>
+    <tr><td>500&ndash;599</td><td>9</td></tr>
+  </tbody>
+</table>
+<p>
+  Damage is fairly uniform. The latest 10 destroyed-arg parts run from seq 497 to seq 543 &mdash; only a
+  handful of turns away from where the most recent structural compaction stopped. The reason is
+  visible in the orchestrator and in <code class="inline">compact_preserving_structure</code>:
+</p>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L297-L304">core/framework/agent_loop/internals/compaction.py:297-304</a>
+<pre class="code"><code><span class="c"># --- Step 2: Standard structure-preserving compaction (free, no LLM) ---</span>
+spill_dir = config.spillover_dir
+<span class="k">if</span> spill_dir:
+    <span class="k">await</span> conversation.<span class="f">compact_preserving_structure</span>(
+        spillover_dir=spill_dir,
+        keep_recent=<span class="n">4</span>,                <span class="c"># &lt;-- only the 4 most recent messages keep full fidelity</span>
+        phase_graduated=phase_grad,
+    )</code></pre>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1432-L1452">core/framework/agent_loop/conversation.py:1432-1452</a>
+<pre class="code"><code><span class="k">else</span>:
+    <span class="c"># Standard mode: keep all tool call pairs as structural</span>
+    <span class="k">for</span> msg <span class="k">in</span> old_messages:
+        <span class="k">if</span> msg.is_transition_marker:
+            kept_structural.<span class="f">append</span>(msg)
+        <span class="k">elif</span> msg.role == <span class="s">"tool"</span>:
+            kept_structural.<span class="f">append</span>(msg)
+        <span class="k">elif</span> msg.role == <span class="s">"assistant"</span> <span class="k">and</span> msg.tool_calls:
+            compact_tcs = <span class="f">_compact_tool_calls</span>(msg.tool_calls)        <span class="c"># &lt;-- destroys args</span>
+            kept_structural.<span class="f">append</span>(
+                <span class="f">Message</span>(
+                    seq=msg.seq,
+                    role=msg.role,
+                    content=<span class="s">""</span>,                                       <span class="c"># &lt;-- also wipes any prose</span>
+                    tool_calls=compact_tcs,
+                    is_error=msg.is_error,
+                    phase_id=msg.phase_id,
+                    is_transition_marker=msg.is_transition_marker,
+                    run_id=msg.run_id,
+                )
+            )</code></pre>
+<p>
+  Every assistant message older than the four most recent has <code class="inline">_compact_tool_calls()</code>
+  applied to it, regardless of how recently it was written or whether the tool was content-bearing.
+  This is exactly the user&rsquo;s &ldquo;not proper&rdquo; intuition: the policy is blanket,
+  position-based, and indifferent to tool semantics.
+</p>
+
+<h2>6. What survives, what doesn&rsquo;t (this session)</h2>
+<table>
+  <thead><tr><th>Category</th><th>Status in this session</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Tool <strong>results</strong> (older than keep_recent at compaction time)</td>
+      <td>Replaced by <code>"Pruned tool result (N chars) cleared from context."</code> placeholders &mdash; visible at part 2 (seq=2) and many others.</td>
+    </tr>
+    <tr>
+      <td>Tool <strong>calls</strong> (older than keep_recent at compaction time)</td>
+      <td>Structure preserved (id, type, name) but arguments wrapped in <code>{"_compacted": "..."}</code> with values truncated to 60 chars and the outer payload capped at 200. <strong>96 occurrences</strong>.</td>
+    </tr>
+    <tr>
+      <td>Freeform user prompts and text-only assistant turns</td>
+      <td>Spilled to the <code>conversation_N.md</code> chain (the four files). Reachable only by following the chain.</td>
+    </tr>
+    <tr>
+      <td>Skill content / errors / transition markers</td>
+      <td>Always preserved by the existing carve-outs in <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1078-L1098">prune_old_tool_results</a> and <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1384-L1402">compact_preserving_structure</a>.</td>
+    </tr>
+    <tr>
+      <td>Recent (post-last-compaction) tool calls and results</td>
+      <td>Full fidelity. Parts ~556 onward range 5&ndash;11 KB &mdash; uncompacted tool results, intact arguments.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>7. Root-cause summary</h2>
+<ol>
+  <li>
+    <strong><code>_TC_ARG_LIMIT = 200</code> is too small for content-bearing tool calls.</strong>
+    <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L210">conversation.py:210</a>.
+    A 200-char outer cap with a 60-char per-value cap loses the entirety of any meaningful
+    argument body: file content, command body, chart spec, batch payload.
+  </li>
+  <li>
+    <strong><code>_compact_tool_calls()</code> is not idempotent.</strong>
+    <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L213-L258">conversation.py:213-258</a>.
+    The trigger is purely <code class="inline">len(args) &gt; _TC_ARG_LIMIT</code>; there is no
+    check for an existing <code class="inline">{"_compacted": "&hellip;"}</code> envelope, so each
+    pass re-wraps. Cause of the seq-69 double envelope.
+  </li>
+  <li>
+    <strong>Structural compaction runs <code>_compact_tool_calls()</code> indiscriminately on
+    every old assistant message.</strong>
+    <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1439-L1452">conversation.py:1439-1452</a>.
+    Tool semantics are ignored: <code class="inline">read_file</code> args (cheap to drop) and
+    <code class="inline">write_file</code> args (irreplaceable) are treated identically.
+  </li>
+  <li>
+    <strong>Spillover files form a linked chain, not a flat archive.</strong>
+    <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1464-L1472">conversation.py:1464-1472</a>.
+    The new ref message only points at the latest file. Older files are reachable only by
+    following the chain, and each <code class="inline">read_file</code> on the chain adds to the
+    current context budget.
+  </li>
+  <li>
+    <strong>The keep_recent boundary is too tight for sessions with bursty tool use.</strong>
+    <code class="inline">keep_recent=4</code> at
+    <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L297-L304">compaction.py:297-304</a>.
+    Anything older than four messages at the moment of the trigger loses its arguments, including
+    very recent content-bearing calls.
+  </li>
+</ol>
+
+<h2>8. Suggested follow-up work (not executed)</h2>
+<div class="callout">
+  <div class="label">Direction, not implementation</div>
+  These are observations for the maintainers of the compaction pipeline. None of them are applied
+  by this audit.
+</div>
+<ul>
+  <li>
+    <strong>Per-tool retention policy.</strong> Declare a small set of fields as
+    &ldquo;content-bearing&rdquo; (e.g.&nbsp;<code class="inline">write_file.content</code>,
+    <code class="inline">excel_write.data</code>, <code class="inline">terminal_exec.command</code>,
+    <code class="inline">chart_render.spec</code>). Either keep them full-fidelity, or spill them to
+    a separate file and reference the path, rather than truncating to 200 chars.
+  </li>
+  <li>
+    <strong>Idempotency in <code>_compact_tool_calls()</code>.</strong> Before wrapping, check
+    whether the parsed dict already has a single <code class="inline">_compacted</code> key &mdash;
+    if so, leave it alone. Prevents the seq-69 double-wrap pathology.
+  </li>
+  <li>
+    <strong>Flatten the spillover chain.</strong> Either append to a single
+    <code class="inline">conversation.md</code>, or carry the original head reference forward when
+    a new file is created, so the &ldquo;Previous conversation saved at: &hellip;&rdquo; in the live
+    conversation always points at the first file in the chain (and an index of subsequent files
+    listed for cheap traversal).
+  </li>
+  <li>
+    <strong>Tune <code>_TC_ARG_LIMIT</code> upward or remove it for content-bearing tools.</strong>
+    The token savings at 200 chars are marginal (a single chart_render spec is ~3 KB, so capping at
+    1&ndash;2&nbsp;KB still saves most of the bytes while keeping useful detail).
+  </li>
+  <li>
+    <strong>Don&rsquo;t empty <code>content</code> on kept structural messages.</strong> The current
+    code clears <code class="inline">content</code> when rewriting an assistant tool-call message
+    (<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1414">conversation.py:1414</a>),
+    which loses any &ldquo;thinking&rdquo; prose the model emitted alongside the tool calls.
+  </li>
+</ul>
+
+<h2 id="section-9">9. Is structure-preserving compaction salvageable at all?</h2>
+<div class="callout danger">
+  <div class="label">The deeper question</div>
+  The fixes in sections 7&ndash;8 treat the symptoms. The harder question is whether Stage 2 &mdash;
+  &ldquo;preserve tool-call structure, spill freeform text to a file&rdquo; &mdash; can be made to
+  work, or whether the design itself is the bug.
+</div>
+
+<h3>What Stage 2 claims to do</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1304-L1320">core/framework/agent_loop/conversation.py:1304-1320</a>
+<pre class="code"><code><span class="s">"""Structure-preserving compaction: save freeform text to file, keep tool messages.
+
+Unlike ``compact()`` which replaces ALL old messages with a single LLM
+summary, this method preserves the tool call structure (assistant
+messages with tool_calls + tool result messages) that are already tiny
+after pruning.  Only freeform text exchanges (user messages,
+text-only assistant messages) are saved to a file and removed.
+
+...
+
+The result: the agent retains exact knowledge of what tools it called,
+where each result is stored, and can load the conversation text if
+needed.  No LLM summary call.  No heuristics.  Nothing lost.
+"""</span></code></pre>
+<p>
+  Three claims are doing the work here: (a) tool-call pairs are <em>tiny after pruning</em>;
+  (b) the agent retains <em>exact knowledge</em> of what it called; (c) <em>nothing is lost</em>.
+  Looking at the actual on-disk state of this session, none of the three survive contact with
+  reality.
+</p>
+
+<h3>Claim audit (with disk evidence from this session)</h3>
+<table>
+  <thead><tr>
+    <th>Claim from the docstring</th>
+    <th>What this session shows</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td><em>Tool-call pairs are tiny after pruning.</em></td>
+      <td>
+        Prune touches tool <strong>results</strong> only (<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1082-L1083">conversation.py:1082</a>:
+        <code class="inline">if msg.role != "tool": continue</code>). The assistant messages with their full
+        tool-call <em>arguments</em> &mdash; a 5&nbsp;KB <code>chart_render</code> spec, a 2&nbsp;KB
+        Python heredoc, a write_file with the entire file body &mdash; are <strong>not touched</strong>
+        by Stage&nbsp;1. So when Stage&nbsp;2 runs, the args are still large and Stage&nbsp;2&rsquo;s
+        only tool is the 200-char truncation. The premise is false for content-bearing sessions.
+      </td>
+    </tr>
+    <tr>
+      <td><em>The agent retains exact knowledge of what tools it called.</em></td>
+      <td>
+        96 parts in this session disagree. The agent knows tool <strong>names</strong> (preserved) but
+        not <strong>arguments</strong> (truncated to 60 chars per field, total 200). For
+        <code>terminal_exec</code> the command body is the call; for <code>write_file</code> the
+        content is the call; for <code>chart_render</code> the spec is the call. Names without args
+        are not knowledge.
+      </td>
+    </tr>
+    <tr>
+      <td><em>Nothing is lost.</em></td>
+      <td>
+        Lost in this session: the original user prompt (now four files away), 96 tool-call
+        argument bodies, an unknown number of assistant &ldquo;thinking&rdquo; prose strings
+        (wiped to <code>content=""</code> at <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1414">conversation.py:1414</a>),
+        and one tool call that was double-wrapped past readability (seq 69).
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>The spill-to-file pattern in particular</h3>
+<p>
+  The user&rsquo;s focus is right: the bit that <em>writes to a file</em> is where the damage
+  compounds. Let&rsquo;s walk through what actually happens.
+</p>
+
+<h4>What is in each file?</h4>
+<table>
+  <thead><tr><th>File</th><th>Size</th><th>What it contains</th></tr></thead>
+  <tbody>
+    <tr><td><code>conversation_1.md</code></td><td>128 B</td><td>The original user prompt (one line: &ldquo;chart isrg vs tem vs oscr stocks&rdquo;) plus the <code>## Compacted conversation</code> header.</td></tr>
+    <tr><td><code>conversation_2.md</code></td><td>2.4 KB</td><td>One injected reference to <code>conversation_1.md</code> at the top, then ~40 freeform messages from messages 12&ndash;51.</td></tr>
+    <tr><td><code>conversation_3.md</code></td><td>17 KB</td><td>Reference to <code>conversation_2.md</code> at the top, then ~280 freeform messages from 52&ndash;330. This is the bulk of the freeform conversation.</td></tr>
+    <tr><td><code>conversation_4.md</code></td><td>11 KB</td><td>Reference to <code>conversation_3.md</code> at the top, then freeform messages from 331&ndash;521.</td></tr>
+  </tbody>
+</table>
+<p>
+  Total: ~30&nbsp;KB across four files, none of which can stand alone. To answer &ldquo;what did the
+  user originally ask?&rdquo; the agent must call <code class="inline">read_file</code> four times
+  in sequence, each time loading more content into the live context until eventually it triggers
+  yet another compaction.
+</p>
+
+<h4>The retrieval pathology</h4>
+<div class="callout warn">
+  <div class="label">Each recovery read costs more than the bytes recovered</div>
+  Reading <code class="inline">conversation_4.md</code> (11 KB) into context to satisfy the
+  reference message in part 0 immediately consumes ~3,000 tokens. The result contains another
+  reference to <code class="inline">conversation_3.md</code> &mdash; another read. After all four
+  reads the agent has consumed ~10,000 tokens of context just to recover the same freeform
+  conversation that compaction was supposed to save space on. The agent has now likely tripped the
+  next compaction threshold, which will write <code class="inline">conversation_5.md</code> and
+  the cycle repeats &mdash; with the inflated chain inside it.
+</div>
+
+<h4>What &ldquo;append&rdquo; would look like</h4>
+<p>
+  Looking at <a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1464-L1486">conversation.py:1464-1486</a>,
+  the spill writes <em>only the messages between the previous compaction&rsquo;s boundary and the
+  current one</em>. The previous compaction&rsquo;s ref message is included in &ldquo;old freeform&rdquo;
+  and gets serialised right back into the new file. Each file is therefore a slice <strong>plus</strong>
+  the head of the previous slice &mdash; a linked list, not a transcript. An honest implementation
+  would either:
+</p>
+<ul>
+  <li>Open <code class="inline">conversation_1.md</code> in append mode each time, producing one
+    growing transcript and a single ref message that always points at it; or</li>
+  <li>Dereference the previous-compaction ref before spilling, so each file is self-contained for
+    its slice; or</li>
+  <li>Carry forward an explicit &ldquo;original head&rdquo; reference inside every new file so the
+    chain is one-deep at most.</li>
+</ul>
+
+<h3>Three possible directions, evaluated</h3>
+
+<h4>Direction A &mdash; remove Stage 2 entirely</h4>
+<p>
+  When Stage 0 microcompact and Stage 1 prune together aren&rsquo;t enough, skip straight to
+  Stage 3 LLM summary. Stage 4 emergency remains as the last resort.
+</p>
+<table>
+  <thead><tr><th>Pro</th><th>Con</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>One coherent summary file instead of a chain of partial transcripts. No more
+        <code>_compacted</code> args, no more idempotency bug, no more &ldquo;recent isn&rsquo;t
+        safe&rdquo;.</td>
+      <td>Every above-Stage-1 compaction costs an LLM call (latency + tokens). On a session with 4
+        compactions like this one, that&rsquo;s 4 extra calls.</td>
+    </tr>
+    <tr>
+      <td>The LLM summary&rsquo;s structured-sections prompt
+        (<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L626-L656">compaction.py:626-656</a>)
+        already carves out &ldquo;User Messages preserved verbatim&rdquo; and &ldquo;Files and Code
+        Sections&rdquo; &mdash; the things Stage 2 currently destroys.</td>
+      <td>The agent loses the &ldquo;structural&rdquo; affordance of being able to see exactly
+        which tool calls happened. But the current implementation only preserves <em>names</em>
+        anyway, which the LLM summary&rsquo;s tool-history block at
+        <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L512-L516">compaction.py:512-516</a>
+        already captures.</td>
+    </tr>
+    <tr>
+      <td>Removes the file-chain pathology entirely. Spillover dir is no longer load-bearing.</td>
+      <td>Circuit-breaker on LLM failures becomes more important &mdash; without Stage 2 to fall back
+        to, three failed LLM compactions go straight to Stage 4 emergency.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Direction B &mdash; keep Stage 2 but spill, don&rsquo;t truncate</h4>
+<p>
+  Treat tool-call argument bodies the way <code class="inline">truncate_tool_result</code> treats
+  tool-result content: if they&rsquo;re long, write them to disk and replace the in-message value
+  with a path reference and a length annotation.
+</p>
+<table>
+  <thead><tr><th>Pro</th><th>Con</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Preserves the &ldquo;free, no LLM&rdquo; cost profile.</td>
+      <td>Doubles down on the spill-to-file pattern that already hurts retrieval in this session.
+        More files to chase, not fewer.</td>
+    </tr>
+    <tr>
+      <td>Fixes the &ldquo;Nothing lost&rdquo; claim &mdash; an agent can always
+        <code class="inline">read_file</code> the spilled args.</td>
+      <td>Each spilled arg is now a separate file. A session with 70 chart_render calls produces
+        70 extra files in the data dir. Operational mess.</td>
+    </tr>
+    <tr>
+      <td>No LLM dependency, no token cost.</td>
+      <td>Doesn&rsquo;t solve the <code>conversation_N.md</code> cascade; the freeform-text chain
+        is independent and remains.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Direction C &mdash; merge Stage 1 and Stage 2, drop the &ldquo;structure&rdquo; abstraction</h4>
+<p>
+  Have Stage 1 prune both tool results <em>and</em> oversized tool-call arguments. Stage 2 becomes
+  &ldquo;move freeform text to a single appending transcript file&rdquo; only &mdash; no
+  truncation of tool calls.
+</p>
+<table>
+  <thead><tr><th>Pro</th><th>Con</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>The conceptual model becomes clearer: prune handles content, freeform spill handles
+        prose. No more &ldquo;destroy by 200-char cap&rdquo; step.</td>
+      <td>Requires touching the prune logic at conversation.py:1044-1145 to also walk old
+        assistant tool_calls.</td>
+    </tr>
+    <tr>
+      <td>The transcript file becomes a single append-only artefact; the cascade goes away.</td>
+      <td>Still doesn&rsquo;t answer &ldquo;why preserve the structure at all?&rdquo; if the args
+        are mostly path-references after pruning.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Recommended posture</h3>
+<p>
+  The evidence in this session supports a stronger conclusion than the section-8 list:
+  <strong>Stage 2 as currently designed is doing net harm</strong>. The &ldquo;free&rdquo;
+  appellation is misleading because the retrieval cost (each recovery read consumes budget) plus
+  the fidelity loss (96 destroyed args, double-wrapping, content wipe) outweigh the avoided LLM call.
+  Direction&nbsp;A (remove Stage 2) is the cleanest position to defend on this evidence; Direction&nbsp;C
+  is a reasonable conservative alternative if losing the &ldquo;no LLM in the cheap path&rdquo;
+  property is unacceptable. Direction&nbsp;B addresses the worst symptom but keeps the structural
+  problem.
+</p>
+
+<div class="callout">
+  <div class="label">Caveat on generalisation</div>
+  This audit is one session. The session is content-bearing (charts, files, batches) and that is
+  exactly the failure mode Stage 2 handles worst. A session whose tool results dominate
+  (e.g.&nbsp;mostly read_file + web_scrape with short calls) may genuinely benefit from Stage 2.
+  Before ripping it out, a similar audit on a non-content-bearing session would be worth running;
+  the framework already collects the inventory needed for that
+  (<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L659-L697">build_message_inventory</a>
+  + <code class="inline">HIVE_COMPACTION_DEBUG</code> dumps it to disk).
+</div>
+
+<footer class="botline">
+  Audit completed against the working tree as of today. Citations are exact line numbers at the
+  time of writing; re-verify before acting on any of the root-cause findings if the file has
+  changed since.
+</footer>
+
+</div>
+</body>
+</html>

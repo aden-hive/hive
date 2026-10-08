@@ -8,7 +8,7 @@ containing one or more keys (e.g., api_key, access_token, refresh_token).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
@@ -19,7 +19,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class CredentialType(str, Enum):
+class CredentialType(StrEnum):
     """Types of credentials the store can manage."""
 
     API_KEY = "api_key"
@@ -68,6 +68,29 @@ class CredentialKey(BaseModel):
     def get_secret_value(self) -> str:
         """Get the actual secret value (use sparingly)."""
         return self.value.get_secret_value()
+
+
+class CredentialIdentity(BaseModel):
+    """Identity information for a credential (whose account is this?)."""
+
+    email: str | None = None
+    username: str | None = None
+    workspace: str | None = None
+    account_id: str | None = None
+
+    @property
+    def label(self) -> str:
+        """Best human-readable identifier for display."""
+        return self.email or self.username or self.workspace or self.account_id or "unknown"
+
+    @property
+    def is_known(self) -> bool:
+        """Whether any identity field is populated."""
+        return bool(self.email or self.username or self.workspace or self.account_id)
+
+    def to_dict(self) -> dict[str, str]:
+        """Return only non-None identity fields."""
+        return {k: v for k, v in self.model_dump().items() if v is not None}
 
 
 class CredentialObject(BaseModel):
@@ -202,6 +225,35 @@ class CredentialObject(BaseModel):
 
         return None
 
+    @property
+    def identity(self) -> CredentialIdentity:
+        """Extract identity from ``_identity_*`` keys in the vault."""
+        fields = {}
+        for key_name, key_obj in self.keys.items():
+            if key_name.startswith("_identity_"):
+                field_name = key_name[len("_identity_") :]
+                if field_name in CredentialIdentity.model_fields:
+                    fields[field_name] = key_obj.value.get_secret_value()
+        return CredentialIdentity(**fields)
+
+    @property
+    def provider_type(self) -> str | None:
+        """Return the integration/provider type (e.g. 'google', 'slack')."""
+        key = self.keys.get("_integration_type")
+        return key.value.get_secret_value() if key else None
+
+    @property
+    def alias(self) -> str | None:
+        """Return the user-set alias from the Aden platform."""
+        key = self.keys.get("_alias")
+        return key.value.get_secret_value() if key else None
+
+    def set_identity(self, **fields: str) -> None:
+        """Persist identity fields as ``_identity_*`` keys."""
+        for field_name, value in fields.items():
+            if value:
+                self.set_key(f"_identity_{field_name}", value)
+
 
 class CredentialUsageSpec(BaseModel):
     """
@@ -279,6 +331,58 @@ class CredentialRefreshError(CredentialError):
     """Raised when credential refresh fails."""
 
     pass
+
+
+class CredentialExpiredError(CredentialError):
+    """Raised when a credential is expired and refresh has failed.
+
+    Carries the metadata an agent (or the tool runner) needs to surface a
+    reauth request to the user without having to look anything else up.
+    """
+
+    def __init__(
+        self,
+        credential_id: str,
+        message: str,
+        *,
+        provider: str | None = None,
+        alias: str | None = None,
+        help_url: str | None = None,
+    ):
+        self.credential_id = credential_id
+        self.provider = provider
+        self.alias = alias
+        self.help_url = help_url
+        super().__init__(message)
+
+
+class AccountSelectionRequiredError(CredentialError):
+    """Raised when a queen tool needs an explicit account choice.
+
+    Fires only when ``CredentialStoreAdapter.get`` is invoked under
+    queen strict-account-mode (no worker-profile binding, multiple
+    authorized accounts for the provider). The agent loop converts
+    this into a structured ``account_selection_required`` tool result
+    so the queen LLM can ask the user which account to use and re-call
+    the tool with ``account=<alias>`` set.
+
+    ``available_accounts`` is a list of dicts with ``alias`` and
+    ``identity`` keys — the same shape produced by
+    ``CredentialStore.list_accounts``.
+    """
+
+    def __init__(
+        self,
+        credential_id: str,
+        message: str,
+        *,
+        provider: str | None = None,
+        available_accounts: list[dict] | None = None,
+    ):
+        self.credential_id = credential_id
+        self.provider = provider
+        self.available_accounts = available_accounts or []
+        super().__init__(message)
 
 
 class CredentialValidationError(CredentialError):
