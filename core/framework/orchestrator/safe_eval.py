@@ -260,8 +260,8 @@ class SafeEvalVisitor(ast.NodeVisitor):
             return getattr(val, node.attr)
         except AttributeError:
             # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
+            # (Only if we want to support that sugar, usually not standard Python)
+            # Let's stick to standard Python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -322,7 +322,7 @@ def safe_eval(
     timeout_ms: int | None = DEFAULT_TIMEOUT_MS,
 ) -> Any:
     """
-    Safely evaluate a python expression string.
+    Safely evaluate a Python expression string.
 
     Args:
         expr: The expression string to evaluate.
