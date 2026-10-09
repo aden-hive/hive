@@ -92,6 +92,16 @@ class TestSkillCatalog:
         # SKILL.md, so the redundant element was dropped.
         assert "<base_dir>" not in prompt
 
+    def test_to_prompt_windows_location_uses_forward_slashes(self):
+        """Git Bash treats unquoted backslashes as escapes, so cat fails."""
+        location = r"C:\AI\aden-hive\core\framework\skills\_default_skills\pdf\SKILL.md"
+        catalog = SkillCatalog([_make_skill(location=location)])
+        prompt = catalog.to_prompt()
+
+        rendered = prompt.split("<location>", 1)[1].split("</location>", 1)[0]
+        assert rendered == "C:/AI/aden-hive/core/framework/skills/_default_skills/pdf/SKILL.md"
+        assert "\\" not in rendered
+
     def test_to_prompt_sorted_by_name(self):
         skills = [
             _make_skill("zebra", "Z skill", "project"),

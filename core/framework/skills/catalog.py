@@ -7,6 +7,7 @@ skill activation per the Agent Skills standard.
 from __future__ import annotations
 
 import logging
+from pathlib import Path, PureWindowsPath
 from xml.sax.saxutils import escape
 
 from framework.skills.parser import ParsedSkill
@@ -152,7 +153,24 @@ class SkillCatalog:
             if not compact:
                 capped = cls._cap_description(skill.description)
                 lines.append(f"    <description>{escape(capped)}</description>")
-            lines.append(f"    <location>{escape(skill.location)}</location>")
+            lines.append(f"    <location>{escape(cls._location_for_catalog(skill.location))}</location>")
             lines.append("  </skill>")
         lines.append("</available_skills>")
         return "\n".join(lines)
+
+    @staticmethod
+    def _location_for_catalog(location: str) -> str:
+        """Return a skill path that ``cat <location>`` can open.
+
+        The catalog tells the model to read a skill with
+        ``terminal_exec("cat <location>")``. On Windows that command runs
+        in Git Bash, where an unquoted backslash is an escape, so a native
+        path never reaches the file. Forward slashes work in Git Bash,
+        PowerShell, and Python. ``Path.as_posix()`` only rewrites the
+        host platform's separator, so a Windows path rendered on Linux
+        would keep its backslashes. ``PureWindowsPath`` parses them on
+        every platform.
+        """
+        if "\\" in location:
+            return PureWindowsPath(location).as_posix()
+        return Path(location).as_posix()
