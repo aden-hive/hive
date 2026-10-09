@@ -756,7 +756,7 @@ async def create_queen(
         logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
     else:
         # Build fresh (slow path - for backwards compatibility)
-        boot_status.report("Starting tool servers", "MCP discovery")
+        boot_status.report("Loading tools")
         queen_registry = ToolRegistry()
 
         # The session's identity, handed to every tool this registry runs.
@@ -781,7 +781,7 @@ async def create_queen(
         if mcp_config.exists():
             try:
                 queen_registry.load_mcp_config(mcp_config)
-                logger.info("Queen: loaded MCP tools from %s", mcp_config)
+                logger.debug("Queen: loaded server config %s", mcp_config)
             except Exception:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
@@ -837,7 +837,13 @@ async def create_queen(
                     log_collisions=True,
                     max_tools=selection_max_tools,
                 )
-                logger.info("Queen: loaded MCP registry servers: %s", results)
+                from framework.tools.harness_tools import HARNESS_GROUP_NAMES
+
+                harness = {r["server"]: r["tools_loaded"] for r in results if r["server"] in HARNESS_GROUP_NAMES}
+                external = [r for r in results if r["server"] not in HARNESS_GROUP_NAMES]
+                logger.info("Queen: harness tool groups: %s", harness)
+                if external:
+                    logger.info("Queen: external MCP servers: %s", external)
         except Exception:
             logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
@@ -1303,7 +1309,7 @@ async def create_queen(
         total_mcp = len(phase_state.mcp_tool_names_all)
         allowed_mcp = len(set(phase_state.enabled_mcp_tools) & phase_state.mcp_tool_names_all)
         logger.info(
-            "Queen: per-queen MCP allowlist active — %d of %d MCP tools enabled",
+            "Queen: per-queen tool allowlist active — %d of %d gateable tools enabled",
             allowed_mcp,
             total_mcp,
         )

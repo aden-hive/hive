@@ -283,7 +283,7 @@ class QueenPhaseState:
         self._filtered_independent_tools = [t for t in self.independent_tools if self._passes_allowlist(t.name)]
         self._eager_independent_tools = [t for t in self._filtered_independent_tools if self._is_eager(t.name)]
         logger.info(
-            "rebuild_independent_filter: allowlist=%s, always_enabled=%d, loaded=%d, mcp_names=%d, independent=%d -> allowed=%d, eager=%d",
+            "rebuild_independent_filter: allowlist=%s, always_enabled=%d, loaded=%d, gateable=%d, independent=%d -> allowed=%d, eager=%d",
             "none" if self.enabled_mcp_tools is None else len(self.enabled_mcp_tools),
             len(self.always_enabled_names),
             len(self.loaded_tool_names),

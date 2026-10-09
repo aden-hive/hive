@@ -711,7 +711,7 @@ class ToolRegistry:
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
-        self._log_registry_snapshot("after load_mcp_config")
+        self._log_registry_snapshot("after server config")
 
     def _register_mcp_server_with_retry(
         self,
@@ -801,12 +801,15 @@ class ToolRegistry:
 
             essential_servers = DEFAULT_LOCAL_SERVER_NAMES
 
+        from framework.tools.harness_tools import HARNESS_GROUP_NAMES
+
         results: list[dict[str, Any]] = []
         tools_added_batch = 0
 
         def _record(result: dict[str, Any]) -> None:
             results.append(result)
-            if log_summary:
+            # Harness groups log their own "Harness group … registered" line.
+            if log_summary and result["server"] not in HARNESS_GROUP_NAMES:
                 logger.info(
                     "MCP registry server resolution",
                     extra={
@@ -822,8 +825,6 @@ class ToolRegistry:
         # batch — every server's gate would otherwise re-probe every
         # credential, and no credential change can happen mid-loop. Harness
         # groups have no gate, so a batch of only those skips the probe.
-        from framework.tools.harness_tools import HARNESS_GROUP_NAMES
-
         if any(cfg.get("name") not in HARNESS_GROUP_NAMES for cfg in server_list):
             self._mcp_gate_cred_snapshot = self._compute_mcp_gate_cred_snapshot()
         try:
@@ -1266,15 +1267,16 @@ class ToolRegistry:
         contents are already logged by `register_mcp_server`; this is just the
         rollup so the resync path also gets a single anchor line.
         """
-        per_server_counts = {server: len(names) for server, names in self._mcp_server_tools.items()}
-        non_mcp_count = len(self._tools) - len(self._mcp_tool_names)
+        per_group_counts = {server: len(names) for server, names in self._mcp_server_tools.items()}
+        harness_count = sum(len(names) for names, _catalog in self._harness_groups.values())
         logger.info(
-            "ToolRegistry snapshot (%s): total=%d, mcp=%d, non_mcp=%d, per_server=%s",
+            "ToolRegistry snapshot (%s): total=%d, harness=%d, mcp=%d, other=%d, per_group=%s",
             context,
             len(self._tools),
+            harness_count,
             len(self._mcp_tool_names),
-            non_mcp_count,
-            per_server_counts,
+            len(self._tools) - harness_count - len(self._mcp_tool_names),
+            per_group_counts,
         )
 
     _MCP_VERIFIED_MANIFEST_TOOL = "__aden_verified_manifest"

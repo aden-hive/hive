@@ -84,3 +84,26 @@ def _isolate_hive_home_autouse(tmp_path, monkeypatch):
             if hasattr(mod, attr_name):
                 monkeypatch.setattr(mod, attr_name, builder(fake_hive))
     yield fake_hive
+
+
+@pytest.fixture(autouse=True)
+def _no_real_browser_bridge(monkeypatch):
+    """Keep tests off the machine-wide browser bridge.
+
+    Stopping a worker reaps its browser tab group through ``bridge_host``,
+    one process shared by everything on the machine (the desktop app, a
+    running server, a live test run). When one is up, the first test to reap
+    connects a process-wide bridge client whose reader runs on that test's
+    event loop. pytest closes the loop afterwards, and the next test's reap
+    waits forever for a reply only the dead loop could deliver, so the suite
+    hangs whenever Hive is running. Tests have no browser to reap.
+    """
+    try:
+        from gcu.browser.tools import lifecycle
+    except ImportError:
+        return
+
+    async def _no_remote_profile(_profile_name: str) -> None:
+        return None
+
+    monkeypatch.setattr(lifecycle, "_lookup_remote_profile", _no_remote_profile)

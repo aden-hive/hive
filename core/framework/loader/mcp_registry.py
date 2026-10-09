@@ -38,9 +38,12 @@ _DEFAULT_CONFIG = {
 # The servers Hive used to seed into installed.json as stdio subprocesses.
 # They are in-process harness groups now (framework.tools.harness_tools):
 # requesting one of these names resolves to the harness, never to a
-# subprocess. name -> entry script, used to recognise (and retire) the
-# entries earlier versions auto-seeded. Includes the stale aliases older
-# versions wrote (hive-tools, shell-tools).
+# subprocess. name -> entry point (script, or module for ``python -m``),
+# used to recognise (and retire) the entries earlier versions auto-seeded.
+# Includes the stale aliases older versions wrote (hive-tools, shell-tools)
+# and gcu-tools, the browser MCP server the ``hive-browser`` CLI replaced:
+# left installed, it hands every queen 22 browser_* tools that drive a
+# separate, usually unstarted browser.
 _RETIRED_BUNDLED_SERVERS: dict[str, str] = {
     "hive_tools": "mcp_server.py",
     "hive-tools": "mcp_server.py",
@@ -49,6 +52,7 @@ _RETIRED_BUNDLED_SERVERS: dict[str, str] = {
     "chart-tools": "chart_tools_server.py",
     "memory-tools": "memory_tools_server.py",
     "files-tools": "files_server.py",
+    "gcu-tools": "gcu.server",
 }
 
 # Hive's essential tool groups. These are NEVER subject to the ``max_tools``

@@ -1096,8 +1096,8 @@ def test_initialize_retires_previously_seeded_bundled_servers(tmp_path: Path):
     base = tmp_path / "mcp_registry"
     base.mkdir(parents=True)
 
-    def entry(script: str) -> dict:
-        return {"source": "local", "enabled": True, "manifest": {"stdio": {"command": "uv", "args": ["run", "python", script, "--stdio"]}}}
+    def entry(*target: str) -> dict:
+        return {"source": "local", "enabled": True, "manifest": {"stdio": {"command": "uv", "args": ["run", "python", *target, "--stdio"]}}}
 
     (base / "installed.json").write_text(
         json.dumps(
@@ -1107,6 +1107,8 @@ def test_initialize_retires_previously_seeded_bundled_servers(tmp_path: Path):
                     "terminal-tools": entry("terminal_tools_server.py"),
                     "shell-tools": entry("shell_tools_server.py"),
                     "chart-tools": entry("my_own_charts.py"),
+                    # The browser MCP server the hive-browser CLI replaced, run as a module.
+                    "gcu-tools": entry("-m", "gcu.server"),
                     "jira": entry("jira_server.py"),
                 }
             }
