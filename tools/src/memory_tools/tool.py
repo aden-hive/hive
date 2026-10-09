@@ -136,6 +136,13 @@ def _parse_iso(value: str | None, *, field: str) -> tuple[datetime | None, dict 
         }
 
 
+def _in_window(started: datetime | None, since: datetime | None, until: datetime | None) -> bool:
+    """Whether a session that started at *started* falls in [since, until)."""
+    if started is None:
+        return False
+    return (since is None or started >= since) and (until is None or started < until)
+
+
 def _resolve_injected_scope(env: Mapping[str, str] | None = None) -> tuple[P.Scope | None, str | None, dict | None]:
     """Read the host-injected scope binding.
 
@@ -289,6 +296,11 @@ def register_search_messages(mcp: FastMCP, scope_env: Callable[[], Mapping[str, 
         except Exception as exc:  # noqa: BLE001
             logger.exception("memory_tools: locate failed")
             return {"error": "locate_failed", "message": str(exc)}
+
+        # since/until bounded which sessions were synced above, but the index
+        # can already hold others from earlier, unfiltered searches.
+        if since_dt is not None or until_dt is not None:
+            hits = [h for h in hits if _in_window(P.parse_session_started_at(h.session), since_dt, until_dt)]
 
         # Sort: most-recent session first, then ordinal asc.
         def _sort_key(h):

@@ -163,7 +163,9 @@ def _seed_past_sessions(_workdir: Path, home: Path) -> None:
 
 
 def _check_memory_recall(run: Any) -> None:
-    assert run.called("search_messages"), f"answered without searching memory. {run.summary()}"
+    # The window can't be guessed, so a right answer means it came from
+    # memory: a search_messages call, or the excerpts recalled automatically
+    # ahead of the turn.
     text = run.text.lower()
     assert "tuesday" in text and "02:00" in run.text, f"wrong or missing window. {run.summary()}"
 

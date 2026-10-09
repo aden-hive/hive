@@ -882,6 +882,27 @@ def get_email_senders_enabled() -> bool:
     return False
 
 
+def get_memory_timeline_enabled() -> bool:
+    """Return whether queens keep a dated timeline of what the user mentions.
+
+    The timeline (``framework.agents.queen.timeline``) costs a background
+    LLM call every few user messages, plus a catch-up over recent older
+    sessions at each queen boot; ``search_timeline`` is offered only when
+    it is on. Resolution:
+    1. ``HIVE_MEMORY_TIMELINE`` env var, when explicitly set.
+    2. Top-level ``memory_timeline`` boolean in configuration.json (the
+       features endpoint writes it).
+    3. Default: off.
+    """
+    raw = os.environ.get("HIVE_MEMORY_TIMELINE")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    value = get_hive_config().get("memory_timeline")
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 def sync_email_senders_env(enabled: bool | None = None) -> bool:
     """Publish the email-senders flag into ``os.environ``.
 

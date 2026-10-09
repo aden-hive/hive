@@ -368,8 +368,11 @@ async def subscribe_timeline_triggers(event_bus: Any, session_dir: Path, llm: An
     At subscribe time, up to *backfill_sessions* earlier sessions of this
     queen that predate timelines are extracted, newest first.
     """
+    from framework.config import get_memory_timeline_enabled
     from framework.host.event_bus import EventType
 
+    if not get_memory_timeline_enabled():
+        return []
     tasks: set[asyncio.Task] = set()
     last_run = 0.0
 

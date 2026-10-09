@@ -279,8 +279,12 @@ def _memory(mcp: _Collector, scope_env: ScopeEnvGetter) -> None:
     from memory_tools.timeline import register_search_timeline
     from memory_tools.tool import register_search_messages
 
+    from framework.config import get_memory_timeline_enabled
+
     register_search_messages(mcp, scope_env=scope_env)
-    register_search_timeline(mcp, scope_env=scope_env)
+    # Without extraction there is no timeline to search.
+    if get_memory_timeline_enabled():
+        register_search_timeline(mcp, scope_env=scope_env)
 
 
 class _LazyCredentials:

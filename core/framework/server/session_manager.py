@@ -1306,13 +1306,15 @@ class SessionManager:
                 # Extract the timeline items for user messages that arrived
                 # since the last background run, so none are lost at stop.
                 from framework.agents.queen.timeline import update_session_timeline
+                from framework.config import get_memory_timeline_enabled
 
-                timeline_task = asyncio.create_task(
-                    update_session_timeline(session.llm, session.queen_dir),
-                    name=f"shutdown-timeline-{session_id}",
-                )
-                self._background_tasks.add(timeline_task)
-                timeline_task.add_done_callback(self._background_tasks.discard)
+                if get_memory_timeline_enabled():
+                    timeline_task = asyncio.create_task(
+                        update_session_timeline(session.llm, session.queen_dir),
+                        name=f"shutdown-timeline-{session_id}",
+                    )
+                    self._background_tasks.add(timeline_task)
+                    timeline_task.add_done_callback(self._background_tasks.discard)
             except RuntimeError as exc:
                 # Most common when a session is stopped after the event loop
                 # has closed (e.g. during server shutdown or from an atexit

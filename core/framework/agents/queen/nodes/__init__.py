@@ -667,8 +667,8 @@ _queen_memory_instructions = """
 You remember this user across sessions. Notes about them arrive as \
 "Recalled memories" reminders; excerpts of earlier conversations that look \
 related to their latest message may arrive as reminders too. Beyond those, \
-every past conversation is searchable with search_messages, and the dated \
-events and facts they have mentioned with search_timeline.
+every past conversation is searchable with search_messages, and, where \
+search_timeline is available, the dated events and facts they mentioned.
 
 Check memory before you ask. When the user asks about their own life, plans, \
 purchases, history or anything they may have told you before, or asks for \

@@ -297,8 +297,8 @@ uv sync
 The `core` and `tools` packages are **intentionally independent**:
 
 - **No cross-imports**: `framework` does not import `aden_tools` directly, and vice versa
-- **Communication via MCP**: Tools are exposed to agents through MCP servers, not direct Python imports
-- **Runtime integration**: The agent runner loads tools via the MCP protocol at runtime
+- **Built-in tools run in-process**: the runtime imports Hive's own tool groups from `tools/src` directly (see [Tools](tools.md))
+- **External tools via MCP**: servers added with `hive mcp add` are started and spoken to over MCP at runtime
 
 If you need to use both packages in a single script (e.g., for testing), prefer `uv run` with `PYTHONPATH`:
 
@@ -308,7 +308,7 @@ PYTHONPATH=tools/src uv run python your_script.py
 
 ### MCP Server Configuration
 
-The `.mcp.json` at project root configures MCP servers to run through `uv run` in each package directory:
+The `.mcp.json` at project root exposes Hive's tool servers to IDE agents (such as Claude Code), run through `uv run` in each package directory. Hive's own agents don't use it:
 
 ```json
 {

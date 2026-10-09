@@ -515,3 +515,18 @@ def test_colony_and_queen_memories_stay_separate(hive_home: Path, bind_colony, b
     bind_queen("queen_ops")
     assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 0
     assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 1
+
+
+def test_since_until_filter_results_not_just_indexing(hive_home: Path, bind_queen):
+    """A session indexed by an earlier unfiltered search must still be filtered out."""
+    for session in ("session_20260110_100000_aaaa", "session_20260505_100000_bbbb"):
+        _write_session(hive_home, queen="queen_x", session=session, events=[_user_event("NEEDLE_DATED")])
+    bind_queen("queen_x")
+    fn = _make_tool()
+
+    assert fn(pattern="NEEDLE_DATED")["total_matches"] == 2  # indexes both sessions
+
+    after = fn(pattern="NEEDLE_DATED", since="2026-04-01")
+    assert [m["session"] for m in after["matches"]] == ["session_20260505_100000_bbbb"]
+    before = fn(pattern="NEEDLE_DATED", until="2026-04-01")
+    assert [m["session"] for m in before["matches"]] == ["session_20260110_100000_aaaa"]

@@ -125,7 +125,7 @@ hive/
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
-│   ├── mcp_server.py       # MCP server entry point
+│   ├── mcp_server.py       # Standalone MCP server (agents use the tools in-process)
 │   └── src/aden_tools/     # Tools for agent capabilities
 │       └── tools/          # Individual tool implementations
 │           ├── web_search_tool/

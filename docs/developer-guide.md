@@ -113,7 +113,7 @@ hive/                                    # Repository root
 │   │       │   ├── web_scrape_tool/
 │   │       │   ├── file_system_toolkits/
 │   │       │   └── ...                  # Additional tools
-│   │       ├── mcp_server.py            # HTTP MCP server
+│   │       ├── mcp_server.py            # Standalone MCP server (IDE / external use)
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
 │   └── README.md                        # Tools documentation

@@ -174,3 +174,23 @@ def test_hub_hands_user_text_to_sources() -> None:
     block = asyncio.run(hub.fire(ReminderPoint.USER_PROMPT_SUBMIT, ctx, user_text="Where did I meet Sophia?"))
 
     assert block is not None and "related to: Where did I meet Sophia?" in block
+
+
+def test_timeline_switch_controls_extraction_and_the_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from framework.tools.harness_tools import build_harness_group
+
+    bus = SimpleNamespace(subscribe=lambda **kwargs: "sub_1")
+    llm = FakeLLM(lambda _p: [])
+
+    monkeypatch.setenv("HIVE_MEMORY_TIMELINE", "0")
+    assert asyncio.run(TL.subscribe_timeline_triggers(bus, tmp_path / SESSION, llm)) == []
+    assert "search_timeline" not in {t.name for t in build_harness_group("memory-tools")}
+
+    monkeypatch.setenv("HIVE_MEMORY_TIMELINE", "1")
+
+    async def subscribe() -> list[str]:
+        subs = await TL.subscribe_timeline_triggers(bus, tmp_path / SESSION, llm, backfill_sessions=0)
+        return subs
+
+    assert asyncio.run(subscribe()) == ["sub_1"]
+    assert "search_timeline" in {t.name for t in build_harness_group("memory-tools")}

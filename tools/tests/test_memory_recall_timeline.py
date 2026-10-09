@@ -148,3 +148,20 @@ def test_search_truncates_and_reports_total(weddings) -> None:
 def test_search_is_empty_without_timelines(hive_home: Path) -> None:
     _session(hive_home, "session_20230901_100000_dddd0001", [("user", "hello")])
     assert T.search("queens", QUEEN, ".") == {"items": [], "total": 0, "truncated": False, "sessions_with_timeline": 0}
+
+
+def test_colony_scope_covers_every_overseeing_queens_sessions(hive_home: Path) -> None:
+    """A colony's history lives under each queen that oversaw it."""
+    for queen, session, text in (
+        ("queen_a", "session_20230301_100000_eeee0001", "We shipped the billing migration to Postgres."),
+        ("queen_b", "session_20230302_100000_eeee0002", "The billing migration rollback plan is ready."),
+    ):
+        sdir = hive_home / "colonies" / "acme" / "queens" / queen / "sessions" / session
+        sdir.mkdir(parents=True)
+        events = [{"type": "client_input_received", "data": {"content": text}}]
+        (sdir / "events.jsonl").write_text(json.dumps(events[0]) + "\n", encoding="utf-8")
+        (sdir / "timeline.jsonl").write_text(json.dumps(_item(text, "2023-03-01")) + "\n", encoding="utf-8")
+
+    turns = R.recall("colonies", "acme", "What happened with the billing migration?")
+    assert {t.session for t in turns} == {"session_20230301_100000_eeee0001", "session_20230302_100000_eeee0002"}
+    assert T.search("colonies", "acme", "billing")["total"] == 2

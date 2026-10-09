@@ -157,17 +157,6 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
     # browser_basic for richer site-by-site research; this category is the
     # lightweight always-available fallback.
     "research": ["web_scrape", "pdf_read"],
-    # Security — defensive scanning and reconnaissance. Engineering-only
-    # surface; the rest of the queens shouldn't see port scanners.
-    "security": [
-        "port_scan",
-        "dns_security_scan",
-        "http_headers_scan",
-        "ssl_tls_scan",
-        "subdomain_enumerate",
-        "tech_stack_detect",
-        "risk_score",
-    ],
     # Lightweight context helpers — good default for every queen.
     "context_awareness": [
         "get_current_time",
@@ -194,31 +183,9 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
     "media": [
         "image_generate",
     ],
-    # ----- OAuth-bound categories ------------------------------------
-    # These tools require an OAuth provider connection (Google, GitHub,
-    # HubSpot, Notion, Slack). They are listed in the Library catalog
-    # regardless of whether the provider is currently authorized — the
-    # UI shows a greyed-out checkbox + Connect button when not — and
-    # are filtered out of the worker prompt at spawn time if the
-    # provider has no live account. New OAuth tools added under each
-    # provider here will auto-light up once the user authorizes.
-    "email_oauth": [
-        "send_email",
-        "gmail_list_messages",
-        "gmail_get_message",
-        "gmail_create_draft",
-        "gmail_reply_email",
-        "gmail_modify_message",
-        "gmail_trash_message",
-        "gmail_create_label",
-        "gmail_list_labels",
-        "gmail_batch_get_messages",
-        "gmail_batch_modify_messages",
-    ],
     # Team email senders — the cloud-configured sender pool + rotation. These
-    # tools are credential-less at the MCP layer (secrets come from the sender
-    # registry), so unlike "email_oauth" they are NOT gated on a connected
-    # provider: a queen with this category always has the send surface, which
+    # tools are credential-less (secrets come from the sender registry), so a
+    # queen with this category always has the send surface, which
     # self-describes an empty pool until the team configures senders.
     "email_senders": [
         "list_senders",
@@ -230,119 +197,6 @@ _TOOL_CATEGORIES: dict[str, list[str]] = {
         "suppress_recipient",
         "list_suppressed",
         "adjust_sender",
-    ],
-    "calendar_oauth": [
-        "calendar_list_calendars",
-        "calendar_get_calendar",
-        "calendar_list_events",
-        "calendar_get_event",
-        "calendar_create_event",
-        "calendar_update_event",
-        "calendar_delete_event",
-        "calendar_check_availability",
-    ],
-    "google_workspace": [
-        "google_docs_create_document",
-        "google_docs_get_document",
-        "google_docs_insert_text",
-        "google_docs_format_text",
-        "google_docs_replace_all_text",
-        "google_docs_batch_update",
-        "google_docs_insert_image",
-        "google_docs_create_list",
-        "google_docs_add_comment",
-        "google_docs_list_comments",
-        "google_docs_export_content",
-        "google_sheets_create_spreadsheet",
-        "google_sheets_get_spreadsheet",
-        "google_sheets_get_values",
-        "google_sheets_update_values",
-        "google_sheets_append_values",
-        "google_sheets_clear_values",
-        "google_sheets_batch_update_values",
-        "google_sheets_batch_clear_values",
-        "google_sheets_add_sheet",
-        "google_sheets_delete_sheet",
-    ],
-    "github_oauth": [
-        "github_list_repos",
-        "github_get_repo",
-        "github_search_repos",
-        "github_list_issues",
-        "github_get_issue",
-        "github_create_issue",
-        "github_update_issue",
-        "github_list_pull_requests",
-        "github_get_pull_request",
-        "github_create_pull_request",
-        "github_search_code",
-        "github_list_branches",
-        "github_get_branch",
-        "github_list_stargazers",
-        "github_get_user_profile",
-        "github_get_user_emails",
-        "github_list_commits",
-        "github_create_release",
-        "github_list_workflow_runs",
-    ],
-    "hubspot_oauth": [
-        "hubspot_search_contacts",
-        "hubspot_get_contact",
-        "hubspot_create_contact",
-        "hubspot_update_contact",
-        "hubspot_search_companies",
-        "hubspot_get_company",
-        "hubspot_create_company",
-        "hubspot_update_company",
-        "hubspot_search_deals",
-        "hubspot_get_deal",
-        "hubspot_create_deal",
-        "hubspot_update_deal",
-        "hubspot_delete_object",
-        "hubspot_list_associations",
-        "hubspot_create_association",
-    ],
-    "notion_oauth": [
-        "notion_search",
-        "notion_get_page",
-        "notion_create_page",
-        "notion_update_page",
-        "notion_query_database",
-        "notion_get_database",
-        "notion_create_database",
-        "notion_update_database",
-        "notion_get_block_children",
-        "notion_get_block",
-        "notion_update_block",
-        "notion_delete_block",
-        "notion_append_blocks",
-    ],
-    # Slack is currently "Coming soon" in the desktop integrations UI,
-    # but queens still get the category — the per-spawn credential
-    # filter drops the tools until the provider is connected, so when
-    # Slack ships the queens auto-light up without any sidecar churn.
-    "slack_oauth": [
-        "slack_send_message",
-        "slack_list_channels",
-        "slack_get_channel_history",
-        "slack_get_channel_info",
-        "slack_list_users",
-        "slack_get_user_info",
-        "slack_find_user_by_email",
-        "slack_send_dm",
-        "slack_search_messages",
-        "slack_get_thread_replies",
-        "slack_get_messages_for_analysis",
-        "slack_get_conversation_context",
-        "slack_update_message",
-        "slack_delete_message",
-        "slack_schedule_message",
-        "slack_add_reaction",
-        "slack_remove_reaction",
-        "slack_pin_message",
-        "slack_unpin_message",
-        "slack_upload_file",
-        "slack_get_permalink",
     ],
 }
 

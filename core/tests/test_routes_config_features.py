@@ -51,6 +51,7 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(routes_config_mod, "HIVE_CONFIG_FILE", cfg_file)
     monkeypatch.setattr(config_mod, "COLONIES_DIR", tmp_path / "colonies")
     monkeypatch.delenv("HIVE_ADAPTIVE_TOOL_BUDGET", raising=False)
+    monkeypatch.delenv("HIVE_MEMORY_TIMELINE", raising=False)
     return cfg_file
 
 
@@ -116,8 +117,20 @@ async def test_get_features_default(make_client) -> None:
     body = await resp.json()
     # Senders default OFF — it is an advanced developer feature, and this
     # default is what keeps the sender tools out of every queen's hands until
-    # the user opts in. Adaptive budgets default ON.
-    assert body == {"features": {"adaptive_tool_budget": True, "email_senders": False}}
+    # the user opts in. Adaptive budgets default ON. The memory timeline
+    # defaults OFF: it costs background LLM calls for a small measured gain.
+    assert body == {"features": {"adaptive_tool_budget": True, "email_senders": False, "memory_timeline": False}}
+
+
+async def test_put_memory_timeline_persists(make_client, _isolated_config: Path) -> None:
+    from framework.config import get_memory_timeline_enabled
+
+    client = await make_client()
+    resp = await client.put("/api/config/features", json={"features": {"memory_timeline": True}})
+    assert resp.status == 200
+    assert json.loads(_isolated_config.read_text(encoding="utf-8"))["memory_timeline"] is True
+    assert get_memory_timeline_enabled() is True
+    assert (await (await client.get("/api/config/features")).json())["features"]["memory_timeline"] is True
 
 
 async def test_put_email_senders_persists_and_publishes_env(

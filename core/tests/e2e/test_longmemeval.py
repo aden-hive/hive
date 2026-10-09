@@ -7,7 +7,7 @@ per-question results.
 Default sample (12, stratified):  cd core && uv run pytest tests/e2e/test_longmemeval.py -m live
 Full benchmark, 4 at a time:      HIVE_LME_QUESTIONS=all uv run pytest tests/e2e/test_longmemeval.py -m live -n 4
 Specific questions:               HIVE_LME_QUESTIONS=e47becba,gpt4_2655b836 uv run pytest ...
-Without timeline extraction:      HIVE_LME_TIMELINE=0 ...
+With timeline extraction:         HIVE_LME_TIMELINE=1 ...  (first run per question extracts; cached after)
 """
 
 from __future__ import annotations
@@ -42,7 +42,11 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 async def test_longmemeval(question_id: str, run_queen, hive_home, monkeypatch) -> None:
     item = lme.load_question(question_id)
     session_map = lme.seed_haystack(hive_home, item)
-    if os.environ.get("HIVE_LME_TIMELINE", "1") != "0":
+    # Off by default, like the shipped memory_timeline feature flag.
+    timeline = os.environ.get("HIVE_LME_TIMELINE", "0") != "0"
+    # The queen offers search_timeline only when the feature is on.
+    monkeypatch.setenv("HIVE_MEMORY_TIMELINE", "1" if timeline else "0")
+    if timeline:
         await lme.build_timelines(
             hive_home,
             api_base=harness.API_BASE,

@@ -1203,6 +1203,25 @@ class ToolRegistry:
         logger.info("Harness group '%s' registered %d tool(s): %s", group, len(registered), sorted(registered))
         return len(registered)
 
+    def record_builtin_tools(self, group: str, names: list[str]) -> None:
+        """Make already-registered in-process tools gateable under *group*.
+
+        Allowlists, tool categories and the Tool Library only see tools
+        recorded under a server or group name, so a tool registered
+        directly (``browser_setup``) would otherwise never reach a queen's
+        phase tools. Recorded like a harness group, so a credential resync
+        keeps it.
+        """
+        names = [n for n in names if n in self._tools]
+        members = self._mcp_server_tools.setdefault(group, set())
+        members.update(names)
+        catalog = [
+            {"name": n, "description": self._tools[n].tool.description, "input_schema": self._tools[n].tool.parameters, "provider": None}
+            for n in sorted(members)
+        ]
+        self._mcp_full_catalog[group] = catalog
+        self._harness_groups[group] = (set(members), list(catalog))
+
     def _make_harness_executor(self, ht: Any) -> Callable[[dict], Any]:
         """Executor for an in-process harness tool (context in, MCP-shaped result out)."""
 

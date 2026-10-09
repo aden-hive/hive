@@ -399,8 +399,9 @@ async def test_get_tools_exposes_categories(queen_dir, monkeypatch):
     # use it — frontend can group/show it.
     assert "spreadsheet_advanced" in cats
     assert cats["spreadsheet_advanced"]["in_role_default"] is False
-    # Security was removed from queen_technology defaults.
-    assert cats["security"]["in_role_default"] is False
+    # The security scanners left with the bundled integrations; no
+    # category may advertise tools that no longer exist.
+    assert "security" not in cats
     # file_ops grants pdf_read + attach_file by name.
     assert "pdf_read" in cats["file_ops"]["tools"]
     assert "attach_file" in cats["file_ops"]["tools"]

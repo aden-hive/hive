@@ -571,11 +571,18 @@ list tools that would answer ``scope_unbound``. Real queen sessions load
 them through queen_orchestrator's slow path with their identity set."""
 
 
-def _recall_past_conversations(queen_id: str, text: str, current_session: str) -> str | None:
-    """Excerpts of *queen_id*'s earlier sessions related to *text*, or None."""
+def _recall_past_conversations(session: Any, text: str, current_session: str) -> str | None:
+    """Excerpts of earlier sessions related to *text*, or None.
+
+    Searches the same history the memory tools do (``_session_identity``):
+    the colony's once the session is bound to one, else the queen's own.
+    Resolved per message, because a live session can bind or unbind.
+    """
     from memory_tools.recall import recall_block
 
-    return recall_block("queens", queen_id, text, exclude_session=current_session)
+    if session.colony_id:
+        return recall_block("colonies", session.colony_id, text, exclude_session=current_session)
+    return recall_block("queens", session.queen_name or "default", text, exclude_session=current_session)
 
 
 def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]]]]:
@@ -1869,7 +1876,7 @@ async def create_queen(
                 # history doesn't hinge on the queen deciding to search.
                 # Same scope search_messages uses; the live session is
                 # excluded (it's already in context).
-                past_conversation_recall_provider=lambda text: _recall_past_conversations(session.queen_name or "default", text, queen_dir.name),
+                past_conversation_recall_provider=lambda text: _recall_past_conversations(session, text, queen_dir.name),
                 # Resolves the on-disk colony binding for tool-budget
                 # checkpoint reminders (tracker + fleet snapshots).
                 # Returns None for an independent-mode queen (no colony
