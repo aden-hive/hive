@@ -2097,6 +2097,33 @@ if ($credKey) {
 Write-Host ""
 
 # ============================================================
+# Step 4b: Install browser extension from Chrome Web Store
+# ============================================================
+
+Write-Step -Number "" -Text "Installing browser extension..."
+
+$ExtensionUrl = "https://chromewebstore.google.com/detail/hive-browser-bridge/jkpcegnbfimimjodblcemoheedidnppm"
+
+Write-Host "  Install " -NoNewline
+Write-Color -Text "Hive Browser Bridge" -Color White -NoNewline
+Write-Host " from the Chrome Web Store, then click " -NoNewline
+Write-Color -Text "Add to Chrome" -Color White -NoNewline
+Write-Host "."
+Write-Color -Text "  $ExtensionUrl" -Color DarkGray
+Write-Host ""
+$null = Read-Host "  Press Enter to open the Web Store"
+
+try {
+    Start-Process $ExtensionUrl -ErrorAction Stop
+} catch {
+    Write-Color -Text "  Could not open a browser automatically. Open the URL above in Chrome." -Color DarkGray
+}
+
+Write-Host ""
+$null = Read-Host "  Press Enter once the extension is installed"
+Write-Host ""
+
+# ============================================================
 # Step 5: Verify Setup
 # ============================================================
 
@@ -2288,6 +2315,13 @@ if ($credKey) {
     Write-Ok "~/.hive/credentials/  (encrypted)"
     Write-Host ""
 }
+
+# Show the tool surface. The aden_tools integration catalog isn't loaded by
+# default (it runs as an external MCP server), so it isn't counted here.
+Write-Color -Text "Tools:" -Color White
+Write-Ok "Built in: shell, files, code search, browser, web scraping, PDFs, CSV, charts, memory search"
+Write-Color -Text "  More integrations (GitHub, Gmail, HubSpot, Slack, ...) run as an MCP server: see docs/tools.md" -Color DarkGray
+Write-Host ""
 
 # Show Codex instructions if available
 if ($CodexAvailable) {
