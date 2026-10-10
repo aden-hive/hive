@@ -1670,45 +1670,51 @@ async def _compact_inherited_conversation(
     from datetime import UTC as _UTC, datetime as _datetime
 
     inherited_chars, inherited_count = await _inherited_transcript_size(dest_queen_dir)
+    inherited_tokens = inherited_chars // 4
     window_tokens = _queen_window_tokens(queen_loop)
-    if inherited_count and inherited_chars // 4 < window_tokens * _INHERITED_COMPACTION_MIN_WINDOW_SHARE:
-        # Small enough to inherit whole. Compacting it would only lose
-        # detail, and the colony opening waits on compaction (up to 180s).
-        result: tuple[int, int, str] | None = (inherited_count, 0, "")
+    small_enough_to_keep = inherited_count > 0 and inherited_tokens < window_tokens * _INHERITED_COMPACTION_MIN_WINDOW_SHARE
+    if small_enough_to_keep:
+        # Compacting it would only lose detail, and the colony opening
+        # waits on compaction (up to 180s).
         logger.info(
             "compact_inherited: keeping %d message(s) (~%d tokens) verbatim for colony forked from %s",
             inherited_count,
-            inherited_chars // 4,
+            inherited_tokens,
             source_session_id,
         )
+        messages_compacted, summary_text = inherited_count, ""
     else:
-        result = None
-    try:
-        if result is None:
+        try:
             result = await _compact_queen_conversation_in_place(
                 queen_dir=dest_queen_dir,
                 queen_ctx=queen_ctx,
                 queen_loop=queen_loop,
                 inherited_from=source_session_id,
             )
-    except Exception:
-        logger.warning(
-            "compact_inherited: compaction failed; leaving raw transcript",
-            exc_info=True,
-        )
-        return
+        except Exception:
+            logger.warning(
+                "compact_inherited: compaction failed; leaving raw transcript",
+                exc_info=True,
+            )
+            return
 
-    if result is None:
-        # No queen ctx, no parts on disk, or empty conversation. Nothing
-        # to compact and nothing to mark — the colony will just open with
-        # an empty chat (or whatever raw state was copied).
+        if result is None:
+            # No queen ctx, no parts on disk, or empty conversation. Nothing
+            # to compact and nothing to mark — the colony will just open with
+            # an empty chat (or whatever raw state was copied).
+            logger.info(
+                "compact_inherited: nothing to compact for colony forked from %s",
+                source_session_id,
+            )
+            return
+
+        messages_compacted, summary_chars, summary_text = result
         logger.info(
-            "compact_inherited: nothing to compact for colony forked from %s",
+            "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
+            messages_compacted,
+            summary_chars,
             source_session_id,
         )
-        return
-
-    messages_compacted, summary_chars, summary_text = result
 
     # Append the boundary marker to the colony's events.jsonl so the
     # frontend can group + collapse everything that came before.  The
@@ -1738,14 +1744,6 @@ async def _compact_inherited_conversation(
         await asyncio.to_thread(_append_marker)
     except OSError:
         logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
-
-    if summary_text:
-        logger.info(
-            "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
-            messages_compacted,
-            summary_chars,
-            source_session_id,
-        )
 
 
 async def fork_session_into_colony(

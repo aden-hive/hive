@@ -21,11 +21,11 @@ from framework.storage.conversation_store import FileConversationStore
 
 
 def test_target_never_outgrows_the_input():
-    assert compaction_target_chars(69_271, 180_000) == 69_271 // 2
+    assert compaction_target_chars(69_271, 180_000) == 34_635
 
 
 def test_target_still_caps_at_half_the_window_for_large_inputs():
-    assert compaction_target_chars(2_000_000, 180_000) == 90_000 * 4
+    assert compaction_target_chars(2_000_000, 180_000) == 360_000
 
 
 def test_target_has_a_floor_for_tiny_inputs():

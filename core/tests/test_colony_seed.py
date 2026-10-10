@@ -74,5 +74,10 @@ async def test_waits_for_the_queen_loop_to_come_up():
 
 
 @pytest.mark.asyncio
-async def test_gives_up_quietly_when_the_queen_never_starts():
-    await _seed_colony_queen(_session(EventBus()), colony_id="watchlist", user_goal=None, wait_s=0.3)
+async def test_gives_up_with_a_warning_when_the_queen_never_starts(caplog):
+    session = _session(EventBus())
+
+    with caplog.at_level("WARNING", logger="framework.server.routes_sessions"):
+        await _seed_colony_queen(session, colony_id="watchlist", user_goal=None, wait_s=0.3)
+
+    assert "colony 'watchlist' queen never came up; not seeded" in caplog.text

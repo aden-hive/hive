@@ -445,6 +445,13 @@ async def _create_colony_from_source(
 _COLONY_SEED_TASKS: set[asyncio.Task[None]] = set()
 
 
+def _live_queen_node(session: Any) -> Any:
+    """The session's running queen loop, or None until it has started."""
+    executor = getattr(session, "queen_executor", None)
+    registry = getattr(executor, "node_registry", None)
+    return registry.get("queen") if isinstance(registry, dict) else None
+
+
 async def _seed_colony_queen(session: Any, *, colony_id: str, user_goal: str | None, wait_s: float = 30.0) -> None:
     """Give a freshly forked colony queen her first turn.
 
@@ -457,18 +464,13 @@ async def _seed_colony_queen(session: Any, *, colony_id: str, user_goal: str | N
     from framework.host.event_bus import AgentEvent, EventType
 
     goal = (user_goal or "").strip()
-    deadline = asyncio.get_running_loop().time() + wait_s
-    node = None
-    while node is None:
-        executor = getattr(session, "queen_executor", None)
-        registry = getattr(executor, "node_registry", None)
-        node = registry.get("queen") if isinstance(registry, dict) else None
-        if node is None or not hasattr(node, "inject_event"):
-            node = None
-            if asyncio.get_running_loop().time() >= deadline:
-                logger.warning("_seed_colony_queen: colony '%s' queen never came up; not seeded", colony_id)
-                return
-            await asyncio.sleep(0.2)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_s
+    while (node := _live_queen_node(session)) is None:
+        if loop.time() >= deadline:
+            logger.warning("_seed_colony_queen: colony '%s' queen never came up; not seeded", colony_id)
+            return
+        await asyncio.sleep(0.2)
     try:
         if goal:
             await session.event_bus.publish(

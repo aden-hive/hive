@@ -8,7 +8,6 @@ no bound, so a bridge that stopped answering hung ``colony.stop()``.
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -21,13 +20,19 @@ from framework.host.colony_runtime import ColonyRuntime
 async def test_reap_gives_up_on_a_bridge_that_never_answers(monkeypatch):
     from gcu.browser.tools import lifecycle
 
-    async def never_answers(*_args, **_kwargs):
-        await asyncio.Event().wait()
+    abandoned: list[str] = []
+
+    async def never_answers(profile_name, **_kwargs):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            abandoned.append(profile_name)
+            raise
 
     monkeypatch.setattr(lifecycle, "close_profile_context", never_answers)
-    monkeypatch.setattr(colony_runtime, "_BROWSER_REAP_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(colony_runtime, "_BROWSER_REAP_TIMEOUT_S", 0.01)
 
-    started = time.monotonic()
-    await ColonyRuntime._reap_worker_browsers(SimpleNamespace(_workers={}), ["w1", "w2", "w3"])
+    # The outer bound only keeps a regression from hanging the suite.
+    await asyncio.wait_for(ColonyRuntime._reap_worker_browsers(SimpleNamespace(_workers={}), ["w1", "w2", "w3"]), timeout=30)
 
-    assert time.monotonic() - started < 2.0
+    assert sorted(abandoned) == ["w1", "w2", "w3"]

@@ -32,5 +32,7 @@ def test_every_called_bridge_method_is_forwardable():
 
 
 def test_unknown_method_error_names_the_problem():
+    bridge = object.__new__(RemoteBridge)  # attribute lookup needs no live connection
+
     with pytest.raises(AttributeError, match="not a bridge RPC method"):
-        RemoteBridge.__getattr__(object.__new__(RemoteBridge), "definitely_not_a_method")
+        bridge.definitely_not_a_method  # noqa: B018 - the lookup is the behaviour under test

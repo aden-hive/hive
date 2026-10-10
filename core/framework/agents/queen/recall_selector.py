@@ -138,11 +138,7 @@ async def select_memories(
         # max_results profile memories (one queen had 10 character sheets
         # typed "profile") return the same pins every turn and never a single
         # memory the selector judged relevant.
-        merged = list(dict.fromkeys(normalized))
-        for p in pinned:
-            if p not in merged:
-                merged.append(p)
-        result = merged[:max_results]
+        result = list(dict.fromkeys([*normalized, *pinned]))[:max_results]
         if not normalized:
             # LLM picked nothing. Log the raw response so the next bug
             # report is diagnosable; we still return pinned memories.

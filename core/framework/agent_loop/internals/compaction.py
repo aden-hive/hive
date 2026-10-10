@@ -32,12 +32,11 @@ LLM_COMPACT_MAX_DEPTH: int = 10
 
 
 def compaction_target_chars(formatted_chars: int, max_context_tokens: int) -> int:
-    """Length (chars) to ask a compaction summary for.
+    """Return the length (chars) to ask a compaction summary for.
 
-    Half the window, but never more than half of what is being compacted.
-    Asking for ``window / 2`` regardless of input told the model to write a
-    "summary" of a 69k-char chat at 360k chars; it produced 40k chars in
-    over four minutes, so the colony fork's 180s compaction always timed out.
+    Half the window, but never more than half of what is being compacted:
+    a target longer than the input makes the model pad its "summary", which
+    both fails to reduce context and takes minutes to generate.
     """
     return min((max_context_tokens // 2) * 4, max(2_000, formatted_chars // 2))
 
