@@ -5,4 +5,8 @@ The repo ``.env`` points ``HIVE_HOME`` at a real Hive home, and
 server tests read and write that home (and dial the live browser bridge).
 """
 
-from tests.conftest import _isolate_hive_home_autouse, _no_real_browser_bridge  # noqa: F401
+from tests.conftest import (  # noqa: F401
+    _isolate_hive_home_autouse,
+    _no_real_browser_bridge,
+    _session_hive_home_floor,
+)

@@ -61,24 +61,16 @@ _HIVE_PATH_NAMES = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _isolate_hive_home_autouse(tmp_path, monkeypatch):
-    """Per-test isolation of ``~/.hive`` to ``tmp_path/.hive``.
-
-    Every test automatically gets Path.home() redirected to its own
-    tmp directory and every module-level ``HIVE_HOME``/``QUEENS_DIR``/
-    ``COLONIES_DIR`` binding rewritten. Tests that need to read from
-    the developer's real home can explicitly unpatch these by calling
-    ``monkeypatch.undo()`` at the start -- none currently do.
-    """
-    fake_home_root = tmp_path
-    fake_hive = fake_home_root / ".hive"
+def _sandbox_hive_home(mp: pytest.MonkeyPatch, home_root: Path) -> Path:
+    """Point the home directory, ``HIVE_HOME`` and every module-level Hive
+    path binding at ``home_root/.hive``; return that directory."""
+    fake_hive = home_root / ".hive"
     fake_hive.mkdir(exist_ok=True)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home_root))
+    mp.setattr(Path, "home", classmethod(lambda cls: home_root))
     # The repo .env sets HIVE_HOME to a real Hive home; anything that resolves
     # the home from the environment (memory search, terminal child processes)
     # would otherwise follow it out of the sandbox.
-    monkeypatch.setenv("HIVE_HOME", str(fake_hive))
+    mp.setenv("HIVE_HOME", str(fake_hive))
     for mod_name in _HIVE_PATH_CONSUMERS:
         try:
             mod = importlib.import_module(mod_name)
@@ -86,8 +78,35 @@ def _isolate_hive_home_autouse(tmp_path, monkeypatch):
             continue
         for attr_name, builder in _HIVE_PATH_NAMES:
             if hasattr(mod, attr_name):
-                monkeypatch.setattr(mod, attr_name, builder(fake_hive))
-    yield fake_hive
+                mp.setattr(mod, attr_name, builder(fake_hive))
+    return fake_hive
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _session_hive_home_floor(tmp_path_factory):
+    """A sandbox under the per-test one, for the whole run.
+
+    ``monkeypatch.undo()`` inside a test reverts *every* patch, including the
+    per-test sandbox below. Without this floor that undo landed on the
+    developer's real ``~/.hive``, where a janitor test then ran a real
+    tier-2 sweep.
+    """
+    mp = pytest.MonkeyPatch()
+    yield _sandbox_hive_home(mp, tmp_path_factory.mktemp("session-home"))
+    mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_hive_home_autouse(_session_hive_home_floor, tmp_path, monkeypatch):
+    """Per-test isolation of ``~/.hive`` to ``tmp_path/.hive``.
+
+    Every test automatically gets Path.home() redirected to its own
+    tmp directory and every module-level ``HIVE_HOME``/``QUEENS_DIR``/
+    ``COLONIES_DIR`` binding rewritten. A test that calls
+    ``monkeypatch.undo()`` falls back to the session sandbox, never to the
+    developer's real home.
+    """
+    yield _sandbox_hive_home(monkeypatch, tmp_path)
 
 
 @pytest.fixture(autouse=True)

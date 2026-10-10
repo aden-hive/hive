@@ -7,6 +7,7 @@ import { ScrambleText } from "./fx/ScrambleText";
 import { useCreateColony } from "@/context/CreateColonyContext";
 import { useLiveSessions } from "@/hooks/use-live-sessions";
 import { deriveColonyStatus, describeColonyStatus, type ColonyStatus } from "@/lib/colony-status";
+import { isFullMotion } from "@/lib/motion";
 import type { Colony, QueenProfileSummary } from "@/types/colony";
 
 const SQRT3 = Math.sqrt(3);
@@ -14,10 +15,13 @@ const SQRT3 = Math.sqrt(3);
  *  neighbours is the comb's "wax". */
 const CELL_FILL = 0.93;
 const MAX_RADIUS = 56;
-const MIN_RADIUS = 34;
-const MAX_HEIGHT = 380;
+// Below this a ten-letter word no longer fits a cell's line.
+const MIN_RADIUS = 42;
+const MAX_HEIGHT = 600;
 const HIVES_PER_BAND = 6;
 const MAX_COLONY_PETALS = 6;
+/** One pass of the scan beam across the comb. */
+const BEAM_MS = 9000;
 
 /** Axial neighbour offsets, clockwise from the right (pointy-top cells). */
 const PETALS: [number, number][] = [
@@ -57,6 +61,9 @@ interface Cell {
   kind: CellKind;
   x: number;
   y: number;
+  /** The hive (flower) this cell belongs to, and its slot: 0 = centre. */
+  hive: number;
+  slot: number;
   /** Entrance order: hives in turn, each centre first, then its petals. */
   delayMs: number;
   queen?: QueenProfileSummary;
@@ -79,6 +86,8 @@ function layout(hives: Hive[]): Cell[] {
       key: `${id}:centre`,
       kind: hive.queen ? "queen" : "unassigned",
       ...toPoint(cq, cr),
+      hive: h,
+      slot: 0,
       delayMs: h * 90,
       queen: hive.queen ?? undefined,
     });
@@ -87,6 +96,8 @@ function layout(hives: Hive[]): Cell[] {
     PETALS.forEach(([dq, dr], p) => {
       const base = {
         ...toPoint(cq + dq, cr + dr),
+        hive: h,
+        slot: p + 1,
         delayMs: h * 90 + 160 + p * 45,
         queen: hive.queen ?? undefined,
       };
@@ -102,12 +113,6 @@ function layout(hives: Hive[]): Cell[] {
   return cells;
 }
 
-/** A role that fits under a queen's name: "Head of Lead Generation" → "Lead". */
-function shortRole(title: string): string {
-  const role = title.replace(/^Head of\s+/i, "");
-  return role.length > 9 ? role.split(/[\s&]+/)[0] : role;
-}
-
 const STATUS_LABEL: Record<ColonyStatus, string> = {
   active: "Working",
   parked: "Needs you",
@@ -116,8 +121,9 @@ const STATUS_LABEL: Record<ColonyStatus, string> = {
 
 /** The home page's live map of the user's hive: one seven-cell honeycomb per
  *  queen — the queen at the centre, her colonies in the petals, empty petals
- *  to found new ones. Cells light up while work runs; hovering decodes a
- *  readout of the cell; clicking opens it. */
+ *  to found new ones. Projected like a HUD: the comb tilts toward the
+ *  pointer, a scan beam sweeps it, hovering locks a reticle onto a cell and
+ *  lights its hive, and busy cells pulse. */
 export default function HiveMap({
   queens,
   colonies,
@@ -152,6 +158,7 @@ export default function HiveMap({
 
   // The radius follows the container: as large as fits, within limits.
   const hostRef = useRef<HTMLDivElement>(null);
+  const planeRef = useRef<HTMLDivElement>(null);
   const [hostWidth, setHostWidth] = useState(0);
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -170,6 +177,7 @@ export default function HiveMap({
   const mapHeight = bounds.height * radius;
   const cellW = SQRT3 * radius * CELL_FILL;
   const cellH = 2 * radius * CELL_FILL;
+  const centre = (c: Cell) => ({ cx: (c.x - bounds.minX) * radius, cy: (c.y - bounds.minY) * radius });
 
   const [focused, setFocused] = useState<Cell | null>(null);
 
@@ -204,10 +212,26 @@ export default function HiveMap({
     else if (cell.kind === "empty") openCreateColony({ queenId: cell.queen?.id });
   };
 
+  // HUD projection: the comb plane leans toward the pointer. Written straight
+  // to CSS variables so tracking never re-renders the cells.
+  const tilt = (e: React.PointerEvent<HTMLDivElement>) => {
+    const plane = planeRef.current;
+    if (!plane || !isFullMotion()) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    plane.style.setProperty("--tilt-x", ((e.clientX - r.left) / r.width - 0.5).toFixed(3));
+    plane.style.setProperty("--tilt-y", ((e.clientY - r.top) / r.height - 0.5).toFixed(3));
+  };
+  const leave = () => {
+    setFocused(null);
+    planeRef.current?.style.setProperty("--tilt-x", "0");
+    planeRef.current?.style.setProperty("--tilt-y", "0");
+  };
+
   const working =
     [...byQueen.values()].filter((l) => l.is_executing).length +
     colonies.filter((c) => colonyStatus(c) === "active").length;
   const needsYou = colonies.filter((c) => colonyStatus(c) === "parked").length;
+  const lock = focused ? centre(focused) : null;
 
   return (
     <section className="hive-map" aria-label="Hive map">
@@ -224,11 +248,29 @@ export default function HiveMap({
         </span>
       </header>
 
-      <div ref={hostRef} className="hive-map-stage" onMouseLeave={() => setFocused(null)}>
-        <div className="relative mx-auto" style={{ width: mapWidth, height: mapHeight }}>
+      <div ref={hostRef} className="hive-map-stage" onPointerMove={tilt} onMouseLeave={leave}>
+        <div
+          ref={planeRef}
+          className="hive-map-plane"
+          data-focus={focused ? "" : undefined}
+          style={{
+            width: mapWidth,
+            height: mapHeight,
+            "--beam-ms": `${BEAM_MS}ms`,
+            // Type scales with the cells so a line always fits its band.
+            "--cell-name": `${Math.min(12.5, Math.max(10.5, radius * 0.24)).toFixed(1)}px`,
+            "--cell-text": `${Math.min(11, Math.max(9.5, radius * 0.215)).toFixed(1)}px`,
+          } as CSSProperties}
+        >
+          <span aria-hidden className="hive-map-beam" />
+          {lock && focused && (
+            <>
+              <span aria-hidden className="hive-map-cross" data-axis="x" style={{ top: lock.cy }} />
+              <span aria-hidden className="hive-map-cross" data-axis="y" style={{ left: lock.cx }} />
+            </>
+          )}
           {cells.map((cell) => {
-            const cx = (cell.x - bounds.minX) * radius;
-            const cy = (cell.y - bounds.minY) * radius;
+            const { cx, cy } = centre(cell);
             const state =
               cell.kind === "colony" && cell.colony
                 ? colonyStatus(cell.colony)
@@ -241,6 +283,8 @@ export default function HiveMap({
               width: cellW,
               height: cellH,
               "--fx-d": `${cell.delayMs}ms`,
+              // The beam lights each cell as it crosses the cell's centre.
+              "--hit-d": `${Math.round((cx / mapWidth) * BEAM_MS)}ms`,
             } as CSSProperties;
             return (
               <button
@@ -249,8 +293,10 @@ export default function HiveMap({
                 className="hive-cell"
                 data-kind={cell.kind}
                 data-state={state}
+                data-lit={focused && focused.hive === cell.hive ? "" : undefined}
                 style={style}
                 aria-label={readout(cell)}
+                title={cell.kind === "queen" && cell.queen ? `${cell.queen.name} — ${cell.queen.title}` : undefined}
                 onMouseEnter={() => setFocused(cell)}
                 onFocus={() => setFocused(cell)}
                 onBlur={() => setFocused(null)}
@@ -264,6 +310,46 @@ export default function HiveMap({
               </button>
             );
           })}
+          {/* Busy cells send hexagonal ripples out past their edges. */}
+          {cells
+            .filter((c) =>
+              c.kind === "colony" && c.colony
+                ? colonyStatus(c.colony) === "active"
+                : c.kind === "queen" && c.queen
+                  ? queenWorking(c.queen)
+                  : false,
+            )
+            .map((c) => {
+              const { cx, cy } = centre(c);
+              return (
+                <svg
+                  key={`${c.key}:pulse`}
+                  aria-hidden
+                  className="hive-map-pulse"
+                  viewBox="-1 -1 2 2"
+                  style={{ left: cx - radius, top: cy - radius, width: radius * 2, height: radius * 2 }}
+                >
+                  <polygon points="0,-1 0.866,-0.5 0.866,0.5 0,1 -0.866,0.5 -0.866,-0.5" />
+                </svg>
+              );
+            })}
+          {lock && focused && (
+            <span
+              aria-hidden
+              key={focused.key}
+              className="hive-map-reticle"
+              style={{
+                left: lock.cx - cellW / 2 - 7,
+                top: lock.cy - cellH / 2 - 7,
+                width: cellW + 14,
+                height: cellH + 14,
+              }}
+            >
+              <span className="hive-map-reticle-tag">
+                Hive {String(focused.hive + 1).padStart(2, "0")} · {focused.slot === 0 ? "Core" : `Cell ${focused.slot}`}
+              </span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -276,33 +362,42 @@ export default function HiveMap({
   );
 }
 
+/**
+ * A cell's contents. Pointy-top hexagons are full width only through their
+ * middle half, so every line sits inside that band: a queen shows her avatar
+ * and name (her role is in the tooltip and the readout), a colony its name
+ * and a one-line status.
+ */
 function CellFace({ cell, radius, state }: { cell: Cell; radius: number; state?: ColonyStatus }) {
   if (cell.kind === "queen" && cell.queen) {
-    const avatar = Math.round(radius * 0.74);
+    const avatar = Math.round(radius * 0.52);
     return (
       <>
         <span className="hive-cell-avatar" style={{ width: avatar, height: avatar }}>
           <QueenAvatar queen={cell.queen} className="w-full h-full" />
         </span>
-        <span className="hive-cell-name">{cell.queen.name.split(" ")[0]}</span>
-        <span className="hive-cell-meta">{shortRole(cell.queen.title)}</span>
+        <ScrambleText
+          text={cell.queen.name.split(" ")[0]}
+          className="hive-cell-name"
+          delayMs={cell.delayMs + 220}
+          durationMs={420}
+        />
       </>
     );
   }
   if (cell.kind === "unassigned") {
     return (
       <>
-        <HiveLogo size={Math.round(radius * 0.6)} className="text-muted-foreground" />
-        <span className="hive-cell-meta">Unassigned</span>
+        <HiveLogo size={Math.round(radius * 0.46)} className="text-muted-foreground" />
+        <span className="hive-cell-status">Unassigned</span>
       </>
     );
   }
   if (cell.kind === "colony" && cell.colony) {
     return (
       <>
-        <span className="hive-cell-dot" data-state={state} />
         <span className="hive-cell-colony">{cell.colony.name}</span>
-        <span className="hive-cell-meta" data-state={state}>
+        <span className="hive-cell-status" data-state={state}>
           {state ? STATUS_LABEL[state] : ""}
         </span>
       </>
@@ -312,7 +407,7 @@ function CellFace({ cell, radius, state }: { cell: Cell; radius: number; state?:
     return (
       <>
         <span className="hive-cell-name">+{cell.hidden}</span>
-        <span className="hive-cell-meta">more</span>
+        <span className="hive-cell-status">more</span>
       </>
     );
   }

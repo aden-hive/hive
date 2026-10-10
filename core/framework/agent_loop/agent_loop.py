@@ -758,6 +758,9 @@ class AgentLoop(AgentProtocol):
         # Text of real user messages queued but not yet drained, so the
         # USER_PROMPT_SUBMIT reminders can see what the user is asking.
         self._pending_user_texts: list[str] = []
+        # Context injected with ``wake=False``: it joins the next drain but
+        # never unparks the loop by itself.
+        self._passive_injections: list[str] = []
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Queen input blocking state
         self._input_ready = asyncio.Event()
@@ -3497,15 +3500,15 @@ class AgentLoop(AgentProtocol):
         is_client_input: bool = False,
         image_content: list[dict[str, Any]] | None = None,
         correlation_id: str | None = None,
+        wake: bool = True,
     ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
-        Always unblocks _await_user_input() so the node processes the
-        message promptly — both real user input and external events
-        (e.g. worker ask_user forwarded via queenContext) need to wake
-        the node.
+        Unblocks _await_user_input() so the node processes the message
+        promptly — both real user input and external events (e.g. worker
+        ask_user forwarded via queenContext) need to wake the node.
 
         Args:
             content: The message text.
@@ -3518,7 +3521,16 @@ class AgentLoop(AgentProtocol):
                 CLIENT_INPUT_RECEIVED event already emitted for it, so the
                 drain can emit a matching CLIENT_INPUT_COMMITTED (true
                 injection time) the UI can reconcile against.
+            wake: False for context that should ride along rather than
+                demand a turn (e.g. recalled memories): it joins the next
+                drain — the next iteration if the turn is still running,
+                else the user's next message — and never wakes a parked
+                loop. Waking on it made the queen answer the same message
+                twice when it landed just after her reply.
         """
+        if not wake:
+            self._passive_injections.append(content)
+            return
         logger.debug(
             "[AgentLoop.inject_event] content_len=%d, is_client_input=%s, has_images=%s, queue_size_before=%d",
             len(content) if content else 0,
@@ -6915,6 +6927,11 @@ class AgentLoop(AgentProtocol):
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: AgentContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
+        # Passive context joins whichever drain comes next; it never woke the
+        # loop itself. Queued after anything already waiting.
+        for content in self._passive_injections:
+            self._injection_queue.put_nowait((content, False, None, None))
+        self._passive_injections.clear()
         on_committed = None
         if self._event_bus is not None and ctx.emits_client_io:
             stream_id = ctx.stream_id or ctx.agent_id

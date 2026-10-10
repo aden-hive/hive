@@ -1492,10 +1492,14 @@ async def create_queen(
         if not block or block == _last_injected_recall:
             return
         _last_injected_recall = block
+        # wake=False: recall is context for a turn, never a reason to take
+        # one. A wake-up injection could land just after the queen replied
+        # and make her answer the same message again.
         await loop.inject_event(
             "<system-reminder>\nRecalled memories relevant to the latest "
             "user message (supersedes earlier recall reminders):\n\n"
-            f"{block}\n</system-reminder>"
+            f"{block}\n</system-reminder>",
+            wake=False,
         )
 
     async def _recall_on_user_input(event: AgentEvent) -> None:
@@ -1506,9 +1510,9 @@ async def create_queen(
         we fire it off as a background task. The immediate injection delivers
         whatever recall we already cached (seeding or the prior turn's
         refresh) so this turn starts with relevant memories; the background
-        refresh injects the fresh blocks mid-turn if they differ — but only
-        while the queen is still executing, so a slow refresh landing after
-        the turn ended doesn't wake her into a spurious reply. Phase-change
+        refresh injects the fresh blocks if they differ. Both injections are
+        non-waking: they join the queen's next drain (mid-turn if she is
+        still working, else with the user's next message). Phase-change
         injections and worker-report injections go through
         agent_loop.inject_event() and do NOT publish CLIENT_INPUT_RECEIVED,
         so this runs exactly once per real user turn.
@@ -1519,11 +1523,7 @@ async def create_queen(
         async def _bg_refresh() -> None:
             try:
                 await _refresh_recall_cache(query)
-                from framework.agent_loop.reminders import LoopActivity
-
-                loop = _get_queen_node()
-                if loop is not None and getattr(loop, "activity", None) == LoopActivity.EXECUTING:
-                    await _inject_recall_if_changed()
+                await _inject_recall_if_changed()
             except Exception:
                 logger.debug("background recall refresh failed", exc_info=True)
 

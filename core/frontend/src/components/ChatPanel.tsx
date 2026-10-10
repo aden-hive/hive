@@ -1328,6 +1328,173 @@ export function ReasoningRow({ content }: { content: string }) {
   );
 }
 
+type ActivityRun = { kind: "tool_status_group"; key: string; messages: ChatMessage[]; createdAt: number };
+
+/**
+ * In a turn where the queen thinks (any reasoning row between two user
+ * messages), fold all of the turn's activity runs into its first one.
+ * A thinking model alternates thought → tool → thought around her merged
+ * reply bubble, which scattered one turn's working across several rows above
+ * and below the answer. Turns without reasoning keep their runs in place:
+ * their tool cards read alongside the text they sit next to.
+ */
+export function mergeThinkingTurns<T extends { kind: string }>(items: T[]): T[] {
+  const out: T[] = [];
+  let turnStart = 0;
+  const closeTurn = () => {
+    const turn = out.slice(turnStart);
+    const runs = turn.filter((it) => it.kind === "tool_status_group") as unknown as ActivityRun[];
+    if (runs.length < 2 || !runs.some((r) => r.messages.some((m) => m.type === "reasoning"))) return;
+    const [first, ...later] = runs;
+    // Runs are already in transcript order, so concatenating keeps it.
+    first.messages = runs.flatMap((r) => r.messages);
+    const folded = new Set<unknown>(later);
+    out.splice(turnStart, turn.length, ...turn.filter((it) => !folded.has(it)));
+  };
+  for (const item of items) {
+    const msg = (item as { msg?: ChatMessage }).msg;
+    if (item.kind === "message" && msg?.type === "user") {
+      closeTurn();
+      out.push(item);
+      turnStart = out.length;
+      continue;
+    }
+    out.push(item);
+  }
+  closeTurn();
+  return out;
+}
+
+/** Split an activity run into the timeline the block expands to:
+ *  thoughts one by one, consecutive tool bursts merged into one pill row. */
+function activitySteps(messages: ChatMessage[]): (
+  | { kind: "thought"; key: string; text: string }
+  | { kind: "tools"; key: string; content: string }
+)[] {
+  const steps: (
+    | { kind: "thought"; key: string; text: string }
+    | { kind: "tools"; key: string; content: string; messages: ChatMessage[] }
+  )[] = [];
+  for (const m of messages) {
+    if (m.type === "reasoning") {
+      if (m.content.trim()) steps.push({ kind: "thought", key: m.id, text: m.content.trim() });
+      continue;
+    }
+    const last = steps[steps.length - 1];
+    if (last && last.kind === "tools") last.messages.push(m);
+    else steps.push({ kind: "tools", key: m.id, content: "", messages: [m] });
+  }
+  return steps.map((step) =>
+    step.kind === "tools"
+      ? { kind: "tools", key: step.key, content: mergeToolStatusContents(step.messages) }
+      : step,
+  );
+}
+
+function formatWorkedFor(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 1000) return null;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/**
+ * One block for a run of the queen's thinking and tool calls between two
+ * replies. Thinking models interleave a thought before every tool call;
+ * rendered row by row that stacked into a noisy ladder above each answer.
+ * Collapsed, the block is one line ("Thought · 3 tools · 12s"); while the
+ * run is live it stays open and shows the latest thought; once the reply
+ * lands it folds away unless the user opened it.
+ */
+function ActivityBlock({
+  messages,
+  live,
+  onQuickReply,
+}: {
+  messages: ChatMessage[];
+  live: boolean;
+  onQuickReply?: (text: string) => void;
+}) {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? live;
+  const steps = activitySteps(messages);
+  const thoughts = steps.filter((s) => s.kind === "thought");
+  const toolCount = steps.reduce((n, s) => {
+    if (s.kind !== "tools") return n;
+    try {
+      return n + ((JSON.parse(s.content).tools ?? []) as unknown[]).length;
+    } catch {
+      return n;
+    }
+  }, 0);
+  const times = messages.map((m) => m.createdAt).filter((t): t is number => typeof t === "number");
+  const workedFor = times.length > 1 ? formatWorkedFor(Math.max(...times) - Math.min(...times)) : null;
+  const latestThought = [...thoughts].reverse()[0];
+  const lastToolsKey = [...steps].reverse().find((s) => s.kind === "tools")?.key;
+
+  const summary = [
+    thoughts.length > 1 ? `Thought ${thoughts.length}×` : "Thought",
+    toolCount > 0 ? `${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : null,
+    workedFor,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="hive-activity" data-open={open || undefined} data-live={live || undefined}>
+      <button
+        type="button"
+        className="hive-activity-head"
+        onClick={() => setUserOpen(!open)}
+        aria-expanded={open}
+      >
+        <Brain className="w-3.5 h-3.5 shrink-0" />
+        {live ? (
+          <span className="queen-debate-line hive-activity-live">
+            {latestThought?.kind === "thought" ? latestThought.text.split("\n")[0] : "Thinking…"}
+          </span>
+        ) : (
+          <span className="hive-activity-summary">{summary}</span>
+        )}
+        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <ol className="hive-activity-steps">
+          {steps.map((step) =>
+            step.kind === "thought" ? (
+              <li key={step.key} className="hive-activity-step" data-kind="thought">
+                <ThoughtText text={step.text} />
+              </li>
+            ) : (
+              <li key={step.key} className="hive-activity-step" data-kind="tools">
+                <ToolActivityRow
+                  content={step.content}
+                  onQuickReply={step.key === lastToolsKey ? onQuickReply : undefined}
+                />
+              </li>
+            ),
+          )}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/** A thought in the activity timeline: a few lines, the rest on demand. */
+function ThoughtText({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
+  const long = text.length > 280 || text.split("\n").length > 4;
+  return (
+    <div className="hive-activity-thought">
+      <p className={full || !long ? undefined : "line-clamp-4"}>{text}</p>
+      {long && (
+        <button type="button" onClick={() => setFull((v) => !v)} className="hive-activity-more">
+          {full ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ToolActivityRow({
   content,
   onQuickReply,
@@ -3214,8 +3381,13 @@ export default function ChatPanel({
       // Merge consecutive tool_status messages into a single render
       // unit so their pills share lines via flex-wrap. Without this,
       // each tool_status message is its own block-level row even when
-      // adjacent — visually each tool stacks on its own line.
-      if (item.kind === "message" && item.msg.type === "tool_status") {
+      // adjacent — visually each tool stacks on its own line. Thinking
+      // rows join the same run: a thinking model writes a thought before
+      // every tool call, and the run renders as one ActivityBlock.
+      if (
+        item.kind === "message" &&
+        (item.msg.type === "tool_status" || item.msg.type === "reasoning")
+      ) {
         const last = out[out.length - 1];
         if (last && last.kind === "tool_status_group") {
           last.messages.push(item.msg);
@@ -3231,8 +3403,19 @@ export default function ChatPanel({
       }
       out.push(item);
     }
-    return out;
+    return mergeThinkingTurns(out);
   }, [renderItems]);
+
+  // Key of the activity run in the newest turn (after the last user
+  // message), if any: the run still in progress while the queen is busy.
+  const liveActivityKey = useMemo<string | null>(() => {
+    for (let i = itemsWithDividers.length - 1; i >= 0; i--) {
+      const item = itemsWithDividers[i];
+      if (item.kind === "message" && item.msg.type === "user") return null;
+      if (item.kind === "tool_status_group") return item.key;
+    }
+    return null;
+  }, [itemsWithDividers]);
 
   // ID of the most recent queen message that renders the standard queen
   // bubble (i.e., has the name/title row where the spinner lives). Queen
@@ -4044,6 +4227,19 @@ export default function ChatPanel({
             );
           }
           if (item.kind === "tool_status_group") {
+            if (item.messages.some((m) => m.type === "reasoning")) {
+              return (
+                <div key={item.key}>
+                  <ActivityBlock
+                    messages={item.messages}
+                    // Live while it belongs to the newest turn and the queen
+                    // is still working.
+                    live={!!isBusy && item.key === liveActivityKey}
+                    onQuickReply={item.key === latestToolGroupKey ? handleQuickReply : undefined}
+                  />
+                </div>
+              );
+            }
             // Collapse the messages' tool arrays into one synthetic
             // tool_status content so the pills land in a single
             // flex-wrap container — multiple consecutive bursts now

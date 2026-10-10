@@ -1222,6 +1222,32 @@ class TestEventInjection:
         injected_found = any("[External event]" in str(m.get("content", "")) for m in all_messages)
         assert injected_found
 
+    @pytest.mark.asyncio
+    async def test_passive_context_reaches_the_next_turn(self, runtime, node_spec, buffer):
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
+        llm = MockStreamingLLM(scenarios=[text_scenario("ok")])
+        node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
+
+        await node.inject_event("<system-reminder>recalled: likes tea</system-reminder>", wake=False)
+        result = await node.execute(build_ctx(runtime, node_spec, buffer, llm))
+
+        assert result.success is True
+        sent = [str(m.get("content", "")) for call in llm.stream_calls for m in call["messages"]]
+        assert any("recalled: likes tea" in content for content in sent)
+
+    @pytest.mark.asyncio
+    async def test_passive_context_does_not_wake_a_parked_loop(self):
+        # Regression: recalled memories landing just after the queen replied
+        # woke her parked loop, and she answered the same message twice.
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+
+        await node.inject_event("<system-reminder>recalled</system-reminder>", wake=False)
+
+        assert not node._input_ready.is_set()
+        assert node._injection_queue.empty()
+
 
 # ===========================================================================
 # Pause/resume
