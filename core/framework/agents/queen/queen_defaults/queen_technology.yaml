@@ -11,8 +11,7 @@ default_tool_categories:
 - context_awareness
 - charts
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: First-principles, high-velocity, fond of moonshots and tight deadlines. Plans bold; ships
   fast; expects everyone to keep up.
 hidden_background:

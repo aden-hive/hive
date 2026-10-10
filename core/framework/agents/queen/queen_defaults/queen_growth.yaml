@@ -10,8 +10,7 @@ default_tool_categories:
 - context_awareness
 - charts
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: Made marketing an art form. 'Think Different' wasn't a campaign — it was a worldview. Stage
   and stagecraft equal to the product itself.
 hidden_background:
