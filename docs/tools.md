@@ -12,7 +12,7 @@ The built-in tools are grouped by what they do. Each group runs in-process (no s
 | `files-tools` | `read_file`, `write_file`, `edit_file`, `search_files` |
 | `chart-tools` | `chart_render` (ECharts and Mermaid to PNG) |
 | `memory-tools` | `search_messages` (regex over past conversations); `search_timeline` (dated events, facts and plans the user mentioned) when the `memory_timeline` feature flag is on |
-| `hive_tools` | `attach_file`, `pdf_read`, `web_scrape`, `get_current_time`, `get_account_info`, `image_generate`, the `csv_*` and `excel_*` tools; the email-senders suite when `HIVE_EMAIL_SENDERS` is on |
+| `hive_tools` | `attach_file`, `pdf_read`, `web_scrape`, `get_current_time`, `get_account_info`, `image_generate`, the `csv_*` tools; the `excel_*` tools when `openpyxl` is installed (`tools[excel]` extra); the email-senders suite when `HIVE_EMAIL_SENDERS` is on |
 
 The browser is driven through the `hive-browser` CLI from `terminal_exec`; the in-process `browser_setup` tool makes it discoverable.
 
