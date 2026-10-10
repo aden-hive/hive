@@ -143,6 +143,7 @@ Hive подходит, когда сложность уже не в модели
 - Ключевые понятия: [колония](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [worker'ы](../key_concepts/worker_agent.md), [координация](../key_concepts/coordination.md), [цикл](../key_concepts/the_loop.md), [цели и результаты](../key_concepts/goals_outcome.md), [как колонии совершенствуются](../key_concepts/improvement.md)
 - [Инструменты](../tools.md): встроенные инструменты, MCP-серверы и каталог интеграций
 - [Конфигурация](../configuration.md) и [руководство разработчика](../developer-guide.md)
+- [Дорожная карта](../roadmap.md): что вошло в V1 и что ещё предстоит сделать
 - [docs.adenhq.com](https://docs.adenhq.com/): онлайн-документация
 
 ## Частые вопросы

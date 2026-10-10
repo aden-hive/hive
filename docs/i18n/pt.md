@@ -143,6 +143,7 @@ Para um único prompt ou um script pontual, um agente comum é mais simples.
 - Conceitos principais: [colônia](../key_concepts/colony.md), [queen](../key_concepts/queen.md), [workers](../key_concepts/worker_agent.md), [coordenação](../key_concepts/coordination.md), [o loop](../key_concepts/the_loop.md), [objetivos e resultados](../key_concepts/goals_outcome.md), [como as colônias melhoram](../key_concepts/improvement.md)
 - [Ferramentas](../tools.md): ferramentas nativas, servidores MCP e o catálogo de integrações
 - [Configuração](../configuration.md) e o [guia do desenvolvedor](../developer-guide.md)
+- [Roadmap](../roadmap.md): o que a V1 entrega e o que ainda está em aberto
 - [docs.adenhq.com](https://docs.adenhq.com/): documentação online
 
 ## Perguntas frequentes

@@ -143,6 +143,7 @@ Hive तब काम आता है जब मुश्किल हिस्
 - मुख्य अवधारणाएँ: [कॉलोनी](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [workers](../key_concepts/worker_agent.md), [समन्वय](../key_concepts/coordination.md), [लूप](../key_concepts/the_loop.md), [लक्ष्य और परिणाम](../key_concepts/goals_outcome.md), [कॉलोनियाँ कैसे बेहतर होती हैं](../key_concepts/improvement.md)
 - [टूल्स](../tools.md): बिल्ट-इन टूल्स, MCP servers और इंटीग्रेशन कैटलॉग
 - [कॉन्फ़िगरेशन](../configuration.md) और [डेवलपर गाइड](../developer-guide.md)
+- [रोडमैप](../roadmap.md): V1 में क्या शामिल है और क्या अभी बाकी है
 - [docs.adenhq.com](https://docs.adenhq.com/): ऑनलाइन दस्तावेज़ीकरण
 
 ## अक्सर पूछे जाने वाले प्रश्न (FAQ)

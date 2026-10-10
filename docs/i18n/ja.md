@@ -143,6 +143,7 @@ Hive が持つ**実行プリミティブはひとつだけ**、エージェン�
 - 主要コンセプト：[コロニー](../key_concepts/colony.md)、[Queen](../key_concepts/queen.md)、[worker](../key_concepts/worker_agent.md)、[連携](../key_concepts/coordination.md)、[ループ](../key_concepts/the_loop.md)、[目標と成果](../key_concepts/goals_outcome.md)、[コロニーが改善していく仕組み](../key_concepts/improvement.md)
 - [ツール](../tools.md)：組み込みツール、MCP サーバー、統合カタログ
 - [設定](../configuration.md) と [開発者ガイド](../developer-guide.md)
+- [ロードマップ](../roadmap.md)：V1 で提供済みの機能と、まだ残っている課題
 - [docs.adenhq.com](https://docs.adenhq.com/)：オンラインドキュメント
 
 ## よくある質問

@@ -143,6 +143,7 @@ Hive 只有**一个执行原语**：智能体循环（agent loop）。Queen 就�
 - 核心概念：[蜂群](../key_concepts/colony.md)、[Queen](../key_concepts/queen.md)、[worker](../key_concepts/worker_agent.md)、[协同](../key_concepts/coordination.md)、[智能体循环](../key_concepts/the_loop.md)、[目标与结果](../key_concepts/goals_outcome.md)、[蜂群如何持续改进](../key_concepts/improvement.md)
 - [工具](../tools.md)：内置工具、MCP server 和集成目录
 - [配置](../configuration.md)与[开发者指南](../developer-guide.md)
+- [路线图](../roadmap.md)：V1 已交付的功能和仍待完成的事项
 - [docs.adenhq.com](https://docs.adenhq.com/)：在线文档
 
 ## 常见问题

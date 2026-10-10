@@ -143,6 +143,7 @@ For a single prompt or a one-off script, a plain agent is simpler.
 - Key concepts: [colony](docs/key_concepts/colony.md), [queen](docs/key_concepts/queen.md), [workers](docs/key_concepts/worker_agent.md), [coordination](docs/key_concepts/coordination.md), [the loop](docs/key_concepts/the_loop.md), [goals and outcomes](docs/key_concepts/goals_outcome.md), [how colonies improve](docs/key_concepts/improvement.md)
 - [Tools](docs/tools.md): built-in tools, MCP servers and the integration catalog
 - [Configuration](docs/configuration.md) and the [developer guide](docs/developer-guide.md)
+- [Roadmap](docs/roadmap.md): what V1 ships and what's still open
 - [docs.adenhq.com](https://docs.adenhq.com/): hosted documentation
 
 ## FAQ

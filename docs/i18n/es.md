@@ -143,6 +143,7 @@ Para un solo prompt o un script puntual, un agente normal es más sencillo.
 - Conceptos clave: [colonia](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [trabajadores](../key_concepts/worker_agent.md), [coordinación](../key_concepts/coordination.md), [el bucle](../key_concepts/the_loop.md), [objetivos y resultados](../key_concepts/goals_outcome.md), [cómo mejoran las colonias](../key_concepts/improvement.md)
 - [Herramientas](../tools.md): herramientas integradas, MCP servers y el catálogo de integraciones
 - [Configuración](../configuration.md) y la [guía para desarrolladores](../developer-guide.md)
+- [Hoja de ruta](../roadmap.md): lo que incluye V1 y lo que sigue pendiente
 - [docs.adenhq.com](https://docs.adenhq.com/): documentación en línea
 
 ## Preguntas frecuentes

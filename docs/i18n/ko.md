@@ -143,6 +143,7 @@ Hive에는 **실행 프리미티브가 단 하나** 있습니다. 바로 에이�
 - 핵심 개념: [colony](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [worker](../key_concepts/worker_agent.md), [협업](../key_concepts/coordination.md), [루프](../key_concepts/the_loop.md), [목표와 결과](../key_concepts/goals_outcome.md), [colony가 개선되는 방식](../key_concepts/improvement.md)
 - [도구](../tools.md): 기본 도구, MCP 서버, 통합 카탈로그
 - [설정](../configuration.md) 및 [개발자 가이드](../developer-guide.md)
+- [로드맵](../roadmap.md): V1에 포함된 기능과 아직 남은 작업
 - [docs.adenhq.com](https://docs.adenhq.com/): 온라인 문서
 
 ## 자주 묻는 질문
