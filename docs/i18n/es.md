@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://asset.acho.io/github/img/banner.gif" />
+  <img width="100%" alt="OpenHive" src="https://asset.acho.io/github/img/banner.gif" />
 </p>
 
 <p align="center">
@@ -14,291 +14,190 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 License" /></a>
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Licencia Apache 2.0" /></a>
   <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
   <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
-  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Twitter Follow" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Seguir en X" /></a>
   <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
-  <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
+</p>
+
+<h3 align="center">Colonias de agentes de IA que ejecutan los procesos de tu negocio.</h3>
+
+<p align="center">
+  Describe un resultado. Una Queen hace ella misma la primera parte del trabajo y luego hace crecer una colonia de agentes trabajadores que terminan el resto en paralelo, con cada resultado en un registro compartido que puedes consultar, reanudar y auditar.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="Demo: una Queen de growth investiga los lanzamientos en Hacker News de cinco productos con una colonia de trabajadores en paralelo" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>Grabado de una ejecución real; solo se aceleraron las esperas. <a href="../assets/readme/demo.mp4">Ver en calidad completa (MP4)</a>.</sub>
 </p>
 
-<p align="center"><em>El arnés (harness) de agentes para cargas de trabajo en producción — gestión de estado, recuperación ante fallos, observabilidad y supervisión humana para que tus agentes realmente funcionen.</em></p>
+## Lo que acabas de ver
 
-## Descripción General
+Un equipo de growth que prepara un Show HN quiere saber cómo les fue en Hacker News a los lanzamientos propios de cinco herramientas para desarrolladores. Esto es lo que hizo Hive con ese único mensaje:
 
-OpenHive es un runtime sin configuración y agnóstico de modelo para **colonias de agentes**. Una colonia es un grupo de agentes especializados que trabajan juntos para ejecutar un proceso de negocio: una **Queen** (Reina) — la líder persistente y de cara al cliente — más cuantos agentes **trabajadores** (worker) requiera el trabajo. Tú describes el resultado; la Queen hace el trabajo y luego hace crecer una colonia a su alrededor para ejecutar ese trabajo de forma confiable y a escala.
+1. **Se lo encargas a una Queen.** Cada Queen (reina) es un agente persistente con un rol, en este caso Head of Growth, además de su propia memoria y sus herramientas.
+2. **Hace la única pregunta que cambia la respuesta:** ¿solo los lanzamientos originales o cualquier lanzamiento? Eliges una opción y ella sigue adelante.
+3. **Propone una colonia y tú la confirmas.** Cinco productos son cinco trabajos en paralelo, así que el chat se convierte en una colonia: la Queen más tantos agentes trabajadores como requiera el trabajo.
+4. **Hace ella misma una unidad.** Toma Supabase, el caso complicado (su mayor hilo de lanzamiento no lleva "Launch HN" en el título), decide qué cuenta como lanzamiento y deja el método por escrito como una habilidad (skill) reutilizable.
+5. **Lo ejecuta como un manual (playbook):** un trabajador por producto, en paralelo, cada uno siguiendo la habilidad que ella escribió y guardando su fila en el tracker de la colonia, una tabla SQLite compartida.
+6. **Revisa cada fila antes de responder.** Los casos límite quedan a la vista: Cal.com no tuvo ningún lanzamiento válido con ninguno de sus dos nombres, así que el gráfico lo muestra como sin datos, no como cero.
 
-El mecanismo subyacente es **un bucle que controla muchos bucles**. Hive tiene una única primitiva de ejecución: la Queen *es* un bucle de agente (agent loop), y cada trabajador es un **clon** de ella — las mismas herramientas, el mismo modelo, su propia tarea. No hay ningún grafo que compilar ni código repetitivo de orquestación que escribir. La colonia se coordina a través de un registro compartido (ledger) y un plan persistente, con estado a prueba de caídas, observabilidad profunda y supervisión humana integradas en la única primitiva que comparte cada agente. Consulta el **[Resumen de la Arquitectura](../architecture/README.md)** para ver cómo funciona.
+Nada de ese flujo estaba definido de antemano. No hay ningún grafo de flujo de trabajo que diseñar: la Queen hace crecer la colonia en tiempo de ejecución, y es el tracker en disco, no la memoria de nadie, el que registra qué está hecho y qué falta.
 
-## Características
+## Inicio rápido
 
-- ✅ Colonias de agentes — una Queen genera clones trabajadores bajo demanda para trabajos paralelos y de larga duración
-- ✅ Una primitiva, muchos bucles — sin grafo que cablear; la Queen hace crecer la colonia en tiempo de ejecución
-- ✅ Registro compartido del tracker + plan de tareas persistente para coordinar sin un búfer de datos
-- ✅ Personas de Queen con enrutamiento estilo CEO y memoria evolutiva y acotada
-- ✅ Pausa/reanudación a prueba de caídas, aplicación de límites de costo e intervención humana fuera de banda (Sentinel)
-- ✅ Sin Configuración — no se requiere configuración técnica
-- ✅ Uso General de Cómputo (General Compute Use) y Uso del Navegador (Browser Use) con Extensión Nativa
-- ✅ Soporte de Modelos Personalizados
+**Necesitas:** Python 3.11+, Node.js 20+ y git. El quickstart instala `uv` y `ripgrep` si faltan y se ofrece a instalar Node.
 
-Visita [adenhq.com](https://adenhq.com) para documentación completa, ejemplos y guías.
+**Y un modelo.** El quickstart te guía para configurar cualquiera de estas opciones:
 
-Visita [HoneyComb](http://honeycomb.open-hive.com/) para ver qué empleos está automatizando la IA. Es un mercado de valores para empleos, impulsado por el progreso de los agentes de IA de nuestra comunidad. Puedes tomar posiciones largas y cortas sobre empleos (sin dinero real, sino con tokens de cómputo) según cuánto creas que un empleo será reemplazado por la IA.
-
-https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
-
-
-## ¿Para Quién es Hive?
-
-Hive es la capa de arnés multiagente para equipos que llevan agentes de IA del prototipo a la producción. Los agentes individuales como Openclaw y Cowork pueden completar tareas personales bastante bien, pero carecen del rigor para cumplir procesos de negocio.
-
-Hive es una buena opción si:
-
-- Quieres agentes de IA que **ejecuten procesos de negocio reales**, no demos
-- Necesitas un **runtime que gestione el estado, la recuperación y la ejecución en paralelo** a escala
-- Necesitas **agentes auto-reparables y adaptativos** que mejoren con el tiempo
-- Requieres **control con humano en el bucle**, observabilidad y límites de costo
-- Planeas ejecutar agentes en **producción** donde importan el tiempo de actividad, el costo y la auditabilidad
-
-Hive puede no ser la mejor opción si solo estás experimentando con cadenas de agentes simples o scripts puntuales.
-
-## ¿Cuándo Deberías Usar Hive?
-
-Usa Hive cuando el cuello de botella ya no es el modelo, sino el arnés que lo rodea:
-
-- Agentes de larga duración que necesitan **persistencia de estado y recuperación ante caídas**
-- Cargas de trabajo de producción que requieren **aplicación de límites de costo, observabilidad y registros de auditoría**
-- Agentes que **mejoran con el tiempo** mediante reflexión, memoria acotada y habilidades aprendidas
-- Trabajo paralelo y multiagente coordinado mediante un **registro compartido del tracker y un plan persistente**
-- Un framework que **escala con las mejoras de los modelos** en lugar de luchar contra ellas
-
-## Enlaces Rápidos
-
-- **[Documentación](https://docs.adenhq.com/)** - Guías completas y referencia de API
-- **[Guía de Auto-Hospedaje](https://docs.adenhq.com/getting-started/quickstart)** - Despliega Hive en tu infraestructura
-- **[Registro de Cambios](https://github.com/aden-hive/hive/releases)** - Últimas actualizaciones y versiones
-- **[Hoja de Ruta](../roadmap.md)** - Funciones y planes próximos
-- **[Reportar Problemas](https://github.com/aden-hive/hive/issues)** - Reportes de errores y solicitudes de funciones
-- **[Contribuir](../../CONTRIBUTING.md)** - Cómo contribuir y enviar PRs
-
-## Inicio Rápido
-
-### Prerrequisitos
-
-- Python 3.11+ para el desarrollo de agentes
-- Un proveedor de LLM que impulse a los agentes
-- **ripgrep (necesario para la búsqueda completa):** Quickstart instala y verifica `rg`. Para reparar una instalación existente, ejecuta `uv run scripts/ensure_ripgrep.py --install`. El paquete de Windows es `BurntSushi.ripgrep.MSVC`; puedes indicar una ruta absoluta al ejecutable con `HIVE_RIPGREP_PATH`. Sin `rg`, `terminal_rg` devuelve un error salvo que se solicite una búsqueda aproximada con `allow_fallback=True`.
-
-> **Usuarios de Windows:** Windows nativo es compatible mediante `quickstart.ps1` y `hive.ps1`. Ejecútalos en PowerShell 5.1+. WSL también es una opción, pero no es obligatorio.
-
-### Instalación
-
-> **Nota**
-> Hive usa una disposición de workspace de `uv` y no se instala con `pip install`.
-> Ejecutar `pip install -e .` desde la raíz del repositorio creará un paquete de marcador de posición (placeholder) y Hive no funcionará correctamente.
-> Por favor, usa el script de inicio rápido a continuación para configurar el entorno.
+- una API key: Anthropic, OpenAI, Google Gemini, Groq, Cerebras u OpenRouter
+- una suscripción de programación que ya tengas: Claude Code, OpenAI Codex, Kimi Code, MiniMax, Z.AI o Antigravity
+- Hive LLM
+- un modelo local con Ollama, sin ninguna clave
 
 ```bash
-# Clone the repository
 git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Run quickstart setup (macOS/Linux)
-./quickstart.sh
-
-# Windows (PowerShell)
-.\quickstart.ps1
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-Esto configura:
+El quickstart crea un único entorno de Python para el workspace, guarda tu API key en un almacén de credenciales cifrado dentro de `~/.hive`, te pregunta qué modelo usar, compila el panel y lo abre en `http://127.0.0.1:8787`. Para volver a abrirlo más tarde, ejecuta `hive open` desde el repositorio.
 
-- **framework** - Runtime principal del agente y ejecutor de grafos (en `core/.venv`)
-- **aden_tools** - Herramientas MCP para las capacidades de los agentes (en `tools/.venv`)
-- **credential store** - Almacenamiento cifrado de claves API (`~/.hive/credentials`)
-- **LLM provider** - Configuración interactiva del modelo predeterminado, incluyendo Hive LLM y OpenRouter
-- Todas las dependencias de Python requeridas con `uv`
+> [!NOTE]
+> Hive es un workspace de `uv`, no un paquete de pip. `pip install -e .` instala un paquete de marcador de posición que no funciona; usa el quickstart.
 
-- Por último, abrirá la interfaz de Hive en tu navegador
+**Después:** escribe una tarea en la pantalla de inicio y elige a qué Queen encargársela, o abre la **Prompt Library** y envía un prompt ya preparado directamente a la Queen para la que se escribió.
 
-> **Consejo:** Para volver a abrir el panel más tarde, ejecuta `hive open` desde el directorio del proyecto.
-
-### Construye Tu Primer Agente
-
-Escribe el agente que quieres construir en el cuadro de entrada de la pantalla principal. La Queen te hará preguntas y elaborará una solución contigo.
-
-<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
-
-### Usa Agentes de Plantilla
-
-Haz clic en "Try a sample agent" y revisa las plantillas. Puedes ejecutar una plantilla directamente o elegir construir tu versión sobre la plantilla existente.
-
-### Ejecutar Agentes
-
-Ahora puedes ejecutar un agente seleccionándolo (ya sea un agente existente o un agente de ejemplo). Puedes hacer clic en el botón Run en la parte superior izquierda, o hablar con el agente Queen y este puede ejecutar el agente por ti.
-
-<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
-
-## Integración
-
-<a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
-Hive está construido para ser agnóstico de modelo y agnóstico de sistema.
-
-- **Flexibilidad de LLM** - Hive Framework es compatible con Anthropic, OpenAI, OpenRouter, Hive LLM y otros modelos alojados o locales a través de proveedores compatibles con LiteLLM.
-- **Conectividad con sistemas de negocio** - Hive Framework está diseñado para conectarse a todo tipo de sistemas de negocio como herramientas, tales como CRM, soporte, mensajería, datos, archivos y APIs internas mediante MCP.
-
-## Por Qué Hive
-
-A medida que los modelos mejoran, el límite superior de lo que los agentes pueden hacer aumenta — pero su confiabilidad y su valor en producción los determina el arnés. Hive se enfoca en ejecutar procesos de negocio reales en lugar de agentes genéricos. En lugar de obligarte a cablear a mano un grafo de flujo de trabajo, definir cada interacción entre agentes y manejar los fallos de forma reactiva, Hive invierte el paradigma: **tú describes el resultado, la Queen hace el trabajo primero y luego hace crecer una colonia para escalarlo** — una experiencia adaptativa y orientada a resultados con un conjunto de herramientas e integraciones fácil de usar.
+## Cómo funciona
 
 ```mermaid
 flowchart LR
-    GOAL["Describe Outcome"] --> PILOT["Queen Pilots\n(does one unit herself)"]
-    PILOT --> SYS["Systematize\n(skill + playbook)"]
-    SYS --> FAN["Fan Out\n(spawn worker clones)"]
-    FAN --> CONV["Converge\n(shared tracker ledger)"]
-    CONV --> CHECK{{"Done?"}}
-    CHECK -- "Yes" --> DONE["Deliver Result"]
-    CHECK -- "No" --> FAN
+    You(["Tú"]) -->|"describes el resultado"| Queen["Queen<br/>(agente persistente)"]
+    Queen -->|"propone una colonia,<br/>tú confirmas"| Pilot["Piloto<br/>(una unidad, hecha por la Queen)"]
+    Pilot -->|"deja el método por escrito"| Skill["Habilidad + manual"]
+    Skill -->|"run_worker / run_playbook"| W["Clones trabajadores<br/>en paralelo"]
+    W -->|"tracker_upsert"| T[("Tracker<br/>SQLite compartido")]
+    T -->|"SQL: qué está hecho,<br/>qué falta"| Queen
+    Queen -->|"respuesta verificada"| You
 
-    GOAL -.- V1["Natural Language"]
-    PILOT -.- V2["Prove the path"]
-    SYS -.- V3["Repeatable process"]
-    FAN -.- V4["Parallel at scale"]
-    CONV -.- V5["Resume by construction"]
-    DONE -.- V6["Reliable outcomes"]
-
-    style GOAL fill:#ffbe42,stroke:#cc5d00,stroke-width:2px,color:#333
-    style PILOT fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
-    style SYS fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style FAN fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CONV fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CHECK fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style DONE fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#fff
-    style V1 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V2 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V3 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V4 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V5 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### Cómo Funciona
+Hive tiene **una única primitiva de ejecución**: un bucle de agente. La Queen es uno de ellos; cada trabajador es un clon suyo con su propia tarea, un conjunto de herramientas más reducido y un presupuesto estricto. La orquestación es una llamada a herramienta, no un grafo compilado:
 
-1. **[Describe el resultado](../key_concepts/goals_outcome.md)** → Di lo que quieres en lenguaje simple; un enrutador estilo CEO elige la [Queen](../key_concepts/queen.md) adecuada
-2. **La Queen pilota** → Ella misma realiza una unidad del trabajo, demostrando el camino y registrándolo en el tracker compartido
-3. **[Sistematizar](../key_concepts/improvement.md)** → Ella convierte el protocolo demostrado en una habilidad (skill) + un manual (playbook) — un proceso repetible
-4. **[Distribuir](../key_concepts/colony.md)** → `run_worker` genera [clones trabajadores](../key_concepts/worker_agent.md) que se ejecutan en paralelo e informan de vuelta
-5. **Converger y monitorear** → Los trabajadores escriben los resultados en el tracker; la Queen valida mediante SQL, con métricas en tiempo real, aplicación de presupuesto y reanudación a prueba de caídas
+- **`run_worker`** reparte las tareas y devuelve el control de inmediato, así que la Queen sigue hablando contigo mientras los trabajadores se ejecutan. Por defecto se ejecutan hasta cuatro a la vez; el resto espera en cola. El informe de cada trabajador que termina llega a la conversación de la Queen como un turno nuevo.
+- **El tracker** es el estado compartido de la colonia. La Queen define la tabla y qué columnas pueden escribir los trabajadores; los trabajadores hacen upsert de una fila por unidad de trabajo; la Queen revisa el progreso con SQL. Se guarda en disco, en `~/.hive/colonies/<name>/tracker/tracker.db`.
+- **`run_playbook`** aplica un protocolo probado a cada fila: reintentos con backoff, carriles con límite de tasa y una lista dead-letter para las filas que siguen fallando. Como "lo que falta" siempre es una consulta nueva al tracker, volver a ejecutar un manual lo reanuda.
+
+El **[resumen de la arquitectura](../architecture/README.md)** explica el bucle, la superficie de herramientas, la memoria, la supervisión humana y cómo sobrevive el estado a una caída.
+
+<table>
+  <tr>
+    <td width="50%"><img alt="Inicio: el mapa de la colmena con las Queens y sus colonias" src="../assets/readme/home.webp" /><br /><sub><b>Inicio.</b> Tus Queens y sus colonias en un solo mapa. Describe una tarea y elige quién se encarga.</sub></td>
+    <td width="50%"><img alt="Los trabajadores de una colonia ejecutándose en paralelo" src="../assets/readme/workers.webp" /><br /><sub><b>Trabajadores.</b> Uno por unidad de trabajo, cada uno con su propia tarea y presupuesto, y todos informan a la Queen.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="El tracker de la colonia llenándose de resultados" src="../assets/readme/tracker.webp" /><br /><sub><b>Tracker.</b> Los resultados llegan a una tabla compartida a medida que terminan los trabajadores, listos para consultarlos, exportarlos o retomar el trabajo desde ahí.</sub></td>
+    <td width="50%"><img alt="La respuesta final de la Queen, con una tabla con fuentes y un gráfico" src="../assets/readme/result.webp" /><br /><sub><b>Resultado.</b> Una respuesta verificada, con fuentes y un gráfico, en el chat.</sub></td>
+  </tr>
+</table>
+
+## Qué incluye
+
+**Queens con un puesto y memoria.** Hive trae trece Queens con perfiles predefinidos: seis están activas por defecto (Growth, RevOps, Content, Lead Generation, Outbound, Brand & Design), el resto se puede contratar desde el Org Chart y también puedes crear las tuyas. Cada una mantiene una memoria acotada en markdown que escribe un paso de reflexión, y las conversaciones pasadas relevantes se recuperan automáticamente en su contexto.
+
+**Herramientas integradas, en el mismo proceso.** Comandos de shell y tareas en segundo plano, edición de archivos, búsqueda rápida de código, PDF, adjuntos e imágenes, web scraping, gráficos (ECharts y Mermaid), archivos CSV y generación de imágenes con Hive LLM. Se ejecutan dentro del propio Hive, sin servidores de herramientas que arrancar.
+
+**Tu navegador, manejado por tus agentes.** La extensión Hive Browser Bridge permite a los agentes usar tu propio Chrome, donde ya tienes tus sesiones iniciadas. Cada trabajador tiene su propio grupo de pestañas.
+
+**Habilidades (skills).** Instrucciones reutilizables en el formato abierto [Agent Skills](https://agentskills.io). Hive incluye un conjunto de serie, las Queens escriben otras nuevas cuando un protocolo demuestra que funciona, y puedes gestionarlas en la Skills Library.
+
+**Cualquier MCP server.** Agrega un MCP server externo con `hive mcp add` y sus herramientas se suman a las mismas allowlists que las integradas. El catálogo completo de integraciones de [`tools/`](../../tools/src/aden_tools/tools) (GitHub, Gmail, HubSpot, Slack, Notion y muchas más) funciona como uno de ellos; consulta [docs/tools.md](../tools.md).
+
+**Sigue trabajando cuando no estás.** Las colonias pueden programarse solas con disparadores de cron, por intervalo o por webhook. **Sentinel**, que se activa por colonia, vigila a una Queen cuando se detiene: le da un empujón para que siga o te escala el caso a través de la bandeja de entrada de Hive, Telegram o Slack, y ella retoma el trabajo cuando respondes.
+
+**Hecho para resistir.** Cada agente guarda su estado en disco y, tras una caída o un reinicio, continúa exactamente donde lo dejó. Los resultados grandes de las herramientas se vuelcan a archivos en lugar de saturar el contexto, las sesiones largas se compactan solas, se detectan los turnos atascados o en bucle, y cada trabajador funciona con un presupuesto estricto de llamadas a herramientas.
+
+**Cualquier modelo.** Todo lo que admite [LiteLLM](https://docs.litellm.ai/docs/providers), incluidos OpenAI, Anthropic, Gemini, OpenRouter, Hive LLM, cualquier endpoint compatible con OpenAI y modelos locales con Ollama. Los trabajadores pueden usar un modelo distinto al de su Queen, y los modelos que solo manejan texto pueden ver imágenes gracias a un fallback de visión.
+
+## ¿Es Hive para ti?
+
+Hive encaja cuando lo difícil ya no es el modelo, sino todo lo que lo rodea:
+
+- Un proceso con **muchas unidades de trabajo similares**, como leads, cuentas, tickets, repositorios o documentos, que quieres resolver en paralelo y siempre de la misma forma.
+- Trabajo que **dura horas o se ejecuta de forma programada** y tiene que sobrevivir a los reinicios.
+- Resultados que necesitas **revisar, consultar y auditar**, no solo leer en un chat.
+- Una **persona que sigue al mando** de las decisiones importantes.
+
+Para un solo prompt o un script puntual, un agente normal es más sencillo.
 
 ## Documentación
 
-- **[Guía del Desarrollador](../developer-guide.md)** - Guía completa para desarrolladores
-- [Primeros Pasos](../getting-started.md) - Instrucciones de configuración rápida
-- [Guía de Configuración](../configuration.md) - Todas las opciones de configuración
-- [Resumen de la Arquitectura](../architecture/README.md) - Diseño y estructura del sistema
+- [Primeros pasos](../getting-started.md): la instalación con más detalle
+- [Resumen de la arquitectura](../architecture/README.md): cómo encajan las colonias, el bucle, las herramientas y la memoria
+- Conceptos clave: [colonia](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [trabajadores](../key_concepts/worker_agent.md), [coordinación](../key_concepts/coordination.md), [el bucle](../key_concepts/the_loop.md), [objetivos y resultados](../key_concepts/goals_outcome.md), [cómo mejoran las colonias](../key_concepts/improvement.md)
+- [Herramientas](../tools.md): herramientas integradas, MCP servers y el catálogo de integraciones
+- [Configuración](../configuration.md) y la [guía para desarrolladores](../developer-guide.md)
+- [docs.adenhq.com](https://docs.adenhq.com/): documentación en línea
+
+## Preguntas frecuentes
+
+**¿Qué modelos admite Hive?**
+Cualquier proveedor que admita [LiteLLM](https://docs.litellm.ai/docs/providers), además de cualquier endpoint compatible con OpenAI. El quickstart configura los más habituales, incluidas suscripciones de programación como Claude Code y OpenAI Codex; [docs/configuration.md](../configuration.md) explica el resto.
+
+**¿Puedo usarlo con modelos locales?**
+Sí. Elige Ollama en el quickstart, o configura un modelo como `ollama/llama3` con Ollama ejecutándose en local.
+
+**¿En qué se diferencia de otros frameworks de agentes?**
+La mayoría de los frameworks te hacen diseñar un grafo de agentes y conectar sus entradas y salidas. Hive tiene un solo tipo de agente: la Queen es un bucle de agente y cada trabajador es un clon suyo. La orquestación ocurre en tiempo de ejecución mediante llamadas a herramientas, y la coordinación pasa por un tracker SQL compartido en lugar de mensajes que circulan por las aristas. Las funciones del arnés (persistencia, reanudación, presupuestos, compactación, supervisión) viven en ese único bucle, así que todos los agentes las tienen.
+
+**¿Dónde se guardan mis datos?**
+En tu máquina. Las sesiones, las colonias, los trackers y la memoria son archivos normales dentro de `~/.hive` (o donde apunte `HIVE_HOME`), y las API keys se guardan ahí cifradas.
+
+**¿Cómo mantengo los costos bajo control?**
+Cada trabajador funciona con límites estrictos de turnos y llamadas a herramientas, así que un trabajador atascado se detiene solo, y la concurrencia está limitada. El uso se mide en cada llamada al modelo. Todavía no hay límites de gasto en dólares.
+
+**¿Pueden los agentes usar mis propias herramientas y APIs?**
+Sí: con la shell y el navegador integrados, con cualquier MCP server que agregues y con habilidades que les enseñan tus procedimientos.
+
+**¿Hive es de código abierto?**
+Sí, bajo la [Licencia Apache 2.0](../../LICENSE).
 
 ## Contribuir
-¡Damos la bienvenida a las contribuciones de la comunidad! Buscamos especialmente ayuda para construir herramientas, integraciones y agentes de ejemplo para el framework ([consulta #2805](https://github.com/aden-hive/hive/issues/2805)). Si te interesa extender su funcionalidad, este es el lugar perfecto para empezar. Por favor, consulta [CONTRIBUTING.md](../../CONTRIBUTING.md) para las directrices.
 
-**Importante:** Por favor, solicita que se te asigne un issue antes de enviar un PR. Comenta en un issue para reclamarlo y un mantenedor te lo asignará. Se priorizan los issues con pasos reproducibles y propuestas. Esto ayuda a evitar trabajo duplicado.
+Las contribuciones son bienvenidas, sobre todo herramientas, integraciones y habilidades ([#2805](https://github.com/aden-hive/hive/issues/2805)). Lee primero [CONTRIBUTING.md](../../CONTRIBUTING.md) y pide que te asignen un issue antes de abrir un pull request: comenta en el issue y un mantenedor te lo asignará. Se priorizan los issues con pasos para reproducirlos o con una propuesta.
 
-1. Encuentra o crea un issue y solicita que te lo asignen
-2. Haz un fork del repositorio
-3. Crea tu rama de funcionalidad (`git checkout -b feature/amazing-feature`)
-4. Haz commit de tus cambios (`git commit -m 'Add amazing feature'`)
-5. Haz push a la rama (`git push origin feature/amazing-feature`)
-6. Abre un Pull Request
+## Comunidad
 
-## Comunidad y Soporte
+- [Discord](https://discord.com/invite/MXE49hrKDk) para preguntas, solicitudes de funciones y debate
+- [X / Twitter](https://x.com/aden_hq) y [LinkedIn](https://www.linkedin.com/company/teamaden/) para novedades
+- [HoneyComb](http://honeycomb.open-hive.com/): un mercado comunitario que sigue qué empleos están automatizando los agentes de IA. Toma posiciones largas o cortas sobre un empleo con tokens de cómputo, no con dinero.
 
-Usamos [Discord](https://discord.com/invite/MXE49hrKDk) para soporte, solicitudes de funciones y discusiones de la comunidad.
-
-- Discord - [Únete a nuestra comunidad](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [Página de la Empresa](https://www.linkedin.com/company/teamaden/)
-
-## Únete a Nuestro Equipo
-
-**¡Estamos contratando!** Únete a nosotros en roles de ingeniería, investigación y comercialización.
-
-[Ver Posiciones Abiertas](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
+**Estamos contratando** en ingeniería, investigación y go-to-market. [Ver vacantes](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant).
 
 ## Seguridad
 
-Para cuestiones de seguridad, por favor consulta [SECURITY.md](../../SECURITY.md).
+Para reportar una vulnerabilidad, consulta [SECURITY.md](../../SECURITY.md).
 
 ## Licencia
 
-Este proyecto está licenciado bajo la Licencia Apache 2.0 - consulta el archivo [LICENSE](../../LICENSE) para más detalles.
+Licencia Apache 2.0. Consulta [LICENSE](../../LICENSE).
 
-## Preguntas Frecuentes (FAQ)
-
-**P: ¿Qué proveedores de LLM soporta Hive?**
-
-Hive soporta más de 100 proveedores de LLM a través de la integración con LiteLLM, incluyendo OpenAI (GPT-4, GPT-4o), Anthropic (modelos Claude), Google Gemini, DeepSeek, Mistral, Groq, OpenRouter y Hive LLM. Simplemente configura la variable de entorno de la clave API apropiada y especifica el nombre del modelo. Consulta [docs/configuration.md](../configuration.md) para ver ejemplos de configuración específicos de cada proveedor.
-
-**P: ¿Puedo usar Hive con modelos de IA locales como Ollama?**
-
-¡Sí! Hive soporta modelos locales a través de LiteLLM. Simplemente usa el formato de nombre de modelo `ollama/model-name` (por ejemplo, `ollama/llama3`, `ollama/mistral`) y asegúrate de que Ollama esté ejecutándose localmente.
-
-**P: ¿Qué hace que Hive sea diferente de otros frameworks de agentes?**
-
-Hive ejecuta **colonias de agentes**, no agentes individuales ni grafos de agentes cableados a mano. La mayoría de los frameworks te obligan a compilar un grafo de nodos y aristas distintos; Hive tiene una única primitiva de ejecución — la Queen *es* un bucle de agente, y cada trabajador es un [clon](../key_concepts/the_loop.md) de ella. La orquestación es una distribución (fan-out) con `run_worker` en tiempo de ejecución, no un DAG compilado, y la colonia se coordina a través de un [registro compartido del tracker](../key_concepts/coordination.md) en lugar de un búfer de datos. Sobre ese núcleo de "un bucle, muchos bucles", Hive es un arnés de producción — pausa/reanudación a prueba de caídas, aplicación de límites de costo, observabilidad en tiempo real e intervención humana fuera de banda — heredado por cada agente porque solo hay un tipo de agente. Consulta el [Resumen de la Arquitectura](../architecture/README.md).
-
-**P: ¿Hive es de código abierto?**
-
-Sí, Hive es completamente de código abierto bajo la Licencia Apache 2.0. Fomentamos activamente las contribuciones y la colaboración de la comunidad.
-
-**P: ¿Hive soporta flujos de trabajo con humano en el bucle?**
-
-Sí. Una Queen escala a un humano fuera de banda a través de **Sentinel** — un canal de Slack/Telegram vinculado a la cuenta. El bucle del agente se pausa (persistiendo su estado en disco), notifica al humano y se reanuda exactamente donde lo dejó cuando esta persona responde. Como la escalación no es un nodo en un grafo, cualquier agente de una colonia puede pausarse para el juicio humano en cualquier punto, con tiempos de espera y políticas de escalación configurables. Consulta el [Resumen de la Arquitectura](../architecture/README.md#reliability-is-in-the-primitive).
-
-**P: ¿Qué lenguajes de programación soporta Hive?**
-
-El framework Hive está construido en Python. Un SDK de JavaScript/TypeScript está en la hoja de ruta.
-
-**P: ¿Pueden los agentes de Hive interactuar con herramientas y APIs externas?**
-
-Sí. Cada agente de una colonia tiene acceso integrado a herramientas, y Hive se conecta a APIs, bases de datos y servicios externos a través de MCP — incluyendo más de 100 herramientas de integración, además del Uso General de Cómputo (General Compute Use) y el Uso del Navegador (Browser Use) mediante la extensión nativa. Como la Queen y sus trabajadores comparten una única superficie de herramientas, cualquier capacidad que agregues está disponible para toda la colonia.
-
-**P: ¿Cómo funciona el control de costos en Hive?**
-
-Hive proporciona controles de presupuesto granulares, incluyendo límites de gasto, limitadores y políticas de degradación automática de modelos. Puedes establecer presupuestos a nivel de equipo, agente o flujo de trabajo, con seguimiento de costos en tiempo real y alertas.
-
-**P: ¿Dónde puedo encontrar ejemplos y documentación?**
-
-Visita [docs.adenhq.com](https://docs.adenhq.com/) para guías completas, referencia de API y tutoriales para empezar. El repositorio también incluye documentación en la carpeta `docs/` y una [guía del desarrollador](../developer-guide.md) completa.
-
-**P: ¿Cómo puedo contribuir a Aden?**
-
-¡Las contribuciones son bienvenidas! Haz un fork del repositorio, crea tu rama de funcionalidad, implementa tus cambios y envía un pull request. Consulta [CONTRIBUTING.md](../../CONTRIBUTING.md) para directrices detalladas.
-
-## Historial de Estrellas
+## Historial de estrellas
 
 <a href="https://www.star-history.com/?type=date&repos=aden-hive%2Fhive">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
  </picture>
 </a>
 
 ---
 
-<p align="center">
-  Hecho con 🔥 Pasión en San Francisco
-</p>
+<p align="center">Hecho con 🔥 Pasión en San Francisco</p>

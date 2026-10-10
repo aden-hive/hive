@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://asset.acho.io/github/img/banner.gif" />
+  <img width="100%" alt="OpenHive" src="https://asset.acho.io/github/img/banner.gif" />
 </p>
 
 <p align="center">
@@ -14,278 +14,179 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 License" /></a>
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 लाइसेंस" /></a>
   <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
   <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
-  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Twitter Follow" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="X पर फ़ॉलो करें" /></a>
   <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
-  <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
+</p>
+
+<h3 align="center">AI एजेंट्स की कॉलोनियाँ, जो आपकी व्यावसायिक प्रक्रियाएँ चलाती हैं।</h3>
+
+<p align="center">
+  आप बस परिणाम बताइए। एक Queen काम का पहला हिस्सा ख़ुद करती है, फिर बाकी काम समानांतर में पूरा करने के लिए worker एजेंट्स की एक कॉलोनी विकसित करती है। हर नतीजा एक साझा लेजर में दर्ज होता है, जिस पर आप query चला सकते हैं, जहाँ से काम फिर शुरू कर सकते हैं और जिसका ऑडिट कर सकते हैं।
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="डेमो: एक Growth Queen समानांतर workers की कॉलोनी के साथ पाँच प्रोडक्ट्स के Hacker News लॉन्च पर रिसर्च करती है" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>एक असली रन की रिकॉर्डिंग; सिर्फ़ इंतज़ार वाला हिस्सा तेज़ किया गया है। <a href="../assets/readme/demo.mp4">पूरी क्वालिटी में देखें (MP4)</a>।</sub>
 </p>
 
-<p align="center"><em>प्रोडक्शन वर्कलोड के लिए एजेंट हार्नेस — स्टेट प्रबंधन, विफलता रिकवरी, ऑब्ज़र्वेबिलिटी और मानवीय निगरानी, ताकि आपके एजेंट वास्तव में चलें।</em></p>
+## आपने अभी क्या देखा
 
-## अवलोकन
+Show HN की तैयारी कर रही एक ग्रोथ टीम जानना चाहती है कि पाँच डेवलपर टूल्स के अपने लॉन्च Hacker News पर कैसे रहे। उस एक मैसेज पर Hive ने यह किया:
 
-OpenHive **एजेंट्स की कॉलोनियों (colonies)** के लिए एक ज़ीरो-सेटअप, मॉडल-एग्नॉस्टिक रनटाइम है। एक कॉलोनी विशेषीकृत एजेंट्स का एक समूह है जो मिलकर एक व्यावसायिक प्रक्रिया चलाते हैं: एक **Queen** (क्वीन) — स्थायी, क्लाइंट-फेसिंग अगुआ — साथ ही उतने **worker** (वर्कर) एजेंट जितने काम को चाहिए। आप परिणाम का वर्णन करते हैं; Queen काम करती है, फिर उसके इर्द-गिर्द एक कॉलोनी विकसित करती है ताकि उस काम को भरोसेमंद रूप से और बड़े पैमाने पर चलाया जा सके।
+1. **आप यह काम एक Queen को सौंपते हैं।** हर Queen एक स्थायी एजेंट है, जिसकी एक भूमिका होती है (यहाँ Head of Growth) और साथ में उसकी अपनी मेमोरी और टूल्स।
+2. **वह वही एक सवाल पूछती है जिससे जवाब बदल जाता है:** सिर्फ़ पहले लॉन्च, या कोई भी लॉन्च? आप एक विकल्प चुनते हैं और वह आगे बढ़ जाती है।
+3. **वह एक कॉलोनी का प्रस्ताव रखती है, और आप पुष्टि करते हैं।** पाँच प्रोडक्ट यानी पाँच समानांतर काम, इसलिए चैट एक कॉलोनी बन जाती है: Queen और उतने worker एजेंट जितने इस काम को चाहिए।
+4. **काम की एक इकाई वह ख़ुद करती है।** वह Supabase को लेती है, जो सबसे पेचीदा मामला है (उसके सबसे बड़े लॉन्च थ्रेड के शीर्षक में "Launch HN" है ही नहीं), तय करती है कि किसे लॉन्च माना जाए, और उस तरीके को दोबारा इस्तेमाल होने वाली एक skill के रूप में लिख लेती है।
+5. **वह इसे एक playbook के रूप में चलाती है:** हर प्रोडक्ट के लिए एक worker, सब समानांतर में; हर worker उसकी skill का पालन करता है और अपनी पंक्ति कॉलोनी के tracker में लिखता है, जो एक साझा SQLite टेबल है।
+6. **जवाब देने से पहले वह हर पंक्ति जाँचती है।** एज केस छिपते नहीं: Cal.com के दोनों में से किसी भी नाम से कोई योग्य लॉन्च नहीं मिला, इसलिए चार्ट में उसे शून्य नहीं, बल्कि अनुपलब्ध दिखाया गया है।
 
-इसके नीचे का तंत्र है **एक लूप जो कई लूप्स को नियंत्रित करता है**। Hive में एक ही एक्ज़ीक्यूशन प्रिमिटिव है: Queen *स्वयं* एक एजेंट लूप है, और हर worker उसका एक **clone** (क्लोन) है — वही टूल्स, वही मॉडल, अपना अलग कार्य। न कोई ग्राफ़ कंपाइल करना है और न कोई ऑर्केस्ट्रेशन बॉयलरप्लेट लिखनी है। कॉलोनी एक साझा लेजर और एक स्थायी प्लान के माध्यम से समन्वय करती है, जिसमें क्रैश-सेफ स्टेट, गहरी ऑब्ज़र्वेबिलिटी और मानवीय निगरानी उसी एक प्रिमिटिव में निर्मित होती हैं जिसे हर एजेंट साझा करता है। यह कैसे काम करता है, यह जानने के लिए **[Architecture Overview](../architecture/README.md)** देखें।
-
-## विशेषताएँ
-
-- ✅ एजेंट्स की कॉलोनियाँ — एक Queen समानांतर, लंबे समय तक चलने वाले काम के लिए मांग पर worker clones स्पॉन करती है
-- ✅ एक प्रिमिटिव, कई लूप्स — कोई ग्राफ़ वायर नहीं करना; Queen रनटाइम पर कॉलोनी को विकसित करती है
-- ✅ डेटा बफ़र के बिना समन्वय के लिए साझा tracker लेजर + स्थायी टास्क प्लान
-- ✅ CEO-शैली की रूटिंग और विकसित होती, स्कोप्ड मेमोरी के साथ Queen पर्सोना
-- ✅ क्रैश-सेफ पार्क/रिज़्यूम, लागत प्रवर्तन, और आउट-ऑफ़-बैंड human-in-the-loop (Sentinel)
-- ✅ ज़ीरो सेटअप — किसी तकनीकी कॉन्फ़िगरेशन की आवश्यकता नहीं
-- ✅ नेटिव एक्सटेंशन के साथ General Compute Use और Browser Use
-- ✅ कस्टम मॉडल सपोर्ट
-
-पूर्ण दस्तावेज़ीकरण, उदाहरणों और मार्गदर्शिकाओं के लिए [adenhq.com](https://adenhq.com) पर जाएँ।
-
-यह देखने के लिए कि AI द्वारा कौन-से जॉब्स ऑटोमेट किए जा रहे हैं, [HoneyComb](http://honeycomb.open-hive.com/) पर जाएँ। यह जॉब्स के लिए एक स्टॉक मार्केट है, जो हमारे समुदाय की AI एजेंट प्रगति से संचालित होता है। आप इस आधार पर जॉब्स को लॉन्ग और शॉर्ट कर सकते हैं (असली पैसे से नहीं बल्कि compute token से) कि आपको कितना लगता है कि किसी जॉब को AI द्वारा प्रतिस्थापित किया जाएगा।
-
-https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
-
-
-## Hive किसके लिए है?
-
-Hive उन टीमों के लिए मल्टी-एजेंट हार्नेस लेयर है जो AI एजेंट्स को प्रोटोटाइप से प्रोडक्शन तक ले जा रही हैं। Openclaw और Cowork जैसे सिंगल एजेंट व्यक्तिगत कार्यों को काफ़ी अच्छे से पूरा कर सकते हैं, लेकिन व्यावसायिक प्रक्रियाओं को पूरा करने की कठोरता (rigor) उनमें नहीं होती।
-
-Hive आपके लिए उपयुक्त है यदि आप:
-
-- ऐसे AI एजेंट चाहते हैं जो **वास्तविक व्यावसायिक प्रक्रियाओं को निष्पादित करें**, केवल डेमो नहीं
-- ऐसा **रनटाइम चाहते हैं जो स्टेट, रिकवरी और समानांतर निष्पादन को** बड़े पैमाने पर संभाले
-- ऐसे **स्वयं-सुधार करने वाले और अनुकूली एजेंट** चाहते हैं जो समय के साथ बेहतर हों
-- **human-in-the-loop नियंत्रण**, ऑब्ज़र्वेबिलिटी और लागत सीमाएँ आवश्यक हैं
-- एजेंट्स को **प्रोडक्शन** में चलाने की योजना है जहाँ अपटाइम, लागत और ऑडिटेबिलिटी मायने रखते हैं
-
-Hive सर्वोत्तम उपयुक्त नहीं हो सकता यदि आप केवल साधारण एजेंट चेन्स या एकबारगी स्क्रिप्ट्स के साथ प्रयोग कर रहे हैं।
-
-## Hive का उपयोग कब करें?
-
-Hive का उपयोग तब करें जब बाधा (bottleneck) अब मॉडल नहीं बल्कि उसके इर्द-गिर्द का हार्नेस हो:
-
-- लंबे समय तक चलने वाले एजेंट जिन्हें **स्टेट परसिस्टेंस और क्रैश रिकवरी** की आवश्यकता है
-- ऐसे प्रोडक्शन वर्कलोड जिन्हें **लागत प्रवर्तन, ऑब्ज़र्वेबिलिटी और ऑडिट ट्रेल्स** की आवश्यकता है
-- ऐसे एजेंट जो रिफ्लेक्शन, स्कोप्ड मेमोरी और सीखे गए स्किल्स के माध्यम से **समय के साथ बेहतर होते हैं**
-- **साझा tracker लेजर और स्थायी प्लान** के माध्यम से समन्वित समानांतर, मल्टी-एजेंट काम
-- ऐसा फ़्रेमवर्क जो मॉडल के सुधारों से लड़ने के बजाय **उनके साथ स्केल करता है**
-
-## त्वरित लिंक
-
-- **[डाक्यूमेंटेशन](https://docs.adenhq.com/)** - पूर्ण गाइड्स और API संदर्भ
-- **[सेल्फ-होस्टिंग गाइड](https://docs.adenhq.com/getting-started/quickstart)** - Hive को अपने इंफ़्रास्ट्रक्चर पर डिप्लॉय करें
-- **[चेंजलॉग](https://github.com/aden-hive/hive/releases)** - नवीनतम अपडेट और रिलीज़
-- **[रोडमैप](../roadmap.md)** - आगामी सुविधाएँ और योजनाएँ
-- **[इशू रिपोर्ट करें](https://github.com/aden-hive/hive/issues)** - बग रिपोर्ट और फ़ीचर अनुरोध
-- **[योगदान करें](../../CONTRIBUTING.md)** - योगदान करने और PR सबमिट करने का तरीका
+इस फ़्लो में कुछ भी पहले से वायर नहीं किया गया था। कोई वर्कफ़्लो ग्राफ़ डिज़ाइन नहीं करना पड़ता: Queen रनटाइम पर कॉलोनी विकसित करती है, और क्या हो चुका है और क्या बाकी है, यह किसी की याददाश्त नहीं, बल्कि डिस्क पर मौजूद tracker दर्ज करता है।
 
 ## त्वरित शुरुआत
 
-### आवश्यकताएँ
+**आपको चाहिए:** Python 3.11+, Node.js 20+ और git। अगर `uv` और `ripgrep` मौजूद नहीं हैं तो क्विकस्टार्ट उन्हें इंस्टॉल कर देता है, और Node इंस्टॉल करने का विकल्प भी देता है।
 
-- एजेंट विकास के लिए Python 3.11+
-- एक LLM प्रदाता जो एजेंट्स को शक्ति देता है
-- **ripgrep (पूर्ण खोज के लिए आवश्यक):** Quickstart `rg` को इंस्टॉल करके जाँचता है। मौजूदा इंस्टॉलेशन सुधारने के लिए `uv run scripts/ensure_ripgrep.py --install` चलाएँ। Windows पैकेज का नाम `BurntSushi.ripgrep.MSVC` है; किसी अन्य executable का पूर्ण पथ `HIVE_RIPGREP_PATH` में दिया जा सकता है। `rg` के बिना `terminal_rg` त्रुटि देता है, जब तक `allow_fallback=True` के साथ अनुमानित खोज स्पष्ट रूप से न माँगी जाए।
+**और एक मॉडल।** क्विकस्टार्ट इनमें से किसी को भी सेट अप करने में आपकी मदद करता है:
 
-> **Windows उपयोगकर्ता:** नेटिव Windows को `quickstart.ps1` और `hive.ps1` के माध्यम से सपोर्ट किया जाता है। इन्हें PowerShell 5.1+ में चलाएँ। WSL भी एक विकल्प है लेकिन आवश्यक नहीं।
-
-### इंस्टॉलेशन
-
-> **नोट**
-> Hive एक `uv` वर्कस्पेस लेआउट का उपयोग करता है और `pip install` से इंस्टॉल नहीं होता।
-> रिपॉज़िटरी रूट से `pip install -e .` चलाने से एक प्लेसहोल्डर पैकेज बनेगा और Hive सही ढंग से काम नहीं करेगा।
-> कृपया वातावरण सेट अप करने के लिए नीचे दी गई क्विकस्टार्ट स्क्रिप्ट का उपयोग करें।
+- एक API key: Anthropic, OpenAI, Google Gemini, Groq, Cerebras या OpenRouter
+- आपका मौजूदा कोडिंग सब्सक्रिप्शन: Claude Code, OpenAI Codex, Kimi Code, MiniMax, Z.AI या Antigravity
+- Hive LLM
+- Ollama के ज़रिए एक लोकल मॉडल, बिना किसी key के
 
 ```bash
-# Clone the repository
 git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Run quickstart setup (macOS/Linux)
-./quickstart.sh
-
-# Windows (PowerShell)
-.\quickstart.ps1
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-यह सेट अप करता है:
+क्विकस्टार्ट पूरे वर्कस्पेस के लिए एक Python एनवायरनमेंट बनाता है, आपकी API key को `~/.hive` के अंदर एक एन्क्रिप्टेड credential store में रखता है, पूछता है कि कौन-सा मॉडल इस्तेमाल करना है, डैशबोर्ड बिल्ड करता है और उसे `http://127.0.0.1:8787` पर खोल देता है। बाद में इसे दोबारा खोलने के लिए रिपॉज़िटरी से `hive open` चलाएँ।
 
-- **framework** - मुख्य एजेंट रनटाइम और ग्राफ़ एक्ज़ीक्यूटर (`core/.venv` में)
-- **aden_tools** - एजेंट क्षमताओं के लिए MCP टूल्स (`tools/.venv` में)
-- **credential store** - एन्क्रिप्टेड API कुंजी भंडारण (`~/.hive/credentials`)
-- **LLM provider** - इंटरैक्टिव डिफ़ॉल्ट मॉडल कॉन्फ़िगरेशन, जिसमें Hive LLM और OpenRouter शामिल हैं
-- `uv` के साथ सभी आवश्यक Python डिपेंडेंसीज़
+> [!NOTE]
+> Hive एक `uv` वर्कस्पेस है, pip पैकेज नहीं। `pip install -e .` सिर्फ़ एक प्लेसहोल्डर इंस्टॉल करता है जो चलेगा नहीं; क्विकस्टार्ट का ही इस्तेमाल करें।
 
-- अंत में, यह आपके ब्राउज़र में Hive इंटरफ़ेस खोलेगा
+**इसके बाद:** होम स्क्रीन पर कोई टास्क टाइप करें और चुनें कि उसे किस Queen को सौंपना है, या **Prompt Library** खोलें और कोई तैयार प्रॉम्प्ट सीधे उसी Queen को डिप्लॉय करें जिसके लिए वह लिखा गया है।
 
-> **टिप:** डैशबोर्ड को बाद में फिर से खोलने के लिए, प्रोजेक्ट डायरेक्टरी से `hive open` चलाएँ।
-
-### अपना पहला एजेंट बनाएँ
-
-होम इनपुट बॉक्स में वह एजेंट टाइप करें जिसे आप बनाना चाहते हैं। Queen आपसे प्रश्न पूछेगी और आपके साथ मिलकर एक समाधान तैयार करेगी।
-
-<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
-
-### टेम्पलेट एजेंट्स का उपयोग करें
-
-"Try a sample agent" पर क्लिक करें और टेम्पलेट्स देखें। आप किसी टेम्पलेट को सीधे चला सकते हैं या मौजूदा टेम्पलेट के ऊपर अपना संस्करण बनाने का विकल्प चुन सकते हैं।
-
-### एजेंट चलाएँ
-
-अब आप किसी एजेंट को चुनकर (मौजूदा एजेंट या उदाहरण एजेंट) चला सकते हैं। आप ऊपर बाईं ओर Run बटन पर क्लिक कर सकते हैं, या Queen एजेंट से बात कर सकते हैं और वह आपके लिए एजेंट चला सकती है।
-
-<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
-
-## इंटीग्रेशन
-
-<a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
-Hive मॉडल-एग्नॉस्टिक और सिस्टम-एग्नॉस्टिक बनाया गया है।
-
-- **LLM लचीलापन** - Hive Framework, LiteLLM-संगत प्रदाताओं के माध्यम से Anthropic, OpenAI, OpenRouter, Hive LLM और अन्य होस्टेड या लोकल मॉडलों को सपोर्ट करता है।
-- **व्यावसायिक सिस्टम कनेक्टिविटी** - Hive Framework को MCP के माध्यम से CRM, सपोर्ट, मैसेजिंग, डेटा, फ़ाइल और आंतरिक APIs जैसे सभी प्रकार के व्यावसायिक सिस्टम से टूल्स के रूप में कनेक्ट करने के लिए डिज़ाइन किया गया है।
-
-## Hive क्यों
-
-जैसे-जैसे मॉडल बेहतर होते हैं, एजेंट क्या कर सकते हैं इसकी ऊपरी सीमा बढ़ती है — लेकिन उनकी विश्वसनीयता और प्रोडक्शन मूल्य हार्नेस द्वारा निर्धारित होते हैं। Hive जेनेरिक एजेंट्स के बजाय वास्तविक व्यावसायिक प्रक्रियाओं को चलाने पर केंद्रित है। आपको एक वर्कफ़्लो ग्राफ़ को हाथ से वायर करने, हर एजेंट इंटरैक्शन को परिभाषित करने और विफलताओं को प्रतिक्रियात्मक रूप से संभालने पर बाध्य करने के बजाय, Hive इस पैरेडाइम को उलट देता है: **आप परिणाम का वर्णन करते हैं, Queen पहले काम करती है, फिर उसे स्केल करने के लिए एक कॉलोनी विकसित करती है** — उपयोग में आसान टूल्स और इंटीग्रेशन्स के सेट के साथ एक परिणाम-उन्मुख, अनुकूली अनुभव।
+## यह कैसे काम करता है
 
 ```mermaid
 flowchart LR
-    GOAL["Describe Outcome"] --> PILOT["Queen Pilots\n(does one unit herself)"]
-    PILOT --> SYS["Systematize\n(skill + playbook)"]
-    SYS --> FAN["Fan Out\n(spawn worker clones)"]
-    FAN --> CONV["Converge\n(shared tracker ledger)"]
-    CONV --> CHECK{{"Done?"}}
-    CHECK -- "Yes" --> DONE["Deliver Result"]
-    CHECK -- "No" --> FAN
+    You(["आप"]) -->|"परिणाम बताइए"| Queen["Queen<br/>(स्थायी एजेंट)"]
+    Queen -->|"कॉलोनी का प्रस्ताव,<br/>आपकी पुष्टि"| Pilot["पायलट<br/>(एक इकाई, Queen ख़ुद करती है)"]
+    Pilot -->|"तरीका लिख लेती है"| Skill["Skill + playbook"]
+    Skill -->|"run_worker / run_playbook"| W["Worker clones<br/>समानांतर में"]
+    W -->|"tracker_upsert"| T[("Tracker<br/>साझा SQLite")]
+    T -->|"SQL: क्या हो चुका,<br/>क्या बाकी"| Queen
+    Queen -->|"सत्यापित जवाब"| You
 
-    GOAL -.- V1["Natural Language"]
-    PILOT -.- V2["Prove the path"]
-    SYS -.- V3["Repeatable process"]
-    FAN -.- V4["Parallel at scale"]
-    CONV -.- V5["Resume by construction"]
-    DONE -.- V6["Reliable outcomes"]
-
-    style GOAL fill:#ffbe42,stroke:#cc5d00,stroke-width:2px,color:#333
-    style PILOT fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
-    style SYS fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style FAN fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CONV fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CHECK fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style DONE fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#fff
-    style V1 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V2 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V3 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V4 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V5 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### यह कैसे काम करता है
+Hive में **एक ही एक्ज़ीक्यूशन प्रिमिटिव** है: एजेंट लूप। Queen भी एक एजेंट लूप है; हर worker उसका एक clone है, जिसका अपना टास्क, सीमित टूल सेट और सख़्त बजट होता है। ऑर्केस्ट्रेशन एक टूल कॉल है, कंपाइल किया हुआ ग्राफ़ नहीं:
 
-1. **[परिणाम का वर्णन करें](../key_concepts/goals_outcome.md)** → सरल भाषा में बताएँ कि आप क्या चाहते हैं; एक CEO-शैली का राउटर सही [Queen](../key_concepts/queen.md) चुनता है
-2. **Queen पायलट करती है** → वह स्वयं काम की एक इकाई करती है, रास्ते को सिद्ध करती है और उसे साझा tracker में रिकॉर्ड करती है
-3. **[सिस्टमीकरण करें](../key_concepts/improvement.md)** → वह सिद्ध प्रोटोकॉल को एक skill + playbook में बदल देती है — एक दोहराने योग्य प्रक्रिया
-4. **[फैन आउट](../key_concepts/colony.md)** → `run_worker` [worker clones](../key_concepts/worker_agent.md) स्पॉन करता है जो समानांतर में चलते हैं और वापस रिपोर्ट करते हैं
-5. **अभिसरण और निगरानी** → Workers परिणामों को tracker में लिखते हैं; Queen SQL के माध्यम से सत्यापन करती है, रीयल-टाइम मेट्रिक्स, बजट प्रवर्तन और क्रैश-सेफ रिज़्यूम के साथ
+- **`run_worker`** टास्क्स को workers में बाँटकर तुरंत लौट आता है, ताकि workers के चलते समय भी Queen आपसे बात करती रहे। डिफ़ॉल्ट रूप से एक साथ अधिकतम चार workers चलते हैं; बाकी कतार में रहते हैं। काम पूरा करने वाले हर worker की रिपोर्ट Queen की बातचीत में एक नए टर्न के रूप में आती है।
+- **Tracker** कॉलोनी की साझा स्टेट है। Queen टेबल तय करती है और यह भी कि workers किन कॉलम में लिख सकते हैं; workers काम की हर इकाई के लिए एक पंक्ति upsert करते हैं; Queen SQL से प्रगति जाँचती है। यह डिस्क पर `~/.hive/colonies/<name>/tracker/tracker.db` में रहता है।
+- **`run_playbook`** एक परखा हुआ प्रोटोकॉल हर पंक्ति पर चलाता है: backoff के साथ retries, rate-limited lanes, और बार-बार फ़ेल होने वाली पंक्तियों के लिए एक dead-letter सूची। चूँकि "क्या बाकी है" हमेशा tracker पर एक ताज़ा query होती है, इसलिए playbook को दोबारा चलाने पर वह वहीं से आगे बढ़ता है।
+
+**[आर्किटेक्चर का अवलोकन](../architecture/README.md)** लूप, टूल सरफेस, मेमोरी, मानवीय निगरानी और क्रैश के बाद स्टेट कैसे बची रहती है, इन सबको समझाता है।
+
+<table>
+  <tr>
+    <td width="50%"><img alt="होम: Queens और कॉलोनियों का hive मैप" src="../assets/readme/home.webp" /><br /><sub><b>होम।</b> आपकी Queens और उनकी कॉलोनियाँ, एक ही मैप पर। टास्क बताइए और चुनिए कि उसे कौन लेगा।</sub></td>
+    <td width="50%"><img alt="समानांतर में चलते हुए एक कॉलोनी के workers" src="../assets/readme/workers.webp" /><br /><sub><b>Workers।</b> काम की हर इकाई के लिए एक, हर एक का अपना टास्क और बजट, और सभी Queen को रिपोर्ट करते हैं।</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="नतीजों से भरता हुआ कॉलोनी tracker" src="../assets/readme/tracker.webp" /><br /><sub><b>Tracker।</b> जैसे-जैसे workers काम पूरा करते हैं, नतीजे एक साझा टेबल में आते जाते हैं, जिन पर आप query चला सकते हैं, उन्हें export कर सकते हैं या वहीं से काम फिर शुरू कर सकते हैं।</sub></td>
+    <td width="50%"><img alt="स्रोतों वाली टेबल और चार्ट के साथ Queen का अंतिम जवाब" src="../assets/readme/result.webp" /><br /><sub><b>नतीजा।</b> चैट में ही स्रोतों और चार्ट के साथ एक सत्यापित जवाब।</sub></td>
+  </tr>
+</table>
+
+## इसमें क्या है
+
+**ज़िम्मेदारी और मेमोरी वाली Queens।** Hive के साथ तेरह persona Queens आती हैं: छह डिफ़ॉल्ट रूप से सक्रिय हैं (Growth, RevOps, Content, Lead Generation, Outbound, Brand & Design), बाकी को Org Chart से नियुक्त किया जा सकता है, और आप अपनी Queens भी बना सकते हैं। हर Queen की अपनी स्कोप्ड markdown मेमोरी होती है, जिसे एक reflection चरण लिखता है, और पिछली प्रासंगिक बातचीत अपने-आप उसके context में आ जाती है।
+
+**बिल्ट-इन टूल्स, उसी प्रोसेस में।** Shell कमांड और बैकग्राउंड जॉब्स, फ़ाइल एडिटिंग, तेज़ कोड सर्च, PDF, अटैचमेंट और इमेज, वेब स्क्रैपिंग, चार्ट (ECharts और Mermaid), CSV फ़ाइलें, और Hive LLM से इमेज जनरेशन। ये Hive के अंदर ही चलते हैं, कोई टूल सर्वर शुरू करने की ज़रूरत नहीं।
+
+**आपका ब्राउज़र, आपके एजेंट्स के हाथ में।** Hive Browser Bridge एक्सटेंशन की मदद से एजेंट्स आपका अपना Chrome चला सकते हैं, जहाँ आप पहले से लॉग इन हैं। हर worker को अपना अलग टैब ग्रुप मिलता है।
+
+**Skills।** खुले [Agent Skills](https://agentskills.io) फ़ॉर्मेट में दोबारा इस्तेमाल होने वाले निर्देश। Hive के साथ कुछ skills पहले से आती हैं, कोई प्रोटोकॉल कारगर साबित होने पर Queens नई skills लिखती हैं, और आप इन्हें Skills Library में मैनेज कर सकते हैं।
+
+**कोई भी MCP server।** `hive mcp add` से कोई बाहरी MCP server जोड़ें, और उसके टूल्स उन्हीं allowlists में शामिल हो जाते हैं जिनमें बिल्ट-इन टूल्स हैं। [`tools/`](../../tools/src/aden_tools/tools) में मौजूद पूरा इंटीग्रेशन कैटलॉग (GitHub, Gmail, HubSpot, Slack, Notion और बहुत कुछ) भी एक MCP server के रूप में चलता है; देखें [docs/tools.md](../tools.md)।
+
+**आपकी ग़ैरमौजूदगी में भी चलता है।** कॉलोनियाँ cron, interval या webhook ट्रिगर्स से ख़ुद को शेड्यूल कर सकती हैं। **Sentinel**, जिसे हर कॉलोनी के लिए अलग से चालू करना होता है, Queen के रुकने पर उस पर नज़र रखता है: वह उसे आगे बढ़ने का इशारा करता है, या Hive inbox, Telegram या Slack के ज़रिए मामला आप तक पहुँचाता है, और आपके जवाब देते ही Queen फिर से काम शुरू कर देती है।
+
+**टिके रहने के लिए बना।** हर एजेंट अपनी स्टेट डिस्क पर सहेजता है और क्रैश या रीस्टार्ट के बाद ठीक वहीं से शुरू होता है जहाँ रुका था। बड़े टूल नतीजे context को भरने के बजाय फ़ाइलों में चले जाते हैं, लंबे सेशन अपने-आप compact हो जाते हैं, अटके हुए या लूप में फँसे टर्न पकड़ लिए जाते हैं, और हर worker एक सख़्त tool-call बजट के भीतर चलता है।
+
+**कोई भी मॉडल।** [LiteLLM](https://docs.litellm.ai/docs/providers) जो कुछ भी सपोर्ट करता है, जिसमें OpenAI, Anthropic, Gemini, OpenRouter, Hive LLM, कोई भी OpenAI-compatible endpoint और Ollama के ज़रिए लोकल मॉडल शामिल हैं। Workers अपनी Queen से अलग मॉडल इस्तेमाल कर सकते हैं, और सिर्फ़ टेक्स्ट वाले मॉडल भी vision fallback के ज़रिए इमेज देख पाते हैं।
+
+## क्या Hive आपके लिए है?
+
+Hive तब काम आता है जब मुश्किल हिस्सा मॉडल नहीं, बल्कि उसके इर्द-गिर्द का सब कुछ हो:
+
+- ऐसी प्रक्रिया जिसमें **काम की कई मिलती-जुलती इकाइयाँ** हों, जैसे लीड्स, अकाउंट्स, टिकट्स, रिपॉज़िटरी या दस्तावेज़, और आप चाहते हों कि वे समानांतर में और एक ही तरीके से पूरी हों।
+- ऐसा काम जो **घंटों तक या किसी शेड्यूल पर चलता है** और जिसे रीस्टार्ट के बाद भी जारी रहना है।
+- ऐसे नतीजे जिन्हें आपको सिर्फ़ चैट में पढ़ना नहीं, बल्कि **जाँचना, query करना और ऑडिट करना** है।
+- अहम फ़ैसलों पर **इंसान का नियंत्रण** बना रहे।
+
+एक अकेले प्रॉम्प्ट या एकबारगी स्क्रिप्ट के लिए साधारण एजेंट ज़्यादा आसान है।
 
 ## दस्तावेज़ीकरण
 
-- **[डेवलपर गाइड](../developer-guide.md)** - डेवलपर्स के लिए व्यापक मार्गदर्शिका
-- [शुरुआत करें](../getting-started.md) - त्वरित सेटअप निर्देश
-- [कॉन्फ़िगरेशन गाइड](../configuration.md) - सभी कॉन्फ़िगरेशन विकल्प
-- [आर्किटेक्चर का अवलोकन](../architecture/README.md) - सिस्टम का डिज़ाइन और संरचना
-
-## योगदान करें
-हम समुदाय से योगदान का स्वागत करते हैं! हम विशेष रूप से फ़्रेमवर्क के लिए टूल्स, इंटीग्रेशन्स और उदाहरण एजेंट बनाने में मदद की तलाश में हैं ([#2805 देखें](https://github.com/aden-hive/hive/issues/2805))। यदि आप इसकी कार्यक्षमता बढ़ाने में रुचि रखते हैं, तो यह शुरू करने के लिए सबसे अच्छी जगह है। कृपया दिशानिर्देशों के लिए [CONTRIBUTING.md](../../CONTRIBUTING.md) देखें।
-
-**महत्वपूर्ण:** कृपया PR सबमिट करने से पहले किसी issue को अपने नाम असाइन करवाएँ। इसे क्लेम करने के लिए issue पर टिप्पणी करें, और कोई मेंटेनर आपको असाइन कर देगा। पुनरुत्पादन योग्य चरणों और प्रस्तावों वाले issues को प्राथमिकता दी जाती है। इससे डुप्लिकेट काम से बचाव होता है।
-
-1. कोई issue खोजें या बनाएँ और असाइनमेंट प्राप्त करें
-2. रिपॉज़िटरी को fork करें
-3. अपनी फ़ीचर ब्रांच बनाएँ (`git checkout -b feature/amazing-feature`)
-4. अपने बदलावों को commit करें (`git commit -m 'Add amazing feature'`)
-5. ब्रांच को push करें (`git push origin feature/amazing-feature`)
-6. एक Pull Request खोलें
-
-## समुदाय और सहायता
-
-हम सपोर्ट, फ़ीचर अनुरोधों और कम्युनिटी चर्चाओं के लिए [Discord](https://discord.com/invite/MXE49hrKDk) का उपयोग करते हैं।
-
-- Discord - [हमारे समुदाय से जुड़ें](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [कंपनी पेज](https://www.linkedin.com/company/teamaden/)
-
-## हमारी टीम से जुड़ें
-
-**हम भर्ती कर रहे हैं!** इंजीनियरिंग, रिसर्च और गो-टू-मार्केट भूमिकाओं में हमारे साथ जुड़ें।
-
-[खुली पदों को देखें](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
-
-## सुरक्षा
-
-सुरक्षा संबंधी चिंताओं के लिए, कृपया [SECURITY.md](../../SECURITY.md) देखें।
-
-## लाइसेंस
-
-यह प्रोजेक्ट Apache License 2.0 के अंतर्गत लाइसेंस्ड है - विवरण के लिए [LICENSE](../../LICENSE) फ़ाइल देखें।
+- [शुरुआत करें](../getting-started.md): सेटअप का विस्तृत विवरण
+- [आर्किटेक्चर का अवलोकन](../architecture/README.md): कॉलोनियाँ, लूप, टूल्स और मेमोरी आपस में कैसे जुड़ते हैं
+- मुख्य अवधारणाएँ: [कॉलोनी](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [workers](../key_concepts/worker_agent.md), [समन्वय](../key_concepts/coordination.md), [लूप](../key_concepts/the_loop.md), [लक्ष्य और परिणाम](../key_concepts/goals_outcome.md), [कॉलोनियाँ कैसे बेहतर होती हैं](../key_concepts/improvement.md)
+- [टूल्स](../tools.md): बिल्ट-इन टूल्स, MCP servers और इंटीग्रेशन कैटलॉग
+- [कॉन्फ़िगरेशन](../configuration.md) और [डेवलपर गाइड](../developer-guide.md)
+- [docs.adenhq.com](https://docs.adenhq.com/): ऑनलाइन दस्तावेज़ीकरण
 
 ## अक्सर पूछे जाने वाले प्रश्न (FAQ)
 
-**प्रश्न: Hive कौन-कौन से LLM प्रदाताओं को सपोर्ट करता है?**
+**Hive कौन-से मॉडल सपोर्ट करता है?**
+[LiteLLM](https://docs.litellm.ai/docs/providers) द्वारा सपोर्ट किया जाने वाला कोई भी प्रदाता, और साथ में कोई भी OpenAI-compatible endpoint। क्विकस्टार्ट आम विकल्पों को सेट अप करता है, जिनमें Claude Code और OpenAI Codex जैसे कोडिंग सब्सक्रिप्शन भी शामिल हैं; बाकी के लिए [docs/configuration.md](../configuration.md) देखें।
 
-Hive, LiteLLM इंटीग्रेशन के माध्यम से 100 से अधिक LLM प्रदाताओं को सपोर्ट करता है, जिसमें OpenAI (GPT-4, GPT-4o), Anthropic (Claude मॉडल), Google Gemini, DeepSeek, Mistral, Groq, OpenRouter और Hive LLM शामिल हैं। बस संबंधित API कुंजी एनवायरनमेंट वेरिएबल सेट करें और मॉडल का नाम निर्दिष्ट करें। प्रदाता-विशिष्ट कॉन्फ़िगरेशन उदाहरणों के लिए [docs/configuration.md](../configuration.md) देखें।
+**क्या मैं इसे लोकल मॉडल्स के साथ चला सकता हूँ?**
+हाँ। क्विकस्टार्ट में Ollama चुनें, या Ollama को लोकली चलाते हुए `ollama/llama3` जैसा कोई मॉडल सेट करें।
 
-**प्रश्न: क्या मैं Hive का उपयोग Ollama जैसे लोकल AI मॉडलों के साथ कर सकता हूँ?**
+**यह दूसरे एजेंट फ़्रेमवर्क्स से कैसे अलग है?**
+ज़्यादातर फ़्रेमवर्क्स में आपको एजेंट्स का एक ग्राफ़ डिज़ाइन करना पड़ता है और उनके इनपुट-आउटपुट आपस में वायर करने पड़ते हैं। Hive में एजेंट का एक ही प्रकार है: Queen एक एजेंट लूप है और हर worker उसका clone है। ऑर्केस्ट्रेशन रनटाइम पर टूल कॉल्स के ज़रिए होता है, और समन्वय edges के रास्ते भेजे गए मैसेजों के बजाय एक साझा SQL tracker के ज़रिए होता है। हार्नेस की सुविधाएँ (परसिस्टेंस, रिज़्यूम, बजट, कम्पैक्शन, निगरानी) उसी एक लूप में हैं, इसलिए हर एजेंट को ये अपने-आप मिलती हैं।
 
-हाँ! Hive, LiteLLM के माध्यम से लोकल मॉडलों को सपोर्ट करता है। बस `ollama/model-name` फ़ॉर्मेट में मॉडल नाम का उपयोग करें (उदा., `ollama/llama3`, `ollama/mistral`) और सुनिश्चित करें कि Ollama स्थानीय रूप से चल रहा है।
+**मेरा डेटा कहाँ रहता है?**
+आपकी अपनी मशीन पर। सेशन, कॉलोनियाँ, trackers और मेमोरी `~/.hive` (या जहाँ भी `HIVE_HOME` पॉइंट करता हो) के अंदर सामान्य फ़ाइलों के रूप में रहते हैं, और API keys वहीं एन्क्रिप्ट करके रखी जाती हैं।
 
-**प्रश्न: Hive को अन्य एजेंट फ़्रेमवर्क्स से अलग क्या बनाता है?**
+**लागत को काबू में कैसे रखूँ?**
+हर worker टर्न्स और टूल कॉल्स की सख़्त सीमाओं के भीतर चलता है, इसलिए अटका हुआ worker अपने-आप रुक जाता है, और एक साथ चलने वाले workers की संख्या भी सीमित है। हर मॉडल कॉल पर उपयोग मापा जाता है। डॉलर में खर्च की सीमा तय करने की सुविधा अभी नहीं है।
 
-Hive **एजेंट्स की कॉलोनियाँ** चलाता है, न कि सिंगल एजेंट या हाथ से वायर किए गए एजेंट ग्राफ़। अधिकांश फ़्रेमवर्क आपको अलग-अलग नोड्स और एजेस का ग्राफ़ कंपाइल करने पर बाध्य करते हैं; Hive में एक ही एक्ज़ीक्यूशन प्रिमिटिव है — Queen *स्वयं* एक एजेंट लूप है, और हर worker उसका एक [clone](../key_concepts/the_loop.md) है। ऑर्केस्ट्रेशन एक रनटाइम `run_worker` फैन-आउट है, न कि कंपाइल किया गया DAG, और कॉलोनी एक डेटा बफ़र के बजाय एक [साझा tracker लेजर](../key_concepts/coordination.md) के माध्यम से समन्वय करती है। उस "एक लूप, कई लूप्स" कोर के ऊपर, Hive एक प्रोडक्शन हार्नेस है — क्रैश-सेफ पार्क/रिज़्यूम, लागत प्रवर्तन, रीयल-टाइम ऑब्ज़र्वेबिलिटी और आउट-ऑफ़-बैंड human-in-the-loop — जो हर एजेंट को विरासत में मिलता है क्योंकि केवल एक ही प्रकार का एजेंट है। [Architecture Overview](../architecture/README.md) देखें।
+**क्या एजेंट्स मेरे अपने टूल्स और APIs इस्तेमाल कर सकते हैं?**
+हाँ: बिल्ट-इन shell और ब्राउज़र के ज़रिए, आपके जोड़े गए किसी भी MCP server के ज़रिए, और उन skills के ज़रिए जो उन्हें आपकी प्रक्रियाएँ सिखाती हैं।
 
-**प्रश्न: क्या Hive ओपन-सोर्स है?**
+**क्या Hive ओपन-सोर्स है?**
+हाँ, [Apache License 2.0](../../LICENSE) के तहत।
 
-हाँ, Hive पूरी तरह से Apache License 2.0 के तहत ओपन-सोर्स है। हम समुदाय के योगदान और सहयोग को सक्रिय रूप से प्रोत्साहित करते हैं।
+## योगदान करें
 
-**प्रश्न: क्या Hive human-in-the-loop वर्कफ़्लो को सपोर्ट करता है?**
+योगदान का स्वागत है, ख़ासकर टूल्स, इंटीग्रेशन्स और skills ([#2805](https://github.com/aden-hive/hive/issues/2805))। पहले [CONTRIBUTING.md](../../CONTRIBUTING.md) पढ़ें, और pull request खोलने से पहले किसी issue पर ख़ुद को असाइन करवाएँ: issue पर कमेंट करें और कोई मेंटेनर आपको असाइन कर देगा। जिन issues में रिप्रोडक्शन स्टेप्स या कोई प्रस्ताव हो, उन्हें प्राथमिकता दी जाती है।
 
-हाँ। एक Queen **Sentinel** के माध्यम से किसी मानव को आउट-ऑफ़-बैंड एस्केलेट करती है — एक अकाउंट-बाउंड Slack/Telegram चैनल। एजेंट लूप पार्क हो जाता है (अपनी स्टेट को डिस्क पर परसिस्ट करते हुए), मानव को सूचित करता है, और जब वे उत्तर देते हैं तो ठीक वहीं से फिर शुरू हो जाता है जहाँ उसने छोड़ा था। चूँकि एस्केलेशन किसी ग्राफ़ में एक नोड नहीं है, इसलिए किसी कॉलोनी का कोई भी एजेंट किसी भी बिंदु पर मानवीय निर्णय के लिए रुक सकता है, कॉन्फ़िगर करने योग्य टाइमआउट और एस्केलेशन नीतियों के साथ। [Architecture Overview](../architecture/README.md#reliability-is-in-the-primitive) देखें।
+## समुदाय
 
-**प्रश्न: Hive कौन सी प्रोग्रामिंग भाषाओं को सपोर्ट करता है?**
+- [Discord](https://discord.com/invite/MXE49hrKDk) पर सवाल पूछें, फ़ीचर अनुरोध भेजें और चर्चा करें
+- [X / Twitter](https://x.com/aden_hq) और [LinkedIn](https://www.linkedin.com/company/teamaden/) पर अपडेट्स पाएँ
+- [HoneyComb](http://honeycomb.open-hive.com/): एक कम्युनिटी मार्केट, जो ट्रैक करता है कि AI एजेंट्स कौन-से जॉब्स ऑटोमेट कर रहे हैं। किसी जॉब पर लॉन्ग या शॉर्ट जाएँ, पैसे से नहीं बल्कि compute tokens से।
 
-Hive फ़्रेमवर्क Python में बनाया गया है। एक JavaScript/TypeScript SDK रोडमैप पर है।
+इंजीनियरिंग, रिसर्च और गो-टू-मार्केट में **हम भर्ती कर रहे हैं**। [खुले पद देखें](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)।
 
-**प्रश्न: क्या Hive एजेंट बाहरी टूल्स और APIs के साथ इंटरैक्ट कर सकते हैं?**
+## सुरक्षा
 
-हाँ। कॉलोनी के हर एजेंट के पास बिल्ट-इन टूल एक्सेस होता है, और Hive, MCP के माध्यम से बाहरी APIs, डेटाबेस और सेवाओं से कनेक्ट होता है — जिसमें 100 से अधिक इंटीग्रेशन टूल्स के साथ-साथ नेटिव एक्सटेंशन के माध्यम से General Compute Use और Browser Use शामिल हैं। चूँकि Queen और उसके workers एक ही टूल सरफेस साझा करते हैं, इसलिए आपके द्वारा जोड़ी गई कोई भी क्षमता पूरी कॉलोनी के लिए उपलब्ध होती है।
+किसी सुरक्षा कमज़ोरी की रिपोर्ट करने के लिए [SECURITY.md](../../SECURITY.md) देखें।
 
-**प्रश्न: Hive में लागत नियंत्रण कैसे काम करता है?**
+## लाइसेंस
 
-Hive विस्तृत बजट नियंत्रण प्रदान करता है जिसमें खर्च की सीमाएँ, थ्रॉटल्स और स्वचालित मॉडल डिग्रेडेशन नीतियाँ शामिल हैं। आप टीम, एजेंट या वर्कफ़्लो स्तर पर बजट सेट कर सकते हैं, रीयल-टाइम लागत ट्रैकिंग और अलर्ट के साथ।
-
-**प्रश्न: मुझे उदाहरण और दस्तावेज़ीकरण कहाँ मिलेंगे?**
-
-पूर्ण गाइड्स, API संदर्भ और शुरुआत करने के ट्यूटोरियल्स के लिए [docs.adenhq.com](https://docs.adenhq.com/) पर जाएँ। रिपॉज़िटरी में `docs/` फ़ोल्डर में दस्तावेज़ीकरण और एक व्यापक [डेवलपर गाइड](../developer-guide.md) भी शामिल है।
-
-**प्रश्न: मैं Aden में योगदान कैसे कर सकता हूँ?**
-
-योगदान का स्वागत है! रिपॉज़िटरी को fork करें, अपनी फ़ीचर ब्रांच बनाएँ, अपने बदलाव लागू करें, और एक pull request सबमिट करें। विस्तृत दिशानिर्देशों के लिए [CONTRIBUTING.md](../../CONTRIBUTING.md) देखें।
+Apache License 2.0। विवरण के लिए [LICENSE](../../LICENSE) देखें।
 
 ## स्टार इतिहास
 
@@ -293,12 +194,10 @@ Hive विस्तृत बजट नियंत्रण प्रदान
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
  </picture>
 </a>
 
 ---
 
-<p align="center">
-  सैन फ्रांसिस्को में 🔥 जुनून के साथ बनाया गया
-</p>
+<p align="center">सैन फ्रांसिस्को में 🔥 जुनून के साथ बनाया गया</p>

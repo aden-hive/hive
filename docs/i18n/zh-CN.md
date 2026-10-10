@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://asset.acho.io/github/img/banner.gif" />
+  <img width="100%" alt="OpenHive" src="https://asset.acho.io/github/img/banner.gif" />
 </p>
 
 <p align="center">
@@ -14,278 +14,179 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 License" /></a>
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 许可证" /></a>
   <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
   <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
-  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Twitter Follow" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="在 X 上关注" /></a>
   <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
-  <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
+</p>
+
+<h3 align="center">由 AI 智能体组成的蜂群，替你运行业务流程。</h3>
+
+<p align="center">
+  描述你想要的结果。Queen 先亲自完成第一部分工作，再培育出一个由 worker 智能体组成的蜂群，并行完成其余部分。每一条结果都记录在共享账本中，可查询、可恢复、可审计。
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="演示：一位增长 Queen 带领由并行 worker 组成的蜂群，调研五款产品在 Hacker News 上的发布情况" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>录制自一次真实运行，只对等待的部分做了加速。<a href="../assets/readme/demo.mp4">观看完整画质版本（MP4）</a>。</sub>
 </p>
 
-<p align="center"><em>The agent harness for production workloads — state management, failure recovery, observability, and human oversight so your agents actually run.</em></p>
+## 演示中发生了什么
 
-## 概述
+一个正在筹备 Show HN 的增长团队，想知道五款开发者工具当初在 Hacker News 上发布时表现如何。针对这一条消息，Hive 做了这些事：
 
-OpenHive 是一个零配置、模型无关的运行时，专为**智能体蜂群（colonies of agents）**打造。一个蜂群（colony）是一组分工明确的智能体，它们协同运行同一个业务流程：一只 **Queen（女王）**——持久存在、直接面向客户的领队——外加该任务所需的任意数量的 **worker（工作蜂）**智能体。你只需描述想要的结果；Queen 会亲自完成工作，随后围绕它培育出一个蜂群，以可靠且可规模化的方式运行这项工作。
+1. **你把任务交给一位 Queen。** 每位 Queen 都是一个持久存在的智能体，有自己的角色（这里是增长负责人），也有自己的记忆和工具。
+2. **她只问一个会改变答案的问题：** 只算首次发布，还是所有发布都算？你选一个选项，她接着往下做。
+3. **她提议组建蜂群，由你确认。** 五款产品就是五项可以并行的任务，于是这段对话变成了一个蜂群：Queen 加上任务所需数量的 worker 智能体。
+4. **她亲自完成一个单元。** 她挑了最棘手的 Supabase（它最大的那篇发布帖标题里没有“Launch HN”），明确什么才算一次发布，并把方法写成一个可复用的技能。
+5. **她把方法作为操作手册（playbook）来运行：** 每款产品一个 worker，并行执行；每个 worker 都按她的技能操作，并把自己那一行写进蜂群的 tracker，也就是一张共享的 SQLite 表。
+6. **回答之前，她逐行核对。** 边界情况也如实保留：Cal.com 无论用哪个名字都找不到符合条件的发布，所以图表里将它标为缺失，而不是记为零。
 
-其底层机制是**一个循环控制众多循环（one loop controlling many loops）**。Hive 只有一个执行原语：Queen 本身*就是*一个智能体循环（agent loop），而每一个 worker 都是它的**克隆体（clone）**——相同的工具、相同的模型，各自承担自己的任务。没有需要编译的图，也没有需要编写的编排样板代码。蜂群通过一个共享账本和一份持久化的计划来协同，崩溃安全的状态、深度可观测性以及人工监督都内建在每个智能体共享的这唯一原语之中。工作原理请参阅 **[架构概述](../architecture/README.md)**。
-
-## 功能特性
-
-- ✅ 智能体蜂群——Queen 按需生成 worker 克隆体，用于并行、长时间运行的工作
-- ✅ 一个原语，众多循环——无需接线的图；Queen 在运行时培育蜂群
-- ✅ 共享 tracker 账本 + 持久化任务计划，无需数据缓冲区即可协同
-- ✅ 具备 CEO 式路由以及不断演进、按范围隔离记忆的 Queen 人格
-- ✅ 崩溃安全的暂停/恢复（park/resume）、成本强制约束，以及带外人机协作（Sentinel）
-- ✅ 零配置——无需任何技术配置
-- ✅ 通过原生扩展实现通用计算机操作（Compute Use）和浏览器操作（Browser Use）
-- ✅ 支持自定义模型
-
-访问 [adenhq.com](https://adenhq.com) 获取完整的文档、示例和指南。
-
-访问 [HoneyComb](http://honeycomb.open-hive.com/) 查看有哪些工作正在被 AI 自动化。它是一个关于工作的股票市场，由我们社区的 AI 智能体进展所驱动。你可以根据你认为某项工作会在多大程度上被 AI 取代，来对它做多或做空（不使用真钱，而是使用计算代币）。
-
-https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
-
-
-## Hive 适合谁？
-
-Hive 是面向那些正将 AI 智能体从原型推向生产的团队的多智能体运行支撑层（harness）。像 Openclaw 和 Cowork 这样的单体智能体能够相当好地完成个人任务，但缺乏履行业务流程所需的严谨性。
-
-如果你符合以下情况，Hive 会是很好的选择：
-
-- 希望 AI 智能体**执行真实的业务流程**，而不只是演示
-- 需要一个能够大规模**处理状态、恢复和并行执行的运行时**
-- 需要能够随时间不断改进的**自愈且自适应的智能体**
-- 要求**人机协作控制**、可观测性和成本上限
-- 计划在对可用性、成本和可审计性有要求的**生产环境**中运行智能体
-
-如果你只是在试验简单的智能体链或一次性脚本，Hive 可能并非最佳选择。
-
-## 何时应该使用 Hive？
-
-当瓶颈不再是模型本身，而是围绕它的运行支撑层（harness）时，就该使用 Hive：
-
-- 需要**状态持久化和崩溃恢复**的长时间运行智能体
-- 需要**成本强制约束、可观测性和审计追踪**的生产工作负载
-- 通过反思（reflexion）、按范围隔离的记忆以及习得技能而**随时间不断改进**的智能体
-- 通过**共享 tracker 账本和持久化计划**来协同的并行、多智能体工作
-- 一个能够**随模型进步而水涨船高**、而非与之对抗的框架
-
-## 快速链接
-
-- **[文档](https://docs.adenhq.com/)** - 完整的指南和 API 参考
-- **[自托管指南](https://docs.adenhq.com/getting-started/quickstart)** - 在你自己的基础设施上部署 Hive
-- **[更新日志](https://github.com/aden-hive/hive/releases)** - 最新更新和发布
-- **[路线图](../roadmap.md)** - 即将推出的功能与计划
-- **[报告问题](https://github.com/aden-hive/hive/issues)** - Bug 报告与功能请求
-- **[贡献指南](../../CONTRIBUTING.md)** - 如何贡献与提交 PR
+整个流程中没有任何环节是事先编排好的，也不需要设计工作流图：Queen 在运行时培育蜂群，哪些已完成、哪些还剩下，都由磁盘上的 tracker 记录，而不是靠谁的记忆。
 
 ## 快速开始
 
-### 前置要求
+**你需要：** Python 3.11+、Node.js 20+ 和 git。如果缺少 `uv` 和 `ripgrep`，quickstart 脚本会自动安装，并询问是否安装 Node。
 
-- Python 3.11+ 用于智能体开发
-- 一个为智能体提供动力的 LLM 提供商
-- **ripgrep（完整搜索所需）：** Quickstart 会安装并验证 `rg`。已有环境可运行 `uv run scripts/ensure_ripgrep.py --install` 修复。Windows 包名为 `BurntSushi.ripgrep.MSVC`；自定义安装位置可通过 `HIVE_RIPGREP_PATH` 指定可执行文件的绝对路径。缺少 `rg` 时，`terminal_rg` 默认报错，只有显式设置 `allow_fallback=True` 才使用近似搜索。
+**再加一个模型。** 以下任意一种都可以，quickstart 脚本会一步步引导你完成配置：
 
-> **Windows 用户：** 通过 `quickstart.ps1` 和 `hive.ps1` 支持原生 Windows。请在 PowerShell 5.1+ 中运行它们。WSL 也是一个选项，但并非必需。
-
-### 安装
-
-> **注意**
-> Hive 使用 `uv` 工作区布局，不通过 `pip install` 安装。
-> 从仓库根目录运行 `pip install -e .` 只会创建一个占位包，Hive 将无法正常运行。
-> 请使用下方的 quickstart 脚本来设置环境。
+- API key：Anthropic、OpenAI、Google Gemini、Groq、Cerebras 或 OpenRouter
+- 你已有的编程订阅：Claude Code、OpenAI Codex、Kimi Code、MiniMax、Z.AI 或 Antigravity
+- Hive LLM
+- 通过 Ollama 运行的本地模型，完全不需要 key
 
 ```bash
-# Clone the repository
 git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Run quickstart setup (macOS/Linux)
-./quickstart.sh
-
-# Windows (PowerShell)
-.\quickstart.ps1
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-该脚本将设置：
+运行 quickstart 脚本后，它会为整个工作区创建一个 Python 环境，把你的 API key 存入 `~/.hive` 下的加密凭证存储，询问要使用哪个模型，然后构建仪表盘并在 `http://127.0.0.1:8787` 打开。之后想重新打开，在仓库目录下运行 `hive open` 即可。
 
-- **framework** - 核心智能体运行时和图执行器（在 `core/.venv` 中）
-- **aden_tools** - 提供智能体能力的 MCP 工具（在 `tools/.venv` 中）
-- **凭证存储** - 加密的 API 密钥存储（`~/.hive/credentials`）
-- **LLM 提供商** - 交互式的默认模型配置，包括 Hive LLM 和 OpenRouter
-- 使用 `uv` 安装所有必需的 Python 依赖
+> [!NOTE]
+> Hive 是一个 `uv` 工作区，而不是 pip 包。`pip install -e .` 只会装上一个无法运行的占位包，请使用 quickstart 脚本。
 
-- 最后，它将在你的浏览器中打开 Hive 界面
+**接下来：** 在主页输入一个任务，选择交给哪位 Queen；或者打开 **Prompt Library**（提示词库），把现成的提示词直接部署给它所对应的 Queen。
 
-> **提示：** 若要稍后重新打开仪表盘，请在项目目录中运行 `hive open`。
-
-### 构建你的第一个智能体
-
-在主页输入框中输入你想要构建的智能体。Queen 会向你提问，并与你一起制定解决方案。
-
-<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
-
-### 使用模板智能体
-
-点击 "Try a sample agent" 查看模板。你可以直接运行某个模板，也可以选择在现有模板的基础上构建你自己的版本。
-
-### 运行智能体
-
-现在你可以通过选择智能体（现有智能体或示例智能体）来运行它。你可以点击左上角的 Run 按钮，也可以与 Queen 智能体对话，让它为你运行智能体。
-
-<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
-
-## 集成
-
-<a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
-Hive 在设计上做到模型无关和系统无关。
-
-- **LLM 灵活性** - Hive 框架通过与 LiteLLM 兼容的提供商支持 Anthropic、OpenAI、OpenRouter、Hive LLM 以及其他托管或本地模型。
-- **业务系统连接** - Hive 框架设计为通过 MCP 将各类业务系统作为工具接入，例如 CRM、客服支持、消息、数据、文件以及内部 API。
-
-## 为什么选择 Hive
-
-随着模型不断进步，智能体能力的上限也随之提高——但它们的可靠性和生产价值取决于围绕模型的运行支撑层（harness）。Hive 专注于运行真实的业务流程，而非通用智能体。Hive 颠覆了这一范式，不再要求你手动接线一张工作流图、定义每一次智能体交互并被动地处理故障：**你描述想要的结果，Queen 先亲自完成工作，然后培育出一个蜂群来对其进行规模化**——这是一种结果驱动、自适应的体验，并配备一套易用的工具与集成。
+## 工作原理
 
 ```mermaid
 flowchart LR
-    GOAL["Describe Outcome"] --> PILOT["Queen Pilots\n(does one unit herself)"]
-    PILOT --> SYS["Systematize\n(skill + playbook)"]
-    SYS --> FAN["Fan Out\n(spawn worker clones)"]
-    FAN --> CONV["Converge\n(shared tracker ledger)"]
-    CONV --> CHECK{{"Done?"}}
-    CHECK -- "Yes" --> DONE["Deliver Result"]
-    CHECK -- "No" --> FAN
+    You(["你"]) -->|"描述想要的结果"| Queen["Queen<br/>（持久存在的智能体）"]
+    Queen -->|"提议组建蜂群，<br/>由你确认"| Pilot["试点<br/>（由 Queen 亲自完成一个单元）"]
+    Pilot -->|"把方法记录下来"| Skill["技能 + playbook"]
+    Skill -->|"run_worker / run_playbook"| W["Worker 克隆体<br/>并行运行"]
+    W -->|"tracker_upsert"| T[("Tracker<br/>共享 SQLite")]
+    T -->|"SQL：哪些已完成，<br/>哪些还剩下"| Queen
+    Queen -->|"经过核验的答案"| You
 
-    GOAL -.- V1["Natural Language"]
-    PILOT -.- V2["Prove the path"]
-    SYS -.- V3["Repeatable process"]
-    FAN -.- V4["Parallel at scale"]
-    CONV -.- V5["Resume by construction"]
-    DONE -.- V6["Reliable outcomes"]
-
-    style GOAL fill:#ffbe42,stroke:#cc5d00,stroke-width:2px,color:#333
-    style PILOT fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
-    style SYS fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style FAN fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CONV fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
-    style CHECK fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style DONE fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#fff
-    style V1 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V2 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V3 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V4 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V5 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
-    style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### 工作原理
+Hive 只有**一个执行原语**：智能体循环（agent loop）。Queen 就是一个智能体循环；每个 worker 都是它的克隆体，各自拥有自己的任务、更精简的工具集和严格的预算。编排是一次工具调用，而不是一张编译好的图：
 
-1. **[描述想要的结果](../key_concepts/goals_outcome.md)** → 用平实的语言说出你想要什么；一个 CEO 式的路由器会挑选出合适的 [Queen](../key_concepts/queen.md)
-2. **Queen 试点** → 她亲自完成其中一个工作单元，验证可行的路径并将其记录到共享的 tracker 中
-3. **[系统化](../key_concepts/improvement.md)** → 她将已验证的流程提炼为一个技能 + 操作手册（playbook）——一个可复用的流程
-4. **[扇出](../key_concepts/colony.md)** → `run_worker` 生成并行运行并汇报结果的 [worker 克隆体](../key_concepts/worker_agent.md)
-5. **汇聚与监控** → worker 将结果写入 tracker；Queen 通过 SQL 进行校验，并配有实时指标、预算强制约束和崩溃安全的恢复
+- **`run_worker`** 把任务扇出后立即返回，所以 worker 运行期间 Queen 仍能继续和你对话。默认最多同时运行四个，其余排队等待。每个 worker 完成后，它的报告会作为新的一轮消息出现在 Queen 的对话中。
+- **Tracker** 是蜂群的共享状态。Queen 定义表结构以及 worker 可以写入哪些列；worker 每处理一个工作单元就 upsert 一行；Queen 用 SQL 查看进度。它保存在磁盘上，路径为 `~/.hive/colonies/<name>/tracker/tracker.db`。
+- **`run_playbook`** 对每一行执行一套已验证的流程：带退避的重试、限流通道，以及存放反复失败行的死信列表。由于“还剩哪些”始终是对 tracker 的一次实时查询，重新运行 playbook 就能从中断处继续。
+
+**[架构概述](../architecture/README.md)** 介绍了智能体循环、工具接口、记忆、人工监督，以及状态如何在崩溃后保留下来。
+
+<table>
+  <tr>
+    <td width="50%"><img alt="主页：Queen 与蜂群的蜂巢地图" src="../assets/readme/home.webp" /><br /><sub><b>主页。</b>你的所有 Queen 及其蜂群都在一张地图上。描述一个任务，再选择由谁接手。</sub></td>
+    <td width="50%"><img alt="蜂群中并行运行的 worker" src="../assets/readme/workers.webp" /><br /><sub><b>Worker。</b>每个工作单元对应一个 worker，各有自己的任务和预算，全部向 Queen 汇报。</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="蜂群的 tracker 正逐步填入结果" src="../assets/readme/tracker.webp" /><br /><sub><b>Tracker。</b>worker 一完成，结果就写入共享表，可随时查询、导出，或从中恢复运行。</sub></td>
+    <td width="50%"><img alt="Queen 的最终答案，附带标明来源的表格和图表" src="../assets/readme/result.webp" /><br /><sub><b>结果。</b>经过核验的答案直接出现在对话中，附带来源和图表。</sub></td>
+  </tr>
+</table>
+
+## 功能一览
+
+**有分工、有记忆的 Queen。** Hive 自带 13 位各有人设的 Queen：其中 6 位默认启用（增长、RevOps、内容、线索获取、主动外联、品牌与设计），其余可以从 Org Chart（组织架构图）中雇用，你也可以创建自己的 Queen。每位 Queen 都有按范围隔离的 Markdown 记忆，由反思步骤写入；相关的历史对话也会被自动召回到她的上下文中。
+
+**内置工具，进程内运行。** Shell 命令和后台任务、文件编辑、快速代码搜索、PDF、附件和图片、网页抓取、图表（ECharts 和 Mermaid）、CSV 文件，以及借助 Hive LLM 生成图像。这些工具直接在 Hive 内部运行，不需要启动任何工具服务器。
+
+**让智能体操控你的浏览器。** 借助 Hive Browser Bridge 扩展，智能体可以操作你自己的 Chrome，你已有的登录状态直接可用。每个 worker 都有自己的标签页组。
+
+**技能。** 采用开放的 [Agent Skills](https://agentskills.io) 格式编写的可复用指令。Hive 自带一套技能；某个流程一旦被验证可行，Queen 就会编写新的技能；你可以在 Skills Library（技能库）中管理它们。
+
+**支持任意 MCP server。** 用 `hive mcp add` 添加外部 MCP server 后，它的工具会和内置工具一起纳入同样的允许列表。[`tools/`](../../tools/src/aden_tools/tools) 中的完整集成目录（GitHub、Gmail、HubSpot、Slack、Notion 等等）就是作为一个 MCP server 运行的；详见 [docs/tools.md](../tools.md)。
+
+**你不在时也能运行。** 蜂群可以通过 cron、固定间隔或 webhook 触发器自行调度。**Sentinel** 可以按蜂群单独开启，它会在 Queen 停下时介入：要么督促她继续，要么通过 Hive 收件箱、Telegram 或 Slack 升级给你，你回复后她会接着执行。
+
+**经得起崩溃。** 每个智能体都会把状态持久化到磁盘，崩溃或重启后能从中断处精确恢复。较大的工具结果会写入文件，而不是塞满上下文；长会话会自动压缩；卡住或陷入循环的轮次会被检测出来；每个 worker 都在严格的工具调用预算内运行。
+
+**任意模型。** [LiteLLM](https://docs.litellm.ai/docs/providers) 支持的模型都可以使用，包括 OpenAI、Anthropic、Gemini、OpenRouter、Hive LLM、任何兼容 OpenAI 的端点，以及通过 Ollama 运行的本地模型。worker 可以使用与其 Queen 不同的模型，纯文本模型也能借助视觉回退机制“看到”图片。
+
+## Hive 适合你吗？
+
+当难点不再是模型本身，而是围绕模型的一切时，Hive 就派上用场了：
+
+- 流程中有**大量相似的工作单元**，例如销售线索、客户账户、工单、代码仓库或文档，你希望它们并行处理，并且处理方式保持一致。
+- 工作需要**持续运行数小时或按计划定时运行**，并且必须能扛过重启。
+- 结果需要能被**核对、查询和审计**，而不只是在聊天里看一眼。
+- 关键决策始终**由人来把关**。
+
+如果只是单个提示词或一次性脚本，用普通的智能体更简单。
 
 ## 文档
 
-- **[开发者指南](../developer-guide.md)** - 面向开发者的综合指南
-- [入门指南](../getting-started.md) - 快速设置说明
-- [配置指南](../configuration.md) - 所有配置选项
-- [架构概述](../architecture/README.md) - 系统设计与结构
+- [入门指南](../getting-started.md)：更详细的安装配置说明
+- [架构概述](../architecture/README.md)：蜂群、智能体循环、工具和记忆如何协同工作
+- 核心概念：[蜂群](../key_concepts/colony.md)、[Queen](../key_concepts/queen.md)、[worker](../key_concepts/worker_agent.md)、[协同](../key_concepts/coordination.md)、[智能体循环](../key_concepts/the_loop.md)、[目标与结果](../key_concepts/goals_outcome.md)、[蜂群如何持续改进](../key_concepts/improvement.md)
+- [工具](../tools.md)：内置工具、MCP server 和集成目录
+- [配置](../configuration.md)与[开发者指南](../developer-guide.md)
+- [docs.adenhq.com](https://docs.adenhq.com/)：在线文档
 
-## 贡献
-我们欢迎来自社区的贡献！我们尤其希望获得为框架构建工具、集成和示例智能体方面的帮助（[查看 #2805](https://github.com/aden-hive/hive/issues/2805)）。如果你有兴趣扩展它的功能，这里是最佳的起点。请参阅 [CONTRIBUTING.md](../../CONTRIBUTING.md) 了解相关指南。
+## 常见问题
 
-**重要：** 请在提交 PR 之前先获得 Issue 的分配。在 Issue 下评论以认领它，维护者会将其分配给你。包含可复现步骤和提案的 Issue 会被优先处理。这有助于避免重复工作。
+**Hive 支持哪些模型？**
+[LiteLLM](https://docs.litellm.ai/docs/providers) 支持的所有提供商，以及任何兼容 OpenAI 的端点。quickstart 脚本可以配置常用的几种，包括 Claude Code、OpenAI Codex 等编程订阅；其余的请参阅 [docs/configuration.md](../configuration.md)。
 
-1. 找到或创建一个 Issue 并获得分配
-2. Fork 仓库
-3. 创建你的功能分支（`git checkout -b feature/amazing-feature`）
-4. 提交你的更改（`git commit -m 'Add amazing feature'`）
-5. 推送到分支（`git push origin feature/amazing-feature`）
-6. 创建一个 Pull Request
+**可以用本地模型运行吗？**
+可以。在 quickstart 脚本中选择 Ollama；或者在本地运行 Ollama，并把模型设为 `ollama/llama3` 之类。
 
-## 社区与支持
+**它和其他智能体框架有什么不同？**
+大多数框架要你设计一张智能体图，并手动连接各个智能体的输入和输出。Hive 只有一种智能体：Queen 是一个智能体循环，每个 worker 都是它的克隆体。编排在运行时通过工具调用完成，协同则依靠一个共享的 SQL tracker，而不是沿着图的边传递消息。持久化、恢复、预算、上下文压缩、人工监督这些运行支撑层（harness）能力都内建在这唯一的循环中，因此每个智能体都天然具备。
 
-我们使用 [Discord](https://discord.com/invite/MXE49hrKDk) 进行支持、功能请求和社区讨论。
+**我的数据存放在哪里？**
+就在你自己的机器上。会话、蜂群、tracker 和记忆都是 `~/.hive`（或 `HIVE_HOME` 指向的目录）下的普通文件，API key 也加密存放在那里。
 
-- Discord - [加入我们的社区](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [公司主页](https://www.linkedin.com/company/teamaden/)
+**如何控制成本？**
+每个 worker 的轮次和工具调用次数都有硬性上限，卡住的 worker 会自行停止，并发数也有上限。每次模型调用都会计量用量。目前还不支持按金额设置支出上限。
 
-## 加入我们的团队
+**智能体能使用我自己的工具和 API 吗？**
+可以：通过内置的 shell 和浏览器，通过你添加的任意 MCP server，还可以通过技能把你的操作流程教给它们。
 
-**我们正在招聘！** 加入我们的工程、研究和市场推广（go-to-market）团队。
+**Hive 是开源的吗？**
+是的，采用 [Apache License 2.0](../../LICENSE) 许可证。
 
-[查看开放职位](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
+## 参与贡献
+
+欢迎贡献，尤其是工具、集成和技能方面（[#2805](https://github.com/aden-hive/hive/issues/2805)）。请先阅读 [CONTRIBUTING.md](../../CONTRIBUTING.md)，并在提交 pull request 之前先认领 issue：在 issue 下留言，维护者会把它分配给你。附带复现步骤或改进方案的 issue 会优先处理。
+
+## 社区
+
+- [Discord](https://discord.com/invite/MXE49hrKDk)：提问、提功能需求和参与讨论
+- [X / Twitter](https://x.com/aden_hq) 和 [LinkedIn](https://www.linkedin.com/company/teamaden/)：获取最新动态
+- [HoneyComb](http://honeycomb.open-hive.com/)：一个追踪 AI 智能体正在自动化哪些工作的社区市场。你可以用计算代币（而不是真钱）对某项工作做多或做空。
+
+**我们正在招聘**工程、研究和市场推广（go-to-market）岗位。[查看开放职位](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)。
 
 ## 安全
 
-有关安全问题，请参阅 [SECURITY.md](../../SECURITY.md)。
+如需报告安全漏洞，请参阅 [SECURITY.md](../../SECURITY.md)。
 
 ## 许可证
 
-本项目采用 Apache License 2.0 许可证 - 详情请参阅 [LICENSE](../../LICENSE) 文件。
-
-## 常见问题（FAQ）
-
-**问：Hive 支持哪些 LLM 提供商？**
-
-Hive 通过 LiteLLM 集成支持 100 多个 LLM 提供商，包括 OpenAI（GPT-4、GPT-4o）、Anthropic（Claude 系列模型）、Google Gemini、DeepSeek、Mistral、Groq、OpenRouter 以及 Hive LLM。只需设置相应的 API 密钥环境变量并指定模型名称即可。针对特定提供商的配置示例，请参阅 [docs/configuration.md](../configuration.md)。
-
-**问：我可以在 Hive 中使用像 Ollama 这样的本地 AI 模型吗？**
-
-可以！Hive 通过 LiteLLM 支持本地模型。只需使用模型名称格式 `ollama/model-name`（例如 `ollama/llama3`、`ollama/mistral`），并确保 Ollama 正在本地运行即可。
-
-**问：Hive 与其他智能体框架有何不同？**
-
-Hive 运行的是**智能体蜂群**，而非单体智能体或手动接线的智能体图。大多数框架要求你编译一张由不同节点和边构成的图；而 Hive 只有一个执行原语——Queen 本身*就是*一个智能体循环，每一个 worker 都是它的[克隆体](../key_concepts/the_loop.md)。编排是运行时的 `run_worker` 扇出，而非编译出来的 DAG，并且蜂群通过一个[共享 tracker 账本](../key_concepts/coordination.md)来协同，而不是数据缓冲区。在这个"一个循环、众多循环"的内核之上，Hive 是一个生产级运行支撑层——崩溃安全的暂停/恢复、成本强制约束、实时可观测性以及带外人机协作——由于只存在一种智能体，这些能力被每个智能体所继承。请参阅[架构概述](../architecture/README.md)。
-
-**问：Hive 是开源的吗？**
-
-是的，Hive 在 Apache License 2.0 许可证下完全开源。我们积极鼓励社区贡献与协作。
-
-**问：Hive 支持人机协作工作流吗？**
-
-支持。Queen 通过 **Sentinel**——一个与账户绑定的 Slack/Telegram 通道——以带外方式升级给人类。智能体循环会暂停（将其状态持久化到磁盘），通知人类，并在对方回复后从中断处精确恢复。由于升级并不是图中的某个节点，蜂群中的任意智能体都可以在任意时刻暂停以等待人类判断，并支持可配置的超时和升级策略。请参阅[架构概述](../architecture/README.md#reliability-is-in-the-primitive)。
-
-**问：Hive 支持哪些编程语言？**
-
-Hive 框架使用 Python 构建。JavaScript/TypeScript SDK 已在路线图中。
-
-**问：Hive 智能体可以与外部工具和 API 交互吗？**
-
-可以。蜂群中的每个智能体都内建了工具访问能力，Hive 通过 MCP 连接到外部 API、数据库和服务——包括 100 多个集成工具，以及通过原生扩展实现的通用计算机操作（Compute Use）和浏览器操作（Browser Use）。由于 Queen 和她的 worker 共享同一个工具界面，你新增的任何一项能力都会对整个蜂群可用。
-
-**问：Hive 的成本控制是如何工作的？**
-
-Hive 提供精细的预算控制，包括支出上限、节流以及自动的模型降级策略。你可以在团队、智能体或工作流级别设置预算，并配有实时成本跟踪和告警。
-
-**问：我在哪里可以找到示例和文档？**
-
-访问 [docs.adenhq.com](https://docs.adenhq.com/) 获取完整的指南、API 参考和入门教程。仓库的 `docs/` 文件夹中也包含文档，以及一份完整的[开发者指南](../developer-guide.md)。
-
-**问：我如何为 Aden 做贡献？**
-
-欢迎贡献！Fork 仓库，创建你的功能分支，实现你的更改，然后提交一个 pull request。详细指南请参阅 [CONTRIBUTING.md](../../CONTRIBUTING.md)。
+Apache License 2.0。详见 [LICENSE](../../LICENSE)。
 
 ## Star 历史
 
@@ -293,12 +194,10 @@ Hive 提供精细的预算控制，包括支出上限、节流以及自动的模
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
  </picture>
 </a>
 
 ---
 
-<p align="center">
-  Made with 🔥 Passion in San Francisco
-</p>
+<p align="center">在旧金山，用 🔥 热情打造</p>
