@@ -1,10 +1,12 @@
-# Hive Architecture: Colonies of Agents
+# Hive architecture
 
-Hive's unit of work is not "an agent," and not "a graph of hand-wired agents." It is a **colony**: a group of specialized agents that operate together to run and scale one business process. A colony has a **Queen** — the persistent, client-facing lead — and however many **worker** agents the work needs. The Queen grows the colony on demand; you never wire it by hand.
+Hive's unit of work is not an agent and not a graph of hand-wired agents. It is a **colony**: a group of agents that together run and scale one business process. A colony has a **queen**, the persistent agent you talk to, and as many **worker** agents as the work needs. The queen grows the colony at runtime; nobody wires it by hand.
 
-The mechanism that makes a colony work is **one loop controlling many loops**. Hive has exactly one execution primitive, the `AgentLoop`. The Queen *is* an AgentLoop. Every worker is a **clone** of that same loop — same tools, same prompt, same model — with a tighter budget and one injected task. There are no graphs, no edges, no nodes, and no shared data buffer. The colony coordinates through four lightweight substrates instead: a fan-out tool, a shared SQLite **tracker**, a persistent **task plan**, and a **reminder hub**. From `core/framework/host/colony_runtime.py`:
+What makes that work is **one loop controlling many loops**. Hive has exactly one execution primitive, the `AgentLoop`. The queen is one. Every worker is another instance of the same class, given one task, a narrower set of tools and a strict budget. There are no graphs, edges or shared data buffers. Agents coordinate through a fan-out tool, a shared SQLite **tracker**, a persistent **task plan**, an **event bus** and a **reminder hub**. In the words of `core/framework/host/colony_runtime.py`:
 
-> *"Each worker is an exact copy of the queen's AgentLoop — same tools, same prompt, same LLM… The ColonyRuntime replaces both AgentHost and ExecutionManager. There are no graphs, no edges, no nodes, no data buffers. Just: spawn N independent clones, let them run, collect results."*
+> *"There are no graphs, no edges, no nodes, no data buffers. Just: spawn N independent clones, let them run, collect results."*
+
+This document explains how those pieces fit. Paths are relative to `core/framework/` unless they start with `tools/` or `frontend/`.
 
 ---
 
@@ -12,207 +14,193 @@ The mechanism that makes a colony work is **one loop controlling many loops**. H
 
 ```mermaid
 flowchart TB
-    User([User])
+    User([You])
 
-    subgraph Colony["🐝 Colony — colonies/&lt;name&gt;/"]
+    subgraph Colony["Colony: ~/.hive/colonies/&lt;name&gt;/"]
         direction TB
-
-        subgraph Queen["Queen — a persistent AgentLoop"]
-            Q_ID["Identity / persona (YAML)"]
-            Q_LOOP["Event loop (long-lived)"]
-            Q_PLAN["Task plan (file-backed)"]
+        Queen["Queen<br/>long-lived AgentLoop<br/>persona, memory, task plan"]
+        subgraph Workers["Workers: short-lived AgentLoops"]
+            W1["worker"]
+            W2["worker"]
+            W3["worker …"]
         end
-
-        subgraph Workers["Worker clones — ephemeral AgentLoops"]
-            W1["worker 1"]
-            W2["worker 2"]
-            W3["worker N"]
-        end
-
-        Tracker[("Tracker (tracker.db)<br/>shared SQLite ledger")]
-        Reminders["Reminder hub<br/>(fleet + tracker + metacognition nudges)"]
+        Tracker[("Tracker<br/>tracker/tracker.db")]
+        Hub["Reminder hub"]
     end
 
-    subgraph Escalation["Out-of-band"]
-        Sentinel["Sentinel<br/>(Slack / Telegram)"]
+    subgraph Tools["Tool surface"]
+        Harness["Built-in tools<br/>(in-process)"]
+        MCP["External MCP servers"]
+        Browser["Your Chrome<br/>(Hive Browser Bridge)"]
     end
 
-    User -->|"chat"| Q_LOOP
-    Q_LOOP -->|"run_worker (fire-and-forget)"| W1
-    Q_LOOP -->|"run_worker"| W2
-    Q_LOOP -->|"run_worker"| W3
-    W1 -->|"report_to_parent → SUBAGENT_REPORT"| Q_LOOP
-    W2 -->|"report_to_parent"| Q_LOOP
-    W3 -->|"report_to_parent"| Q_LOOP
+    Sentinel["Sentinel<br/>Hive inbox · Telegram · Slack"]
 
-    Q_LOOP <-->|"DDL / register / query (SQL)"| Tracker
-    W1 -->|"tracker_upsert"| Tracker
-    W2 -->|"tracker_upsert"| Tracker
-    W3 -->|"tracker_upsert"| Tracker
-
-    Reminders -.->|"&lt;system-reminder&gt; injects"| Q_LOOP
-    Q_LOOP -.->|"escalate (park)"| Sentinel
-    Sentinel -.->|"human reply resumes loop"| Q_LOOP
+    User <-->|"chat"| Queen
+    Queen -->|"run_worker / run_playbook"| Workers
+    Workers -->|"report_to_parent"| Queen
+    Queen <-->|"tracker_sql / tracker_query"| Tracker
+    Workers -->|"tracker_upsert"| Tracker
+    Hub -.->|"&lt;system-reminder&gt;"| Queen
+    Queen --- Tools
+    Workers --- Tools
+    Sentinel -.->|"watches when she parks:<br/>nudge or escalate"| Queen
+    Sentinel -.-> User
 ```
 
-The Queen fans out worker clones with a single tool call and stays unblocked. Workers do their piece, write rows to the shared tracker, and report back — each report arrives in the Queen's own loop as a `[WORKER_REPORT]` turn. Nothing is a compiled artifact; the topology is whatever the Queen calls into being at runtime.
+The queen fans workers out with one tool call and stays responsive. Workers do their piece, write rows to the tracker and report back; each report arrives in the queen's own conversation as a new turn. Nothing is compiled ahead of time: the topology is whatever the queen creates at runtime.
 
 ---
 
 ## The colony
 
-A **colony** is Hive's unit of deployment. On disk it is a single directory, `colonies/<name>/`, that holds everything the colony shares: its worker spec (`worker.json`), its tracker ledger (`data/tracker.db`), and its task plan. A colony is:
+A colony is a directory under `~/.hive/colonies/<name>/` (or under `HIVE_HOME`) that holds everything its agents share (`config.py`, `colony_dir`):
 
-- **Portable** — export/import as a tarball (`POST /api/colonies/import`), so a working colony can be handed to another user or machine.
-- **Schedulable** — cron triggers fire directly into the owning Queen's session, so a colony can wake itself on a clock.
-- **Long-lived** — the Queen persists across sessions; workers come and go as the work demands.
+| Path | What it holds |
+| --- | --- |
+| `worker.json` | The worker spec the colony's workers are cloned from |
+| `tracker/tracker.db` | The tracker: the colony's shared SQLite ledger |
+| `colony.db` | Bookkeeping, such as the playbook run log |
+| `skills/` | Skills the queen wrote for this colony |
+| `playbooks/` | Saved playbook scripts (`<name>.play.py`) |
+| `triggers.json` | Scheduled and webhook triggers |
+| `queens/<queen>/sessions/<id>/` | The queen's sessions in this colony: conversation, events, task plan |
+| `workers/<id>/` | Each worker's run state |
 
-Everything below is *how* a colony runs.
+Colonies can be **scheduled**: `set_trigger` adds a cron, interval or webhook trigger that wakes the colony queen with a task (`host/triggers.py`). Timers fire while the colony is loaded; ticks missed while it wasn't are reported when it loads. A colony can be **imported** from a tarball (`POST /api/colonies/import`).
 
 ## One primitive: the `AgentLoop`
 
-`AgentLoop` (`core/framework/agent_loop/agent_loop.py`) is a multi-turn streaming LLM loop and the only execution unit in Hive. Each turn: stream the model's response, execute any tool calls (in a parallel batch), feed the results back, and either terminate (judge-gated or on a clean text-only turn) or iterate again. That single class runs everything:
+`AgentLoop` (`agent_loop/agent_loop.py`) is a multi-turn streaming LLM loop and Hive's only execution unit. Each turn it streams the model's reply, executes the tool calls (tools marked concurrency-safe run in parallel, up to ten at a time; the rest run in order), feeds the results back and decides whether to continue.
 
-- **The Queen** is one `AgentLoop` configured for long-running conversational oversight — effectively unbounded iterations, a large context window, a generous tool budget.
-- **Each worker** is a **clone** of that loop with a tighter `LoopConfig`. The worker profile (`agents/queen/worker_definition.py`) is the single source of truth: **3 work iterations + 1 grace iteration**, a per-turn tool-call budget, and a **lifetime** tool-call budget so a worker can never fan out unboundedly. The grace iteration is a guaranteed wrap-up turn restricted to `report_to_parent` / `task_update` / `tracker_upsert`, so a worker that exhausts its budget still reports instead of dying silently.
+- **The queen** is configured for long-running conversation: effectively unlimited turns, a large context window, a 30-call-per-turn tool budget (50 once she runs a colony). Her turn ends when she replies without calling a tool; the loop then **parks** until you answer.
+- **A worker** gets a worker system prompt with no persona (`agents/queen/worker_definition.py`), a subset of the queen's tools without the queen-only ones, and optionally a different model (`worker_llm` in configuration). Its budget is fixed: **3 working turns plus 1 grace turn**, 30 tool calls per turn (hard stop at 90) and 200 over its lifetime, which the colony can adapt. The grace turn may only call `report_to_parent`, `tracker_upsert` and `task_update`, so a worker that runs out of budget still reports instead of vanishing.
 
-A worker is deliberately narrow: no persona, no memory of prior runs, no escalation channel, no ability to spawn or delegate. It reads its task, uses its tools, and calls `report_to_parent`. Fail-fast is the contract — if a worker is blocked, it persists partial state to the tracker and reports `failed`/`partial` rather than looping on workarounds.
+A worker is deliberately narrow. It has no memory of earlier runs, can't spawn other workers and can't talk to the user. It reads its task, does the work and calls `report_to_parent` with `success`, `partial` or `failed`. If it's blocked, it saves what it has to the tracker and reports, rather than looping on workarounds.
+
+Agents that declare success criteria are checked by a judge before a turn is accepted (`agent_loop/internals/judge_pipeline.py`); a `RETRY` verdict comes back as a `[Judge feedback]` message the agent sees on its next turn. The queen skips the judge (you are her judge); workers end when they report.
 
 ## One loop controls many
 
-In the **colony phase**, the Queen delegates with a single tool, `run_worker` (`tools/queen_lifecycle_tools.py`):
+In a colony the queen delegates with one tool, `run_worker` (`tools/queen_lifecycle_tools.py`):
 
 ```
-run_worker(tasks=[{"task": ..., "data": {...}}, ...], timeout=600)
+run_worker(tasks=[{"task": "...", "data": {...}}, ...], timeout=600)
 ```
 
-- **Fire-and-forget.** `run_worker` returns immediately. Workers run in the background; the Queen stays unblocked and can keep talking to the user or dispatch more work.
-- **Reports come home as turns.** When a worker finishes it emits a `SUBAGENT_REPORT` event, which the Queen sees as a `[WORKER_REPORT]` user turn in her own conversation — status, one-paragraph summary, optional structured payload. This is how "many loops" report to "one loop" without any shared call stack.
-- **Concurrency is scheduled, not manual.** The colony admits all N tasks; up to `max_concurrent_workers` (default 4, `HIVE_MAX_CONCURRENT_WORKERS`) run at once and the rest queue, starting as peers terminate. The Queen sees the split (`running_now` / `queued` / `batch_remaining`).
-- **Timeouts are soft then hard.** `timeout` (default 600s) is a soft deadline that injects a "report now" nudge into each still-running worker; a derived hard deadline force-stops stragglers. Force-stopped or timed-out workers can be resumed (`resume_worker_ids`, optional `guidance`) from their saved conversation.
+- **It returns immediately.** Workers run in the background while the queen keeps talking to you or dispatches more work.
+- **Reports come home as turns.** A finished worker emits a `SUBAGENT_REPORT` event, which the queen receives as a `[WORKER_REPORT]` message: status, a short summary and an optional structured payload.
+- **Concurrency is scheduled.** All tasks are admitted; up to four run at once (`HIVE_MAX_CONCURRENT_WORKERS`) and the rest queue. The queen sees how many are running, queued and left.
+- **Timeouts are soft, then hard.** At `timeout` each running worker is told to report now; at the hard deadline (four times the soft one, at least ten minutes more, at most an hour) stragglers are stopped. Stopped workers can be resumed from their saved conversation with `resume_worker_ids` and optional guidance.
 
-Workers cannot see, message, or wait on each other. Coordination is entirely through the shared substrates below.
+Workers can't see or message each other. Everything they share goes through the substrates below.
 
-## Coordination substrates (what replaced edges and the data buffer)
+## Coordination: what replaces edges and data buffers
 
-### 1. The tracker — a shared SQLite blackboard
+### The tracker
 
-Every colony has exactly one `tracker.db`, identified by an immutable **`ColonyBinding {name, dir, tracker_db}`** (`host/colony_binding.py`). The binding is threaded to the Queen through her tool-execution context and to workers through their `input_data`, so both sides always resolve the *same* database. Tools that have no binding **refuse** the call — they never synthesize a path (this is what prevents split-brain "phantom colony" directories).
+Every colony has one `tracker.db`, identified by an immutable `ColonyBinding {name, dir, tracker_db}` (`host/colony_binding.py`). The binding reaches the queen through her tool context and the workers through their task input, so both always open the same database; a tracker tool without a binding refuses the call rather than guessing a path.
 
-The tracker is the colony's structured shared state:
+- The **queen** creates tables with `tracker_sql` and declares which columns workers may write with `tracker_register_writable`.
+- **Workers** record results with `tracker_upsert`, one row per unit of work.
+- The **queen** checks progress with `tracker_query` (read-only SQL). "What's done and what's left" is always a fresh query, never state a crash could lose.
 
-- The **Queen** sets up schema (`tracker_sql` for DDL) and declares which columns workers may write (`tracker_register_writable`).
-- **Workers** record findings with `tracker_upsert` — one row per unit of work.
-- The **Queen** validates progress with `tracker_query` (SELECT-only). "What's done / what's left" is always a fresh SQL query, never in-memory state that a crash could lose.
+### The task plan
 
-### 2. The task plan — the Queen's persistent spine
+Each session has a file-backed plan (`tasks/`, stored as the session's `tasks.json`) that the queen maintains with `task_create`, `task_update`, `task_list` and `task_get`. You see it as the **Action Plan**, it survives reloads, and it outlives any single worker run.
 
-A file-backed task system (`core/framework/tasks/`) gives the Queen a durable, structured plan for every conversation (`task_create` / `task_update` / `task_list`). It is visible to the user, editable on the fly, and survives session reload — the plan outlives any single agent run. Colonies can ship a template task list the Queen adopts on entry, so recurring workflows always start from the same plan.
+### The event bus
 
-### 3. The event bus
+`host/event_bus.py` carries worker reports back to the queen (`SUBAGENT_REPORT`) and streams the live transcript to the UI (`CLIENT_*` events over server-sent events).
 
-`host/event_bus.py` is the colony's pub/sub backbone: `SUBAGENT_REPORT` carries worker results back to the Queen, and `CLIENT_*` events stream the live transcript to the UI.
+### The reminder hub
 
-### 4. The reminder hub — engineered attention
+The loop stays coherent over long, high-fan-out sessions because the framework injects short `<system-reminder>` context at fixed points (`agent_loop/reminders.py`): session start, each user message, after tool use, tool-budget checkpoints, before and after compaction, idle ticks while parked, and stalled streams. Sources include the current task plan, in-flight workers (so she doesn't dispatch the same work twice), tracker snapshots, the colony's worker fleet, a nudge to turn a proven pilot into a playbook, relevant past conversations, the tools she can load on demand and the skills available to her.
 
-The single loop stays coherent because the framework continuously injects advisory `<system-reminder>` context at well-known points (`agent_loop/reminders.py`, `ReminderHub` / `ReminderSource` / `ReminderPoint`):
+## From chat to colony: execute first, then systematize
 
-- **Lifecycle points** — `SESSION_START`, `POST_TOOL_USE`, `TOOL_BUDGET_CHECKPOINT`, `PRE_COMPACT`, `POST_COMPACT`, `STOP`.
-- **Temporal points** — `IDLE_TICK` (a background ticker can nudge even while the loop is parked) and `STREAM_STALLED` (reactive, when the stream watchdog trips).
+A queen doesn't design a colony up front. She has two phases (`QUEEN_PHASES` in `tools/queen_lifecycle_tools.py`):
 
-Sources keep the Queen fleet-aware and disciplined: `active_workers_reminder` (re-surfaces in-flight workers when the user re-engages, preventing duplicate dispatch), `tracker_snapshot_reminder` and `colony_worker_snapshot_reminder` (surface tracker tables and the live worker fleet at tool-budget checkpoints), `colony_parallel_nudge` (after a pilot, suggests factoring the protocol into a playbook), `idle_nudge`, and `tool_skill_reminders` (lists the available tool/skill surface by name and how to load full schemas on demand, instead of baking it all into a static prompt). This is engineered metacognition — the framework managing the model's attention across a long-running, high-fan-out session.
+1. **Independent.** She is a standalone agent doing the work herself. When a task turns out to be parallel, recurring or long-running, she calls `suggest_colony`.
+2. **Colony.** You confirm in the Create Colony dialog, and the chat becomes the colony queen's session. A short chat is carried over verbatim; a long one is summarized first. She continues there with the colony tools: `run_worker`, the tracker, `write_skill`, `run_playbook` and triggers.
 
-## The maturation arc: execute first, then systematize
+The defining move is **execute first, then systematize**. The queen does one unit of the work end to end herself, the **pilot**, and records it in the tracker. Then she writes the proven protocol down as a **skill** and runs a **playbook** (`tools/playbook_tools.py`, `host/playbook/runner.py`): a script that dispatches workers over the tracker's rows. It retries with backoff, supports rate-limited lanes and a circuit breaker, and lists rows that keep failing in a dead letter. It owns no durable state, because the tracker is the source of truth, so **re-running a playbook resumes it**. Playbooks run up to 8 workers at once by default (32 at most) and work best when each worker takes a chunk of rows.
 
-A Queen doesn't design a colony up front. She grows into one across two phases (see `agents/queen/nodes/__init__.py`):
+## Queens
 
-1. **Independent** — the Queen is a standalone conversational agent doing the work herself. She has `suggest_colony` to propose scaling up when a task turns out to be parallel, recurring, or long-running.
-2. **Colony** — the Queen forks a headless worker spec to disk and enters fan-out mode. Forking is expensive (it ends the interactive chat and the colony runs unattended), so the commit point is an explicit user confirmation in the frontend popup rather than something the Queen decides alone.
+Queens are personas, not interchangeable orchestrators. Thirteen ship with Hive as YAML profiles (`agents/queen/queen_defaults/*.yaml`): Growth, RevOps, Content, Lead Generation, Outbound, Brand & Design, Technology, Operations, Product Strategy, Market Research, Finance, Legal and Talent. Each brings traits, background and behavior triggers to her system prompt, plus a default set of tool categories for her role. Six are active out of the box; the rest are hired from the Org Chart, and you can create your own.
 
-The defining move is **execute-first-then-systematize**. The Queen does one unit of the work end-to-end herself — the **pilot** — and records the result in the tracker. Then she factors the proven protocol into a reusable **skill + playbook** and calls `run_playbook` — "the convergence spine" (`host/playbook/runner.py`): a deterministic runner that owns no durable state, treats the tracker as the source of truth, dispatches a worker clone per row (with retry/backoff, lanes, and a dead-letter path), and — because "what's left" is always a fresh tracker query — makes **re-running a playbook resume by construction**.
+You choose which queen takes a request. (An LLM classifier still exists server-side as a fallback for sessions created without a queen.)
 
-## Queens as identities
+## The tool surface
 
-Queens are not interchangeable orchestrators; they are personas. Hive ships **13 YAML-backed Queens** (`agents/queen/queen_defaults/*.yaml` — sales, growth, legal, finance, talent, technology, operations, product strategy, brand & design, content, market research, outbound, lead-gen), each with traits, background, and behavior triggers injected into the system prompt. An LLM **CEO-style router** picks the best-matching Queen for each new request.
+Agents only ever see ordinary function calls, but those come from three places.
 
-Each Queen carries **Queen Memory v2** (`agents/queen/queen_memory_v2.py`, `reflection_agent.py`, `recall_selector.py`): scoped markdown memory files under `~/.hive/memories/` (global, per-colony, per-queen), written through a cooldown-gated reflection agent and retrieved by a recall selector — not a vector store.
+**Built-in tools run in-process.** `tools/harness_tools.py` registers Hive's own tools inside the host, grouped as `terminal-tools` (shell, background jobs, ripgrep and glob search), `files-tools`, `chart-tools` (ECharts and Mermaid), `memory-tools` (conversation search) and `hive_tools` (attachments, PDFs, web scraping, CSV, image generation and a few more). They start with no subprocesses.
+
+**External MCP servers** are registered with `hive mcp add` or `hive mcp install` and stored in `~/.hive/mcp_registry/installed.json` (`loader/mcp_registry.py`). Their tools join the same allowlists as the built-ins. The full `aden_tools` integration catalog in `tools/` runs this way; see [docs/tools.md](../tools.md).
+
+**Gating.** What an agent can call is decided by tool **categories** (`agents/queen/queen_tools_defaults.py`), each queen's role defaults and per-queen and per-colony allowlists you edit in the Skills Library's MCP Tools tab. A small always-on set is loaded up front; everything else appears in a manifest the agent loads on demand with `search_tools`, which keeps prompts short.
+
+**The browser** is your own Chrome. The Hive Browser Bridge extension (`tools/browser-extension/`) connects to a long-lived bridge process (`tools/src/gcu/bridge_host.py`), and agents drive it through the `hive-browser` CLI from the terminal. The in-process `browser_setup` tool makes the browser discoverable and gateable. Each worker gets its own tab group in the same Chrome profile, so your logins carry over.
+
+**Images.** Models that support vision see screenshots and attachments directly; on APIs that can't carry images inside a tool result, they're moved into the next user message. Text-only models get a caption from a configured vision model instead (`llm/capabilities.py`, `agent_loop/internals/vision_fallback.py`).
+
+## Memory
+
+A queen remembers in three ways, all of them plain files:
+
+- **Reflection.** Every few turns a reflection step writes durable notes as markdown under `~/.hive/memories/`, scoped globally or to the queen (`agents/queen/queen_memory_v2.py`, `reflection_agent.py`). Before each turn a selector picks the notes relevant to your message and injects them as a reminder (`recall_selector.py`).
+- **Past conversations.** Relevant excerpts of earlier sessions are found by keyword search over the queen's history, or the colony's, and injected automatically (`tools/src/memory_tools/recall.py`). The queen can also search that history herself with `search_messages`.
+- **Timeline** (opt-in, the `memory_timeline` flag). Events, facts and plans you mention are extracted once per session with their dates resolved, so she can answer *when* and *how often* questions with `search_timeline` (`agents/queen/timeline.py`).
+
+## Skills
+
+A skill is a `SKILL.md` package in the open [Agent Skills](https://agentskills.io) format (`skills/`). Hive ships default and preset skills; queens and colonies have their own skill directories; and a colony queen turns a proven protocol into a colony skill with `write_skill`, which her workers then load from the catalog. Foundation skills for the browser, terminal and charts are activated automatically when an agent has those tools.
+
+## Human in the loop
+
+- **Questions.** Any time she needs a decision, the queen asks with `ask_user`; her loop parks until you answer.
+- **Commit points.** Turning a chat into a colony always needs your confirmation.
+- **Sentinel**, opt-in per colony (`sentinel/`), keeps a colony moving while you're away. When the queen parks, a classifier decides whether to nudge her on, mark the work done or escalate to you through the Hive inbox, Telegram or Slack; your reply resumes her.
+- **Workers escalate to the queen**, never to you directly, through the `escalate` tool.
 
 ## Reliability is in the primitive
 
-Because every actor is the same loop, the harness features live in one place and every agent inherits them:
+Because every agent is the same loop, these live in one place and every agent has them:
 
-- **Park / resume.** A loop persists a cursor to disk and parks when it needs something — `ASK_USER`, `CREDENTIAL_FORM`, `COLONY_SUGGESTION`, `AWAITING_QUEEN`, `USER_STOPPED`, `COLD_INTERRUPTED` (mid-turn when the runtime died), `LLM_ERROR`, `DOOM_LOOP`. Disk is the source of truth, so a crash or restart resumes exactly where it left off (`internals/cursor_persistence.py`).
-- **Context management.** Structure-preserving compaction plus the tool-result **pointer/spillover pattern** (below) keep long sessions inside the context budget without losing information.
-- **Stall & doom-loop detection.** A TTFT/inter-event stream watchdog plus n-gram similarity checks catch stuck turns and repeated tool calls.
-- **Judge-gated termination.** A turn only "accepts" when the judge pipeline (below) is satisfied.
-- **Human-in-the-loop is out-of-band.** Escalation isn't a node in a graph — the Queen `escalate`s to a human through **Sentinel** (`internals/sentinel_tool.py`, `core/framework/sentinel/`), an account-bound Slack/Telegram channel. The loop parks; a human reply is injected and the loop resumes.
+- **Park and resume.** A loop saves its position to disk whenever it waits: on a question, a credential form, a colony suggestion, a stop, an error or a crash mid-turn. Disk is the source of truth, so a restart resumes exactly where it stopped (`agent_loop/internals/cursor_persistence.py`).
+- **Large tool results go to files.** Any result over 30,000 characters (configurable) is saved as `<tool>_<n>.txt`; the conversation keeps a preview, the file's path and a hint to search it with the terminal tools (`agent_loop/internals/tool_result_handler.py`).
+- **Compaction.** As a session nears its context budget, older tool results are cleared to point at their saved files, then the oldest turns are summarized by the model, while the most recent turns stay intact (`agent_loop/internals/compaction.py`).
+- **Stall and loop detection.** A stream watchdog catches turns that stop producing output; similarity checks and tool-call fingerprints catch an agent repeating itself (`agent_loop/internals/stall_detector.py`).
+- **Budgets.** Per-turn and lifetime tool-call budgets, worker turn limits and concurrency caps bound what any agent can do.
 
----
+## The server and the UI
 
-## Tool result truncation and the pointer pattern
+`hive serve` (and `hive open`, which also opens a browser) runs an aiohttp server on `127.0.0.1:8787` (`server/app.py`). `POST /api/sessions` opens a queen chat or a colony, or forks a chat into a new colony; messages go to `POST /api/sessions/<id>/chat`; and events stream back over server-sent events. The React frontend (`frontend/`) is served from the same port: the home screen and hive map, queen chats, colony pages (Data, Plan, Automations and Workers), the Org Chart, and the prompt, skill, memory and credentials libraries.
 
-Agents routinely produce or consume tool results that exceed the context budget (web searches, scraped pages, large API responses). Hive uses a **pointer pattern**: large results are persisted to disk and replaced in the conversation with a compact file reference the agent dereferences on demand via `load_data()`.
+## Code map
 
-```mermaid
-flowchart LR
-    ToolResult["ToolResult (content, is_error)"]
-    IsError{is_error?}
-    ToolResult --> IsError
-    IsError -->|"Yes"| PassThrough["Pass through unchanged"]
-    IsLoadData{tool == load_data?}
-    IsError -->|"No"| IsLoadData
-    IsLoadData -->|"Yes"| LDSize{"≤ 30KB?"}
-    LDSize -->|"Yes"| LDPass["Pass through"]
-    LDSize -->|"No"| LDTrunc["Truncate + pagination hint"]
-    IsLoadData -->|"No"| HasSpillDir{"spillover_dir set?"}
-    HasSpillDir -->|"No"| InlineTrunc{"≤ 30KB?"}
-    InlineTrunc -->|"Yes"| InlinePass["Pass through"]
-    InlineTrunc -->|"No"| InlineCut["Truncate in place"]
-    HasSpillDir -->|"Yes"| SaveFile["Save full result to file<br/>(web_search_1.txt)"]
-    SaveFile --> SpillSize{"≤ 30KB?"}
-    SpillSize -->|"Yes"| SmallRef["Full content + [Saved to …]"]
-    SpillSize -->|"No"| LargeRef["Preview + pointer:<br/>load_data(filename)"]
-```
-
-**How it works:**
-
-1. **Every tool result is saved to a file** (when a spillover dir is configured), with short monotonic names (`web_search_1.txt`) to minimize token cost. JSON is pretty-printed so `load_data`'s line-based pagination works. The counter restores from existing files on resume.
-2. **The conversation gets a pointer, not the payload.** Results ≤ 30KB pass through with a `[Saved to '…']` annotation (so the agent can act on them in the same turn); larger results are replaced by a preview plus a `load_data(...)` pointer. The 30KB threshold is deliberately generous to avoid extra round-trips.
-3. **`load_data(filename, offset, limit)`** retrieves full results on demand and is never itself re-spilled (no circular references); an over-large `load_data` result is truncated with a pagination hint.
-4. **Pointers survive compaction.** Structure-preserving compaction keeps tool-call messages (already tiny pointers) and spills freeform prose to numbered `conversation_N.md` files, replacing it with a reference. The agent retains exact knowledge of every tool it called and where each result lives.
-5. **The system prompt lists all spillover files** each turn, so the agent always knows what it can re-read.
-
----
-
-## The judge pipeline
-
-Termination is decided by a three-level judge (`agent_loop/internals/judge_pipeline.py`), evaluated in order:
-
-| Level | Trigger | Mechanism | Verdict |
-| ----- | ------- | --------- | ------- |
-| **Level 0** (short-circuits) | Always | Are required output keys set? Are tool calls still pending? | `RETRY` if keys missing; continue if tools running |
-| **Level 1** (custom judge) | A `JudgeProtocol` is set | User-provided judge inspects assistant text, tool calls, accumulator state, iteration count — full authority | `ACCEPT` / `RETRY` / `ESCALATE` with feedback |
-| **Level 2** (implicit) | No custom judge; keys present | Output-key check, then an optional conversation-aware quality gate against `success_criteria` | `ACCEPT` or `RETRY` with feedback |
-
-A `RETRY` verdict's feedback is injected as a `[Judge feedback]` user message, so on the next turn the agent sees its prior attempt and the critique and adjusts. This in-context reflexion — feedback → reflection → correction — is how agents self-correct **within a session**, without any model retraining. (Where the older docs described "Triangulated Verification," it survives here as the layering of deterministic checks, semantic evaluation, and human escalation across these levels plus Sentinel.)
-
----
-
-## How a colony improves over time
-
-Hive does **not** regenerate a graph across "generations." Colonies get better through four in-band mechanisms:
-
-- **Reflexion within a session** — judge feedback injected as conversation memory (above).
-- **Queen Memory v2** — cooldown-gated reflections written to scoped markdown memory and recalled on later sessions.
-- **Learned, tool-gated skills** — protocols a Queen proves out become skills that activate when their required tools are present and join her baseline.
-- **Systematization** — the incubating → pilot → **playbook** arc turns a one-off success into a deterministic, resumable process that converges the rest of the batch across worker clones.
-
----
+| Concern | Where |
+| --- | --- |
+| The loop | `agent_loop/agent_loop.py`, `agent_loop/internals/` |
+| Reminders | `agent_loop/reminders.py` and the `*_reminder.py` sources |
+| Colonies and workers | `host/colony_runtime.py`, `host/worker.py`, `agents/queen/worker_definition.py` |
+| Queen tools (`run_worker`, `suggest_colony`, triggers) | `tools/queen_lifecycle_tools.py` |
+| Tracker | `host/colony_binding.py`, `tools/tracker_tools.py` |
+| Playbooks | `tools/playbook_tools.py`, `host/playbook/runner.py` |
+| Queens and memory | `agents/queen/` |
+| Built-in tools | `tools/harness_tools.py`, `tools/src/` (repo root) |
+| MCP servers and tool registry | `loader/mcp_registry.py`, `loader/tool_registry.py` |
+| Skills | `skills/` |
+| Sentinel | `sentinel/` |
+| HTTP server | `server/` |
+| UI | `core/frontend/src/` |
 
 ## Summary
 
-1. **The colony is the unit.** A Queen plus as many worker clones as the work needs, sharing one on-disk workspace, one tracker, and one plan.
-2. **One loop, many loops.** A single `AgentLoop` primitive is both the Queen and every worker; orchestration is a runtime `run_worker` fan-out, not a compiled graph.
-3. **Coordination without a graph.** A shared SQLite tracker, a persistent task plan, an event bus, and a reminder hub replace edges and data buffers.
-4. **Execute first, then systematize.** Independent → incubating → colony; pilot the work, then factor it into a skill + playbook and converge with `run_playbook`.
-5. **Reliability in the primitive.** Park/resume from disk, compaction + pointer pattern, stall/doom-loop detection, judge-gated termination, and out-of-band Sentinel escalation — inherited by every agent because there is only one kind of agent.
+1. **The colony is the unit.** A queen plus as many workers as the work needs, sharing one directory, one tracker and one plan.
+2. **One loop, many loops.** One `AgentLoop` class is the queen and every worker; orchestration is a runtime fan-out, not a compiled graph.
+3. **Coordination without a graph.** A shared SQLite tracker, a task plan, an event bus and a reminder hub replace edges and data buffers.
+4. **Execute first, then systematize.** The queen pilots one unit, writes the protocol down as a skill and converges the rest with a resumable playbook.
+5. **Reliability in the primitive.** Park and resume from disk, file-backed tool results, compaction, stall detection and hard budgets, which every agent has because there is only one kind of agent.

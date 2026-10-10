@@ -2,7 +2,7 @@
 
 A **worker** is a single agent the [Queen](./queen.md) spawns to do one unit of work inside a [colony](./colony.md). Workers are how a colony does things in parallel: when the Queen has 50 prospects to research, she doesn't do them one at a time — she fans out workers and each takes a share.
 
-A worker is not a different kind of program from the Queen. It's a **clone** of her [agent loop](./the_loop.md) — same tools, same model — with a tighter budget and one task injected. What makes a worker a *worker* is what it deliberately lacks.
+A worker is not a different kind of program from the Queen. It's a **clone** of her [agent loop](./the_loop.md) with its own worker prompt, a subset of her tools, a tighter budget, and one task injected. It uses the Queen's model unless you configure a separate worker model. What makes a worker a *worker* is what it deliberately lacks.
 
 ## What a worker is
 
@@ -32,14 +32,15 @@ Workers can't see or message each other, so they coordinate entirely through the
 
 - **The tracker** — a worker records structured findings by upserting rows into the colony's shared `tracker.db`. The Queen reads those rows directly with SQL. This is the primary channel for results — one row per unit of work, not prose.
 - **Its own task list** — a worker can break its assignment into steps and track them, which also protects working memory across context pruning.
+- **The colony's skills** — methods the Queen wrote down during the pilot show up in every worker's skill catalog, and a worker loads the one it needs.
 
 See [Coordination](./coordination.md) for how the tracker and plan tie the colony together.
 
 ## Sessions, headless execution, and resume
 
-A **session** is one run of an agent against a specific input. Sessions are isolated — each has its own state and history — and they're **crash-safe**: state is persisted to disk, so a process crash, deploy, or restart resumes exactly where it left off rather than starting over.
+A **session** is one run of an agent against a specific input. Sessions are isolated — each has its own state and history — and they're **crash-safe**: a loop saves its position to disk whenever it waits, so a crash or restart resumes the session rather than starting over. A worker the Queen stopped can be resumed from its saved conversation (`run_worker` with `resume_worker_ids`), and because results live in the tracker, re-running a playbook only redoes the units that aren't done.
 
-A lot of colony work runs **headless** — no UI, no human at a terminal — monitoring inboxes, processing leads, watching for events around the clock. Headless doesn't mean unsupervised: when the colony hits a decision a human should make, the Queen escalates out-of-band via [Sentinel](./coordination.md#human-in-the-loop-sentinel) and the loop parks until they respond. Automate the routine; escalate the exceptions.
+A lot of colony work runs **headless** — no UI, no human at a terminal — monitoring inboxes, processing leads, watching for events around the clock. Headless doesn't mean unsupervised: when the colony hits a decision a human should make, the Queen asks, and with [Sentinel](./coordination.md#human-in-the-loop) switched on the question reaches you through the Hive inbox, Telegram or Slack. The loop parks until you respond. Automate the routine; escalate the exceptions.
 
 ## The big picture
 

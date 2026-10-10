@@ -22,13 +22,19 @@ You define what you want to achieve. The agent plans and executes toward that go
 
 You define measurable success criteria, hard constraints, and the context the agent needs. The agent is evaluated against the actual outcome, not whether it followed the right steps or aimed at the right goal. This is what Hive implements.
 
+## Two ways to state an outcome
+
+**In conversation.** With the built-in Queens, your message *is* the goal. The Queen turns it into a [task plan](./coordination.md#the-task-plan) you can see and edit, asks when something is ambiguous, and, once the work becomes a colony, defines "done" concretely as the columns of the colony's [tracker](./coordination.md#the-tracker): one row per unit of work, checked with SQL before she reports back. You stay the judge of the result.
+
+**As a structured `Goal`.** Agents loaded from an agent definition (`framework/loader/agent_loader.py`) can declare a `Goal` object (`framework/schemas/goal.py`) instead of a sentence. Its success criteria become the agent's judge check, and its criteria, constraints, and context are written into the agent's prompt. The built-in Queens and workers carry an empty `Goal` and rely on the conversation, the plan, and the tracker instead.
+
 ## Goals as First-Class Citizens
 
-In Hive, a `Goal` is not a string description. It's a structured object with three components:
+A structured `Goal` is not a string description. It has three components:
 
 ### Success Criteria
 
-Each goal has weighted success criteria that define what "done" looks like. These aren't binary pass/fail checks — they're multi-dimensional measures of quality.
+Each goal has weighted success criteria that define what "done" looks like.
 
 ```python
 Goal(
@@ -59,7 +65,7 @@ Goal(
 )
 ```
 
-Metrics can be `output_contains`, `output_equals`, `llm_judge`, or `custom`. Weights let you express what matters most — a perfectly compliant message that isn't personalized still falls short.
+Each criterion names a metric (`output_contains`, `output_equals`, `llm_judge`, or `custom`) and a weight, so you can say what matters most — a perfectly compliant message that isn't personalized still falls short.
 
 ### Constraints
 
@@ -70,35 +76,33 @@ constraints=[
     Constraint(
         id="no_spam",
         description="Never send more than 3 messages to the same person per week",
-        constraint_type="hard",    # Violation = immediate escalation
+        constraint_type="hard",    # written into the prompt as MUST
         category="safety"
     ),
     Constraint(
-        id="budget_limit",
-        description="Total LLM cost must not exceed $5 per run",
-        constraint_type="soft",    # Violation = warning, not a hard stop
-        category="cost"
+        id="tone",
+        description="Keep messages under 120 words",
+        constraint_type="soft",    # written into the prompt as SHOULD
+        category="quality"
     ),
 ]
 ```
 
-Hard constraints are non-negotiable — violating one triggers escalation or failure. Soft constraints are preferences that the agent should respect but can bend when necessary. Constraint categories include `time`, `cost`, `safety`, `scope`, and `quality`.
+Hard constraints are the lines the agent must not cross; soft constraints are preferences it should respect but can bend when necessary. Both are written into the agent's prompt (as MUST and SHOULD), so they're guidance the model reasons with rather than a runtime enforcement layer. For hard limits on spend or reach, use the tools themselves: tool allowlists, tool-call budgets, and the credentials you grant. Constraint categories include `time`, `cost`, `safety`, `scope`, and `quality`.
 
 ### Context
 
-Goals carry context — domain knowledge, preferences, background information that the agent needs to make good decisions. This context is injected into every LLM call the agent makes, so the agent is always reasoning with the full picture.
+Goals carry context — domain knowledge, preferences, background information that the agent needs to make good decisions. It's written into the agent's prompt alongside the criteria and constraints, so the agent is always reasoning with the full picture.
 
 ## Why This Matters
 
-When you define goals with weighted criteria and constraints, three things happen:
+Whether the outcome comes from a conversation or a structured `Goal`, stating it as a result rather than a procedure pays off three ways:
 
-1. **The agent can self-correct.** Goals are injected into every LLM call, so the agent is always reasoning against its success criteria. Within [the loop](./the_loop.md), the judge uses these criteria to decide whether to accept the output, retry with feedback, or escalate — self-correction in real time.
+1. **The agent can self-correct.** It's always reasoning against what "done" means. Within [the loop](./the_loop.md), a judge can use declared criteria to accept the output, retry with feedback, or escalate; in a colony, the Queen checks the tracker rows against what you asked for before she reports back.
 
-2. **Improvement has a target.** When an agent falls short, the framework knows *which criteria* it missed. That precise signal is what drives [how a colony improves](./improvement.md) — the feedback the judge injects, the notes a Queen reflects into memory, and the results workers write to the [tracker](./coordination.md#the-tracker).
+2. **Improvement has a target.** When an agent falls short, the gap is concrete: a missed criterion, an empty tracker column. That signal is what drives [how a colony improves](./improvement.md) — the feedback the judge injects, the notes a Queen reflects into memory, and the skill she writes once the pilot works.
 
-3. **Humans stay in control.** Constraints define the boundaries. The agent has freedom to find creative solutions within those boundaries, but it can't cross the lines you've drawn.
-
-The goal lifecycle flows through `DRAFT → READY → ACTIVE → COMPLETED / FAILED / SUSPENDED`, giving you visibility into where each objective stands at any point during execution.
+3. **Humans stay in control.** You define the boundaries. The agent has freedom to find creative solutions within them, and the Queen asks you when a decision is yours.
 
 ## Learn more
 
