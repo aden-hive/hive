@@ -334,8 +334,10 @@ class TestReportToParent:
             ids = await colony.spawn(task="crashing task", count=1)
             worker = colony.get_worker(ids[0])
 
+            # The worker goes inactive before its report is published (the
+            # publish awaits), so wait for both, as the success test above does.
             deadline = asyncio.get_event_loop().time() + 5.0
-            while worker.is_active and asyncio.get_event_loop().time() < deadline:
+            while (worker.is_active or len(reports) == 0) and asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(0.05)
             assert not worker.is_active
 

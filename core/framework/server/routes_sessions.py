@@ -209,6 +209,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 queen_name=queen_name,
                 model=model,
                 initial_phase=initial_phase,
+                initial_prompt=initial_prompt,
             )
         except _ColonyForkError as exc:
             return web.json_response({"error": exc.message}, status=exc.status)
@@ -268,6 +269,7 @@ async def _create_colony_from_source(
     queen_name: str | None,
     model: str | None,
     initial_phase: str | None,
+    initial_prompt: str | None = None,
 ):
     """Fork an independent queen session into a new colony.
 
@@ -287,6 +289,10 @@ async def _create_colony_from_source(
       6. Publish ``COLONY_CREATED`` on the source session's bus.
       7. Resume the colony session live via ``create_session(colony_id=...)``
          and return it.
+      8. Hand the colony queen her first turn: the dialog's goal/handover
+         when the user wrote one, else a nudge to carry on with the agreed
+         work. Without it she restores parked and waits for the user to
+         repeat themselves.
 
     Raises ``_ColonyForkError`` on validation or resolution failures.
     """
@@ -429,7 +435,60 @@ async def _create_colony_from_source(
         queen_name=queen_name or getattr(source_session, "queen_name", None),
         initial_phase=initial_phase or "colony",
     )
+    seed = asyncio.create_task(_seed_colony_queen(session, colony_id=cn, user_goal=initial_prompt))
+    _COLONY_SEED_TASKS.add(seed)
+    seed.add_done_callback(_COLONY_SEED_TASKS.discard)
     return session
+
+
+# Strong refs so the background first-turn seeding isn't GC'd mid-wait.
+_COLONY_SEED_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _live_queen_node(session: Any) -> Any:
+    """The session's running queen loop, or None until it has started."""
+    executor = getattr(session, "queen_executor", None)
+    registry = getattr(executor, "node_registry", None)
+    return registry.get("queen") if isinstance(registry, dict) else None
+
+
+async def _seed_colony_queen(session: Any, *, colony_id: str, user_goal: str | None, wait_s: float = 30.0) -> None:
+    """Give a freshly forked colony queen her first turn.
+
+    She restores the inherited chat parked for input, so the request that
+    created the colony would otherwise sit unanswered. A goal or handover
+    the user typed into the Create Colony dialog is delivered as their own
+    message; with none, a framework note tells her to carry on with what
+    the chat agreed. Waits briefly for the queen's loop to come up.
+    """
+    from framework.host.event_bus import AgentEvent, EventType
+
+    goal = (user_goal or "").strip()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_s
+    while (node := _live_queen_node(session)) is None:
+        if loop.time() >= deadline:
+            logger.warning("_seed_colony_queen: colony '%s' queen never came up; not seeded", colony_id)
+            return
+        await asyncio.sleep(0.2)
+    try:
+        if goal:
+            await session.event_bus.publish(
+                AgentEvent(
+                    type=EventType.CLIENT_INPUT_RECEIVED,
+                    stream_id="queen",
+                    node_id="queen",
+                    execution_id=session.id,
+                    data={"content": goal, "image_count": 0},
+                )
+            )
+            await node.inject_event(goal, is_client_input=True)
+        else:
+            await node.inject_event(
+                f"[Colony '{colony_id}' is ready and you are its queen. Carry on with the work agreed in the conversation above.]"
+            )
+    except Exception:
+        logger.warning("_seed_colony_queen: failed to seed colony '%s'", colony_id, exc_info=True)
 
 
 async def _create_sibling_colony_from_colony(
@@ -2176,9 +2235,7 @@ async def handle_session_history(request: web.Request) -> web.Response:
     # conversation part of any summary-stale session and rewrites its
     # summary.json — hundreds of ms to seconds of disk+CPU that used to
     # stall every SSE stream on each sidebar refresh.
-    disk_sessions = await asyncio.get_running_loop().run_in_executor(
-        _history_read_executor(), SessionManager.list_cold_sessions
-    )
+    disk_sessions = await asyncio.get_running_loop().run_in_executor(_history_read_executor(), SessionManager.list_cold_sessions)
     for s in disk_sessions:
         if s["session_id"] in live_sessions:
             live = live_sessions[s["session_id"]]
@@ -2229,9 +2286,7 @@ async def handle_list_colony_sessions(request: web.Request) -> web.Response:
 
     # Off-loop for the same reason as handle_session_history: summary
     # rebuilds parse every part file of stale sessions.
-    sessions = await asyncio.get_running_loop().run_in_executor(
-        _history_read_executor(), SessionManager.list_colony_sessions, colony_id
-    )
+    sessions = await asyncio.get_running_loop().run_in_executor(_history_read_executor(), SessionManager.list_colony_sessions, colony_id)
     for s in sessions:
         sid = s.get("session_id")
         if sid in live_sessions:

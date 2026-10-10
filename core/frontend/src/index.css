@@ -36,8 +36,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
 }
 
 /* Density toggle — scales the root font-size so every rem-based
@@ -245,11 +245,12 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
-    font-feature-settings: "ss01", "cv11";
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     line-height: 1.55;
+    letter-spacing: -0.006em;
   }
 
   ::selection {
@@ -257,23 +258,31 @@
     color: hsl(0 0% 4.3%);
   }
 
-  /* User chat bubbles have a primary-colored background, so the default
-     accent selection is invisible. Use an inverted selection instead. */
+  /* Solid primary surfaces (buttons, badges) hide the default amber
+     selection. Use an inverted selection instead. */
   .bg-primary ::selection {
     background: hsl(0 0% 100% / 0.4);
     color: hsl(0 0% 0%);
   }
 
-  h1, h2, h3 {
-    font-family: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
-    font-weight: 500;
-    letter-spacing: -0.028em;
-    line-height: 1.1;
+  /* The user's chat bubble: brand amber as a tint with a hairline edge,
+     one step stronger than the queen's bubble (bg-primary/5). */
+  .hive-user-bubble {
+    color: hsl(var(--foreground));
+    background: linear-gradient(180deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.11));
+    border: 1px solid hsl(var(--primary) / 0.28);
   }
 
-  code, pre, .mono, .font-mono {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-feature-settings: "calt" 0;
+  h1, h2, h3 {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: -0.024em;
+    line-height: 1.15;
+  }
+
+  code, pre, kbd, .mono, .font-mono {
+    font-family: var(--font-mono);
+    letter-spacing: 0;
   }
 
   button {
@@ -455,4 +464,1561 @@
   background-color: hsl(var(--primary) / 0.55);
   color: hsl(var(--primary-foreground));
   border-radius: 2px;
+}
+
+/* ── FX layer ──────────────────────────────────────────────────────────
+ * HUD effects after RhineLab's terminal UI (github.com/LBEILC/RhineLabUI),
+ * drawn in Hive's own amber-on-cream / amber-on-black palette. Anything that
+ * moves is gated on :root[data-motion="full"] (Settings → Appearance →
+ * Motion; "System" follows prefers-reduced-motion). Without it every effect
+ * sits in its final, static state. Entrance animations use fill-mode
+ * `backwards` so their clip-paths and transforms are gone once they finish
+ * and never clip a menu or tooltip afterwards. */
+
+/* Rolling digits (RollingNumber) — one 0–9 strip per digit, one line tall. */
+.fx-roll {
+  display: inline-block;
+  height: 1lh;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.fx-roll-col {
+  display: inline-block;
+  height: 1lh;
+  overflow: hidden;
+  vertical-align: top;
+  user-select: none;
+}
+.fx-roll-strip {
+  display: flex;
+  flex-direction: column;
+  transition: transform 460ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.fx-roll-strip > span {
+  height: 1lh;
+}
+
+/* Decryption (Decrypt) — each line starts as a row of per-word redaction
+ * strips on a page-colored mask; the mask retracts behind an amber read
+ * head, writing the text in. */
+.fx-decrypt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.fx-decrypt-line {
+  position: absolute;
+}
+.fx-decrypt-mask,
+.fx-decrypt-head {
+  position: absolute;
+  animation-delay: inherit;
+  animation-duration: 620ms;
+  animation-timing-function: cubic-bezier(0.65, 0, 0.25, 1);
+  animation-fill-mode: both;
+}
+.fx-decrypt-mask {
+  /* Bleeds past the line box so descenders and side bearings stay hidden. */
+  inset: -4px -3px;
+  background: hsl(var(--fx-decrypt-bg, var(--background)));
+  animation-name: fx-mask-retract;
+}
+.fx-decrypt-word {
+  position: absolute;
+  top: 50%;
+  height: 0.46em;
+  transform: translateY(-50%);
+  border-radius: 1.5px;
+  background: hsl(var(--foreground) / 0.82);
+}
+.fx-decrypt-head {
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.85), 0 0 2px hsl(var(--primary));
+  animation-name: fx-read-head;
+}
+@keyframes fx-mask-retract {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(0 0 0 100%); }
+}
+@keyframes fx-read-head {
+  0% { left: 0; opacity: 0; }
+  8% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* Tick ruler — long/short graduations, used as a section rule. */
+.fx-ruler {
+  height: 5px;
+  min-width: 12px;
+  color: hsl(var(--sidebar-section-text) / 0.55);
+  background:
+    linear-gradient(currentColor, currentColor) bottom / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 24px) bottom left / 100% 5px no-repeat,
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 6px) bottom left / 100% 3px no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, #000 30%, transparent);
+  mask-image: linear-gradient(90deg, #000 30%, transparent);
+}
+:root[data-motion="full"] .fx-ruler {
+  animation: fx-wipe-in 720ms cubic-bezier(0.2, 0.8, 0.2, 1) 120ms backwards;
+}
+@keyframes fx-wipe-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+/* Tick progress (TickProgress) — a graduated ruler, one segment per item:
+ * done segments amber, the next one pulsing, pending ones faint. */
+.fx-ticks {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 7px;
+}
+.fx-tick {
+  position: relative;
+  flex: 1 1 0;
+  height: 3px;
+  border-radius: 1px;
+  background: hsl(var(--muted-foreground) / 0.22);
+  transition: background-color 360ms;
+}
+/* The graduation at each segment's start, in the segment's own color. */
+.fx-tick::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 7px;
+  background: inherit;
+}
+.fx-tick[data-lit] {
+  background: hsl(var(--primary));
+}
+:root[data-motion="full"] .fx-tick[data-next] {
+  animation: fx-tick-pulse 1.4s ease-in-out infinite;
+}
+@keyframes fx-tick-pulse {
+  50% { background: hsl(var(--primary) / 0.5); }
+}
+
+/* Selection rail — a solid amber bar with a graduated edge beside the active
+ * nav row (NavLink sets aria-current="page"). */
+.fx-rail {
+  position: relative;
+}
+.fx-rail[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 4px;
+  bottom: 4px;
+  width: 5px;
+  pointer-events: none;
+  background:
+    linear-gradient(hsl(var(--primary)), hsl(var(--primary))) left / 2px 100% no-repeat,
+    repeating-linear-gradient(180deg, hsl(var(--primary) / 0.6) 0 1px, transparent 1px 4px) right / 2px 100% no-repeat;
+}
+:root[data-motion="full"] .fx-rail[aria-current="page"]::before {
+  animation: fx-rail-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes fx-rail-in {
+  from { transform: scaleY(0); opacity: 0; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+
+/* Staggered cascade — children wipe in one after another, 34ms apart and
+ * capped near 400ms, like RhineLab's row cascade. Set --fx-i on a child to
+ * override its slot. */
+.fx-cascade > :nth-child(1) { --fx-i: 0; }
+.fx-cascade > :nth-child(2) { --fx-i: 1; }
+.fx-cascade > :nth-child(3) { --fx-i: 2; }
+.fx-cascade > :nth-child(4) { --fx-i: 3; }
+.fx-cascade > :nth-child(5) { --fx-i: 4; }
+.fx-cascade > :nth-child(6) { --fx-i: 5; }
+.fx-cascade > :nth-child(7) { --fx-i: 6; }
+.fx-cascade > :nth-child(8) { --fx-i: 7; }
+.fx-cascade > :nth-child(9) { --fx-i: 8; }
+.fx-cascade > :nth-child(10) { --fx-i: 9; }
+.fx-cascade > :nth-child(11) { --fx-i: 10; }
+:root[data-motion="full"] .fx-cascade > * {
+  animation: fx-rise 440ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  animation-delay: calc(var(--fx-i, 12) * 34ms);
+}
+@keyframes fx-rise {
+  from { opacity: 0; transform: translateY(6px); clip-path: inset(0 100% 0 0); }
+  to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); }
+}
+
+/* Panel projection — dialogs tilt up out of the screen plane, then an amber
+ * scan line sweeps down them. The panel must be positioned. */
+:root[data-motion="full"] .fx-panel-in {
+  transform-origin: 50% 0;
+  animation: fx-panel-in 540ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+:root[data-motion="full"] .fx-panel-in::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)), transparent);
+  box-shadow: 0 0 12px hsl(var(--primary) / 0.7);
+  animation: fx-scan 720ms cubic-bezier(0.4, 0, 0.2, 1) 140ms both;
+}
+@keyframes fx-panel-in {
+  0% { opacity: 0; transform: perspective(1000px) rotateX(12deg) translateY(16px) scale(0.97); filter: blur(3px); }
+  55% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-scan {
+  from { top: 0; opacity: 1; }
+  85% { opacity: 0.9; }
+  to { top: 100%; opacity: 0; }
+}
+
+/* Message materialize — a fresh chat bubble opens top-down behind a scan
+ * line. Applied only to bubbles created moments ago, never to history. */
+:root[data-motion="full"] .fx-msg-in {
+  animation: fx-materialize 520ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+:root[data-motion="full"] .fx-msg-in::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)), transparent);
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.7);
+  animation: fx-scan 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes fx-materialize {
+  from { opacity: 0; transform: translateY(6px); clip-path: inset(0 0 100% 0 round 16px); }
+  to { opacity: 1; transform: none; clip-path: inset(0 0 0 0 round 16px); }
+}
+
+/* Targeting brackets — four corner ticks around a focusable surface that
+ * spread and brighten while it holds focus. */
+.fx-corners {
+  --fx-c: hsl(var(--primary) / 0.7);
+  --fx-l: 12px;
+  --fx-w: 1.5px;
+  position: absolute;
+  inset: -6px;
+  pointer-events: none;
+  opacity: 0.35;
+  background:
+    linear-gradient(var(--fx-c), var(--fx-c)) top left / var(--fx-l) var(--fx-w),
+    linear-gradient(var(--fx-c), var(--fx-c)) top left / var(--fx-w) var(--fx-l),
+    linear-gradient(var(--fx-c), var(--fx-c)) top right / var(--fx-l) var(--fx-w),
+    linear-gradient(var(--fx-c), var(--fx-c)) top right / var(--fx-w) var(--fx-l),
+    linear-gradient(var(--fx-c), var(--fx-c)) bottom left / var(--fx-l) var(--fx-w),
+    linear-gradient(var(--fx-c), var(--fx-c)) bottom left / var(--fx-w) var(--fx-l),
+    linear-gradient(var(--fx-c), var(--fx-c)) bottom right / var(--fx-l) var(--fx-w),
+    linear-gradient(var(--fx-c), var(--fx-c)) bottom right / var(--fx-w) var(--fx-l);
+  background-repeat: no-repeat;
+}
+:root[data-motion="full"] .fx-corners {
+  transition: inset 320ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 320ms;
+}
+.fx-corners-host:focus-within > .fx-corners {
+  inset: -9px;
+  opacity: 1;
+}
+
+/* Holographic tilt — the card leans toward the pointer and catches a sheen
+ * at its position (--fx-px/--fx-py, set by the page on pointermove). */
+:root[data-motion="full"] .fx-tilt {
+  transform: perspective(900px) rotateX(var(--fx-rx, 0deg)) rotateY(var(--fx-ry, 0deg));
+  transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.fx-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    360px circle at var(--fx-px, 50%) var(--fx-py, 50%),
+    hsl(var(--primary) / 0.14),
+    transparent 45%
+  );
+  transition: opacity 300ms;
+}
+:root[data-motion="full"] .fx-tilt:hover > .fx-sheen {
+  opacity: 1;
+}
+
+/* Home backdrop — honeycomb clusters drift against the pointer (depth set
+ * per cluster), their cores breathe, and a faint scan band rolls down. */
+:root[data-motion="full"] .fx-hex-layer svg {
+  transition: transform 1200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+:root[data-motion="full"] .fx-hex-core {
+  animation: fx-breathe 6.5s ease-in-out infinite;
+}
+@keyframes fx-breathe {
+  0%, 100% { fill-opacity: 0.08; }
+  50% { fill-opacity: 0.3; }
+}
+.fx-scanband {
+  display: none;
+}
+:root[data-motion="full"] .fx-scanband {
+  display: block;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 35%, hsl(var(--primary) / 0.05) 50%, transparent 65%);
+  animation: fx-band 11s linear infinite;
+}
+@keyframes fx-band {
+  from { transform: translateY(-65%); }
+  to { transform: translateY(65%); }
+}
+
+/* Telemetry caret. */
+.fx-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  vertical-align: -0.15em;
+  background: hsl(var(--primary));
+}
+:root[data-motion="full"] .fx-caret {
+  animation: fx-blink 1.1s steps(1) infinite;
+}
+@keyframes fx-blink {
+  50% { opacity: 0; }
+}
+
+/* Boot card (BootSequence) — only ever mounted with full motion. */
+.fx-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: hsl(var(--background) / 0.86);
+  backdrop-filter: blur(8px);
+  animation: fx-boot-out 380ms ease-in 1100ms both;
+}
+@keyframes fx-boot-out {
+  to { opacity: 0; visibility: hidden; }
+}
+.fx-boot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+.fx-boot-logo polygon {
+  stroke-dasharray: 37;
+  stroke-dashoffset: 37;
+  animation: fx-draw 520ms cubic-bezier(0.6, 0, 0.2, 1) forwards;
+}
+.fx-boot-logo polygon:nth-child(2) { animation-delay: 60ms; }
+.fx-boot-logo polygon:nth-child(3) { animation-delay: 120ms; }
+.fx-boot-logo polygon:nth-child(4) { animation-delay: 180ms; }
+.fx-boot-logo polygon:nth-child(5) { animation-delay: 240ms; }
+.fx-boot-logo polygon:nth-child(6) { animation-delay: 300ms; }
+.fx-boot-logo polygon:nth-child(7) {
+  fill: currentColor;
+  fill-opacity: 0;
+  animation: fx-draw 520ms cubic-bezier(0.6, 0, 0.2, 1) 360ms forwards, fx-core-lit 300ms ease-out 820ms forwards;
+}
+@keyframes fx-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes fx-core-lit {
+  to { fill-opacity: 0.35; }
+}
+.fx-boot-lines {
+  display: grid;
+  gap: 4px;
+  width: 232px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: hsl(var(--muted-foreground));
+}
+.fx-boot-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  animation: fx-rise 300ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+.fx-boot-leader {
+  flex: 1;
+  border-bottom: 1px dotted hsl(var(--muted-foreground) / 0.5);
+}
+.fx-boot-ok {
+  animation: fx-blink-in 180ms steps(3) backwards;
+}
+@keyframes fx-blink-in {
+  from { opacity: 0; }
+}
+/* Load ruler: graduations with an amber fill running out to the end. */
+.fx-boot-bar {
+  position: relative;
+  height: 5px;
+  margin-top: 8px;
+  color: hsl(var(--muted-foreground) / 0.45);
+  background:
+    linear-gradient(currentColor, currentColor) bottom / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 29px) bottom left / 100% 5px no-repeat,
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 5.8px) bottom left / 100% 3px no-repeat;
+}
+.fx-boot-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.6);
+  transform-origin: left;
+  animation: fx-fill 900ms cubic-bezier(0.6, 0, 0.2, 1) 150ms both;
+}
+@keyframes fx-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* Theme switch — hexReveal() grows the new theme out of a honeycomb cell at
+ * the click point and animates the new snapshot itself, so the default
+ * cross-fade is switched off. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ── Hive map (HiveMap) ────────────────────────────────────────────────
+ * One seven-cell honeycomb per queen. Cells are clipped pointy-top
+ * hexagons: an edge layer with the face inset over it, so the edge reads as
+ * a 1.5px border. A pointy-top hexagon is full width only through its middle
+ * half, so a cell's lines are kept inside that band (see CellFace). */
+.hive-map {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.hive-map-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.hive-map-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+  color: hsl(var(--foreground) / 0.85);
+}
+.hive-map-legend {
+  display: inline-flex;
+  gap: 14px;
+}
+.hive-map-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hive-map-legend > span::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: hsl(var(--status-offline));
+}
+.hive-map-legend > [data-state="working"]::before {
+  background: hsl(var(--primary));
+}
+.hive-map-legend > [data-state="parked"]::before {
+  background: hsl(var(--badge-unread));
+}
+.hive-map-stage {
+  position: relative;
+  width: 100%;
+  padding: 10px 0;
+  perspective: 1400px;
+}
+
+/* The projection plane. It leans toward the pointer (--tilt-x/--tilt-y in
+   -0.5…0.5, set by HiveMap) and settles like a damped spring. */
+/* The plane stays flat (no preserve-3d): its cells all lie in it, and a
+   3D context made a hovered cell's scale-up flip hit-testing between the
+   cell and the plane, so hover toggled on and off under a still pointer. */
+.hive-map-plane {
+  --tilt-x: 0;
+  --tilt-y: 0;
+  position: relative;
+  margin: 0 auto;
+}
+:root[data-motion="full"] .hive-map-plane {
+  transform: rotateX(calc(var(--tilt-y) * -4deg)) rotateY(calc(var(--tilt-x) * 5deg));
+  transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Cells ── */
+.hive-cell {
+  --hex: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  clip-path: var(--hex);
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms, filter 260ms;
+}
+.hive-cell:hover,
+.hive-cell:focus-visible {
+  z-index: 2;
+  transform: scale(1.08);
+  outline: none;
+}
+.hive-cell:disabled {
+  cursor: default;
+}
+/* Hive focus: while a cell is targeted, other hives recede. */
+.hive-map-plane[data-focus] .hive-cell:not([data-lit]) {
+  opacity: 0.38;
+  filter: saturate(0.4);
+}
+.hive-cell-edge {
+  position: absolute;
+  inset: 0;
+  clip-path: var(--hex);
+  background: hsl(var(--border));
+  transition: background-color 200ms;
+}
+.hive-cell-face {
+  position: absolute;
+  inset: 1.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  text-align: center;
+  clip-path: var(--hex);
+  background: hsl(var(--card));
+}
+/* The beam's touch: a brief wash of amber as the sweep crosses the cell. */
+.hive-cell-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: hsl(var(--primary) / 0.1);
+  opacity: 0;
+}
+:root[data-motion="full"] .hive-cell-face::before {
+  animation: hive-beam-hit var(--beam-ms) linear infinite;
+  animation-delay: var(--hit-d, 0ms);
+}
+@keyframes hive-beam-hit {
+  0% { opacity: 1; }
+  4% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* Queen: the hive's centre. */
+.hive-cell[data-kind="queen"] .hive-cell-edge {
+  background: hsl(var(--primary) / 0.45);
+}
+.hive-cell[data-kind="queen"] .hive-cell-face {
+  background:
+    radial-gradient(120% 70% at 50% 0%, hsl(var(--primary) / 0.12), transparent 70%),
+    hsl(var(--card));
+}
+.hive-cell-avatar {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 2px hsl(var(--card)), 0 0 0 3px hsl(var(--primary) / 0.35);
+}
+.hive-cell-name {
+  max-width: 88%;
+  overflow: hidden;
+  font-size: var(--cell-name, 11.5px);
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: hsl(var(--foreground));
+}
+
+/* Colony: a petal. */
+.hive-cell[data-kind="colony"] .hive-cell-edge,
+.hive-cell[data-kind="more"] .hive-cell-edge {
+  background: hsl(var(--primary) / 0.28);
+}
+.hive-cell[data-kind="colony"] .hive-cell-face,
+.hive-cell[data-kind="more"] .hive-cell-face {
+  background:
+    linear-gradient(hsl(var(--primary) / 0.06), hsl(var(--primary) / 0.06)),
+    hsl(var(--card));
+}
+.hive-cell-colony {
+  display: -webkit-box;
+  max-width: 88%;
+  overflow: hidden;
+  font-size: var(--cell-text, 10px);
+  font-weight: 500;
+  line-height: 1.2;
+  overflow-wrap: break-word;
+  color: hsl(var(--foreground) / 0.9);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* One status line, its dot inline. */
+.hive-cell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 88%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.hive-cell-status[data-state]::before {
+  content: "";
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: hsl(var(--status-offline));
+}
+.hive-cell-status[data-state="active"] { color: hsl(var(--primary)); }
+.hive-cell-status[data-state="active"]::before {
+  background: hsl(var(--status-online));
+  box-shadow: 0 0 5px hsl(var(--status-online) / 0.8);
+}
+.hive-cell-status[data-state="parked"] { color: hsl(var(--badge-unread)); }
+.hive-cell-status[data-state="parked"]::before { background: hsl(var(--badge-unread)); }
+.hive-cell[data-state="parked"] .hive-cell-edge {
+  background: hsl(var(--badge-unread) / 0.8);
+}
+
+/* Empty petal: a hollow cell that offers a new colony on hover. */
+.hive-cell[data-kind="empty"] .hive-cell-edge {
+  background: hsl(var(--foreground) / 0.07);
+}
+.hive-cell[data-kind="empty"] .hive-cell-face {
+  inset: 1px;
+  background: hsl(var(--background));
+}
+.hive-cell[data-kind="empty"]:hover .hive-cell-face,
+.hive-cell[data-kind="empty"]:focus-visible .hive-cell-face {
+  background:
+    radial-gradient(90% 70% at 50% 50%, hsl(var(--primary) / 0.1), transparent 70%),
+    hsl(var(--background));
+}
+.hive-cell-new {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+  opacity: 0;
+  transition: opacity 180ms;
+}
+.hive-cell:hover .hive-cell-new,
+.hive-cell:focus-visible .hive-cell-new {
+  opacity: 1;
+}
+.hive-cell[data-kind="unassigned"] .hive-cell-face {
+  background: hsl(var(--muted) / 0.6);
+}
+
+/* Hover/focus, and the targeted cell's hive: edges light up. */
+.hive-cell:hover .hive-cell-edge,
+.hive-cell:focus-visible .hive-cell-edge {
+  background: hsl(var(--primary));
+}
+.hive-cell[data-lit]:not([data-kind="empty"]) .hive-cell-edge {
+  background: hsl(var(--primary) / 0.8);
+}
+
+/* Chromatic glitch as a cell is targeted — RhineLab's edge aberration. */
+:root[data-motion="full"] .hive-cell:hover :is(.hive-cell-name, .hive-cell-colony) {
+  animation: hive-glitch 300ms steps(1) 1;
+}
+@keyframes hive-glitch {
+  0% { text-shadow: 1.5px 0 hsl(350 90% 55% / 0.7), -1.5px 0 hsl(190 90% 50% / 0.7); transform: translateX(1px); }
+  25% { text-shadow: -1px 0 hsl(350 90% 55% / 0.7), 1px 0 hsl(190 90% 50% / 0.7); transform: translateX(-1px); }
+  50% { text-shadow: 1px 0 hsl(350 90% 55% / 0.5), -1px 0 hsl(190 90% 50% / 0.5); transform: none; }
+  75%, 100% { text-shadow: none; transform: none; }
+}
+
+/* Working: the edge carries a rotating amber sweep and a scan band rolls
+ * through the face. */
+@property --fx-spin {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.hive-cell[data-state="active"] .hive-cell-edge {
+  background: conic-gradient(
+    from var(--fx-spin),
+    hsl(var(--primary)),
+    hsl(var(--primary) / 0.15) 30%,
+    hsl(var(--primary)) 50%,
+    hsl(var(--primary) / 0.15) 80%,
+    hsl(var(--primary))
+  );
+}
+:root[data-motion="full"] .hive-cell[data-state="active"] .hive-cell-edge {
+  animation: fx-spin 2.4s linear infinite;
+}
+@keyframes fx-spin {
+  to { --fx-spin: 360deg; }
+}
+:root[data-motion="full"] .hive-cell[data-state="active"] .hive-cell-face::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 35%;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, hsl(var(--primary) / 0.16), transparent);
+  animation: fx-cell-scan 2s linear infinite;
+}
+@keyframes fx-cell-scan {
+  from { top: -35%; }
+  to { top: 100%; }
+}
+
+/* Entrance: each hive assembles, centre first, then its petals clockwise. */
+:root[data-motion="full"] .hive-cell {
+  animation: fx-cell-in 560ms cubic-bezier(0.2, 0.9, 0.25, 1.15) backwards;
+  animation-delay: var(--fx-d, 0ms);
+}
+@keyframes fx-cell-in {
+  from { opacity: 0; transform: scale(0.35) rotate(-60deg); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── HUD overlay ── */
+/* Scan beam: a bright vertical line that crosses the comb, then rests. */
+.hive-map-beam {
+  display: none;
+}
+:root[data-motion="full"] .hive-map-beam {
+  display: block;
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: 0;
+  width: 2px;
+  z-index: 3;
+  pointer-events: none;
+  width: 1px;
+  background: linear-gradient(transparent, hsl(var(--primary)) 25%, hsl(var(--primary)) 75%, transparent);
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.45);
+  animation: hive-beam var(--beam-ms) linear infinite;
+}
+@keyframes hive-beam {
+  0% { left: 0; opacity: 0; }
+  2% { opacity: 0.6; }
+  98% { opacity: 0.6; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* Target lock: corner brackets snap onto the hovered cell. */
+.hive-map-reticle {
+  --c: hsl(var(--primary));
+  --l: 11px;
+  --w: 1.5px;
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--c), var(--c)) top left / var(--l) var(--w),
+    linear-gradient(var(--c), var(--c)) top left / var(--w) var(--l),
+    linear-gradient(var(--c), var(--c)) top right / var(--l) var(--w),
+    linear-gradient(var(--c), var(--c)) top right / var(--w) var(--l),
+    linear-gradient(var(--c), var(--c)) bottom left / var(--l) var(--w),
+    linear-gradient(var(--c), var(--c)) bottom left / var(--w) var(--l),
+    linear-gradient(var(--c), var(--c)) bottom right / var(--l) var(--w),
+    linear-gradient(var(--c), var(--c)) bottom right / var(--w) var(--l);
+  background-repeat: no-repeat;
+}
+:root[data-motion="full"] .hive-map-reticle {
+  animation: hive-lock 320ms cubic-bezier(0.2, 0.9, 0.25, 1.1) both;
+}
+@keyframes hive-lock {
+  from { opacity: 0; transform: scale(1.35); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+.hive-map-reticle-tag {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border: 1px solid hsl(var(--primary) / 0.5);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+  background: hsl(var(--background) / 0.9);
+}
+
+/* Crosshair through the target, fading out toward the comb's edges. */
+.hive-map-cross {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+.hive-map-cross[data-axis="x"] {
+  left: -24px;
+  right: -24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.45) 30%, hsl(var(--primary) / 0.45) 70%, transparent);
+}
+.hive-map-cross[data-axis="y"] {
+  top: -10px;
+  bottom: -10px;
+  width: 1px;
+  background: linear-gradient(transparent, hsl(var(--primary) / 0.45) 30%, hsl(var(--primary) / 0.45) 70%, transparent);
+}
+:root[data-motion="full"] .hive-map-cross {
+  transition: top 220ms cubic-bezier(0.2, 0.8, 0.2, 1), left 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Working pulse: hexagonal ripples leave busy cells. */
+.hive-map-pulse {
+  display: none;
+}
+:root[data-motion="full"] .hive-map-pulse {
+  display: block;
+  position: absolute;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: hsl(var(--primary));
+  stroke-width: 0.04;
+  animation: hive-pulse 2.4s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+}
+@keyframes hive-pulse {
+  from { opacity: 0.85; transform: scale(0.95); }
+  to { opacity: 0; transform: scale(1.75); }
+}
+
+.hive-map-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 680px;
+  height: 26px;
+  margin: 0 auto;
+  padding: 0 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--card) / 0.7);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+}
+.hive-map-readout > .fx-caret {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 6px;
+  height: 11px;
+}
+
+/* ── Message attachments (MessageAttachments) ─────────────────────────── */
+.hive-att-gallery {
+  display: grid;
+  gap: 4px;
+  width: 320px;
+  max-width: 100%;
+}
+.hive-att-gallery[data-layout="mosaic"] {
+  grid-template-columns: repeat(6, 1fr);
+}
+.hive-att-tile {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--muted));
+  cursor: zoom-in;
+}
+.hive-att-gallery[data-layout="single"] .hive-att-tile {
+  aspect-ratio: 3 / 2;
+  border-radius: 12px;
+}
+/* A mosaic reads as one picture cut into tiles: only its outer corners are
+   round, which the gallery's own clip provides. */
+.hive-att-gallery[data-layout="mosaic"] {
+  overflow: hidden;
+  border-radius: 12px;
+}
+.hive-att-tile:disabled {
+  cursor: default;
+}
+.hive-att-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 260ms ease, transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hive-att-img--contain {
+  object-fit: contain;
+}
+.hive-att-tile[data-state="ready"] .hive-att-img {
+  opacity: 1;
+}
+.hive-att-tile:hover .hive-att-img:not(.hive-att-img--contain) {
+  transform: scale(1.04);
+}
+/* The single image's letterbox: a blurred, zoomed copy fills the bars. */
+.hive-att-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(18px) saturate(1.2);
+  transform: scale(1.2);
+  opacity: 0.55;
+}
+/* Loading: a sweep of light across the empty tile. */
+.hive-att-tile[data-state="loading"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, hsl(var(--foreground) / 0.06) 50%, transparent 70%);
+  background-size: 220% 100%;
+}
+:root[data-motion="full"] .hive-att-tile[data-state="loading"]::before {
+  animation: hive-att-shimmer 1.3s linear infinite;
+}
+@keyframes hive-att-shimmer {
+  from { background-position: 110% 0; }
+  to { background-position: -110% 0; }
+}
+.hive-att-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 18px 8px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.62));
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 180ms, transform 180ms;
+}
+.hive-att-caption-meta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+.hive-att-tile:hover .hive-att-caption,
+.hive-att-tile:focus-visible .hive-att-caption {
+  opacity: 1;
+  transform: none;
+}
+.hive-att-gallery[data-layout="mosaic"] .hive-att-caption {
+  font-size: 10px;
+  padding: 14px 6px 5px;
+}
+.hive-att-gallery[data-layout="mosaic"] .hive-att-caption-meta {
+  display: none;
+}
+.hive-att-more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #fff;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(2px);
+}
+.hive-att-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+
+.hive-att-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 280px;
+  max-width: 100%;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  text-align: left;
+  transition: border-color 150ms, background-color 150ms;
+}
+.hive-att-file:hover {
+  border-color: hsl(var(--primary) / 0.4);
+}
+.hive-att-file-icon {
+  --tone: var(--muted-foreground);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 40px;
+  padding-bottom: 6px;
+  border-radius: 7px;
+  color: hsl(var(--tone));
+  background: hsl(var(--tone) / 0.12);
+}
+.hive-att-file-icon[data-tone="pdf"] { --tone: 0 72% 51%; }
+.hive-att-file-icon[data-tone="sheet"] { --tone: 145 63% 36%; }
+.hive-att-file-icon[data-tone="doc"] { --tone: 214 82% 51%; }
+.hive-att-file-icon[data-tone="slides"] { --tone: 24 95% 50%; }
+.hive-att-file-icon[data-tone="archive"] { --tone: 262 52% 55%; }
+.hive-att-file-icon[data-tone="code"] { --tone: 190 80% 38%; }
+.hive-att-file-icon[data-tone="media"] { --tone: 330 70% 52%; }
+.hive-att-file-ext {
+  position: absolute;
+  bottom: 3px;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.hive-att-file-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: hsl(var(--foreground));
+}
+.hive-att-file-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: hsl(var(--muted-foreground));
+}
+.hive-att-file-open {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.hive-att-file:hover .hive-att-file-open {
+  opacity: 1;
+}
+
+/* ── Markdown (MarkdownContent) ───────────────────────────────────────── */
+:root {
+  --shiki-foreground: hsl(36 14% 14%);
+  --shiki-background: transparent;
+  --shiki-token-constant: hsl(206 62% 38%);
+  --shiki-token-string: hsl(100 38% 31%);
+  --shiki-token-string-expression: hsl(100 38% 31%);
+  --shiki-token-comment: hsl(32 8% 54%);
+  --shiki-token-keyword: hsl(14 72% 44%);
+  --shiki-token-parameter: hsl(280 32% 44%);
+  --shiki-token-function: hsl(30 80% 36%);
+  --shiki-token-punctuation: hsl(32 10% 42%);
+  --shiki-token-link: hsl(30 73% 41%);
+}
+.dark {
+  --shiki-foreground: hsl(40 18% 86%);
+  --shiki-token-constant: hsl(199 72% 70%);
+  --shiki-token-string: hsl(88 42% 64%);
+  --shiki-token-string-expression: hsl(88 42% 64%);
+  --shiki-token-comment: hsl(0 0% 48%);
+  --shiki-token-keyword: hsl(14 85% 67%);
+  --shiki-token-parameter: hsl(280 50% 76%);
+  --shiki-token-function: hsl(43 92% 60%);
+  --shiki-token-punctuation: hsl(0 0% 62%);
+  --shiki-token-link: hsl(45 93% 55%);
+}
+
+.hive-md {
+  line-height: 1.65;
+}
+.hive-md > :first-child { margin-top: 0; }
+.hive-md > :last-child { margin-bottom: 0; }
+.hive-md p {
+  margin: 0 0 0.75em;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.hive-md p:last-child { margin-bottom: 0; }
+.hive-md h1,
+.hive-md h2,
+.hive-md h3,
+.hive-md h4,
+.hive-md h5,
+.hive-md h6 {
+  margin: 1.35em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: hsl(var(--foreground));
+}
+.hive-md h1 { font-size: 1.3em; letter-spacing: -0.022em; }
+.hive-md h2 {
+  font-size: 1.14em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.hive-md h3 { font-size: 1.03em; }
+.hive-md h4,
+.hive-md h5,
+.hive-md h6 {
+  font-family: var(--font-mono);
+  font-size: 0.74em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.hive-md strong { font-weight: 600; color: hsl(var(--foreground)); }
+.hive-md del { color: hsl(var(--muted-foreground)); }
+
+.hive-md ul,
+.hive-md ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.35em;
+}
+.hive-md ul { list-style: disc; }
+.hive-md ul ul { list-style: circle; }
+.hive-md ul ul ul { list-style: square; }
+.hive-md ol { list-style: decimal; }
+.hive-md ol ol { list-style: lower-alpha; }
+.hive-md li {
+  margin: 0.2em 0;
+  padding-left: 0.2em;
+}
+.hive-md li::marker { color: hsl(var(--primary) / 0.8); }
+.hive-md ol > li::marker {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+}
+.hive-md li > p { margin: 0 0 0.35em; }
+.hive-md li > p:last-child { margin-bottom: 0; }
+.hive-md li > ul,
+.hive-md li > ol { margin: 0.3em 0 0.1em; }
+
+/* Task lists */
+.hive-md .contains-task-list {
+  list-style: none;
+  padding-left: 0.2em;
+}
+.hive-md .task-list-item::marker { content: ""; }
+.hive-md input[type="checkbox"] {
+  appearance: none;
+  /* inline-block, not grid: a grid's baseline would come from the check
+     mark, dropping ticked boxes below unticked ones. */
+  position: relative;
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin: 0 0.55em 0 0;
+  vertical-align: -2.5px;
+  border: 1.5px solid hsl(var(--muted-foreground) / 0.55);
+  border-radius: 4px;
+  background: hsl(var(--card));
+}
+.hive-md input[type="checkbox"]:checked {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+}
+.hive-md input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 3px;
+  width: 8px;
+  height: 4.5px;
+  border: 1.75px solid hsl(var(--primary-foreground));
+  border-top: 0;
+  border-right: 0;
+  transform: translate(0, -1px) rotate(-45deg);
+}
+.hive-md .task-list-item:has(> input:checked) { color: hsl(var(--muted-foreground)); }
+
+/* Inline code */
+.hive-md :not(pre) > code {
+  padding: 0.12em 0.4em;
+  border: 1px solid hsl(var(--primary) / 0.16);
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: hsl(var(--primary) / 0.08);
+  color: hsl(var(--foreground));
+}
+.hive-md kbd {
+  padding: 0.08em 0.45em;
+  border: 1px solid hsl(var(--border));
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: hsl(var(--card));
+}
+
+.hive-md-link {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--primary) / 0.35);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms;
+}
+.hive-md-link:hover { text-decoration-color: hsl(var(--primary)); }
+
+.hive-md blockquote {
+  margin: 0.85em 0;
+  padding: 0.2em 0 0.2em 0.95em;
+  border-left: 3px solid hsl(var(--primary) / 0.45);
+  color: hsl(var(--foreground) / 0.78);
+}
+.hive-md-callout {
+  --c: var(--primary);
+  margin: 0.9em 0;
+  padding: 0.6em 0.9em 0.7em;
+  border: 1px solid hsl(var(--c) / 0.28);
+  border-radius: 9px;
+  background: hsl(var(--c) / 0.07);
+}
+.hive-md-callout[data-callout="note"] { --c: 214 82% 51%; }
+.hive-md-callout[data-callout="tip"] { --c: 145 63% 36%; }
+.hive-md-callout[data-callout="important"] { --c: 262 52% 55%; }
+.hive-md-callout[data-callout="warning"] { --c: 38 92% 42%; }
+.hive-md-callout[data-callout="caution"] { --c: 0 72% 51%; }
+.hive-md-callout-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0.3em;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--c));
+}
+
+.hive-md hr {
+  height: 1px;
+  margin: 1.4em 0;
+  border: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--border)) 15%, hsl(var(--border)) 85%, transparent);
+}
+.hive-md img {
+  max-width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.hive-md-table {
+  margin: 0.9em 0;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+}
+.hive-md-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+.hive-md-table th {
+  padding: 0.55em 0.9em;
+  border-bottom: 1px solid hsl(var(--border));
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  background: hsl(var(--muted) / 0.5);
+}
+.hive-md-table td {
+  padding: 0.5em 0.9em;
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+  vertical-align: top;
+}
+.hive-md-table tr:last-child td { border-bottom: 0; }
+.hive-md-table tbody tr:hover td { background: hsl(var(--primary) / 0.04); }
+
+.hive-md .footnotes {
+  margin-top: 1.2em;
+  padding-top: 0.6em;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 0.86em;
+  color: hsl(var(--muted-foreground));
+}
+.hive-md .footnotes h2 {
+  margin-top: 0;
+  border: 0;
+  font-size: 0.85em;
+}
+.hive-md sup a { text-decoration: none; }
+
+/* Code blocks (CodeBlock) */
+.hive-code {
+  position: relative;
+  margin: 0.9em 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+}
+.hive-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+  background: hsl(var(--muted) / 0.4);
+}
+.hive-code-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+}
+.hive-code-lang::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+  background: hsl(var(--primary) / 0.8);
+}
+.hive-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  transition: background-color 150ms, color 150ms;
+}
+.hive-code-copy:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+}
+.hive-code pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  color: var(--shiki-foreground);
+}
+.hive-code pre code {
+  font-family: inherit;
+  white-space: pre;
+}
+.hive-code pre[data-numbered] code { counter-reset: hive-line; }
+.hive-code pre[data-numbered] .line::before {
+  counter-increment: hive-line;
+  content: counter(hive-line);
+  display: inline-block;
+  width: 2em;
+  margin-right: 1.1em;
+  text-align: right;
+  color: hsl(var(--muted-foreground) / 0.45);
+  user-select: none;
+}
+/* Diff rows run the full width of the block. */
+.hive-code .line[data-diff] {
+  display: inline-block;
+  min-width: calc(100% + 28px);
+  margin: 0 -14px;
+  padding: 0 14px;
+}
+.hive-code .line[data-diff="add"] {
+  color: hsl(145 55% 30%);
+  background: hsl(145 60% 40% / 0.1);
+}
+.hive-code .line[data-diff="del"] {
+  color: hsl(0 60% 42%);
+  background: hsl(0 70% 50% / 0.08);
+}
+.hive-code .line[data-diff="hunk"] {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 0.5);
+}
+.dark .hive-code .line[data-diff="add"] { color: hsl(140 55% 68%); }
+.dark .hive-code .line[data-diff="del"] { color: hsl(0 75% 72%); }
+.hive-code[data-collapsed] pre {
+  max-height: calc(24 * 1.6 * 12.5px + 12px);
+  overflow: hidden;
+}
+.hive-code[data-collapsed]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 30px;
+  height: 64px;
+  pointer-events: none;
+  background: linear-gradient(transparent, hsl(var(--card)));
+}
+.hive-code-more {
+  display: block;
+  width: 100%;
+  height: 30px;
+  border-top: 1px solid hsl(var(--border) / 0.8);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: hsl(var(--primary));
+  background: hsl(var(--muted) / 0.3);
+}
+.hive-code-more:hover { background: hsl(var(--muted) / 0.6); }
+
+/* ── Thinking + tool activity (ActivityBlock) ────────────────────────── */
+.hive-activity {
+  margin: 2px 0;
+  font-size: 12px;
+}
+.hive-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 0;
+  color: hsl(var(--muted-foreground) / 0.8);
+  transition: color 150ms;
+}
+.hive-activity-head:hover {
+  color: hsl(var(--foreground));
+}
+.hive-activity-summary {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+.hive-activity-live {
+  min-width: 0;
+  max-width: 60ch;
+  overflow: hidden;
+  font-style: italic;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+}
+/* The timeline: a rail with a tick per step, thoughts as muted prose and
+   tool bursts as their pill rows. */
+.hive-activity-steps {
+  position: relative;
+  margin: 4px 0 6px 6px;
+  padding-left: 14px;
+  border-left: 1px solid hsl(var(--border));
+  list-style: none;
+}
+.hive-activity-step {
+  position: relative;
+  padding: 3px 0;
+}
+.hive-activity-step::before {
+  content: "";
+  position: absolute;
+  left: -17.5px;
+  top: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--muted-foreground) / 0.5);
+}
+.hive-activity-step[data-kind="tools"]::before {
+  border-color: hsl(var(--primary) / 0.7);
+}
+.hive-activity[data-live] .hive-activity-step:last-child::before {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+.hive-activity-thought {
+  max-width: 72ch;
+  font-style: italic;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: hsl(var(--muted-foreground));
+}
+.hive-activity-more {
+  margin-top: 2px;
+  font-size: 11px;
+  font-style: normal;
+  color: hsl(var(--primary));
 }

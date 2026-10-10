@@ -34,6 +34,13 @@ import {
   Brain,
 } from "lucide-react";
 import { ReportModal } from "@/components/SessionReportAction";
+import MessageAttachments from "@/components/MessageAttachments";
+import {
+  attachmentLabel,
+  formatBytes,
+  isImageAttachment,
+  resolveAttachmentUrl,
+} from "@/lib/attachments";
 import {
   printHtmlToPdf,
   openAttachment as openAttachmentInBrowser,
@@ -403,12 +410,6 @@ const FILE_INPUT_ACCEPT = [
   ...TEXT_FILE_EXTENSIONS,
 ].join(",");
 
-function formatBytes(n: number): string {
-  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${n} B`;
-}
-
 /**
  * Strip <system-reminder>...</system-reminder> blocks from displayed message
  * text. The runtime injects framework-level reminders (e.g. the attachments
@@ -429,54 +430,10 @@ function stripSystemReminders(content: string | undefined): string {
 }
 
 /**
- * Decide whether an image_url URL points at an image (renderable as a
- * thumbnail) vs. a non-image attachment (PDF, CSV, etc). Used by the
- * unified attachment chip so all attachment types share one card shape.
- */
-function isImageAttachment(url: string): boolean {
-  if (url.startsWith("data:image/")) return true;
-  if (url.startsWith("data:application/pdf")) return false;
-  if (url.startsWith("hive-attachment://")) {
-    return /\.(png|jpe?g|webp|gif|svg)$/i.test(url);
-  }
-  // attachment-served URLs end with the filename — sniff by extension.
-  return /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(url);
-}
-
-/**
- * Turn an attachment URL into something the browser can fetch.
- *
- * Canonical attachment refs come through as `hive-attachment://<rel_path>`
- * (the runtime's scheme for "file on disk under the session dir"). The
- * route at /api/sessions/{sid}/attachment/{basename} serves the bytes;
- * this resolver maps the canonical ref → fetchable URL. Layer F2 made
- * `hive-attachment://` the single canonical form everywhere — submit,
- * replay, persistence — so the route-URL shape lives only here.
- *
- * Pass-through for everything else: data: URIs, already-resolved API
- * URLs (legacy persisted messages), absolute http(s) URLs.
- */
-function resolveAttachmentUrl(url: string, sessionId: string): string {
-  if (!url || !url.startsWith("hive-attachment://")) return url;
-  const relPath = url.slice("hive-attachment://".length).replace(/^\/+/, "");
-  // Route accepts a basename only — its path-traversal guard rejects
-  // slashes, and the path-param matcher won't match across slashes
-  // anyway. Both `data/attachments/X` (post-D1) and `attachments/X`
-  // (legacy) resolve via basename. encodeURIComponent because filenames
-  // now preserve the user's original name (e.g. "Calculus Volume 1.pdf"
-  // with spaces) instead of being normalized to `{ts}_{idx}.{ext}`.
-  const basename = relPath.split("/").pop() ?? relPath;
-  return apiUrl(`/sessions/${sessionId}/attachment/${encodeURIComponent(basename)}`);
-}
-
-/**
- * Unified attachment chip — one shape for every attachment type.
- * Images get a small thumbnail in the icon slot; PDFs/CSVs get a
- * doc icon. Filename + optional size meta sit alongside.
- *
- * Two visual variants:
- *   - `pending`: muted/border styling for the composer's preview strip
- *   - `history`: high-contrast on the primary bubble background
+ * Attachment chip for the composer's preview strip — one shape for every
+ * attachment type. Images get a small thumbnail in the icon slot; PDFs/CSVs
+ * get a doc icon. Name + optional size meta sit alongside. Sent messages
+ * render their attachments with MessageAttachments instead.
  */
 function AttachmentChip({
   url,
@@ -484,7 +441,6 @@ function AttachmentChip({
   byteSize,
   isUploading,
   onClick,
-  variant,
   sessionId,
   credits,
 }: {
@@ -493,7 +449,6 @@ function AttachmentChip({
   byteSize?: number;
   isUploading?: boolean;
   onClick?: () => void;
-  variant: "pending" | "history";
   /** Needed so `hive-attachment://` canonical refs can be resolved to a
    * fetchable /api/sessions/{sid}/attachment/{basename} URL at render time. */
   sessionId?: string;
@@ -503,12 +458,9 @@ function AttachmentChip({
   const [openError, setOpenError] = useState<string | null>(null);
   const isImage = isImageAttachment(url) && url !== "file-pending" && url !== "file-uploaded";
   const showThumbPreview = isImage && url.startsWith("data:image/");
-  const displayName = fileName || (isImage ? "image" : "document");
+  const name = attachmentLabel(fileName);
+  const displayName = fileName ? name.label : isImage ? "Image" : "Document";
   const sizeText = byteSize !== undefined ? formatBytes(byteSize) : undefined;
-  const variantClasses =
-    variant === "pending"
-      ? "border-border bg-muted/40 text-foreground hover:bg-muted/60"
-      : "border-black/20 bg-black/10 text-black hover:bg-black/20";
   // Resolve canonical hive-attachment:// refs to fetchable route URLs.
   // For data: URIs and already-resolved API URLs this is a pass-through.
   const fetchableUrl = sessionId ? resolveAttachmentUrl(url, sessionId) : url;
@@ -559,7 +511,8 @@ function AttachmentChip({
       type="button"
       onClick={handleClick}
       disabled={isUploading || (!onClick && !hasOpenable)}
-      className={`flex items-center gap-2 h-14 pl-1.5 pr-3 rounded-lg border text-xs transition-colors disabled:cursor-default ${variantClasses}`}
+      title={name.original || undefined}
+      className="flex items-center gap-2 h-14 pl-1.5 pr-3 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted/60 text-xs transition-colors disabled:cursor-default"
     >
       <div className="relative w-11 h-11 flex-shrink-0">
         {showThumbPreview ? (
@@ -1375,6 +1328,173 @@ export function ReasoningRow({ content }: { content: string }) {
   );
 }
 
+type ActivityRun = { kind: "tool_status_group"; key: string; messages: ChatMessage[]; createdAt: number };
+
+/**
+ * In a turn where the queen thinks (any reasoning row between two user
+ * messages), fold all of the turn's activity runs into its first one.
+ * A thinking model alternates thought → tool → thought around her merged
+ * reply bubble, which scattered one turn's working across several rows above
+ * and below the answer. Turns without reasoning keep their runs in place:
+ * their tool cards read alongside the text they sit next to.
+ */
+export function mergeThinkingTurns<T extends { kind: string }>(items: T[]): T[] {
+  const out: T[] = [];
+  let turnStart = 0;
+  const closeTurn = () => {
+    const turn = out.slice(turnStart);
+    const runs = turn.filter((it) => it.kind === "tool_status_group") as unknown as ActivityRun[];
+    if (runs.length < 2 || !runs.some((r) => r.messages.some((m) => m.type === "reasoning"))) return;
+    const [first, ...later] = runs;
+    // Runs are already in transcript order, so concatenating keeps it.
+    first.messages = runs.flatMap((r) => r.messages);
+    const folded = new Set<unknown>(later);
+    out.splice(turnStart, turn.length, ...turn.filter((it) => !folded.has(it)));
+  };
+  for (const item of items) {
+    const msg = (item as { msg?: ChatMessage }).msg;
+    if (item.kind === "message" && msg?.type === "user") {
+      closeTurn();
+      out.push(item);
+      turnStart = out.length;
+      continue;
+    }
+    out.push(item);
+  }
+  closeTurn();
+  return out;
+}
+
+/** Split an activity run into the timeline the block expands to:
+ *  thoughts one by one, consecutive tool bursts merged into one pill row. */
+function activitySteps(messages: ChatMessage[]): (
+  | { kind: "thought"; key: string; text: string }
+  | { kind: "tools"; key: string; content: string }
+)[] {
+  const steps: (
+    | { kind: "thought"; key: string; text: string }
+    | { kind: "tools"; key: string; content: string; messages: ChatMessage[] }
+  )[] = [];
+  for (const m of messages) {
+    if (m.type === "reasoning") {
+      if (m.content.trim()) steps.push({ kind: "thought", key: m.id, text: m.content.trim() });
+      continue;
+    }
+    const last = steps[steps.length - 1];
+    if (last && last.kind === "tools") last.messages.push(m);
+    else steps.push({ kind: "tools", key: m.id, content: "", messages: [m] });
+  }
+  return steps.map((step) =>
+    step.kind === "tools"
+      ? { kind: "tools", key: step.key, content: mergeToolStatusContents(step.messages) }
+      : step,
+  );
+}
+
+function formatWorkedFor(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 1000) return null;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/**
+ * One block for a run of the queen's thinking and tool calls between two
+ * replies. Thinking models interleave a thought before every tool call;
+ * rendered row by row that stacked into a noisy ladder above each answer.
+ * Collapsed, the block is one line ("Thought · 3 tools · 12s"); while the
+ * run is live it stays open and shows the latest thought; once the reply
+ * lands it folds away unless the user opened it.
+ */
+function ActivityBlock({
+  messages,
+  live,
+  onQuickReply,
+}: {
+  messages: ChatMessage[];
+  live: boolean;
+  onQuickReply?: (text: string) => void;
+}) {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? live;
+  const steps = activitySteps(messages);
+  const thoughts = steps.filter((s) => s.kind === "thought");
+  const toolCount = steps.reduce((n, s) => {
+    if (s.kind !== "tools") return n;
+    try {
+      return n + ((JSON.parse(s.content).tools ?? []) as unknown[]).length;
+    } catch {
+      return n;
+    }
+  }, 0);
+  const times = messages.map((m) => m.createdAt).filter((t): t is number => typeof t === "number");
+  const workedFor = times.length > 1 ? formatWorkedFor(Math.max(...times) - Math.min(...times)) : null;
+  const latestThought = [...thoughts].reverse()[0];
+  const lastToolsKey = [...steps].reverse().find((s) => s.kind === "tools")?.key;
+
+  const summary = [
+    thoughts.length > 1 ? `Thought ${thoughts.length}×` : "Thought",
+    toolCount > 0 ? `${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : null,
+    workedFor,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="hive-activity" data-open={open || undefined} data-live={live || undefined}>
+      <button
+        type="button"
+        className="hive-activity-head"
+        onClick={() => setUserOpen(!open)}
+        aria-expanded={open}
+      >
+        <Brain className="w-3.5 h-3.5 shrink-0" />
+        {live ? (
+          <span className="queen-debate-line hive-activity-live">
+            {latestThought?.kind === "thought" ? latestThought.text.split("\n")[0] : "Thinking…"}
+          </span>
+        ) : (
+          <span className="hive-activity-summary">{summary}</span>
+        )}
+        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <ol className="hive-activity-steps">
+          {steps.map((step) =>
+            step.kind === "thought" ? (
+              <li key={step.key} className="hive-activity-step" data-kind="thought">
+                <ThoughtText text={step.text} />
+              </li>
+            ) : (
+              <li key={step.key} className="hive-activity-step" data-kind="tools">
+                <ToolActivityRow
+                  content={step.content}
+                  onQuickReply={step.key === lastToolsKey ? onQuickReply : undefined}
+                />
+              </li>
+            ),
+          )}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/** A thought in the activity timeline: a few lines, the rest on demand. */
+function ThoughtText({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
+  const long = text.length > 280 || text.split("\n").length > 4;
+  return (
+    <div className="hive-activity-thought">
+      <p className={full || !long ? undefined : "line-clamp-4"}>{text}</p>
+      {long && (
+        <button type="button" onClick={() => setFull((v) => !v)} className="hive-activity-more">
+          {full ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ToolActivityRow({
   content,
   onQuickReply,
@@ -1946,6 +2066,10 @@ function parseQnA(content: string): { q: string; a: string }[] | null {
   return pairs;
 }
 
+/** A bubble created within this window materializes on mount; older ones
+ *  (history, or rows the lazy window re-mounts on scroll) appear instantly. */
+const FRESH_MESSAGE_MS = 4000;
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
@@ -2004,6 +2128,10 @@ const MessageBubble = memo(
       !isQueen && msg.role === "worker"
         ? workerIdFromStreamId(msg.streamId)
         : null;
+    const [fresh] = useState(
+      () => msg.createdAt != null && Date.now() - msg.createdAt < FRESH_MESSAGE_MS,
+    );
+    const enterFx = fresh ? " fx-msg-in" : "";
 
     if (msg.type === "run_divider") {
       return (
@@ -2150,34 +2278,24 @@ const MessageBubble = memo(
       return (
         <div className="flex flex-col items-end gap-1 group">
           <div
-            className={`max-w-[75%] bg-primary text-black text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " ring-1 ring-amber-500/50" : ""}`}
+            className={`hive-user-bubble relative max-w-[75%] text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " ring-1 ring-amber-500/50" : ""}${enterFx}`}
           >
             {msg.images && msg.images.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {msg.images.map((img, i) => (
-                  img._generated ? (
-                    <GeneratedImageCard
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      credits={img._credits}
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  ) : (
-                    <AttachmentChip
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      byteSize={img._byteSize}
-                      credits={img._credits}
-                      variant="history"
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  )
-                ))}
-              </div>
+              <MessageAttachments
+                images={msg.images}
+                sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                onOpenImage={(i) => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                renderGenerated={(img, i) => (
+                  <GeneratedImageCard
+                    key={i}
+                    url={img.image_url.url}
+                    fileName={img._fileName}
+                    credits={img._credits}
+                    sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                    onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                  />
+                )}
+              />
             )}
             {msg.content &&
               (() => {
@@ -2198,11 +2316,7 @@ const MessageBubble = memo(
                   );
                 }
                 return (
-                  <SkillMarkerText
-                    text={cleanedContent}
-                    tone="onPrimary"
-                    className="block"
-                  />
+                  <SkillMarkerText text={cleanedContent} className="block" />
                 );
               })()}
             {(msg.queued || msg.createdAt) && (
@@ -2332,36 +2446,26 @@ const MessageBubble = memo(
             )}
           </div>
           <div
-            className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
+            className={`relative text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
               isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
-            }`}
+            }${enterFx}`}
           >
             {msg.images && msg.images.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {msg.images.map((img, i) => (
-                  img._generated ? (
-                    <GeneratedImageCard
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      credits={img._credits}
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  ) : (
-                    <AttachmentChip
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      byteSize={img._byteSize}
-                      credits={img._credits}
-                      variant="history"
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  )
-                ))}
-              </div>
+              <MessageAttachments
+                images={msg.images}
+                sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                onOpenImage={(i) => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                renderGenerated={(img, i) => (
+                  <GeneratedImageCard
+                    key={i}
+                    url={img.image_url.url}
+                    fileName={img._fileName}
+                    credits={img._credits}
+                    sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                    onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                  />
+                )}
+              />
             )}
             {msg.innerTurns && msg.innerTurns.length > 1 ? (
               // Merged multi-inner-turn bubble presented as an activity
@@ -3277,8 +3381,13 @@ export default function ChatPanel({
       // Merge consecutive tool_status messages into a single render
       // unit so their pills share lines via flex-wrap. Without this,
       // each tool_status message is its own block-level row even when
-      // adjacent — visually each tool stacks on its own line.
-      if (item.kind === "message" && item.msg.type === "tool_status") {
+      // adjacent — visually each tool stacks on its own line. Thinking
+      // rows join the same run: a thinking model writes a thought before
+      // every tool call, and the run renders as one ActivityBlock.
+      if (
+        item.kind === "message" &&
+        (item.msg.type === "tool_status" || item.msg.type === "reasoning")
+      ) {
         const last = out[out.length - 1];
         if (last && last.kind === "tool_status_group") {
           last.messages.push(item.msg);
@@ -3294,8 +3403,19 @@ export default function ChatPanel({
       }
       out.push(item);
     }
-    return out;
+    return mergeThinkingTurns(out);
   }, [renderItems]);
+
+  // Key of the activity run in the newest turn (after the last user
+  // message), if any: the run still in progress while the queen is busy.
+  const liveActivityKey = useMemo<string | null>(() => {
+    for (let i = itemsWithDividers.length - 1; i >= 0; i--) {
+      const item = itemsWithDividers[i];
+      if (item.kind === "message" && item.msg.type === "user") return null;
+      if (item.kind === "tool_status_group") return item.key;
+    }
+    return null;
+  }, [itemsWithDividers]);
 
   // ID of the most recent queen message that renders the standard queen
   // bubble (i.e., has the name/title row where the spinner lives). Queen
@@ -4107,6 +4227,19 @@ export default function ChatPanel({
             );
           }
           if (item.kind === "tool_status_group") {
+            if (item.messages.some((m) => m.type === "reasoning")) {
+              return (
+                <div key={item.key}>
+                  <ActivityBlock
+                    messages={item.messages}
+                    // Live while it belongs to the newest turn and the queen
+                    // is still working.
+                    live={!!isBusy && item.key === liveActivityKey}
+                    onQuickReply={item.key === latestToolGroupKey ? handleQuickReply : undefined}
+                  />
+                </div>
+              );
+            }
             // Collapse the messages' tool arrays into one synthetic
             // tool_status content so the pills land in a single
             // flex-wrap container — multiple consecutive bursts now
@@ -4369,7 +4502,6 @@ export default function ChatPanel({
                       fileName={img._fileName}
                       byteSize={img._byteSize}
                       isUploading={isUploadingThis}
-                      variant="pending"
                       sessionId={sessionId ?? undefined}
                     />
                     <button
@@ -4625,10 +4757,15 @@ function ImageCarouselModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
-          <span className="text-xs text-muted-foreground">
-            {images.length > 1
-              ? `${index + 1} of ${images.length}`
-              : isFile ? "File preview" : "Image preview"}
+          <span className="flex items-center gap-2 min-w-0 text-xs text-muted-foreground">
+            <span className="truncate font-medium text-foreground" title={current._fileName}>
+              {current._fileName ? attachmentLabel(current._fileName).label : isFile ? "File preview" : "Image preview"}
+            </span>
+            {images.length > 1 && (
+              <span className="flex-shrink-0 font-mono text-[10.5px] tabular-nums">
+                {index + 1} / {images.length}
+              </span>
+            )}
           </span>
           <div className="flex items-center gap-1">
             {!isFile && !isUnresolved && (

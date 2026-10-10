@@ -34,7 +34,7 @@ export default function MermaidBlock({ source, theme = "light" }: Props) {
             theme: theme === "dark" ? "dark" : "default",
             securityLevel: "loose",
             fontFamily:
-              "'Inter Tight', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+              "'Geist Variable', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
           });
           _mermaidInitialized = true;
         }

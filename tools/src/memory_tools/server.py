@@ -1,7 +1,7 @@
 """memory-tools FastMCP server entry module.
 
 Run via:
-    uv run python memory_tools_server.py --stdio   (preferred, see _DEFAULT_LOCAL_SERVERS)
+    uv run python memory_tools_server.py --stdio   (standalone MCP; Hive runs these in-process)
     uv run python -m memory_tools.server --stdio
 """
 

@@ -252,6 +252,10 @@ class ReminderContext:
     # POST_TOOL_USE, so a source can tell what the agent just did (e.g.
     # distinguish a self-induced change from an external one).
     tool_names: list[str] | None = None
+    # The user's message this render precedes — set at SESSION_START (the
+    # first message) and USER_PROMPT_SUBMIT, so a source can react to what
+    # the user is asking.
+    user_text: str | None = None
 
 
 @dataclass
@@ -408,14 +412,16 @@ class ReminderHub:
         agent_ctx: Any,
         signals: LoopSignals | None = None,
         tool_names: list[str] | None = None,
+        user_text: str | None = None,
     ) -> list[Reminder]:
         """Consult every source firing at ``point`` → list of Reminders.
 
         Bare-string source bodies are normalized to a default
         :class:`Reminder`. Empty bodies are dropped. ``tool_names`` carries
-        the batch's executed tools at POST_TOOL_USE.
+        the batch's executed tools at POST_TOOL_USE; ``user_text`` the
+        incoming message at SESSION_START / USER_PROMPT_SUBMIT.
         """
-        rctx = ReminderContext(point=point, agent_ctx=agent_ctx, signals=signals, tool_names=tool_names)
+        rctx = ReminderContext(point=point, agent_ctx=agent_ctx, signals=signals, tool_names=tool_names, user_text=user_text)
         out: list[Reminder] = []
         for s in self._consulted():
             try:
@@ -443,15 +449,16 @@ class ReminderHub:
         point: ReminderPoint,
         agent_ctx: Any,
         tool_names: list[str] | None = None,
+        user_text: str | None = None,
     ) -> str | None:
         """Collect every source's body for ``point`` → one wrapped block, or None.
 
         Back-compat entry point for lifecycle points: the loop places the
         returned ``<system-reminder>`` block itself. Temporal points should
         use :meth:`collect` instead. ``tool_names`` carries the batch's
-        executed tools at POST_TOOL_USE.
+        executed tools at POST_TOOL_USE; ``user_text`` the incoming message.
         """
-        block, _ = await self.fire_energized(point, agent_ctx, tool_names=tool_names)
+        block, _ = await self.fire_energized(point, agent_ctx, tool_names=tool_names, user_text=user_text)
         return block
 
     async def fire_energized(
@@ -459,6 +466,7 @@ class ReminderHub:
         point: ReminderPoint,
         agent_ctx: Any,
         tool_names: list[str] | None = None,
+        user_text: str | None = None,
     ) -> tuple[str | None, bool]:
         """:meth:`fire`, plus whether any contributing source wants the loop woken.
 
@@ -466,7 +474,7 @@ class ReminderHub:
         loses which of them produced it — and "should this wake a parked
         agent?" is a per-source policy (:attr:`ReminderSource.energizes`).
         """
-        items = await self.collect(point, agent_ctx, tool_names=tool_names)
+        items = await self.collect(point, agent_ctx, tool_names=tool_names, user_text=user_text)
         block = wrap_reminder([r.body for r in items]) or None
         energized = bool(block) and any(r.meta.get("energizes") for r in items)
         return block, energized

@@ -168,6 +168,20 @@ class TestAttachFileResolution:
         assert summary["attached"][0]["filename"] == "from_chat.pdf"
         assert summary["attached"][0]["resolved"] == str(pdf.resolve())
 
+    def test_bare_name_resolves_in_the_session_working_directory(self, attach_file_fn, tmp_path: Path, monkeypatch):
+        """A file the agent just wrote with terminal_exec (whose cwd is the
+        session dir) attaches by bare name. Before, this hit the server
+        process's cwd and returned "file not found" for every file."""
+        session = tmp_path / "session"
+        session.mkdir()
+        (session / "report.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        monkeypatch.delenv("HIVE_STORAGE_PATH", raising=False)
+
+        summary = _parse_summary(attach_file_fn(paths="report.csv", session_cwd=str(session)))
+
+        assert summary["errors"] == []
+        assert summary["attached"][0]["resolved"] == str((session / "report.csv").resolve())
+
     def test_absolute_path_always_wins(self, attach_file_fn, tmp_path: Path, monkeypatch):
         pdf = tmp_path / "absolute.pdf"
         pdf.write_bytes(TINY_PDF_BYTES)

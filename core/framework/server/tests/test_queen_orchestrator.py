@@ -84,15 +84,12 @@ async def test_create_queen_keeps_configurable_mcp_tools_in_colony_phase(monkeyp
     }
 
     registry = ToolRegistry()
-    browser_tool = Tool(name="browser_open", description="Open browser", parameters={"type": "object"})
     pdf_tool = Tool(name="pdf_read", description="Read a PDF", parameters={"type": "object"})
     # csv_read (spreadsheet_advanced) is NOT always-enabled — represents the
-    # searchable tier alongside the now-always-enabled browser/file tools.
+    # searchable tier alongside the always-enabled file tools.
     csv_tool = Tool(name="csv_read", description="Read a CSV", parameters={"type": "object"})
-    registry.register("browser_open", browser_tool, lambda _inputs: {"ok": True})
     registry.register("pdf_read", pdf_tool, lambda _inputs: {"ok": True})
     registry.register("csv_read", csv_tool, lambda _inputs: {"ok": True})
-    registry._mcp_server_tools["gcu-tools"] = {"browser_open"}  # type: ignore[attr-defined]
     registry._mcp_server_tools["hive_tools"] = {"pdf_read"}  # type: ignore[attr-defined]
     registry._mcp_server_tools["spreadsheet-tools"] = {"csv_read"}  # type: ignore[attr-defined]
 
@@ -110,21 +107,23 @@ async def test_create_queen_keeps_configurable_mcp_tools_in_colony_phase(monkeyp
     try:
         assert session.phase_state is not None
         assert session._queen_tool_registry is registry  # type: ignore[attr-defined]
-        assert "browser_open" in {t.name for t in session.phase_state.independent_tools}
+        # The browser is the hive-browser CLI; its in-process discovery tool
+        # browser_setup is registered by create_queen itself.
+        assert "browser_setup" in {t.name for t in session.phase_state.independent_tools}
         colony_tool_names = {t.name for t in session.phase_state.colony_tools}
-        assert "browser_open" in colony_tool_names
+        assert "browser_setup" in colony_tool_names
         assert "tracker_sql" in colony_tool_names
         assert "tracker_register_writable" in colony_tool_names
         assert "pdf_read" in {t.name for t in session.phase_state.colony_tools}
         # The always-enabled / searchable split: a user-configured MCP tool is
         # not dropped by the colony phase. Always-enabled categories load
         # eagerly (callable up front); everything else is searchable
-        # (manifest-only, loaded on demand). browser_open (browser_basic) and
-        # pdf_read (file_ops) are now always-enabled → eager; csv_read
+        # (manifest-only, loaded on demand). browser_setup (browser_core) and
+        # pdf_read (file_ops) are always-enabled → eager; csv_read
         # (spreadsheet_advanced) is not → searchable.
         eager_names = {t.name for t in session.phase_state.get_current_tools()}
         searchable_names = {t.name for t in session.phase_state.get_searchable_tools()}
-        assert "browser_open" in eager_names
+        assert "browser_setup" in eager_names
         assert "pdf_read" in eager_names
         assert "csv_read" in searchable_names
         assert "csv_read" not in eager_names

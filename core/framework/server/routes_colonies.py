@@ -527,7 +527,20 @@ async def _read_upload(
 # restart (same VM), which the finalize retry path relies on. It gets
 # wiped when the VM itself is torn down, which is exactly what we want
 # for staging.
-_UPLOAD_STAGING_DIR = Path("/var/tmp") / "hive-colony-uploads"
+#
+# Elsewhere (Windows, or a POSIX host without /var/tmp) staging lives under
+# HIVE_HOME instead: on Windows "/var/tmp" resolves to the current drive's
+# root, so uploads were staged in e.g. G:/var/tmp.
+def _default_upload_staging_dir() -> Path:
+    var_tmp = Path("/var/tmp")
+    if os.name != "nt" and var_tmp.is_dir():
+        return var_tmp / "hive-colony-uploads"
+    from framework.config import HIVE_HOME
+
+    return HIVE_HOME / "tmp" / "colony_uploads"
+
+
+_UPLOAD_STAGING_DIR = _default_upload_staging_dir()
 _UPLOAD_TTL_SECONDS = 24 * 60 * 60  # 24h — GC's failed-mid-push orphans
 _UPLOAD_ID_RE = re.compile(r"^[a-f0-9]{16}$")
 # Per-chunk ceiling. Bigger than the client's default (4 MiB) to give room

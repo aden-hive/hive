@@ -1139,8 +1139,7 @@ def iter_legacy_queen_sessions() -> Iterator[Path]:
 
     NOTE: HIVE_HOME/agents is NOT wholly legacy — v3 reuses it for live
     agent storage (colony worker stores, cloud-sync queen-session
-    destinations, framework agents like credential_tester; see
-    storage/migrate_v3.py). The janitor therefore never deletes the tree.
+    destinations; see storage/migrate_v3.py). The janitor therefore never deletes the tree.
     Only the old queen DM session TRANSCRIPT dirs get the same tier-3
     hygiene (orphan spillovers + events rewrite) as current sessions —
     which preserves the transcript itself — and each one still passes the

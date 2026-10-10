@@ -495,7 +495,8 @@ class TestAdenCachedStorage:
 
     def test_load_from_aden_when_stale(self, cached_storage, local_storage, provider, mock_client, aden_response):
         """Test load fetches from Aden when cache is stale."""
-        # Create stale cached credential
+        # Create a stale cached credential. Only Aden-managed credentials are
+        # refreshed from Aden; anything else is a local-only key.
         cred = CredentialObject(
             id="hubspot",
             credential_type=CredentialType.OAUTH2,
@@ -503,7 +504,11 @@ class TestAdenCachedStorage:
                 "access_token": CredentialKey(
                     name="access_token",
                     value=SecretStr("stale-token"),
-                )
+                ),
+                "_aden_managed": CredentialKey(
+                    name="_aden_managed",
+                    value=SecretStr("true"),
+                ),
             },
         )
         local_storage.save(cred)
@@ -825,7 +830,15 @@ class TestAdenIntegration:
         assert refreshed.keys["access_token"].value.get_secret_value() == "refreshed-token"
 
     def test_cached_storage_with_store(self, mock_client, aden_response):
-        """Test AdenCachedStorage with CredentialStore."""
+        """AdenCachedStorage fetches from Aden once on sync, then serves loads from its cache."""
+        mock_client.list_integrations.return_value = [
+            AdenIntegrationInfo(
+                integration_id=aden_response.integration_id,
+                provider="hubspot",
+                alias="My HubSpot",
+                status="active",
+            ),
+        ]
         mock_client.get_credential.return_value = aden_response
 
         provider = AdenSyncProvider(client=mock_client)
@@ -836,13 +849,17 @@ class TestAdenIntegration:
             cache_ttl_seconds=300,
         )
 
-        # First load fetches from Aden
-        cred = cached_storage.load("hubspot")
-        assert cred is not None
+        # A load never fetches a credential that hasn't been synced:
+        # sync_all_from_aden is the fetch path.
+        assert cached_storage.load("hubspot") is None
+        mock_client.get_credential.assert_not_called()
+
+        assert cached_storage.sync_all_from_aden() == 1
         mock_client.get_credential.assert_called_once()
 
-        # Second load uses cache
+        # Within the TTL, loads by provider name come from the cache.
         mock_client.get_credential.reset_mock()
-        cred2 = cached_storage.load("hubspot")
-        assert cred2 is not None
+        cred = cached_storage.load("hubspot")
+        assert cred is not None
+        assert cred.keys["access_token"].value.get_secret_value() == "test-access-token"
         mock_client.get_credential.assert_not_called()

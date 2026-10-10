@@ -230,13 +230,15 @@ def test_global_lock_not_leaked_on_disposer_setup_failure(monkeypatch) -> None:
     def boom(cfg_, execute):
         raise OSError("archive dir on read-only fs")
 
-    monkeypatch.setattr(janitor, "_build_disposer", boom)
-    report = run_once(SafetyContext.for_offline(cfg), cfg, tiers={2}, execute=True)
+    # A scoped patch: monkeypatch.undo() would also drop the suite's
+    # HIVE_HOME sandbox and send the follow-up run at a real home.
+    with monkeypatch.context() as m:
+        m.setattr(janitor, "_build_disposer", boom)
+        report = run_once(SafetyContext.for_offline(cfg), cfg, tiers={2}, execute=True)
     assert "disposer setup failed" in report.error
     assert not janitor._global_lock_path().exists(), "no 2h lockout left behind"
     assert janitor.load_last_report() is not None, "failure still produces a report"
 
     # And a follow-up run works immediately.
-    monkeypatch.undo()
     report = run_once(SafetyContext.for_offline(cfg), cfg, tiers={2}, execute=True)
     assert report.error == ""

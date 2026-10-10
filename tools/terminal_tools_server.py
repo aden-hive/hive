@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """terminal-tools MCP server entry point.
 
-Wired into _DEFAULT_LOCAL_SERVERS in core/framework/loader/mcp_registry.py
-so that running ``uv run python terminal_tools_server.py --stdio`` from this
-directory starts the server. The cwd of ``tools/`` puts ``src/terminal_tools``
+Hive itself runs these tools in-process (core/framework/tools/harness_tools.py);
+this entry point serves them over MCP for standalone use: running
+``uv run python terminal_tools_server.py --stdio`` from this directory starts the
+server. The cwd of ``tools/`` puts ``src/terminal_tools``
 on the import path via uv's workspace setup.
 
 Usage:

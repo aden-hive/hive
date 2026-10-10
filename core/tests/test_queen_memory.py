@@ -238,6 +238,35 @@ async def test_select_memories_with_files(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_profiles_never_crowd_out_relevant_memories(tmp_path: Path):
+    """A scope with max_results profile memories still returns relevant picks.
+
+    One live queen had 10 character sheets typed "profile"; with pins first,
+    every recall returned the same 3 sheets and never what was relevant.
+    """
+    for i in range(5):
+        (tmp_path / f"character-{i}.md").write_text(f"---\nname: c{i}\ndescription: character {i}\ntype: profile\n---\nbody")
+    (tmp_path / "deploy-window.md").write_text("---\nname: d\ndescription: Acme deploy window\ntype: preference\n---\nbody")
+
+    llm = AsyncMock()
+    llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": ["deploy-window.md"]}))
+
+    result = await select_memories("when can we deploy to Acme?", llm, memory_dir=tmp_path, max_results=3)
+
+    assert result[0] == "deploy-window.md"
+    assert len(result) == 3  # profiles back-fill the remaining slots
+
+
+@pytest.mark.asyncio
+async def test_profiles_fill_in_when_nothing_is_selected(tmp_path: Path):
+    (tmp_path / "user-profile.md").write_text("---\nname: u\ndescription: the user\ntype: profile\n---\nbody")
+    llm = AsyncMock()
+    llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": []}))
+
+    assert await select_memories("who is my partner?", llm, memory_dir=tmp_path) == ["user-profile.md"]
+
+
+@pytest.mark.asyncio
 async def test_select_memories_error_returns_empty(tmp_path: Path):
     (tmp_path / "a.md").write_text("---\nname: a\n---\nbody")
 

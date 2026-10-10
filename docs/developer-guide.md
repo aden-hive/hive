@@ -113,7 +113,7 @@ hive/                                    # Repository root
 │   │       │   ├── web_scrape_tool/
 │   │       │   ├── file_system_toolkits/
 │   │       │   └── ...                  # Additional tools
-│   │       ├── mcp_server.py            # HTTP MCP server
+│   │       ├── mcp_server.py            # Standalone MCP server (IDE / external use)
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
 │   └── README.md                        # Tools documentation
@@ -121,8 +121,8 @@ hive/                                    # Repository root
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
 │   └── your_agent_name/                 # Created via files-tools workflow
 │
-├── examples/                            # Example agents
-│   └── templates/                       # Pre-built template agents
+├── examples/                            # Example prompts
+│   └── recipes/                         # Prompt-only agent recipes
 │
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide

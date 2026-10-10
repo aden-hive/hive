@@ -107,6 +107,12 @@ export default function QueenDM() {
   // in their composer). Reset whenever the route changes so a stale flag
   // can't leak between queens / between bootstrap and resume modes.
   const deferredBootstrapRef = useRef(false);
+  // The session a staged handoff is being delivered into. The bootstrap's own
+  // ?new=1 -> ?session={sid} rewrite re-runs the load effect for that same
+  // session; dropping the handoff there stranded the picked-queen task in the
+  // composer, because auto-send waits for `loading` to clear and the token was
+  // gone by then.
+  const handoffSessionRef = useRef<string | null>(null);
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
   const queenInfo = getQueenForAgent(queenId || "");
@@ -993,8 +999,12 @@ export default function QueenDM() {
     // Any handoff belongs to the session load that claimed it. Dropping it here
     // means switching sessions can't hand a stale draft to a remounted composer
     // and send it a second time; the branch below re-sets it when this load is
-    // the one delivering it.
-    setHandoff(null);
+    // the one delivering it. The bootstrap's URL rewrite for the session it is
+    // delivering into is the same load, so it keeps the handoff.
+    if (!selectedSessionParam || selectedSessionParam !== handoffSessionRef.current) {
+      setHandoff(null);
+      handoffSessionRef.current = null;
+    }
 
     let cancelled = false;
     const isBootstrap = newSessionFlag === "1";
@@ -1220,6 +1230,7 @@ export default function QueenDM() {
           if (isBootstrap && !cancelled) {
             // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
             // this session instead of creating another new one.
+            if (pendingHandoff) handoffSessionRef.current = sid;
             setSearchParams({ session: sid }, { replace: true });
 
             // Message was passed as initial_prompt so the queen is already

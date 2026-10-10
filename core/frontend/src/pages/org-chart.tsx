@@ -40,9 +40,9 @@ const COLONY_ICON_KEYS = Object.keys(COLONY_ICONS);
 const CANVAS_W = 2200;
 const CANVAS_H = 1500;
 const CENTER_X = CANVAS_W / 2;
-const CARD_W = 140; // 8.75rem queen card
+const CARD_W = 160; // 10rem queen card
 const CARD_H = 130; // 8.125rem card body (connector anchor; tags hang below)
-const ROW_GAP = 28;
+const ROW_GAP = 20;
 const CEO_W = 190;
 const CEO_H = 104;
 const CEO_X = CENTER_X - CEO_W / 2;
@@ -323,14 +323,14 @@ function QueenCard({
         <div className="mb-2.5">
           <QueenAvatar queenId={queen.id} name={queen.name} />
         </div>
-        <span className={`text-sm font-semibold transition-colors line-clamp-1 ${
+        <span className={`text-[13px] font-semibold tracking-[-0.01em] transition-colors line-clamp-1 ${
           decommissioned
             ? "text-muted-foreground line-through"
             : "text-foreground group-hover:text-primary"
         }`}>
           {queen.name}
         </span>
-        <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+        <span className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
           {decommissioned ? "Decommissioned" : queen.title}
         </span>
       </div>

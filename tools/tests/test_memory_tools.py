@@ -61,7 +61,7 @@ def _write_session(
     spilled_files: dict[str, str] | None = None,
 ) -> Path:
     """Materialize a synthetic queen session under HIVE_HOME."""
-    sdir = hive_home / "agents" / "queens" / queen / "sessions" / session
+    sdir = hive_home / "queens" / queen / "sessions" / session
     sdir.mkdir(parents=True, exist_ok=True)
     events_path = sdir / "events.jsonl"
     with events_path.open("w", encoding="utf-8") as f:
@@ -241,7 +241,7 @@ def test_sync_indexes_spilled_tool_result(hive_home: Path):
     from memory_tools import index, paths as P
 
     spill_name = "browser_snapshot_4.txt"
-    sdir = hive_home / "agents" / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
+    sdir = hive_home / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
     spill_abs = sdir / "data" / spill_name
     full_body = "needle_in_a_haystack " + ("x" * 200)
     placeholder = (
@@ -440,3 +440,93 @@ def test_search_messages_context_narrow_only_hit(hive_home: Path, bind_queen):
     m = res["matches"][0]
     assert len(m["turn"]) == 1
     assert m["turn"][0]["is_hit"] is True
+
+
+# ── Colony scope (v3: colonies/<c>/queens/<q>/sessions/<s>) ────────────
+
+
+def _write_colony_session(hive_home: Path, *, colony: str, queen: str, session: str, events: list[dict]) -> None:
+    sdir = hive_home / "colonies" / colony / "queens" / queen / "sessions" / session
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+
+
+def test_colony_search_spans_every_overseer_queen(hive_home: Path, bind_colony):
+    """A colony can be overseen by more than one queen; its memory is all of them."""
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("kick off the COLONY_NEEDLE migration"), *_assistant_deltas("Starting it.")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_tech",
+        session="session_20260602_090000_bbbb",
+        events=[_user_event("status of COLONY_NEEDLE?"), *_assistant_deltas("Done.")],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="COLONY_NEEDLE")
+
+    assert "error" not in result, result
+    assert {m["session"] for m in result["matches"]} == {"session_20260601_090000_aaaa", "session_20260602_090000_bbbb"}
+
+
+def test_colony_search_finds_worker_tool_results(hive_home: Path, bind_colony):
+    """Workers' tool results are logged in the overseer session's events."""
+    worker_result = _tool_event(tool_name="terminal_exec", result="deployed build WORKER_NEEDLE-42 to staging")
+    worker_result["stream_id"] = "worker:session_20260601_091500_cccc"
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("ship it"), worker_result],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="WORKER_NEEDLE-42", role="tool")
+
+    assert result.get("total_matches") == 1, result
+
+
+def test_colony_and_queen_memories_stay_separate(hive_home: Path, bind_colony, bind_queen):
+    _write_session(
+        hive_home,
+        queen="queen_ops",
+        session="session_20260601_080000_dddd",
+        events=[_user_event("private DM about DM_ONLY_NEEDLE")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("colony work on COLONY_ONLY_NEEDLE")],
+    )
+
+    bind_colony("acme")
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 1
+
+    bind_queen("queen_ops")
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 1
+
+
+def test_since_until_filter_results_not_just_indexing(hive_home: Path, bind_queen):
+    """A session indexed by an earlier unfiltered search must still be filtered out."""
+    for session in ("session_20260110_100000_aaaa", "session_20260505_100000_bbbb"):
+        _write_session(hive_home, queen="queen_x", session=session, events=[_user_event("NEEDLE_DATED")])
+    bind_queen("queen_x")
+    fn = _make_tool()
+
+    assert fn(pattern="NEEDLE_DATED")["total_matches"] == 2  # indexes both sessions
+
+    after = fn(pattern="NEEDLE_DATED", since="2026-04-01")
+    assert [m["session"] for m in after["matches"]] == ["session_20260505_100000_bbbb"]
+    before = fn(pattern="NEEDLE_DATED", until="2026-04-01")
+    assert [m["session"] for m in before["matches"]] == ["session_20260110_100000_aaaa"]

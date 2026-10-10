@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -135,14 +136,24 @@ def _parse_iso(value: str | None, *, field: str) -> tuple[datetime | None, dict 
         }
 
 
-def _resolve_injected_scope() -> tuple[P.Scope | None, str | None, dict | None]:
+def _in_window(started: datetime | None, since: datetime | None, until: datetime | None) -> bool:
+    """Whether a session that started at *started* falls in [since, until)."""
+    if started is None:
+        return False
+    return (since is None or started >= since) and (until is None or started < until)
+
+
+def _resolve_injected_scope(env: Mapping[str, str] | None = None) -> tuple[P.Scope | None, str | None, dict | None]:
     """Read the host-injected scope binding.
 
     Exactly one of ``HIVE_QUEEN_ID`` / ``HIVE_COLONY_NAME`` must be set.
-    Empty strings are treated as unset.
+    Empty strings are treated as unset. *env* defaults to the process
+    environment (the standalone-server case); the in-process harness passes
+    the owning agent's own binding, since one host process serves many.
     """
-    queen = os.environ.get("HIVE_QUEEN_ID") or None
-    colony = os.environ.get("HIVE_COLONY_NAME") or None
+    env = os.environ if env is None else env
+    queen = env.get("HIVE_QUEEN_ID") or None
+    colony = env.get("HIVE_COLONY_NAME") or None
 
     if queen and colony:
         return (
@@ -181,7 +192,7 @@ def _resolve_injected_scope() -> tuple[P.Scope | None, str | None, dict | None]:
     return scope, owner, None
 
 
-def register_search_messages(mcp: FastMCP) -> None:
+def register_search_messages(mcp: FastMCP, scope_env: Callable[[], Mapping[str, str]] | None = None) -> None:
     @mcp.tool()
     def search_messages(
         pattern: Annotated[str, Field(description=_PARAM_DESCRIPTIONS["pattern"])],
@@ -239,7 +250,7 @@ def register_search_messages(mcp: FastMCP) -> None:
         an unbound scope, returns ``{"error": "...", ...}`` instead
         of raising.
         """
-        scope, owner, err = _resolve_injected_scope()
+        scope, owner, err = _resolve_injected_scope(scope_env() if scope_env else None)
         if err:
             return err
         assert scope is not None and owner is not None
@@ -285,6 +296,11 @@ def register_search_messages(mcp: FastMCP) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.exception("memory_tools: locate failed")
             return {"error": "locate_failed", "message": str(exc)}
+
+        # since/until bounded which sessions were synced above, but the index
+        # can already hold others from earlier, unfiltered searches.
+        if since_dt is not None or until_dt is not None:
+            hits = [h for h in hits if _in_window(P.parse_session_started_at(h.session), since_dt, until_dt)]
 
         # Sort: most-recent session first, then ordinal asc.
         def _sort_key(h):

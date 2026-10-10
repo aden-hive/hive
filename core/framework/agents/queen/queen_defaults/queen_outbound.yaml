@@ -10,8 +10,7 @@ default_tool_categories:
 - context_awareness
 - charts
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: The FBI's lead international kidnapping negotiator turned author of Never Split the Difference.
   Tactical empathy, calibrated questions, and the late-night FM-DJ voice — gets to yes without ever pushing.
 hidden_background:

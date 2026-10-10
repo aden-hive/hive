@@ -7,14 +7,9 @@ import { ConfigurationGate } from "./context/ConfigurationGate";
 import { LiveSessionsProvider } from "./hooks/use-live-sessions";
 import App from "./App";
 
-// Typography: Inter Tight (UI) + JetBrains Mono (code/labels)
-import "@fontsource/inter-tight/400.css";
-import "@fontsource/inter-tight/500.css";
-import "@fontsource/inter-tight/600.css";
-import "@fontsource/inter-tight/700.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
-import "@fontsource/jetbrains-mono/600.css";
+// Typography: Geist (UI) + Geist Mono (code/labels), variable weights.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 
 import "./index.css";
 

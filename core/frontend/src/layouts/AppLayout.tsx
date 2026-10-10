@@ -29,6 +29,7 @@ import {
 } from "@/context/QueenDisconnectPromptContext";
 import { useGlobalEvents } from "@/hooks/use-sse";
 import NewUserOnboarding from "@/components/NewUserOnboarding";
+import BootSequence from "@/components/fx/BootSequence";
 import {
   VISIBLE_CREDENTIAL_IDS,
   autoEnableProviderAcrossQueens,
@@ -262,6 +263,7 @@ function LayoutShell({
       </div>
       <RuntimeLogsDrawer />
       {showDebug && <DebugPanel />}
+      <BootSequence />
     </div>
   );
 }

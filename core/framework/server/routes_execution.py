@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -354,9 +355,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # pure CPU that used to freeze the whole server for up to
                 # minutes. Page cap bounds the extraction (a 9.9 MB
                 # 1000-page PDF is still megabytes of text otherwise).
-                _pdf_bytes = raw_bytes
-
-                def _inspect_pdf() -> tuple[int, list[str]]:
+                def _inspect_pdf(_pdf_bytes: bytes | None, pdf_filepath: Path, is_large: bool) -> tuple[int, list[str]]:
                     page_count = 0
                     parts: list[str] = []
                     try:
@@ -384,7 +383,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                         logger.debug("[handle_chat] PDF inspection failed", exc_info=True)
                     return page_count, parts
 
-                pdf_page_count, _pdf_parts = await asyncio.to_thread(_inspect_pdf)
+                pdf_page_count, _pdf_parts = await asyncio.to_thread(_inspect_pdf, raw_bytes, pdf_filepath, is_large)
                 attachment_text_parts.extend(_pdf_parts)
 
                 if not is_large:
@@ -468,9 +467,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # first 200 rows, count the rest row-by-row (O(1) memory).
                 # Runs in a worker thread: the full-file row count over a
                 # 100 MB CSV is seconds of loop-stalling work otherwise.
-                _csv_bytes = raw_bytes
-
-                def _parse_csv() -> tuple[int, str | None]:
+                def _parse_csv(_csv_bytes: bytes | None, csv_filepath: Path, csv_filename: str) -> tuple[int, str | None]:
                     row_count = 0
                     text_part: str | None = None
                     try:
@@ -503,7 +500,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                         logger.debug("[handle_chat] CSV parse failed", exc_info=True)
                     return row_count, text_part
 
-                csv_row_count, _csv_part = await asyncio.to_thread(_parse_csv)
+                csv_row_count, _csv_part = await asyncio.to_thread(_parse_csv, raw_bytes, csv_filepath, csv_filename)
                 if _csv_part is not None:
                     attachment_text_parts.append(_csv_part)
 
@@ -536,9 +533,8 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # Runs in a worker thread (chunked newline count over a
                 # 100 MB file is loop-stalling work).
                 is_large = attachment_size > LARGE_TEXT_THRESHOLD_BYTES
-                _text_bytes = raw_bytes
 
-                def _read_text_attachment() -> tuple[str, int]:
+                def _read_text_attachment(_text_bytes: bytes | None, text_filepath: Path, is_large: bool) -> tuple[str, int]:
                     if _text_bytes is not None:
                         t = _text_bytes.decode("utf-8", errors="replace")
                         return t, (t.count("\n") + 1 if t else 0)
@@ -555,7 +551,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     return t, (t.count("\n") + 1 if t else 0)
 
                 try:
-                    text, line_count = await asyncio.to_thread(_read_text_attachment)
+                    text, line_count = await asyncio.to_thread(_read_text_attachment, raw_bytes, text_filepath, is_large)
                 except OSError as exc:
                     logger.warning(
                         "[handle_chat] text attachment read failed (%s): %s",
@@ -627,13 +623,11 @@ async def handle_chat(request: web.Request) -> web.Response:
                 try:
                     from PIL import Image
 
-                    _img_bytes = raw_bytes
-
-                    def _probe_dims() -> str:
+                    def _probe_dims(_img_bytes: bytes) -> str:
                         with Image.open(io.BytesIO(_img_bytes)) as im:
                             return f"{im.size[0]}×{im.size[1]}, "
 
-                    dims_str = await asyncio.to_thread(_probe_dims)
+                    dims_str = await asyncio.to_thread(_probe_dims, raw_bytes)
                 except Exception:
                     pass
                 saved_attachment_info.append(
@@ -1188,10 +1182,7 @@ async def _compact_queen_conversation_in_place(
     if not messages:
         return None
 
-    max_ctx_tokens = 180_000
-    loop_cfg = getattr(queen_loop, "_config", None)
-    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
-        max_ctx_tokens = int(loop_cfg.max_context_tokens)
+    max_ctx_tokens = _queen_window_tokens(queen_loop)
 
     summary = await llm_compact(
         queen_ctx,
@@ -1622,6 +1613,30 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+# An inherited DM transcript below this share of the colony queen's window is
+# carried over verbatim instead of being compacted.
+_INHERITED_COMPACTION_MIN_WINDOW_SHARE = 0.25
+
+
+def _queen_window_tokens(queen_loop: Any) -> int:
+    """The queen's context window, as compaction sizes it (180k fallback)."""
+    loop_cfg = getattr(queen_loop, "_config", None)
+    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
+        return int(loop_cfg.max_context_tokens)
+    return 180_000
+
+
+async def _inherited_transcript_size(queen_dir: Any) -> tuple[int, int]:
+    """(content chars, message count) of the conversation in ``queen_dir``."""
+    from framework.storage.conversation_store import FileConversationStore
+
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return 0, 0
+    parts = await FileConversationStore(convs_dir).read_parts()
+    return sum(len(str(p.get("content") or "")) for p in parts), len(parts)
+
+
 async def _compact_inherited_conversation(
     *,
     dest_queen_dir: Any,
@@ -1648,31 +1663,52 @@ async def _compact_inherited_conversation(
     import json as _json
     from datetime import UTC as _UTC, datetime as _datetime
 
-    try:
-        result = await _compact_queen_conversation_in_place(
-            queen_dir=dest_queen_dir,
-            queen_ctx=queen_ctx,
-            queen_loop=queen_loop,
-            inherited_from=source_session_id,
-        )
-    except Exception:
-        logger.warning(
-            "compact_inherited: compaction failed; leaving raw transcript",
-            exc_info=True,
-        )
-        return
-
-    if result is None:
-        # No queen ctx, no parts on disk, or empty conversation. Nothing
-        # to compact and nothing to mark — the colony will just open with
-        # an empty chat (or whatever raw state was copied).
+    inherited_chars, inherited_count = await _inherited_transcript_size(dest_queen_dir)
+    inherited_tokens = inherited_chars // 4
+    window_tokens = _queen_window_tokens(queen_loop)
+    small_enough_to_keep = inherited_count > 0 and inherited_tokens < window_tokens * _INHERITED_COMPACTION_MIN_WINDOW_SHARE
+    if small_enough_to_keep:
+        # Compacting it would only lose detail, and the colony opening
+        # waits on compaction (up to 180s).
         logger.info(
-            "compact_inherited: nothing to compact for colony forked from %s",
+            "compact_inherited: keeping %d message(s) (~%d tokens) verbatim for colony forked from %s",
+            inherited_count,
+            inherited_tokens,
             source_session_id,
         )
-        return
+        messages_compacted, summary_text = inherited_count, ""
+    else:
+        try:
+            result = await _compact_queen_conversation_in_place(
+                queen_dir=dest_queen_dir,
+                queen_ctx=queen_ctx,
+                queen_loop=queen_loop,
+                inherited_from=source_session_id,
+            )
+        except Exception:
+            logger.warning(
+                "compact_inherited: compaction failed; leaving raw transcript",
+                exc_info=True,
+            )
+            return
 
-    messages_compacted, summary_chars, summary_text = result
+        if result is None:
+            # No queen ctx, no parts on disk, or empty conversation. Nothing
+            # to compact and nothing to mark — the colony will just open with
+            # an empty chat (or whatever raw state was copied).
+            logger.info(
+                "compact_inherited: nothing to compact for colony forked from %s",
+                source_session_id,
+            )
+            return
+
+        messages_compacted, summary_chars, summary_text = result
+        logger.info(
+            "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
+            messages_compacted,
+            summary_chars,
+            source_session_id,
+        )
 
     # Append the boundary marker to the colony's events.jsonl so the
     # frontend can group + collapse everything that came before.  The
@@ -1702,13 +1738,6 @@ async def _compact_inherited_conversation(
         await asyncio.to_thread(_append_marker)
     except OSError:
         logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
-
-    logger.info(
-        "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
-        messages_compacted,
-        summary_chars,
-        source_session_id,
-    )
 
 
 async def fork_session_into_colony(

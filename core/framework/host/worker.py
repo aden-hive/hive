@@ -204,7 +204,10 @@ class Worker:
         # conversation parts to leak into the process working directory.
         self._storage_path: Path | None = Path(storage_path) if storage_path is not None else None
         self._task_handle: asyncio.Task | None = None
+        # Monotonic, for durations only. ``_started_wall_at`` is the
+        # epoch time reported to the UI.
         self._started_at: float = 0.0
+        self._started_wall_at: float = 0.0
         self._result: WorkerResult | None = None
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         # Set by AgentLoop when the worker's LLM calls ``report_to_parent``.
@@ -233,7 +236,7 @@ class Worker:
             id=self.id,
             task=self.task,
             status=self.status,
-            started_at=self._started_at,
+            started_at=self._started_wall_at,
             result=self._result,
             profile_name=self._profile_name,
             batch_id=self._batch_id,
@@ -315,6 +318,7 @@ class Worker:
         """
         self.status = WorkerStatus.RUNNING
         self._started_at = time.monotonic()
+        self._started_wall_at = time.time()
 
         # Scope browser profile (and any other CONTEXT_PARAMS) to this
         # worker. asyncio.create_task() copies the parent's contextvars,

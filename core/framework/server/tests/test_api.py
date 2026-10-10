@@ -503,7 +503,7 @@ class TestSessionCRUD:
             trigger_type="timer",
             trigger_config={"cron": "0 5 * * *"},
             task="Run task",
-            active=True,
+            enabled=True,
         )
         session.active_trigger_ids.add("daily")
         session.active_timer_tasks["daily"] = asyncio.create_task(asyncio.sleep(60))
@@ -988,11 +988,21 @@ class TestSSEFormat:
 
 class TestErrorMiddleware:
     @pytest.mark.asyncio
-    async def test_unknown_api_route_falls_back_to_frontend(self):
+    async def test_unknown_api_route_falls_back_to_frontend(self, tmp_path, monkeypatch):
+        # The SPA catch-all only exists when a built frontend does. Provide one
+        # (the server checks ./frontend/dist first) rather than depend on a
+        # local `npm run build`, which CI runners don't have.
+        dist = tmp_path / "frontend" / "dist"
+        dist.mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html><title>Hive</title>")
+        monkeypatch.chdir(tmp_path)
+
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")
             assert resp.status == 200
+            # The fallback must never be cached for an /api/* URL.
+            assert resp.headers["Cache-Control"] == "no-store"
 
 
 class TestCleanupStaleActiveSessions:

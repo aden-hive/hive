@@ -181,7 +181,7 @@ See the [Getting Started Guide](getting-started.md) for building agents, and the
 
 ## MCP Server Configuration
 
-MCP (Model Context Protocol) servers are configured in `.mcp.json` at the project root:
+Hive's own tools run in-process and need no configuration (see [Tools](tools.md)); external MCP servers are added with `hive mcp add`. The `.mcp.json` at the project root is separate: it exposes Hive's tool servers to IDE agents such as Claude Code:
 
 ```json
 {
@@ -200,7 +200,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The standalone `files-tools` server (`files_server.py`) exposes file I/O (`read_file`, `write_file`, `edit_file`, `hashline_edit`, `search_files`). It is no longer auto-registered for agents — queens/workers do file I/O through the `terminal-tools` server (`terminal_exec` for cat/sed/heredoc, `terminal_rg` / `terminal_glob` for search), which defaults its cwd to the session workdir. The `tools` MCP server exposes integration tools including web search, PDF reading, and CSV processing.
+The standalone `files-tools` server (`files_server.py`) exposes file I/O (`read_file`, `write_file`, `edit_file`, `search_files`); the `tools` server (`mcp_server.py`) exposes the full `aden_tools` integration catalog. Hive's queens and workers don't use either: they get the same file tools, and a curated subset of the integrations, in-process.
 
 ## Storage
 

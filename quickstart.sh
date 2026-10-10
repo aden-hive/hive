@@ -2365,25 +2365,12 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-# Show tool summary
-TOOL_COUNTS=$(uv run python -c "
-from fastmcp import FastMCP
-from aden_tools.tools import register_all_tools
-mv = FastMCP('v')
-v = register_all_tools(mv, include_unverified=False)
-ma = FastMCP('a')
-a = register_all_tools(ma, include_unverified=True)
-print(f'{len(v)}|{len(a) - len(v)}')
-" 2>/dev/null)
-if [ -n "$TOOL_COUNTS" ]; then
-    VERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f1)
-    UNVERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f2)
-    echo -e "${BOLD}Tools:${NC}"
-    echo -e "  ${GREEN}⬢${NC} ${VERIFIED} verified    ${DIM}${UNVERIFIED} unverified available${NC}"
-    echo -e "  ${DIM}Enable unverified: INCLUDE_UNVERIFIED_TOOLS=true${NC}"
-    echo -e "  ${DIM}Learn more: docs/tools.md${NC}"
-    echo ""
-fi
+# Show the tool surface. The aden_tools integration catalog isn't loaded by
+# default (it runs as an external MCP server), so it isn't counted here.
+echo -e "${BOLD}Tools:${NC}"
+echo -e "  ${GREEN}⬢${NC} Built in: shell, files, code search, browser, web scraping, PDFs, CSV, charts, memory search"
+echo -e "  ${DIM}More integrations (GitHub, Gmail, HubSpot, Slack, ...) run as an MCP server: see docs/tools.md${NC}"
+echo ""
 
 # Show Codex instructions if available
 if [ "$CODEX_AVAILABLE" = true ]; then

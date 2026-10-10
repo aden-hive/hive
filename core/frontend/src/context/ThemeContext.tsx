@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { configApi } from "@/api/config";
+import { applyMotion, hexReveal, resolveMotion, type MotionPref } from "@/lib/motion";
 
 type Theme = "light" | "dark";
 type Density = "compact" | "spacious";
@@ -9,6 +10,14 @@ interface ThemeContextValue {
   setTheme: (theme: Theme) => void;
   density: Density;
   setDensity: (density: Density) => void;
+  motion: MotionPref;
+  setMotion: (motion: MotionPref) => void;
+}
+
+function applyThemeClass(theme: Theme): void {
+  const root = document.documentElement;
+  root.classList.remove("light", "dark");
+  root.classList.add(theme);
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -49,14 +58,45 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return "compact";
   });
 
+  const [motion, setMotion] = useState<MotionPref>(() => {
+    const stored = localStorage.getItem("motion");
+    const pref: MotionPref = stored === "full" || stored === "reduced" ? stored : "system";
+    // Resolve during the first render, not in an effect: children's layout
+    // effects run before this provider's effects, and the entrance effects
+    // read data-motion when they mount.
+    document.documentElement.dataset.motion = resolveMotion(pref);
+    return pref;
+  });
+
   useEffect(() => {
-    const root = document.documentElement;
-
-    root.classList.remove("light", "dark");
-    root.classList.add(theme);
-
+    applyThemeClass(theme);
     localStorage.setItem("theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    applyMotion(resolveMotion(motion));
+    localStorage.setItem("motion", motion);
+    if (motion !== "system") return;
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    } catch {
+      return;
+    }
+    const onChange = () => applyMotion(resolveMotion("system"));
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [motion]);
+
+  // Where the last click landed: the theme sweep grows from there.
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.density = density;
@@ -64,7 +104,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [density]);
 
   const handleSetTheme = useCallback((t: Theme) => {
-    setTheme(t);
+    // Both the class swap and the state update must wait for the view
+    // transition's callback: React flushes a click handler's update before
+    // the next frame, so updating here would repaint the page dark before the
+    // "old" snapshot is taken. The class is applied synchronously so the new
+    // snapshot has it; the state's effect then re-applies it as a no-op.
+    hexReveal(() => {
+      applyThemeClass(t);
+      setTheme(t);
+    }, lastPointer.current);
     // Mark an explicit on-device choice so future /v1/me hydration won't
     // override it with the account's onboarding theme (see hydration effect).
     try { localStorage.setItem("theme-explicit", "1"); } catch { /* ignore */ }
@@ -86,6 +134,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         setTheme: handleSetTheme,
         density,
         setDensity: handleSetDensity,
+        motion,
+        setMotion,
       }}
     >
       {children}

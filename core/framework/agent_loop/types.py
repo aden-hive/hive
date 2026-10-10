@@ -214,6 +214,12 @@ class AgentContext:
     # contexts and for queens with no colony runtime.
     active_workers_provider: Any = None
 
+    # Optional Callable[[str], str | None]: the user's message in, a block of
+    # related excerpts from past conversations out (None when nothing is
+    # related). Read by the past-conversations reminder source before each
+    # user turn. Wired by the queen orchestrator; None elsewhere.
+    past_conversation_recall_provider: Any = None
+
     # Optional Callable[[], ColonyBinding | None]: resolves the on-disk
     # colony this agent is bound to. Wired by the queen orchestrator from
     # ``session.colony.binding`` and by colony worker spawn from

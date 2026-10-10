@@ -755,6 +755,12 @@ class AgentLoop(AgentProtocol):
         # event emitted at receive time, so the drain can emit a matching
         # CLIENT_INPUT_COMMITTED carrying the true injection time.
         self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None, str | None]] = asyncio.Queue()
+        # Text of real user messages queued but not yet drained, so the
+        # USER_PROMPT_SUBMIT reminders can see what the user is asking.
+        self._pending_user_texts: list[str] = []
+        # Context injected with ``wake=False``: it joins the next drain but
+        # never unparks the loop by itself.
+        self._passive_injections: list[str] = []
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Queen input blocking state
         self._input_ready = asyncio.Event()
@@ -869,6 +875,7 @@ class AgentLoop(AgentProtocol):
             ColonyWorkerSnapshotReminderSource,
         )
         from framework.agent_loop.idle_nudge import IdleNudgeSource
+        from framework.agent_loop.past_conversations_reminder import PastConversationsReminderSource
         from framework.agent_loop.stream_stall import StreamStallSource
         from framework.agent_loop.tool_skill_reminders import (
             SearchableToolsReminderSource,
@@ -884,6 +891,7 @@ class AgentLoop(AgentProtocol):
         self._reminder_hub.register(TaskReminderSource())
         self._reminder_hub.register(ColonyParallelNudgeSource())
         self._reminder_hub.register(ActiveWorkersReminderSource())
+        self._reminder_hub.register(PastConversationsReminderSource())
         # Queen-only: the searchable-tools manifest + skills catalog ride the
         # conversation as <system-reminder>s Self-skip for non-queen streams.
         self._reminder_hub.register(SearchableToolsReminderSource())
@@ -1512,7 +1520,7 @@ class AgentLoop(AgentProtocol):
             # fires before the injection queue is drained) — "cowork style":
             # the queen reads the frame first, then the user's latest message.
             await self._run_hooks("session_start", conversation, trigger=initial_message)
-            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation)
+            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation, user_text=initial_message or None)
 
             if initial_message:
                 # Stamp with arrival time so the conversation has a
@@ -1812,7 +1820,9 @@ class AgentLoop(AgentProtocol):
             # ordering is async-single-loop so there is no real race.
             will_drain = not self._injection_queue.empty()
             if will_drain:
-                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation)
+                user_text = "\n".join(self._pending_user_texts) or None
+                self._pending_user_texts.clear()
+                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation, user_text=user_text)
             logger.debug("[AgentLoop.execute] iteration=%d: draining injection queue...", iteration)
             drained_injections = await self._drain_injection_queue(conversation, ctx)
             logger.debug(
@@ -3490,15 +3500,15 @@ class AgentLoop(AgentProtocol):
         is_client_input: bool = False,
         image_content: list[dict[str, Any]] | None = None,
         correlation_id: str | None = None,
+        wake: bool = True,
     ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
-        Always unblocks _await_user_input() so the node processes the
-        message promptly — both real user input and external events
-        (e.g. worker ask_user forwarded via queenContext) need to wake
-        the node.
+        Unblocks _await_user_input() so the node processes the message
+        promptly — both real user input and external events (e.g. worker
+        ask_user forwarded via queenContext) need to wake the node.
 
         Args:
             content: The message text.
@@ -3511,7 +3521,16 @@ class AgentLoop(AgentProtocol):
                 CLIENT_INPUT_RECEIVED event already emitted for it, so the
                 drain can emit a matching CLIENT_INPUT_COMMITTED (true
                 injection time) the UI can reconcile against.
+            wake: False for context that should ride along rather than
+                demand a turn (e.g. recalled memories): it joins the next
+                drain — the next iteration if the turn is still running,
+                else the user's next message — and never wakes a parked
+                loop. Waking on it made the queen answer the same message
+                twice when it landed just after her reply.
         """
+        if not wake:
+            self._passive_injections.append(content)
+            return
         logger.debug(
             "[AgentLoop.inject_event] content_len=%d, is_client_input=%s, has_images=%s, queue_size_before=%d",
             len(content) if content else 0,
@@ -3531,6 +3550,8 @@ class AgentLoop(AgentProtocol):
             # answered (in-app or via a routed messaging reply).
             self._escalation_source.reset()
             self._notify_sentinel_local_resume()
+            if content:
+                self._pending_user_texts.append(content)
         try:
             await self._injection_queue.put((content, is_client_input, image_content, correlation_id))
             logger.debug("[AgentLoop.inject_event] Message queued successfully")
@@ -3725,6 +3746,12 @@ class AgentLoop(AgentProtocol):
         # Same after emit (sync handlers may inject during the emit).
         if not self._injection_queue.empty() or not self._trigger_queue.empty():
             return True
+
+        # The same window for shutdown: signal_shutdown() sets _input_ready, so a
+        # shutdown that landed before this park (say, while the cursor was being
+        # written) was just erased by the clear(). _shutdown is sticky; honor it.
+        if self._shutdown:
+            return False
 
         if emit_client_request and self._event_bus:
             if colony_pivot is not None:
@@ -6906,6 +6933,11 @@ class AgentLoop(AgentProtocol):
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: AgentContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
+        # Passive context joins whichever drain comes next; it never woke the
+        # loop itself. Queued after anything already waiting.
+        for content in self._passive_injections:
+            self._injection_queue.put_nowait((content, False, None, None))
+        self._passive_injections.clear()
         on_committed = None
         if self._event_bus is not None and ctx.emits_client_io:
             stream_id = ctx.stream_id or ctx.agent_id
@@ -6978,6 +7010,8 @@ class AgentLoop(AgentProtocol):
         point: ReminderPoint,
         ctx: AgentContext,
         conversation: NodeConversation,
+        *,
+        user_text: str | None = None,
     ) -> bool:
         """Fire a reminder lifecycle point that injects as a user message.
 
@@ -6992,7 +7026,7 @@ class AgentLoop(AgentProtocol):
         reminder the agent would not read until the user next speaks.
         """
         try:
-            block, energized = await self._reminder_hub.fire_energized(point, ctx)
+            block, energized = await self._reminder_hub.fire_energized(point, ctx, user_text=user_text)
             if block:
                 await conversation.add_user_message(block)
                 self._bump("reminders_injected")

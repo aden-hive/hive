@@ -21,6 +21,7 @@ from framework.loader.mcp_errors import (
     MCPErrorCode,
     MCPInstallError,
 )
+from framework.tools.harness_tools import HARNESS_GROUP_NAMES, HARNESS_GROUPS
 
 logger = logging.getLogger(__name__)
 
@@ -34,54 +35,33 @@ _DEFAULT_CONFIG = {
     "refresh_interval_hours": DEFAULT_REFRESH_INTERVAL_HOURS,
 }
 
-# Default local MCP servers that ship with Hive. Seeded on first startup so
-# fresh users get working file I/O and the hive tool suite without having to
-# run `hive mcp add` manually. (Browser automation is the `hive-browser` CLI
-# now, not a bundled MCP server.) ``cwd`` is filled in at registration time
-# with the absolute path to the ``tools/`` directory.
-_DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
-    "hive_tools": {
-        "description": "Hive tools: web search, email, CRM, calendar, and 100+ integrations",
-        "args": ["run", "python", "mcp_server.py", "--stdio"],
-    },
-    # (Browser automation is no longer a bundled MCP server — it's the
-    # terminal-driven `hive-browser` CLI now. The old `gcu-tools` entry was
-    # removed here so it is not re-seeded into per-user installed.json.)
-    "terminal-tools": {
-        "description": "Terminal capabilities",
-        "args": ["run", "python", "terminal_tools_server.py", "--stdio"],
-    },
-    "chart-tools": {
-        "description": "BI/financial chart + diagram rendering: ECharts, Mermaid",
-        "args": ["run", "python", "chart_tools_server.py", "--stdio"],
-    },
-    "memory-tools": {
-        "description": "System memory: regex search across a queen/colony's messages",
-        "args": ["run", "python", "memory_tools_server.py", "--stdio"],
-    },
+# The servers Hive used to seed into installed.json as stdio subprocesses.
+# They are in-process harness groups now (framework.tools.harness_tools):
+# requesting one of these names resolves to the harness, never to a
+# subprocess. name -> entry point (script, or module for ``python -m``),
+# used to recognise (and retire) the entries earlier versions auto-seeded.
+# Includes the stale aliases older versions wrote (hive-tools, shell-tools)
+# and gcu-tools, the browser MCP server the ``hive-browser`` CLI replaced:
+# left installed, it hands every queen 22 browser_* tools that drive a
+# separate, usually unstarted browser.
+_RETIRED_BUNDLED_SERVERS: dict[str, str] = {
+    "hive_tools": "mcp_server.py",
+    "hive-tools": "mcp_server.py",
+    "terminal-tools": "terminal_tools_server.py",
+    "shell-tools": "shell_tools_server.py",
+    "chart-tools": "chart_tools_server.py",
+    "memory-tools": "memory_tools_server.py",
+    "files-tools": "files_server.py",
+    "gcu-tools": "gcu.server",
 }
 
-# The framework's own bundled servers. These are NEVER subject to the
-# ``max_tools`` cap — the cap exists to bound *user-added* MCP sprawl, not
-# Hive's essential tools (file I/O, terminal, charts, memory, the hive
-# suite). Capping them caused an intermittent, order-dependent bug where a
-# user server that consumed the tool budget first would push e.g.
-# chart-tools past the cap, so ``chart_render`` silently vanished from the
-# queen's live catalog while still showing as allowlisted (the
-# "search_tools says no chart_render" report). See
+# Hive's essential tool groups. These are NEVER subject to the ``max_tools``
+# cap — the cap exists to bound *user-added* MCP sprawl, not Hive's own
+# tools. Capping them caused an intermittent, order-dependent bug where a
+# user server that consumed the budget first pushed e.g. chart_render out
+# of the queen's live catalog while it still showed as allowlisted. See
 # ``ToolRegistry.load_registry_servers`` and ``resolve_for_agent``.
-DEFAULT_LOCAL_SERVER_NAMES: frozenset[str] = frozenset(_DEFAULT_LOCAL_SERVERS)
-
-# Aliases that earlier versions of ensure_defaults wrote under the wrong name.
-# When we see one of these stale entries, drop it before seeding the canonical
-# name so the active agents (queen, credential_tester) can find their tools.
-_STALE_DEFAULT_ALIASES: dict[str, str] = {
-    "hive_tools": "hive-tools",
-    # 2026-04-30: shell-tools renamed to terminal-tools. Drop the stale name
-    # on next ensure_defaults() so the queen's allowlist (which now includes
-    # @server:terminal-tools) actually finds a server with the new name.
-    "terminal-tools": "shell-tools",
-}
+DEFAULT_LOCAL_SERVER_NAMES: frozenset[str] = HARNESS_GROUP_NAMES
 
 
 class MCPRegistry:
@@ -100,28 +80,25 @@ class MCPRegistry:
     # ── Initialization ──────────────────────────────────────────────
 
     def initialize(self) -> None:
-        """Create directory structure, default files, and seed bundled servers.
+        """Create directory structure and default files; retire bundled servers.
 
         Every read path (queen orchestrator, pipeline stage, CLI, routes)
-        calls this — keeping the seeding here means a fresh ``HIVE_HOME``
-        (e.g. the desktop's per-user dir under ``~/.config/Hive/users/<hash>/``
-        or ``~/Library/Application Support/Hive/users/<hash>/``) is always
-        populated with ``hive_tools`` / ``files-tools`` / ``shell-tools``
-        before any agent code reads ``installed.json``.
-        Without this, ``load_agent_selection()`` resolves an empty registry
-        and emits "Server X requested but not installed" warnings even
-        though the server is bundled.
+        calls this. Hive's own tools no longer live in ``installed.json`` —
+        they are harness groups that ``resolve_for_agent`` synthesises on
+        request — so this only removes the stdio entries earlier versions
+        seeded, which would otherwise show up as MCP servers and be spawned
+        by health checks.
 
-        Idempotent — already-installed entries are left untouched.
+        Idempotent.
         """
         self._bootstrap_io()
-        self._seed_defaults()
+        self._retire_bundled_servers()
 
     def _bootstrap_io(self) -> None:
         """Create the registry directory + empty config/installed files.
 
-        Split out from ``initialize()`` so ``_seed_defaults()`` can call it
-        without re-entering the seeding logic (which would recurse via
+        Split out from ``initialize()`` so ``ensure_defaults()`` can call it
+        without re-entering the retirement pass (which would recurse via
         ``_read_installed()`` → ``initialize()``).
         """
         self._base.mkdir(parents=True, exist_ok=True)
@@ -136,183 +113,37 @@ class MCPRegistry:
     def ensure_defaults(self) -> list[str]:
         """Public alias kept for the ``hive mcp init`` CLI command.
 
-        Returns the list of newly-registered server names so the CLI can
-        print them. Same idempotent seeding logic as ``initialize()``.
+        Nothing is seeded any more (Hive's tools are in-process harness
+        groups), so this returns an empty list; it still creates the
+        registry files and retires stale bundled entries.
         """
         self._bootstrap_io()
-        return self._seed_defaults()
+        self._retire_bundled_servers()
+        return []
 
-    def _seed_defaults(self) -> list[str]:
-        """Idempotently register the bundled default local servers.
+    def _retire_bundled_servers(self) -> list[str]:
+        """Drop the stdio entries earlier versions auto-seeded for Hive's tools.
 
-        Skips entirely when the source-tree ``tools/`` directory cannot
-        be located (e.g. wheel installs). Returns the list of names that
-        were newly registered.
-
-        Also runs a self-heal pass over already-registered defaults: if an
-        entry's stdio cwd is unreachable on this machine (e.g. the registry
-        was copied from another developer's box and points at their
-        ``/Users/<them>/...`` path), the entry is overwritten with the
-        canonical config so the queen can actually spawn it. The user's
-        ``enabled`` toggle and ``overrides`` are preserved.
+        Only entries that still point at one of the bundled entry scripts
+        are removed, so a user's own server that happens to share a name
+        survives (it is shadowed by the harness group either way). Returns
+        the removed names.
         """
-        # parents: [0]=loader, [1]=framework, [2]=core, [3]=repo root
-        tools_dir = Path(__file__).resolve().parents[3] / "tools"
-        if not tools_dir.is_dir():
-            logger.debug(
-                "MCPRegistry._seed_defaults: tools dir %s missing; skipping default seed",
-                tools_dir,
-            )
-            return []
-
-        cwd = str(tools_dir)
         data = self._read_installed()
-        existing = data.get("servers", {})
-        added: list[str] = []
-
-        # Drop stale aliases (from earlier versions that wrote the wrong name).
-        # Only remove the alias when the canonical name isn't already installed,
-        # so we never clobber a hand-edited entry the user cares about.
-        mutated = False
-        for canonical, stale in _STALE_DEFAULT_ALIASES.items():
-            if stale in existing and canonical not in existing:
-                logger.info(
-                    "MCPRegistry._seed_defaults: removing stale alias '%s' (canonical: '%s')",
-                    stale,
-                    canonical,
-                )
-                del existing[stale]
-                mutated = True
-
-        repaired: list[str] = []
-        for name, spec in _DEFAULT_LOCAL_SERVERS.items():
-            entry = existing.get(name)
+        servers = data.get("servers", {})
+        retired: list[str] = []
+        for name, script in _RETIRED_BUNDLED_SERVERS.items():
+            entry = servers.get(name)
             if entry is None:
                 continue
-            if self._default_entry_runnable(entry, tools_dir, list(spec["args"])):
-                continue
-            existing[name] = self._build_default_entry(
-                name=name,
-                spec=spec,
-                cwd=cwd,
-                preserve_from=entry,
-            )
-            repaired.append(name)
-            mutated = True
-
-        if mutated:
+            stdio = (entry.get("manifest") or {}).get("stdio") or {}
+            if script in (stdio.get("args") or []):
+                del servers[name]
+                retired.append(name)
+        if retired:
             self._write_installed(data)
-        if repaired:
-            logger.warning(
-                "MCPRegistry._seed_defaults: repaired %d default server(s) with unreachable cwd/script: %s",
-                len(repaired),
-                repaired,
-            )
-
-        for name, spec in _DEFAULT_LOCAL_SERVERS.items():
-            if name in existing:
-                continue
-            try:
-                self.add_local(
-                    name=name,
-                    transport="stdio",
-                    command="uv",
-                    args=list(spec["args"]),
-                    cwd=cwd,
-                    description=spec["description"],
-                )
-                added.append(name)
-            except MCPError as exc:
-                logger.warning("MCPRegistry._seed_defaults: failed to seed '%s': %s", name, exc)
-
-        if added:
-            logger.info("MCPRegistry: seeded default local servers: %s", added)
-        return added
-
-    @staticmethod
-    def _default_entry_runnable(entry: dict, tools_dir: Path, canonical_args: list[str]) -> bool:
-        """Return True iff ``entry`` can plausibly be spawned on this machine.
-
-        Checks:
-        - transport is stdio (only stdio defaults exist today; non-stdio
-          gets a free pass since we have nothing to compare against)
-        - stdio.cwd is an existing directory
-        - the entry script (the first ``.py`` arg, e.g. ``files_server.py``)
-          exists relative to that cwd
-
-        We deliberately do NOT spawn the subprocess here — this runs on
-        every read path and must be cheap. A filesystem reachability
-        check catches the cross-machine `cwd` drift that is the common
-        failure, without flapping on transient runtime errors.
-        """
-        transport = entry.get("transport") or "stdio"
-        if transport != "stdio":
-            return True
-        manifest = entry.get("manifest") or {}
-        stdio = manifest.get("stdio") or {}
-        cwd_str = stdio.get("cwd")
-        if not cwd_str:
-            return False
-        cwd_path = Path(cwd_str)
-        if not cwd_path.is_dir():
-            return False
-        # Find the script: the first arg ending in .py, falling back to the
-        # canonical spec if the registered args are unrecognizable. Modules
-        # invoked via `python -m foo.bar` (no .py arg) are accepted as long
-        # as the cwd exists — we can't cheaply prove the module imports.
-        registered_args = stdio.get("args") or []
-        script: str | None = next(
-            (a for a in registered_args if isinstance(a, str) and a.endswith(".py")),
-            None,
-        )
-        if script is None:
-            script = next(
-                (a for a in canonical_args if isinstance(a, str) and a.endswith(".py")),
-                None,
-            )
-        if script is None:
-            return True
-        return (cwd_path / script).is_file()
-
-    @classmethod
-    def _build_default_entry(
-        cls,
-        *,
-        name: str,
-        spec: dict[str, Any],
-        cwd: str,
-        preserve_from: dict | None,
-    ) -> dict:
-        """Construct a fresh canonical entry for a default server.
-
-        When ``preserve_from`` is provided, carries over the user's
-        ``enabled`` flag and ``overrides`` so a deliberate disable or
-        custom env var survives the repair.
-        """
-        manifest = {
-            "name": name,
-            "description": spec["description"],
-            "transport": {"supported": ["stdio"], "default": "stdio"},
-            "stdio": {
-                "command": "uv",
-                "args": list(spec["args"]),
-                "env": {},
-                "cwd": cwd,
-            },
-        }
-        entry = cls._make_entry(
-            source="local",
-            manifest=manifest,
-            transport="stdio",
-            installed_by="hive mcp init (auto-repair)",
-        )
-        if preserve_from is not None:
-            if "enabled" in preserve_from:
-                entry["enabled"] = bool(preserve_from["enabled"])
-            prior_overrides = preserve_from.get("overrides")
-            if isinstance(prior_overrides, dict):
-                entry["overrides"] = prior_overrides
-        return entry
+            logger.info("MCPRegistry: retired bundled MCP server entries (now in-process harness tools): %s", retired)
+        return retired
 
     # ── Internal I/O ────────────────────────────────────────────────
 
@@ -806,8 +637,11 @@ class MCPRegistry:
         cached_index = self._read_cached_index()
         exclude_set = set(exclude or [])
 
-        # Phase 1: collect profile-matched servers (alphabetical)
+        # Phase 1: collect profile-matched servers (alphabetical). "all"
+        # means every tool Hive has, which starts with its harness groups.
         profile_matched: list[str] = []
+        if profile == "all":
+            profile_matched.extend(sorted(n for n in HARNESS_GROUP_NAMES if n not in exclude_set))
         if profile:
             for name, entry in sorted(servers.items()):
                 if name in exclude_set:
@@ -856,6 +690,10 @@ class MCPRegistry:
         configs: list[MCPServerConfig] = []
         total_tools = 0
         for name in selected:
+            if name in HARNESS_GROUP_NAMES:
+                # In-process: no installed entry, no subprocess, no cap.
+                configs.append(MCPServerConfig(name=name, transport="harness", description=HARNESS_GROUPS[name]))
+                continue
             entry = servers.get(name)
             if entry is None:
                 logger.warning(
@@ -893,11 +731,6 @@ class MCPRegistry:
                     "Server '%s' has no tools list in manifest; max_tools enforced at registration",
                     name,
                 )
-            elif name in DEFAULT_LOCAL_SERVER_NAMES:
-                # Essential bundled servers bypass the cap — they must always
-                # resolve so their tools are guaranteed present in the queen's
-                # boot snapshot regardless of how many user servers precede them.
-                pass
             elif max_tools is not None and total_tools + server_tool_count > max_tools:
                 logger.info(
                     "Skipping server '%s' (%d tools): would exceed max_tools=%d",

@@ -5,6 +5,7 @@ and every agent template share one implementation instead of copy-pasting
 helper functions.
 """
 
+import importlib.util
 import json
 import logging
 import os
@@ -18,6 +19,14 @@ DEFAULT_MAX_TOKENS = 8192
 # Desktop mode — set by Electron shell to skip frontend builds, etc.
 # ---------------------------------------------------------------------------
 DESKTOP_MODE: bool = bool(os.environ.get("HIVE_DESKTOP_MODE"))
+
+# ---------------------------------------------------------------------------
+# Team CRM — the ``framework.crm`` package and the ``hive-crm`` CLI ship only
+# in builds that include them; this repository doesn't. Prompts and tool lists
+# that mention the CRM check this, so agents aren't sent after commands that
+# don't exist.
+# ---------------------------------------------------------------------------
+CRM_IN_THIS_BUILD: bool = importlib.util.find_spec("framework.crm") is not None
 
 # ---------------------------------------------------------------------------
 # Hive home directory structure
@@ -877,6 +886,27 @@ def get_email_senders_enabled() -> bool:
     if raw is not None and raw.strip() != "":
         return raw.strip().lower() not in ("0", "false", "no", "off")
     value = get_hive_config().get("email_senders")
+    if isinstance(value, bool):
+        return value
+    return False
+
+
+def get_memory_timeline_enabled() -> bool:
+    """Return whether queens keep a dated timeline of what the user mentions.
+
+    The timeline (``framework.agents.queen.timeline``) costs a background
+    LLM call every few user messages, plus a catch-up over recent older
+    sessions at each queen boot; ``search_timeline`` is offered only when
+    it is on. Resolution:
+    1. ``HIVE_MEMORY_TIMELINE`` env var, when explicitly set.
+    2. Top-level ``memory_timeline`` boolean in configuration.json (the
+       features endpoint writes it).
+    3. Default: off.
+    """
+    raw = os.environ.get("HIVE_MEMORY_TIMELINE")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    value = get_hive_config().get("memory_timeline")
     if isinstance(value, bool):
         return value
     return False

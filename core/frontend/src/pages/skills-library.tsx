@@ -21,7 +21,6 @@ import {
   FileText,
   UploadCloud,
 } from "lucide-react";
-import type { Components } from "react-markdown";
 import ToolLibrary from "./tool-library";
 import MarkdownContent from "@/components/MarkdownContent";
 import { BROWSER_EXT_STORE_URL } from "@/components/BrowserStatusBadge";
@@ -929,38 +928,6 @@ function ClampedText({ text, className }: { text: string; className?: string }) 
   );
 }
 
-// Notion/Slack-style code rendering for the skill body — sizes relative to the
-// container (no fixed px clash) and uses a soft chip / bordered block instead of
-// the heavy chat-bubble styling. Overrides only `code`/`pre`; everything else
-// falls through to MarkdownContent's defaults.
-const SKILL_MD_COMPONENTS: Partial<Components> = {
-  code: ({ className, children, ...props }) => {
-    // A fenced block without an info string (``` with no language) gets no
-    // `language-*` class, so also treat multi-line content as a block. Inline
-    // code is single-line and gets the chip; block code stays transparent so
-    // only the `pre` card shows a background (no patchy per-line fill).
-    const isBlock =
-      className?.includes("language-") || String(children).includes("\n");
-    if (isBlock) {
-      return (
-        <code className={cn("bg-transparent p-0 font-mono text-[0.85em]", className)} {...props}>
-          {children}
-        </code>
-      );
-    }
-    return (
-      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground/90">
-        {children}
-      </code>
-    );
-  },
-  pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-lg border border-border/50 bg-muted/40 p-3.5 font-mono text-[0.85em] leading-relaxed text-foreground/80 last:mb-0">
-      {children}
-    </pre>
-  ),
-};
-
 function SkillDetailDrawer({
   skillName,
   onClose,
@@ -1313,10 +1280,7 @@ function SkillDetailDrawer({
                       expanded ? "max-h-[80vh]" : "max-h-[52vh]"
                     }`}
                   >
-                    <MarkdownContent
-                      content={stripFrontmatter(detail.body)}
-                      components={SKILL_MD_COMPONENTS}
-                    />
+                    <MarkdownContent content={stripFrontmatter(detail.body)} />
                   </div>
                 )}
               </div>

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.agent_loop.types import AgentContext, AgentSpec
+from framework.config import CRM_IN_THIS_BUILD
 from framework.host.colony_binding import ColonyBinding
 from framework.host.event_bus import AgentEvent, EventBus, EventType
 from framework.host.triggers import TriggerDefinition
@@ -291,6 +292,10 @@ class StreamEventBus(EventBus):
 
     async def wait_for(self, *args: Any, **kwargs: Any) -> Any:
         return await self._real_bus.wait_for(*args, **kwargs)
+
+
+# Per-worker cap on closing a browser tab group during colony shutdown.
+_BROWSER_REAP_TIMEOUT_S = 5.0
 
 
 class ColonyRuntime:
@@ -635,15 +640,16 @@ class ColonyRuntime:
                 # CRM can load the current global state before it writes. The
                 # executor must live on the worker registry too — the fork
                 # snapshot carries the name, this makes it callable.
-                try:
-                    from framework.tools.crm_tools import register_crm_tools
+                if CRM_IN_THIS_BUILD:
+                    try:
+                        from framework.tools.crm_tools import register_crm_tools
 
-                    register_crm_tools(stage.tool_registry, role="worker")
-                except Exception:
-                    logger.warning(
-                        "Failed to register CRM tools on pipeline registry",
-                        exc_info=True,
-                    )
+                        register_crm_tools(stage.tool_registry, role="worker")
+                    except Exception:
+                        logger.warning(
+                            "Failed to register CRM tools on pipeline registry",
+                            exc_info=True,
+                        )
 
                 # Browser discovery tool (read-only) so a worker driving the
                 # browser via the hive-browser CLI keeps the capability visible
@@ -1467,9 +1473,7 @@ class ColonyRuntime:
         # default. Skipped entirely when the spawner passed an explicit
         # per-worker budget (whitelisted override) — runtime intent wins.
         if "max_context_tokens" not in (loop_config_overrides or {}):
-            _spawn_loop_config.max_context_tokens = _get_worker_max_ctx(
-                fallback=_spawn_loop_config.max_context_tokens
-            )
+            _spawn_loop_config.max_context_tokens = _get_worker_max_ctx(fallback=_spawn_loop_config.max_context_tokens)
         agent_loop = AgentLoop(
             event_bus=self._scoped_event_bus,
             tool_executor=spawn_executor,
@@ -2598,8 +2602,17 @@ class ColonyRuntime:
             w = self._workers.get(wid)
             return (getattr(w, "_browser_profile", "") or "default") if w else "default"
 
+        # Bounded: the close round-trips through bridge_host, a process shared
+        # by everything on the machine. One that stops answering must not hang
+        # colony shutdown; an unreaped tab group is the lesser failure.
         await asyncio.gather(
-            *(close_profile_context(wid, reason="colony_shutdown", browser_profile=_bp(wid)) for wid in worker_ids),
+            *(
+                asyncio.wait_for(
+                    close_profile_context(wid, reason="colony_shutdown", browser_profile=_bp(wid)),
+                    timeout=_BROWSER_REAP_TIMEOUT_S,
+                )
+                for wid in worker_ids
+            ),
             return_exceptions=True,
         )
 

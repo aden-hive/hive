@@ -27,7 +27,8 @@ class MCPServerConfig:
     """Configuration for an MCP server connection."""
 
     name: str
-    transport: Literal["stdio", "http", "unix", "sse"]
+    # "harness": an in-process tool group (framework.tools.harness_tools); never connected.
+    transport: Literal["stdio", "http", "unix", "sse", "harness"]
 
     # For STDIO transport
     command: str | None = None

@@ -19,12 +19,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from framework.config import get_aux_max_tokens
 from framework.agents.queen.queen_memory_v2 import (
     format_memory_manifest,
     global_memory_dir as _default_global_memory_dir,
     scan_memory_files,
 )
+from framework.config import get_aux_max_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,9 @@ async def select_memories(
     # Profile memories are user-identity baseline. The description rarely
     # enumerates every entity inside the body (e.g. user-profile.md will say
     # "personal life" but not name every person), so an LLM-only selector
-    # misses queries like "who is <partner-name>". Always include them.
+    # misses queries like "who is <partner-name>". They back-fill whatever
+    # slots the relevance picks leave (see below), so they still answer those
+    # queries when the selector finds nothing better.
     pinned = [f.filename for f in files if (f.type or "").lower() == "profile"][:max_results]
 
     logger.debug("recall: selecting from %d memories for query: %.100s", len(files), query)
@@ -132,11 +134,11 @@ async def select_memories(
                 normalized.append(name_aliases[s])
             else:
                 dropped.append(s)
-        merged = list(pinned)
-        for s in normalized:
-            if s not in merged:
-                merged.append(s)
-        result = merged[:max_results]
+        # Relevance first, profiles fill the rest. Pins-first let a scope with
+        # max_results profile memories (one queen had 10 character sheets
+        # typed "profile") return the same pins every turn and never a single
+        # memory the selector judged relevant.
+        result = list(dict.fromkeys([*normalized, *pinned]))[:max_results]
         if not normalized:
             # LLM picked nothing. Log the raw response so the next bug
             # report is diagnosable; we still return pinned memories.
