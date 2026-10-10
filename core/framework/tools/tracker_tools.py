@@ -40,6 +40,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from framework.config import CRM_IN_THIS_BUILD
 from framework.global_db import client as gdb
 from framework.global_db.count_cache import global_count_cache, note_global_used
 from framework.host.colony_binding import ColonyBinding, current_binding
@@ -132,8 +133,8 @@ _SCOPE_PARAM = {
         "tracker.db (local — your work queue). 'global' targets the team's shared "
         "cloud database (requires a signed-in cloud session; other colonies read/"
         "write it too, so scope queries to your own rows and expand the schema only "
-        "additively). For go-to-market people/accounts, use the `hive-crm` CLI (the "
-        "team CRM) — not raw global tracker writes."
+        "additively)."
+        + (" For go-to-market people/accounts, use the `hive-crm` CLI (the team CRM) — not raw global tracker writes." if CRM_IN_THIS_BUILD else "")
     ),
 }
 

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.agent_loop.types import AgentContext, AgentSpec
+from framework.config import CRM_IN_THIS_BUILD
 from framework.host.colony_binding import ColonyBinding
 from framework.host.event_bus import AgentEvent, EventBus, EventType
 from framework.host.triggers import TriggerDefinition
@@ -639,15 +640,16 @@ class ColonyRuntime:
                 # CRM can load the current global state before it writes. The
                 # executor must live on the worker registry too — the fork
                 # snapshot carries the name, this makes it callable.
-                try:
-                    from framework.tools.crm_tools import register_crm_tools
+                if CRM_IN_THIS_BUILD:
+                    try:
+                        from framework.tools.crm_tools import register_crm_tools
 
-                    register_crm_tools(stage.tool_registry, role="worker")
-                except Exception:
-                    logger.warning(
-                        "Failed to register CRM tools on pipeline registry",
-                        exc_info=True,
-                    )
+                        register_crm_tools(stage.tool_registry, role="worker")
+                    except Exception:
+                        logger.warning(
+                            "Failed to register CRM tools on pipeline registry",
+                            exc_info=True,
+                        )
 
                 # Browser discovery tool (read-only) so a worker driving the
                 # browser via the hive-browser CLI keeps the capability visible

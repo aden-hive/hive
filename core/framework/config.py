@@ -5,6 +5,7 @@ and every agent template share one implementation instead of copy-pasting
 helper functions.
 """
 
+import importlib.util
 import json
 import logging
 import os
@@ -18,6 +19,14 @@ DEFAULT_MAX_TOKENS = 8192
 # Desktop mode — set by Electron shell to skip frontend builds, etc.
 # ---------------------------------------------------------------------------
 DESKTOP_MODE: bool = bool(os.environ.get("HIVE_DESKTOP_MODE"))
+
+# ---------------------------------------------------------------------------
+# Team CRM — the ``framework.crm`` package and the ``hive-crm`` CLI ship only
+# in builds that include them; this repository doesn't. Prompts and tool lists
+# that mention the CRM check this, so agents aren't sent after commands that
+# don't exist.
+# ---------------------------------------------------------------------------
+CRM_IN_THIS_BUILD: bool = importlib.util.find_spec("framework.crm") is not None
 
 # ---------------------------------------------------------------------------
 # Hive home directory structure

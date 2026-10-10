@@ -2,6 +2,7 @@
 
 import re
 
+from framework.config import CRM_IN_THIS_BUILD
 from framework.orchestrator import NodeSpec
 
 # Wraps prompt sections that should only be shown to vision-capable models.
@@ -32,10 +33,9 @@ def finalize_queen_prompt(text: str, has_vision: bool) -> str:
 # ---------------------------------------------------------------------------
 
 # Independent phase: queen operates as a standalone agent — no worker.
-# Core tools are listed here; MCP tools (terminal-tools, gcu-tools) are added
-# dynamically in queen_orchestrator.py because their tool names aren't known
-# at import time. File I/O is done with the terminal tools (terminal_exec /
-# terminal_rg / terminal_glob), so no dedicated file tools are listed.
+# Core tools are listed here; the built-in tool groups (terminal-tools,
+# files-tools, ...) and any MCP servers' tools are added dynamically in
+# queen_orchestrator.py because their tool names aren't known at import time.
 _QUEEN_INDEPENDENT_TOOLS = [
     # Propose forking this chat into a colony when the user wants
     # persistent / recurring / parallel work. Synthetic and framework-
@@ -57,11 +57,6 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "task_update",
     "task_list",
     "task_get",
-    # CRM: crm_summary loads the up-to-date CRM state + config. Always-on so a queen
-    # DM (e.g. the Head of Growth on the CRM Configure handoff) can load the
-    # current CRM before changing it, without a search_tools round-trip. The CRM
-    # refuses writes until it's been loaded.
-    "crm_summary",
     # On-demand tool loading. The queen boots with a small always-enabled
     # toolset; every other tool it is allowed to use is *searchable* (name +
     # one-line summary in the prompt manifest) and must be loaded with
@@ -116,11 +111,6 @@ _QUEEN_COLONY_TOOLS = [
     "tracker_register_writable",
     "tracker_upsert",
     "tracker_query",
-    # CRM: crm_summary loads the up-to-date CRM state + config. Always-on (like the
-    # tracker tools) so a queen configuring/modifying the CRM can call it without
-    # a search_tools round-trip — the growth-queen directive + colony reminder
-    # mandate it, and the CRM refuses writes until it's been loaded.
-    "crm_summary",
     # Task system — see the note in _QUEEN_INDEPENDENT_TOOLS. The queen
     # still plans and heartbeats tasks while running a colony, so the
     # task tools must be present in the colony phase too.
@@ -133,6 +123,13 @@ _QUEEN_COLONY_TOOLS = [
     # split (and thus search_tools) applies here as well.
     "search_tools",
 ]
+
+if CRM_IN_THIS_BUILD:
+    # crm_summary loads the up-to-date CRM state + config. Always-on in both
+    # phases so a queen changing the CRM can load it first without a
+    # search_tools round-trip; the CRM refuses writes until it's been loaded.
+    _QUEEN_INDEPENDENT_TOOLS.append("crm_summary")
+    _QUEEN_COLONY_TOOLS.append("crm_summary")
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +156,8 @@ phase. Your identity tells you WHO you are.
 _queen_role_independent = """\
 You are in INDEPENDENT mode. \
 You have full coding tools via the terminal (terminal_exec, plus terminal_rg \
-and terminal_glob for search) and MCP tools (browser automation via gcu-tools). \
+and terminal_glob for search), and you drive the browser through the \
+``hive-browser`` CLI. \
 Execute the user's task directly using planning, conversation and tools.
 If you need a structured choice or approval gate, always use \
 ``ask_user``; otherwise ask in plain prose. ``ask_user`` takes a \
@@ -199,7 +197,10 @@ SQLite database inside it. The tracker tools (``tracker_sql``, \
 operate against that database automatically via the colony binding. \
 "Create the tracker table" means run ``CREATE TABLE`` inside that \
 existing DB; it does NOT mean provisioning storage.
+"""
 
+# Team CRM passages: only in builds that ship it (see CRM_IN_THIS_BUILD).
+_queen_role_colony_crm = """
 There is ALSO a shared team CRM — the ``hive-crm`` CLI (people, companies, \
 opportunities), run in a terminal. Unlike the colony tracker (private, \
 per-colony), hive-crm is TEAM-WIDE: every colony on your team writes into the \
@@ -233,6 +234,9 @@ too. Recording outreach OUTCOMES on a person — advancing their stage, logging 
 calls/emails/replies — is rolling out; for now ``import`` keeps the shared \
 people record current.
 """
+
+if CRM_IN_THIS_BUILD:
+    _queen_role_colony += _queen_role_colony_crm
 
 
 # ---------------------------------------------------------------------------
@@ -315,13 +319,16 @@ inheriting an underspecified seed.
 </ask_user_for_colony_scope>
 """
 
-_queen_behavior_colony = """
+_queen_delegation_intro = """
 ## Delegation loop (when the goal is "do N similar things")
 
 Five steps, in order. The pilot (step 2) is what makes the rest reliable: \
 you discover the real protocol by doing one yourself before paying N× to \
 fan it out.
 
+"""
+
+_queen_delegation_crm = """\
 WHEN THE WORK IS GTM (people / leads / accounts / outreach), bookend the loop \
 with the shared ``hive-crm`` CRM and PUT BOTH ENDS IN YOUR TASK PLAN. Example \
 plan: (1) CLAIM — intake target people into the CRM (``hive-crm import``) and \
@@ -332,6 +339,9 @@ local tracker of the people you won; (3) Pilot outreach to one; (4) Write skill 
 CRM block above); the PROMOTE runs on ``[PLAYBOOK_COMPLETE]`` (step 6). The CRM \
 is a deliverable, not an afterthought — plan it, don't bolt it on at the end.
 
+"""
+
+_queen_delegation_steps = """\
 1. **Tracker table.** Model the goal in the colony's existing ``tracker.db``: \
    ``tracker_sql('CREATE TABLE <thing>(<key> TEXT PRIMARY KEY, ..., \
    <done_at> TEXT)')`` and seed known keys in the same call, then \
@@ -341,7 +351,7 @@ is a deliverable, not an afterthought — plan it, don't bolt it on at the end.
    "what's left" query depends on it. If the goal has no row shape (one \
    summary, one decision), just do it yourself.
 2. **Pilot one row yourself.** Do the FIRST unit end-to-end with your own \
-   ``browser_*``/``web_scrape``/API tools — one profile, one account, \
+   ``hive-browser``/``web_scrape``/API tools — one profile, one account, \
    start to finish — and upsert its tracker row to done. This validates \
    the protocol, surfaces the real selectors/edge-cases, and gives you \
    the experience to write a correct playbook. Don't spawn a worker to \
@@ -374,12 +384,17 @@ is a deliverable, not an afterthought — plan it, don't bolt it on at the end.
    dead-letter and ``list_playbook_runs``; re-run via \
    ``run_playbook(playbook_name='<meta name>')`` to converge any gap. There \
    is no manual per-row re-dispatch — the pending query IS the gap.
+"""
+
+_queen_promote_step_crm = """\
 6. **Promote to the CRM (GTM only).** If this was outreach, on \
    ``[PLAYBOOK_COMPLETE]`` read the completed local rows and ``hive-crm import`` \
    the finished people to update the shared record, then ``hive-crm release`` \
    the ones you're done with — this is your planned PROMOTE task. The playbook \
    stays local; YOU do the promote once it finishes.
+"""
 
+_queen_colony_rules = """
 Read ``hive.worker-delegation`` before fan-out when decomposition, \
 browser sharing, or batch sizing is non-obvious.
 
@@ -389,7 +404,7 @@ browser sharing, or batch sizing is non-obvious.
   on an unverified assumption. When shared browser/session/API behavior is \
   uncertain, probe it yourself first — workers share your Chrome profile, \
   cookies, and logins, so run the read-only check inline with your own \
-  ``browser_*``/``web_scrape``/API tools, then design the full fan-out from \
+  ``hive-browser``/``web_scrape``/API tools, then design the full fan-out from \
   what you saw. Do not spend a worker to test what you can verify directly.
 - Before ``write_skill``, restate the latest user constraints in the \
   protocol. Newer user instructions override earlier task framing and \
@@ -415,6 +430,14 @@ browser sharing, or batch sizing is non-obvious.
 - Do not drive idle conversation. If the user greets you with nothing \
   specific, reply briefly and wait.
 """
+
+_queen_behavior_colony = (
+    _queen_delegation_intro
+    + (_queen_delegation_crm if CRM_IN_THIS_BUILD else "")
+    + _queen_delegation_steps
+    + (_queen_promote_step_crm if CRM_IN_THIS_BUILD else "")
+    + _queen_colony_rules
+)
 
 _queen_behavior_always = """
 # System Rules
@@ -487,7 +510,9 @@ The goal is the anchor used to recognise a real pivot later — see the \
 goal anchor the plan can be drifted silently and the user feels it as \
 forgetfulness.
 
+"""
 
+_queen_plan_crm = """
 **GTM work plans the CRM.** When the work is about people / leads / \
 accounts / outreach, the plan MUST include two CRM tasks: a CLAIM task \
 (``hive-crm import`` target people + ``hive-crm claim`` to lock them before \
@@ -495,7 +520,9 @@ outreach) and a PROMOTE task (``hive-crm import`` the finished people after). \
 The shared CRM is queen-owned and won't fill itself — treat it as a planned \
 deliverable, not an afterthought. See the CRM block and the Delegation loop \
 for how.
+"""
 
+_queen_behavior_always_rest = """
 **ONLY skip `task_create` if:**
 - Pure conversation with no tool use (e.g., answering "what is the \
 capital of France?")
@@ -681,7 +708,13 @@ to when it happened, not when it was mentioned. Recalled notes can be stale: \
 verify before asserting them as fact.
 """
 
-_queen_behavior_always = _queen_behavior_always + _queen_communication + _queen_memory_instructions
+_queen_behavior_always = (
+    _queen_behavior_always
+    + (_queen_plan_crm if CRM_IN_THIS_BUILD else "")
+    + _queen_behavior_always_rest
+    + _queen_communication
+    + _queen_memory_instructions
+)
 
 
 queen_node = NodeSpec(
