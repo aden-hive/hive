@@ -479,6 +479,37 @@ class TestQueenInteractionBlocking:
         assert result.success is True
 
     @pytest.mark.asyncio
+    async def test_shutdown_while_parking_is_not_lost(self, runtime, buffer, client_spec):
+        """A shutdown that lands after the loop's last shutdown check but before
+        the park (here, while the park-time cursor is written) must still end
+        the wait. It used to be wiped by the park's ``_input_ready.clear()``,
+        so the node waited forever: the rare hang under machine load."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user",
+                    {"questions": [{"id": "q1", "prompt": "Waiting...", "options": ["Continue", "Stop"]}]},
+                    tool_use_id="ask_1",
+                ),
+            ]
+        )
+        node = EventLoopNode(event_bus=EventBus(), config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
+
+        write_cursor = node._write_cursor
+
+        async def write_cursor_then_shutdown(*args, **kwargs):
+            await write_cursor(*args, **kwargs)
+            if kwargs.get("pending_input"):
+                node.signal_shutdown()
+
+        node._write_cursor = write_cursor_then_shutdown
+
+        result = await asyncio.wait_for(node.execute(ctx), timeout=10)
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
     async def test_client_input_requested_event_published(self, runtime, buffer, client_spec):
         """CLIENT_INPUT_REQUESTED should be published when ask_user blocks."""
         llm = MockStreamingLLM(

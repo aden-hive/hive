@@ -3747,6 +3747,12 @@ class AgentLoop(AgentProtocol):
         if not self._injection_queue.empty() or not self._trigger_queue.empty():
             return True
 
+        # The same window for shutdown: signal_shutdown() sets _input_ready, so a
+        # shutdown that landed before this park (say, while the cursor was being
+        # written) was just erased by the clear(). _shutdown is sticky; honor it.
+        if self._shutdown:
+            return False
+
         if emit_client_request and self._event_bus:
             if colony_pivot is not None:
                 # The colony-pivot popup variant — slug field starts
