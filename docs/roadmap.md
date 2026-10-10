@@ -48,6 +48,7 @@ Where Hive stands after V1, and what's still open. For how things work today, re
 - [x] An encrypted credential store, with OAuth2 for HubSpot and Zoho
 - [x] Quickstart scripts for macOS, Linux and Windows, and a web dashboard (`hive open`) backed by a REST and server-sent events API
 - [x] Live end-to-end specs that run a real queen and check her results against ground truth (`core/tests/e2e`)
+- [x] CI on Ubuntu and Windows that runs the core, framework and tools test suites
 
 ## Still open
 
@@ -55,7 +56,6 @@ Where Hive stands after V1, and what's still open. For how things work today, re
 - [ ] **Enterprise secret managers.** Credentials live in the encrypted local store or in environment variables. There's no backend for HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager or Azure Key Vault.
 - [ ] **Packages.** Hive installs from a clone with the quickstart. There's no PyPI package (`pip install -e .` installs a placeholder) and no Docker image.
 - [ ] **Semantic memory search.** Recall and `search_messages` match keywords; there's no embedding search.
-- [ ] **Framework tests in CI.** CI runs `core/tests` only. The suites under `core/framework/*/tests` pass locally but don't run on pull requests.
 - [ ] **A JavaScript/TypeScript SDK.**
 
 ## Retired in V1
