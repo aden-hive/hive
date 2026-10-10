@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 LLM_COMPACT_MAX_DEPTH: int = 10
 
 
+def compaction_target_chars(formatted_chars: int, max_context_tokens: int) -> int:
+    """Length (chars) to ask a compaction summary for.
+
+    Half the window, but never more than half of what is being compacted.
+    Asking for ``window / 2`` regardless of input told the model to write a
+    "summary" of a 69k-char chat at 360k chars; it produced 40k chars in
+    over four minutes, so the colony fork's 180s compaction always timed out.
+    """
+    return min((max_context_tokens // 2) * 4, max(2_000, formatted_chars // 2))
+
+
 def llm_compact_char_limit(max_context_tokens: int) -> int:
     """Input-size ceiling (chars) for one compaction-summary call.
 
@@ -41,6 +52,8 @@ def llm_compact_char_limit(max_context_tokens: int) -> int:
     keeps tiny windows from splitting into confetti.
     """
     return max(20_000, (max_context_tokens * 4) // 3)
+
+
 # Max output tokens for a single compaction summary call. A summary must be a
 # small fraction of the window — using ``max_context_tokens // 2`` (e.g. 90k on a
 # 180k window) lets the model emit a "summary" nearly as large as the input, which
@@ -618,6 +631,9 @@ async def llm_compact(
             # summary stays well under the window — keeping each call fast and
             # guaranteeing real reduction on small and large windows alike.
             summary_budget = min(LLM_COMPACT_SUMMARY_MAX_TOKENS, max(1024, max_context_tokens // 8))
+        # Never budget far past the length the prompt asks for (2x headroom).
+        target_tokens = compaction_target_chars(len(formatted), max_context_tokens) // 4
+        summary_budget = min(summary_budget, max(1024, target_tokens * 2))
         try:
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
@@ -745,8 +761,8 @@ def build_llm_compaction_prompt(
     elif spec.output_keys:
         ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
-    target_tokens = max_context_tokens // 2
-    target_chars = target_tokens * 4
+    target_chars = compaction_target_chars(len(formatted_messages), max_context_tokens)
+    target_tokens = target_chars // 4
     node_ctx = "\n".join(ctx_lines)
 
     user_messages_section = (

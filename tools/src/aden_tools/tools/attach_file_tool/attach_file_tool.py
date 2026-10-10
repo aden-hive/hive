@@ -93,13 +93,16 @@ def _classify_file(ext: str, raw_bytes: bytes) -> tuple[str, str]:
     return ("blob", "application/octet-stream")
 
 
-def _resolve_path(raw: str) -> Path | None:
+def _resolve_path(raw: str, session_cwd: str | None = None) -> Path | None:
     """Resolve a path string to an absolute Path, trying in order:
 
     1. As-is if absolute.
-    2. ``$HIVE_STORAGE_PATH / raw`` if that env var is set (so the
+    2. ``session_cwd / raw`` — the calling agent's working directory, where
+       ``terminal_exec`` runs and writes. A file the agent just created by
+       bare name resolves here.
+    3. ``$HIVE_STORAGE_PATH / raw`` if that env var is set (so the
        agent's typical ``data/attachments/X.pdf`` works out of the box).
-    3. CWD-relative as a last resort.
+    4. CWD-relative as a last resort.
 
     Returns the first candidate that exists, or None.
     """
@@ -108,6 +111,8 @@ def _resolve_path(raw: str) -> Path | None:
     if p.is_absolute():
         candidates.append(p)
     else:
+        if session_cwd:
+            candidates.append(Path(session_cwd) / raw)
         storage = os.environ.get("HIVE_STORAGE_PATH")
         if storage:
             candidates.append(Path(storage) / raw)
@@ -129,6 +134,10 @@ def register_tools(mcp: FastMCP) -> None:
     def attach_file(
         paths: str | list[str],
         max_bytes_mb: float = _DEFAULT_MAX_BYTES_MB,
+        # Injected by the framework (a CONTEXT_PARAM, hidden from the model):
+        # the caller's working directory. The tool runs inside a host process
+        # shared by many sessions, so process cwd/env can't stand in for it.
+        session_cwd: str | None = None,
     ) -> list:
         """Surface one or more local files to the user as clickable chips
         in chat. **Any file type is accepted.**
@@ -146,7 +155,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         Args:
             paths: One path or a list of up to 10 paths. Each may be
-                absolute, CWD-relative, or relative to ``$HIVE_STORAGE_PATH``
+                absolute, relative to your working directory (where
+                terminal commands run), or relative to ``$HIVE_STORAGE_PATH``
                 (so ``data/attachments/X.pdf`` works as the agent reads
                 it from the user message).
             max_bytes_mb: Per-file cap. Files larger than this are
@@ -213,7 +223,7 @@ def register_tools(mcp: FastMCP) -> None:
         content_blocks: list[Any] = []
 
         for raw_path in paths_list:
-            resolved = _resolve_path(raw_path)
+            resolved = _resolve_path(raw_path, session_cwd)
             if resolved is None:
                 errors.append({"path": raw_path, "error": "file not found"})
                 continue

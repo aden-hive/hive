@@ -503,7 +503,7 @@ class TestSessionCRUD:
             trigger_type="timer",
             trigger_config={"cron": "0 5 * * *"},
             task="Run task",
-            active=True,
+            enabled=True,
         )
         session.active_trigger_ids.add("daily")
         session.active_timer_tasks["daily"] = asyncio.create_task(asyncio.sleep(60))

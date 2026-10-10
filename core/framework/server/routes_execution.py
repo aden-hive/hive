@@ -1188,10 +1188,7 @@ async def _compact_queen_conversation_in_place(
     if not messages:
         return None
 
-    max_ctx_tokens = 180_000
-    loop_cfg = getattr(queen_loop, "_config", None)
-    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
-        max_ctx_tokens = int(loop_cfg.max_context_tokens)
+    max_ctx_tokens = _queen_window_tokens(queen_loop)
 
     summary = await llm_compact(
         queen_ctx,
@@ -1622,6 +1619,30 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+# An inherited DM transcript below this share of the colony queen's window is
+# carried over verbatim instead of being compacted.
+_INHERITED_COMPACTION_MIN_WINDOW_SHARE = 0.25
+
+
+def _queen_window_tokens(queen_loop: Any) -> int:
+    """The queen's context window, as compaction sizes it (180k fallback)."""
+    loop_cfg = getattr(queen_loop, "_config", None)
+    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
+        return int(loop_cfg.max_context_tokens)
+    return 180_000
+
+
+async def _inherited_transcript_size(queen_dir: Any) -> tuple[int, int]:
+    """(content chars, message count) of the conversation in ``queen_dir``."""
+    from framework.storage.conversation_store import FileConversationStore
+
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return 0, 0
+    parts = await FileConversationStore(convs_dir).read_parts()
+    return sum(len(str(p.get("content") or "")) for p in parts), len(parts)
+
+
 async def _compact_inherited_conversation(
     *,
     dest_queen_dir: Any,
@@ -1648,13 +1669,28 @@ async def _compact_inherited_conversation(
     import json as _json
     from datetime import UTC as _UTC, datetime as _datetime
 
-    try:
-        result = await _compact_queen_conversation_in_place(
-            queen_dir=dest_queen_dir,
-            queen_ctx=queen_ctx,
-            queen_loop=queen_loop,
-            inherited_from=source_session_id,
+    inherited_chars, inherited_count = await _inherited_transcript_size(dest_queen_dir)
+    window_tokens = _queen_window_tokens(queen_loop)
+    if inherited_count and inherited_chars // 4 < window_tokens * _INHERITED_COMPACTION_MIN_WINDOW_SHARE:
+        # Small enough to inherit whole. Compacting it would only lose
+        # detail, and the colony opening waits on compaction (up to 180s).
+        result: tuple[int, int, str] | None = (inherited_count, 0, "")
+        logger.info(
+            "compact_inherited: keeping %d message(s) (~%d tokens) verbatim for colony forked from %s",
+            inherited_count,
+            inherited_chars // 4,
+            source_session_id,
         )
+    else:
+        result = None
+    try:
+        if result is None:
+            result = await _compact_queen_conversation_in_place(
+                queen_dir=dest_queen_dir,
+                queen_ctx=queen_ctx,
+                queen_loop=queen_loop,
+                inherited_from=source_session_id,
+            )
     except Exception:
         logger.warning(
             "compact_inherited: compaction failed; leaving raw transcript",
@@ -1703,12 +1739,13 @@ async def _compact_inherited_conversation(
     except OSError:
         logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
 
-    logger.info(
-        "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
-        messages_compacted,
-        summary_chars,
-        source_session_id,
-    )
+    if summary_text:
+        logger.info(
+            "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
+            messages_compacted,
+            summary_chars,
+            source_session_id,
+        )
 
 
 async def fork_session_into_colony(

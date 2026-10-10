@@ -20,9 +20,9 @@ A Queen isn't an interchangeable "coordinator." She's a persona. Hive ships **13
 
 Each persona is a YAML profile — traits, background, behavior triggers — injected into her system prompt, so she brings domain judgment to the work, not just task execution.
 
-## CEO-style routing
+## Choosing a Queen
 
-You don't pick a Queen from a menu. When a new request comes in, an LLM **router** reads it and assigns the best-matching Queen — the way a CEO routes work to the right department head. You describe the outcome; the routing is automatic.
+You pick who to hand a request to: type it on the home screen and choose the Queen whose domain fits, or open a Queen directly from the sidebar. A prompt deployed from the Prompt Library goes straight to the Queen it was written for. (An automatic LLM router used to assign Queens; it was retired because a classifier guessing your counterpart was the wrong design for a conversation.)
 
 ## The Queen's phases
 

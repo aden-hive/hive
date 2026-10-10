@@ -75,6 +75,10 @@ def _isolate_hive_home_autouse(tmp_path, monkeypatch):
     fake_hive = fake_home_root / ".hive"
     fake_hive.mkdir(exist_ok=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home_root))
+    # The repo .env sets HIVE_HOME to a real Hive home; anything that resolves
+    # the home from the environment (memory search, terminal child processes)
+    # would otherwise follow it out of the sandbox.
+    monkeypatch.setenv("HIVE_HOME", str(fake_hive))
     for mod_name in _HIVE_PATH_CONSUMERS:
         try:
             mod = importlib.import_module(mod_name)

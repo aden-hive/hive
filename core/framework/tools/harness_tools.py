@@ -24,6 +24,7 @@ are no longer loaded; a user who wants one adds it as an external MCP server.
 from __future__ import annotations
 
 import atexit
+import importlib.util
 import inspect
 import json
 import logging
@@ -339,7 +340,11 @@ def _hive_core(mcp: _Collector, scope_env: ScopeEnvGetter) -> None:  # noqa: ARG
     # read_file ships with edit_file: it records the state the stale-edit guard checks.
     register_file_tools(mcp, tool_names={"read_file", "edit_file"})
     register_csv(mcp)
-    register_excel(mcp)
+    # openpyxl is an optional extra (tools[excel]). Without it every excel_*
+    # call returns "pip install openpyxl", inviting the agent to modify the
+    # user's environment, so the tools stay hidden until it is installed.
+    if importlib.util.find_spec("openpyxl") is not None:
+        register_excel(mcp)
 
 
 _BUILDERS: dict[str, Callable[[_Collector, ScopeEnvGetter], None]] = {

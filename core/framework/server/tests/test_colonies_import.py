@@ -1029,23 +1029,24 @@ async def test_concurrent_upload_cap_returns_429(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_staging_dir_is_under_hive_home(tmp_path, monkeypatch) -> None:
-    """Regression guard for finding #6: staging must be on the same disk
-    as HIVE_HOME, not under tempfile.gettempdir() (which is tmpfs on many
-    systemd hosts and would balance 2 GiB uploads on RAM)."""
-    # By default in the runtime, _UPLOAD_STAGING_DIR is HIVE_HOME/tmp/colony_uploads.
-    # Tests monkeypatch this per-test, but the module default at import time
-    # is what matters — read it via a fresh import path.
+async def test_staging_dir_is_on_a_real_disk(tmp_path, monkeypatch) -> None:
+    """Staging never lands in tempfile.gettempdir() (tmpfs on many systemd
+    hosts, which would buffer 2 GiB uploads in RAM). On a POSIX host with
+    /var/tmp it is /var/tmp (local disk even where HIVE_HOME is NFS);
+    otherwise it is under HIVE_HOME — on Windows "/var/tmp" would mean the
+    current drive's root."""
     import importlib
+    import os
 
     from framework.config import HIVE_HOME
 
     fresh = importlib.reload(routes_colonies)
     # Undo the reload's global-state effect on other tests.
     try:
-        expected = HIVE_HOME / "tmp" / "colony_uploads"
-        assert fresh._UPLOAD_STAGING_DIR == expected, (
-            f"staging dir {fresh._UPLOAD_STAGING_DIR} must be under HIVE_HOME ({HIVE_HOME}), not tempfile.gettempdir()"
-        )
+        if os.name != "nt" and Path("/var/tmp").is_dir():
+            expected = Path("/var/tmp") / "hive-colony-uploads"
+        else:
+            expected = HIVE_HOME / "tmp" / "colony_uploads"
+        assert fresh._UPLOAD_STAGING_DIR == expected
     finally:
         importlib.reload(routes_colonies)

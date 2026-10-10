@@ -49,7 +49,7 @@ The mechanism underneath is **one loop controlling many loops**. Hive has a sing
 - ✅ Colonies of agents — a Queen spawns worker clones on demand for parallel, long-running work
 - ✅ One primitive, many loops — no graph to wire; the Queen grows the colony at runtime
 - ✅ Shared tracker ledger + persistent task plan for coordination without a data buffer
-- ✅ Queen personas with CEO-style routing and evolving, scoped memory
+- ✅ Queen personas with evolving, scoped memory
 - ✅ Crash-safe park/resume, cost enforcement, and out-of-band human-in-the-loop (Sentinel)
 - ✅ Zero Setup — no technical configuration required
 - ✅ General Compute Use and Browser Use with Native Extension
@@ -142,9 +142,9 @@ Type the agent you want to build in the home input box. The queen is going to as
 
 <img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
 
-### Use Template Agents
+### Use the Prompt Library
 
-Click "Try a sample agent" and check the templates. You can run a template directly or choose to build your version on top of the existing template.
+Open the Prompt Library to browse ready-made prompts. Deploying one sends it straight to the queen it is written for, as a new colony.
 
 ### Run Agents
 
@@ -198,7 +198,7 @@ flowchart LR
 
 ### How It Works
 
-1. **[Describe the outcome](docs/key_concepts/goals_outcome.md)** → Say what you want in plain English; a CEO-style router picks the right [Queen](docs/key_concepts/queen.md)
+1. **[Describe the outcome](docs/key_concepts/goals_outcome.md)** → Say what you want in plain English and pick the [Queen](docs/key_concepts/queen.md) to hand it to
 2. **Queen pilots** → She does one unit of the work herself, proving the path and recording it in the shared tracker
 3. **[Systematize](docs/key_concepts/improvement.md)** → She factors the proven protocol into a skill + playbook — a repeatable process
 4. **[Fan out](docs/key_concepts/colony.md)** → `run_worker` spawns [worker clones](docs/key_concepts/worker_agent.md) that run in parallel and report back

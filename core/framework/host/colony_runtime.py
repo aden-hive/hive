@@ -293,6 +293,10 @@ class StreamEventBus(EventBus):
         return await self._real_bus.wait_for(*args, **kwargs)
 
 
+# Per-worker cap on closing a browser tab group during colony shutdown.
+_BROWSER_REAP_TIMEOUT_S = 5.0
+
+
 class ColonyRuntime:
     """Orchestrates a colony of parallel worker clones.
 
@@ -2598,8 +2602,17 @@ class ColonyRuntime:
             w = self._workers.get(wid)
             return (getattr(w, "_browser_profile", "") or "default") if w else "default"
 
+        # Bounded: the close round-trips through bridge_host, a process shared
+        # by everything on the machine. One that stops answering must not hang
+        # colony shutdown; an unreaped tab group is the lesser failure.
         await asyncio.gather(
-            *(close_profile_context(wid, reason="colony_shutdown", browser_profile=_bp(wid)) for wid in worker_ids),
+            *(
+                asyncio.wait_for(
+                    close_profile_context(wid, reason="colony_shutdown", browser_profile=_bp(wid)),
+                    timeout=_BROWSER_REAP_TIMEOUT_S,
+                )
+                for wid in worker_ids
+            ),
             return_exceptions=True,
         )
 

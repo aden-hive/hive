@@ -136,3 +136,25 @@ def test_memory_scope_follows_a_live_colony_binding(_isolate_hive_home_autouse, 
     assert (hits("DM_FACT"), hits("COLONY_FACT")) == (1, 0)
     session["colony_id"] = "acme"
     assert (hits("DM_FACT"), hits("COLONY_FACT")) == (0, 1)
+
+
+@pytest.mark.parametrize("openpyxl_installed", [True, False])
+def test_excel_tools_only_appear_with_openpyxl(monkeypatch, openpyxl_installed):
+    """Without the optional extra every excel_* call answered "pip install
+    openpyxl", inviting the agent to modify the user's environment."""
+    import importlib.util
+
+    from framework.tools import harness_tools
+
+    real_find_spec = importlib.util.find_spec
+
+    def find_spec(name, *args, **kwargs):
+        if name == "openpyxl":
+            return object() if openpyxl_installed else None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(harness_tools.importlib.util, "find_spec", find_spec)
+    names = {t.name for t in build_harness_group("hive_tools")}
+
+    assert ("excel_read" in names) is openpyxl_installed
+    assert "csv_sql" in names
