@@ -961,12 +961,14 @@
 
 /* The projection plane. It leans toward the pointer (--tilt-x/--tilt-y in
    -0.5…0.5, set by HiveMap) and settles like a damped spring. */
+/* The plane stays flat (no preserve-3d): its cells all lie in it, and a
+   3D context made a hovered cell's scale-up flip hit-testing between the
+   cell and the plane, so hover toggled on and off under a still pointer. */
 .hive-map-plane {
   --tilt-x: 0;
   --tilt-y: 0;
   position: relative;
   margin: 0 auto;
-  transform-style: preserve-3d;
 }
 :root[data-motion="full"] .hive-map-plane {
   transform: rotateX(calc(var(--tilt-y) * -4deg)) rotateY(calc(var(--tilt-x) * 5deg));

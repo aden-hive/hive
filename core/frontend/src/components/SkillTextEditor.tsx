@@ -94,6 +94,13 @@ function parseSegments(text: string): Seg[] {
   return segs;
 }
 
+/** Nothing typed yet. Chrome leaves a lone <br> (serialized as a newline)
+ *  in a contenteditable the user has cleared, which must still show the
+ *  placeholder. */
+function isBlank(text: string): boolean {
+  return text.replace(/\n+$/, "").length === 0;
+}
+
 // A signature of the chip/placeholder structure (ignoring plain-text content).
 // When this is unchanged between keystrokes, the DOM doesn't need a rebuild —
 // only when a marker/placeholder appears, disappears, or changes.
@@ -289,7 +296,7 @@ export const SkillTextEditor = forwardRef<SkillTextEditorHandle, SkillTextEditor
             el.appendChild(makePlaceholderSpan(seg.label, seg.value));
           }
         }
-        el.dataset.empty = text.length === 0 ? "true" : "false";
+        el.dataset.empty = isBlank(text) ? "true" : "false";
       },
       [makeChip, makePlaceholderSpan],
     );
@@ -481,7 +488,7 @@ export const SkillTextEditor = forwardRef<SkillTextEditorHandle, SkillTextEditor
       lastValueRef.current = v;
       onChange(v);
       const el = editorRef.current;
-      if (el) el.dataset.empty = v.length === 0 ? "true" : "false";
+      if (el) el.dataset.empty = isBlank(v) ? "true" : "false";
       autosize();
       refreshTypeahead();
     }, [serialize, onChange, reflow, autosize, refreshTypeahead]);
@@ -879,6 +886,10 @@ export const SkillTextEditor = forwardRef<SkillTextEditorHandle, SkillTextEditor
             "w-full overflow-y-auto whitespace-pre-wrap break-words outline-none " +
             "data-[empty=true]:before:content-[attr(data-placeholder)] " +
             "before:text-muted-foreground/60 before:pointer-events-none " +
+            // Float the placeholder with no height: an in-flow ::before is
+            // text the empty line's only caret position comes after, so the
+            // caret sat at the end of the placeholder instead of the start.
+            "before:float-left before:h-0 " +
             className
           }
         />
