@@ -65,6 +65,12 @@ jobs:
           uv sync
           uv run pytest tests/ -v --ignore=tests/dummy_agents
 
+      - name: Run framework unit tests
+        working-directory: core
+        # The suites that live next to the code (framework/*/tests).
+        # framework/testing is a library whose modules are named test_*.py.
+        run: uv run pytest framework/ -v --ignore=framework/testing
+
   test-tools:
     name: Test Tools (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
