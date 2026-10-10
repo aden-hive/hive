@@ -94,9 +94,7 @@ async def test_get_library_empty(make_client) -> None:
 
 async def test_put_saves_entry_verbatim(make_client, _isolated_config: Path) -> None:
     client = await make_client()
-    resp = await client.put(
-        "/api/config/provider-library", json={"name": "ds-prod", "section": ENTRY}
-    )
+    resp = await client.put("/api/config/provider-library", json={"name": "ds-prod", "section": ENTRY})
     assert resp.status == 200
     assert (await resp.json())["section"] == ENTRY
 
@@ -119,15 +117,11 @@ async def test_put_validation(make_client) -> None:
     )
     assert resp.status == 400
     # Non-object section.
-    resp = await client.put(
-        "/api/config/provider-library", json={"name": "x", "section": [1]}
-    )
+    resp = await client.put("/api/config/provider-library", json={"name": "x", "section": [1]})
     assert resp.status == 400
 
 
-async def test_put_null_deletes_and_prunes_empty_library(
-    make_client, _isolated_config: Path
-) -> None:
+async def test_put_null_deletes_and_prunes_empty_library(make_client, _isolated_config: Path) -> None:
     client = await make_client()
     await client.put("/api/config/provider-library", json={"name": "a", "section": ENTRY})
     resp = await client.put("/api/config/provider-library", json={"name": "a", "section": None})
@@ -149,9 +143,7 @@ async def test_put_null_deletes_and_prunes_empty_library(
 async def test_apply_to_worker_slot(make_client, _isolated_config: Path) -> None:
     client = await make_client()
     await client.put("/api/config/provider-library", json={"name": "ds", "section": ENTRY})
-    resp = await client.post(
-        "/api/config/provider-library/apply", json={"name": "ds", "role": "worker_llm"}
-    )
+    resp = await client.post("/api/config/provider-library/apply", json={"name": "ds", "role": "worker_llm"})
     assert resp.status == 200
     body = await resp.json()
     assert body["role"] == "worker_llm"
@@ -172,9 +164,7 @@ async def test_apply_to_llm_slot_hot_swaps_sessions(make_client) -> None:
     manager = _StubManager([SimpleNamespace(llm=provider, colony=None)])
     client = await make_client(manager)
     await client.put("/api/config/provider-library", json={"name": "ds", "section": ENTRY})
-    resp = await client.post(
-        "/api/config/provider-library/apply", json={"name": "ds", "role": "llm"}
-    )
+    resp = await client.post("/api/config/provider-library/apply", json={"name": "ds", "role": "llm"})
     assert resp.status == 200
     assert (await resp.json())["sessions_swapped"] == 1
     assert provider.reconfigured_with == ("deepseek/deepseek-chat", "sk-test-1234", None)
@@ -183,20 +173,14 @@ async def test_apply_to_llm_slot_hot_swaps_sessions(make_client) -> None:
 
 async def test_apply_unknown_name_and_role(make_client) -> None:
     client = await make_client()
-    resp = await client.post(
-        "/api/config/provider-library/apply", json={"name": "nope", "role": "llm"}
-    )
+    resp = await client.post("/api/config/provider-library/apply", json={"name": "nope", "role": "llm"})
     assert resp.status == 404
     await client.put("/api/config/provider-library", json={"name": "ds", "section": ENTRY})
-    resp = await client.post(
-        "/api/config/provider-library/apply", json={"name": "ds", "role": "bogus"}
-    )
+    resp = await client.post("/api/config/provider-library/apply", json={"name": "ds", "role": "bogus"})
     assert resp.status == 400
 
 
-async def test_apply_health_checks_key_against_base(
-    make_client, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_apply_health_checks_key_against_base(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
     """An entry with api_key + api_base runs the same health check as the
     slot editor; a failing check must not touch the slot."""
     calls: list[tuple] = []
@@ -213,9 +197,7 @@ async def test_apply_health_checks_key_against_base(
     assert resp.status == 200
     assert calls == []
 
-    resp = await client.post(
-        "/api/config/provider-library/apply", json={"name": "ds", "role": "worker_llm"}
-    )
+    resp = await client.post("/api/config/provider-library/apply", json={"name": "ds", "role": "worker_llm"})
     assert resp.status == 400
     assert calls == [("deepseek", "sk-test-1234", "https://ds.example.com/v1", "deepseek-chat")]
     resp = await client.get("/api/config/llm-sections")
