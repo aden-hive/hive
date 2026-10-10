@@ -12,18 +12,20 @@ A colony solves this by not fixing the shape in advance. The Queen does the work
 
 ## What's inside a colony
 
-On disk a colony is one directory, `colonies/<name>/`, holding everything its agents share:
+On disk a colony is one directory, `~/.hive/colonies/<name>/`, holding everything its agents share:
 
 - **The Queen** — a persistent, client-facing agent who owns the conversation, the plan, and the colony.
 - **Worker clones** — ephemeral agents the Queen spawns to do units of work in parallel. See [The Worker Agent](./worker_agent.md).
-- **The tracker** — one `tracker.db` (SQLite) that acts as the colony's shared ledger.
+- **The tracker** — one `tracker/tracker.db` (SQLite) that acts as the colony's shared ledger.
 - **The task plan** — a persistent, file-backed to-do list that is the Queen's spine.
+- **Skills** — methods the Queen wrote down once she proved them, which every worker can load (`skills/`).
+- **Triggers** — schedules that wake the colony on their own (`triggers.json`).
 
-The Queen and every worker are the *same* underlying program — see the mechanism below.
+The Queen and every worker run on the *same* underlying loop — see the mechanism below.
 
 ## One loop controlling many loops
 
-Here's what makes a colony elegant rather than complicated: Hive has exactly **one execution primitive**, the agent loop ([The Loop](./the_loop.md)). The Queen *is* an agent loop. Every worker is a **clone** of that same loop — same tools, same model — just with a tighter budget and one specific task injected.
+Here's what makes a colony elegant rather than complicated: Hive has exactly **one execution primitive**, the agent loop ([The Loop](./the_loop.md)). The Queen *is* an agent loop. Every worker is a **clone** of that same loop with a worker prompt, a subset of the Queen's tools, a tighter budget, and one specific task injected. It uses the Queen's model unless you configure a separate worker model.
 
 So "a colony" is really **one loop controlling many loops**:
 
@@ -44,29 +46,30 @@ So "a colony" is really **one loop controlling many loops**:
 
 The Queen calls `run_worker` and keeps going — she isn't blocked while workers run. Each worker does its piece, writes its results to the shared tracker, and calls `report_to_parent`; that report lands back in the Queen's own conversation as a `[WORKER_REPORT]` turn. Workers can't see or message each other — everything they share flows through the tracker and the plan.
 
-Because the Queen and the workers are the same primitive, every reliability feature (crash-safe resume, context compaction, cost tracking, stall detection) is built once and every agent in the colony inherits it.
+Because the Queen and the workers are the same primitive, every reliability feature (crash-safe resume, context compaction, usage metering, stall detection) is built once and every agent in the colony inherits it.
 
 ## How a colony grows: execute first, then systematize
 
-A Queen doesn't jump straight to spawning workers. She matures through three phases:
+A Queen doesn't jump straight to spawning workers. Work moves through two phases:
 
-1. **Independent** — she's a normal conversational agent, doing the work herself. When a task turns out to be parallel, recurring, or long-running, she can suggest scaling up.
-2. **Incubating** — a fail-closed gate checks that the plan is settled enough to commit, because forking a colony is expensive (the interactive chat ends and the colony runs unattended).
-3. **Colony** — she forks the colony to disk and switches into fan-out mode.
+1. **Independent** — she's a normal conversational agent, doing the work herself. When a task turns out to be parallel, recurring, or long-running, she proposes a colony.
+2. **Colony** — you confirm in the Create Colony dialog, she forks the work into a colony on disk, and she switches into fan-out mode. You keep talking to her there.
+
+Nothing forks without you: the proposal is a dialog you accept or dismiss.
 
 The defining move is **execute-first-then-systematize**. The Queen does one unit of the work herself first — the **pilot** — and records the result in the tracker. Once she's proven the path, she factors it into a reusable **skill + playbook** and runs it across worker clones. Because the tracker always knows what's done and what's left, re-running a playbook simply resumes where it stopped. See [How a Colony Improves](./improvement.md) for more.
 
 ## What a colony gives you
 
-- **Portability** — export a colony as a tarball and import it elsewhere (`POST /api/colonies/import`). A working colony is a shareable artifact.
+- **Portability** — a colony is plain files in one directory. The server can import one from a tar archive (`POST /api/colonies/import`), which is how a colony moves to another host.
 - **Scheduling** — cron triggers fire straight into the owning Queen's session, so a colony can run itself on a clock.
 - **Longevity** — the Queen persists across sessions; workers come and go with the work.
-- **Oversight** — a colony can pause for human judgment at any point via out-of-band [Sentinel](./coordination.md#human-in-the-loop-sentinel) escalation (Slack/Telegram), then resume from disk.
+- **Oversight** — the Queen asks you when a decision is yours. With [Sentinel](./coordination.md#human-in-the-loop) switched on, a colony that stalls while you're away is nudged along or escalated to you through the Hive inbox, Telegram or Slack, then resumes from disk.
 
 ## Learn more
 
 - [The Loop](./the_loop.md) — the single primitive a colony is built from.
-- [The Queen](./queen.md) — the colony's persistent lead: personas, routing, memory, phases.
+- [The Queen](./queen.md) — the colony's persistent lead: personas, memory, phases.
 - [The Worker Agent](./worker_agent.md) — a single ephemeral clone in a colony.
 - [Coordination](./coordination.md) — the tracker, the task plan, the event bus, and the reminder hub.
 - [How a Colony Improves](./improvement.md) — reflexion, memory, learned skills, and playbooks.
