@@ -25,6 +25,13 @@ import {
   SkillTextEditor,
   type SkillTextEditorHandle,
 } from "@/components/SkillTextEditor";
+import HiveLogo from "@/components/HiveLogo";
+import HiveMap from "@/components/HiveMap";
+import { Decrypt } from "@/components/fx/Decrypt";
+import { RollingNumber } from "@/components/fx/RollingNumber";
+import { ScrambleText } from "@/components/fx/ScrambleText";
+import { useLiveSessions } from "@/hooks/use-live-sessions";
+import { isFullMotion } from "@/lib/motion";
 
 // Ordering for community sections, matching the Prompt Library's default sort:
 // most copied first, newest (higher id) breaking ties. Static/custom items with
@@ -45,6 +52,24 @@ function titleToColonySlug(title: string): string {
       .replace(/[^a-z0-9_]+/g, "_")
       .replace(/^_+|_+$/g, "") || "new_colony"
   );
+}
+
+/** Lean a prompt card toward the pointer and park its sheen under it. */
+function tiltTowardPointer(e: React.PointerEvent<HTMLDivElement>) {
+  if (!isFullMotion()) return;
+  const el = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  const px = (e.clientX - r.left) / r.width;
+  const py = (e.clientY - r.top) / r.height;
+  el.style.setProperty("--fx-rx", `${((0.5 - py) * 5).toFixed(2)}deg`);
+  el.style.setProperty("--fx-ry", `${((px - 0.5) * 7).toFixed(2)}deg`);
+  el.style.setProperty("--fx-px", `${(px * 100).toFixed(1)}%`);
+  el.style.setProperty("--fx-py", `${(py * 100).toFixed(1)}%`);
+}
+
+function untilt(e: React.PointerEvent<HTMLDivElement>) {
+  e.currentTarget.style.removeProperty("--fx-rx");
+  e.currentTarget.style.removeProperty("--fx-ry");
 }
 
 /** Colony name for a hand-typed task when we can't classify (free users):
@@ -180,6 +205,23 @@ export default function Home() {
   };
 
   const displayName = userProfile.displayName || "there";
+
+  // Telemetry for the status line above the greeting.
+  const { byQueen } = useLiveSessions();
+  const workingQueens = useMemo(
+    () => [...byQueen.values()].filter((l) => l.is_executing).length,
+    [byQueen],
+  );
+
+  // The honeycomb backdrop drifts against the pointer (see .fx-hex-layer).
+  const hexLayerRef = useRef<HTMLDivElement>(null);
+  const handleBackdropPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    const layer = hexLayerRef.current;
+    if (!layer || !isFullMotion()) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    layer.style.setProperty("--fx-mx", ((e.clientX - r.left) / r.width - 0.5).toFixed(3));
+    layer.style.setProperty("--fx-my", ((e.clientY - r.top) / r.height - 0.5).toFixed(3));
+  };
 
   // Stash the prompt and bounce to /queen-routing immediately. The classify
   // LLM call (2-5s) runs on the routing screen rather than blocking nav, so
@@ -319,7 +361,10 @@ export default function Home() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start pt-6 px-6 pb-10 relative overflow-hidden">
+    <div
+      className="flex-1 flex flex-col items-center justify-start pt-6 px-6 pb-10 relative overflow-hidden"
+      onPointerMove={handleBackdropPointer}
+    >
       {detailPrompt && (
         <PromptDetailModal
           prompt={detailPrompt}
@@ -330,7 +375,7 @@ export default function Home() {
         />
       )}
       {/* Decorative hexagons scattered around the edges */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+      <div ref={hexLayerRef} className="fx-hex-layer absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
         {(() => {
           const clusters: { x: string; y: string; scale: number; opacity: number; rotate: number }[] = [
             { x: "5%",  y: "8%",  scale: 1.2, opacity: 0.13, rotate: 12 },
@@ -360,7 +405,8 @@ export default function Home() {
               style={{
                 left: cluster.x,
                 top: cluster.y,
-                transform: `translate(-50%, -50%) scale(${cluster.scale}) rotate(${cluster.rotate}deg)`,
+                // Bigger clusters read as nearer, so they drift further.
+                transform: `translate(-50%, -50%) translate3d(calc(var(--fx-mx, 0) * ${-36 * cluster.scale}px), calc(var(--fx-my, 0) * ${-36 * cluster.scale}px), 0) scale(${cluster.scale}) rotate(${cluster.rotate}deg)`,
                 opacity: cluster.opacity,
               }}
               width="260" height="260" viewBox="-130 -130 260 260"
@@ -380,12 +426,15 @@ export default function Home() {
                     strokeLinejoin="round"
                     fill={fi === 0 ? "currentColor" : "none"}
                     fillOpacity={fi === 0 ? 0.12 : 0}
+                    className={fi === 0 ? "fx-hex-core" : undefined}
+                    style={fi === 0 ? { animationDelay: `${-ci * 0.9}s` } : undefined}
                   />
                 );
               })}
             </svg>
           ));
         })()}
+        <div className="fx-scanband" />
         {/* Radial fade — transparent center, solid background at edges */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,var(--background)_25%,transparent_70%)]" />
       </div>
@@ -393,17 +442,35 @@ export default function Home() {
       <div className="w-full max-w-3xl flex flex-col relative z-30 flex-shrink-0">
         {/* Personalized greeting */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-foreground mb-2">
+          <div className="flex items-center justify-center gap-2 mb-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80">
+            <HiveLogo size={11} className="text-primary" />
+            <ScrambleText text="OpenHive // Queen network" />
+            <span aria-hidden className="fx-ruler w-10" />
+            <span>
+              <RollingNumber value={deployQueens.length} /> {deployQueens.length === 1 ? "queen" : "queens"}
+            </span>
+            <span aria-hidden className="text-primary/60">·</span>
+            <span>
+              <RollingNumber value={colonies.length} /> {colonies.length === 1 ? "colony" : "colonies"}
+            </span>
+            <span aria-hidden className="text-primary/60">·</span>
+            <span className={workingQueens > 0 ? "text-primary" : undefined}>
+              <RollingNumber value={workingQueens} /> working
+            </span>
+            <span aria-hidden className="fx-caret" />
+          </div>
+          <Decrypt as="h1" className="block text-2xl font-bold text-foreground mb-2" delayMs={120}>
             Hey {displayName}, what can I help you with?
-          </h1>
-          <p className="text-sm text-muted-foreground">
+          </Decrypt>
+          <Decrypt as="p" className="block text-sm text-muted-foreground" delayMs={260}>
             Describe a task and I'll deploy an agent to handle it
-          </p>
+          </Decrypt>
         </div>
 
         {/* Chat input */}
         <form onSubmit={handleSubmit} className="mb-6 relative">
-          <div className="relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
+          <div className="fx-corners-host relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
+            <span aria-hidden className="fx-corners" />
             <SkillTextEditor
               ref={editorRef}
               value={inputValue}
@@ -427,20 +494,26 @@ export default function Home() {
         </form>
       </div>
 
-      {/* Prompt library, inline card grid. Click a card to seed the
+      {/* Below the composer, one scroll column: the live hive map, then the
+          prompt library as an inline card grid. Click a card to seed the
           textarea above; Copy / Deploy work the same as on the full
           library page. Sections render in the canonical order ("My
           Prompts" first, then categories); cards are paginated
-          globally — scroll near the bottom and the next 30 mount.
-          Lives in its own wider column (~30% wider than the search
-          column) so three cards fit comfortably side by side. */}
-      {totalPrompts > 0 && (
-        <div className="w-full max-w-5xl flex-1 min-h-0 flex flex-col relative z-20">
-          <div
-            className="rounded-xl overflow-y-auto flex-1 min-h-0 -mx-2 px-2"
-            aria-label="Prompt library"
-            onScroll={handleLibraryScroll}
-          >
+          globally — scroll near the bottom and the next 30 mount. The
+          map gets the full width; the cards keep a narrower column so
+          three fit comfortably side by side. */}
+      <div className="w-full max-w-6xl flex-1 min-h-0 flex flex-col relative z-20">
+        <div
+          className="rounded-xl overflow-y-auto flex-1 min-h-0 -mx-2 px-2"
+          aria-label="Prompt library"
+          onScroll={handleLibraryScroll}
+        >
+          {deployQueens.length > 0 && (
+            <div className="mb-8">
+              <HiveMap queens={deployQueens} colonies={colonies} />
+            </div>
+          )}
+          <div className="max-w-5xl mx-auto">
             {sectionsToRender.map((section) => (
               section.visibleItems.length === 0 ? null : (
                 <div key={section.id} className="mb-5">
@@ -455,7 +528,7 @@ export default function Home() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
+                  <div className="fx-cascade grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
                     {section.visibleItems.map((item, i) => (
                       // The first card doubles as the onboarding tour's
                       // "pick a playbook" spotlight target (see Tutorial/steps.ts).
@@ -463,14 +536,17 @@ export default function Home() {
                         key={item.id}
                         // `grid` so the card stretches to fill the cell exactly
                         // as it did when it was the grid item itself.
-                        className="grid"
+                        className="fx-tilt relative grid"
                         data-tour={i === 0 && section === sectionsToRender[0] ? "tour-playbook-card" : undefined}
+                        onPointerMove={tiltTowardPointer}
+                        onPointerLeave={untilt}
                       >
                         <PromptCard
                           prompt={item}
                           onSelect={() => handlePromptHint(item)}
                           onDetail={() => setDetailPrompt(item)}
                         />
+                        <span aria-hidden className="fx-sheen" />
                       </div>
                     ))}
                   </div>
@@ -484,17 +560,17 @@ export default function Home() {
             )}
           </div>
         </div>
-        )}
+      </div>
 
       {/* Hand-pick the queen for a hand-typed message (replaces the
           deprecated /queen-routing LLM classification). */}
       {queenPick !== null && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]"
           onMouseDown={() => setQueenPick(null)}
         >
           <div
-            className="w-[24rem] max-w-[92vw] rounded-xl border border-border/60 bg-card p-4 shadow-xl"
+            className="fx-panel-in relative w-[24rem] max-w-[92vw] rounded-xl border border-border/60 bg-card p-4 shadow-xl"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="text-sm font-semibold text-foreground mb-1">
@@ -503,7 +579,7 @@ export default function Home() {
             <div className="text-[11px] text-muted-foreground mb-3">
               Your message is sent to the queen you pick.
             </div>
-            <div className="max-h-[50vh] overflow-y-auto flex flex-col gap-1.5">
+            <div className="fx-cascade max-h-[50vh] overflow-y-auto flex flex-col gap-1.5">
               {deployQueens.map((q) => (
                 <button
                   key={q.id}

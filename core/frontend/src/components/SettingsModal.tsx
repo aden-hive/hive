@@ -17,6 +17,13 @@ import { compressImage } from "@/lib/image-utils";
 import { useShowRuntimeLogs } from "@/hooks/use-show-runtime-logs";
 import McpServersPanel from "./McpServersPanel";
 import { Switch } from "./Switch";
+import type { MotionPref } from "@/lib/motion";
+
+const MOTION_LABELS: Record<MotionPref, string> = {
+  system: "System",
+  full: "Full",
+  reduced: "Reduced",
+};
 
 interface SettingsModalProps {
   open: boolean;
@@ -39,7 +46,7 @@ function StatusText({ icon, color, title, children }: { icon: React.ReactNode; c
 
 export default function SettingsModal({ open, onClose, initialSection }: SettingsModalProps) {
   const { userProfile, setUserProfile, userAvatarVersion, bumpUserAvatar, userHasAvatar } = useColony();
-  const { theme, setTheme, density, setDensity } = useTheme();
+  const { theme, setTheme, density, setDensity, motion, setMotion } = useTheme();
   const { me, refresh: refreshMe } = useMe();
   const {
     currentProvider, currentModel, connectedProviders, availableModels,
@@ -85,6 +92,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const [densityDropdownOpen, setDensityDropdownOpen] = useState(false);
+  const [motionDropdownOpen, setMotionDropdownOpen] = useState(false);
   const avatarUrl = apiUrl(`/config/profile/avatar?v=${userAvatarVersion}`);
   // Start "failed" when the runtime says no avatar exists — that way we
   // render initials immediately without firing an `<img>` request.
@@ -96,6 +104,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const themeDropdownRef = useRef<HTMLDivElement>(null);
   const densityDropdownRef = useRef<HTMLDivElement>(null);
+  const motionDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!themeDropdownOpen) return;
@@ -116,6 +125,16 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [densityDropdownOpen]);
+
+  useEffect(() => {
+    if (!motionDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (motionDropdownRef.current && !motionDropdownRef.current.contains(e.target as Node))
+        setMotionDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [motionDropdownOpen]);
 
   useEffect(() => {
     if (open) {
@@ -426,6 +445,28 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                               className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${density === option ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted/30"}`}>
                               {density === option ? <Check className="w-3 h-3 flex-shrink-0" /> : <span className="w-3" />}
                               <span>{option === "compact" ? "Compact" : "Spacious"}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <span className="text-[13px] text-foreground">Motion</span>
+                    <div className="relative" ref={motionDropdownRef}>
+                      <button onClick={() => setMotionDropdownOpen(!motionDropdownOpen)}
+                        className="flex items-center gap-1.5 h-7 bg-muted/30 border border-border/50 rounded-md px-2.5 text-xs text-foreground hover:bg-muted/40">
+                        {MOTION_LABELS[motion]}
+                        <ChevronDown className={`w-3 h-3 text-muted-foreground ${motionDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {motionDropdownOpen && (
+                        <div className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-md shadow-lg z-10 min-w-[140px] overflow-hidden">
+                          {(["system", "full", "reduced"] as const).map((option) => (
+                            <button key={option} onClick={() => { setMotion(option); setMotionDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${motion === option ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted/30"}`}>
+                              {motion === option ? <Check className="w-3 h-3 flex-shrink-0" /> : <span className="w-3" />}
+                              <span>{MOTION_LABELS[option]}</span>
                             </button>
                           ))}
                         </div>

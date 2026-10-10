@@ -34,6 +34,13 @@ import {
   Brain,
 } from "lucide-react";
 import { ReportModal } from "@/components/SessionReportAction";
+import MessageAttachments from "@/components/MessageAttachments";
+import {
+  attachmentLabel,
+  formatBytes,
+  isImageAttachment,
+  resolveAttachmentUrl,
+} from "@/lib/attachments";
 import {
   printHtmlToPdf,
   openAttachment as openAttachmentInBrowser,
@@ -403,12 +410,6 @@ const FILE_INPUT_ACCEPT = [
   ...TEXT_FILE_EXTENSIONS,
 ].join(",");
 
-function formatBytes(n: number): string {
-  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${n} B`;
-}
-
 /**
  * Strip <system-reminder>...</system-reminder> blocks from displayed message
  * text. The runtime injects framework-level reminders (e.g. the attachments
@@ -429,54 +430,10 @@ function stripSystemReminders(content: string | undefined): string {
 }
 
 /**
- * Decide whether an image_url URL points at an image (renderable as a
- * thumbnail) vs. a non-image attachment (PDF, CSV, etc). Used by the
- * unified attachment chip so all attachment types share one card shape.
- */
-function isImageAttachment(url: string): boolean {
-  if (url.startsWith("data:image/")) return true;
-  if (url.startsWith("data:application/pdf")) return false;
-  if (url.startsWith("hive-attachment://")) {
-    return /\.(png|jpe?g|webp|gif|svg)$/i.test(url);
-  }
-  // attachment-served URLs end with the filename — sniff by extension.
-  return /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(url);
-}
-
-/**
- * Turn an attachment URL into something the browser can fetch.
- *
- * Canonical attachment refs come through as `hive-attachment://<rel_path>`
- * (the runtime's scheme for "file on disk under the session dir"). The
- * route at /api/sessions/{sid}/attachment/{basename} serves the bytes;
- * this resolver maps the canonical ref → fetchable URL. Layer F2 made
- * `hive-attachment://` the single canonical form everywhere — submit,
- * replay, persistence — so the route-URL shape lives only here.
- *
- * Pass-through for everything else: data: URIs, already-resolved API
- * URLs (legacy persisted messages), absolute http(s) URLs.
- */
-function resolveAttachmentUrl(url: string, sessionId: string): string {
-  if (!url || !url.startsWith("hive-attachment://")) return url;
-  const relPath = url.slice("hive-attachment://".length).replace(/^\/+/, "");
-  // Route accepts a basename only — its path-traversal guard rejects
-  // slashes, and the path-param matcher won't match across slashes
-  // anyway. Both `data/attachments/X` (post-D1) and `attachments/X`
-  // (legacy) resolve via basename. encodeURIComponent because filenames
-  // now preserve the user's original name (e.g. "Calculus Volume 1.pdf"
-  // with spaces) instead of being normalized to `{ts}_{idx}.{ext}`.
-  const basename = relPath.split("/").pop() ?? relPath;
-  return apiUrl(`/sessions/${sessionId}/attachment/${encodeURIComponent(basename)}`);
-}
-
-/**
- * Unified attachment chip — one shape for every attachment type.
- * Images get a small thumbnail in the icon slot; PDFs/CSVs get a
- * doc icon. Filename + optional size meta sit alongside.
- *
- * Two visual variants:
- *   - `pending`: muted/border styling for the composer's preview strip
- *   - `history`: high-contrast on the primary bubble background
+ * Attachment chip for the composer's preview strip — one shape for every
+ * attachment type. Images get a small thumbnail in the icon slot; PDFs/CSVs
+ * get a doc icon. Name + optional size meta sit alongside. Sent messages
+ * render their attachments with MessageAttachments instead.
  */
 function AttachmentChip({
   url,
@@ -484,7 +441,6 @@ function AttachmentChip({
   byteSize,
   isUploading,
   onClick,
-  variant,
   sessionId,
   credits,
 }: {
@@ -493,7 +449,6 @@ function AttachmentChip({
   byteSize?: number;
   isUploading?: boolean;
   onClick?: () => void;
-  variant: "pending" | "history";
   /** Needed so `hive-attachment://` canonical refs can be resolved to a
    * fetchable /api/sessions/{sid}/attachment/{basename} URL at render time. */
   sessionId?: string;
@@ -503,12 +458,9 @@ function AttachmentChip({
   const [openError, setOpenError] = useState<string | null>(null);
   const isImage = isImageAttachment(url) && url !== "file-pending" && url !== "file-uploaded";
   const showThumbPreview = isImage && url.startsWith("data:image/");
-  const displayName = fileName || (isImage ? "image" : "document");
+  const name = attachmentLabel(fileName);
+  const displayName = fileName ? name.label : isImage ? "Image" : "Document";
   const sizeText = byteSize !== undefined ? formatBytes(byteSize) : undefined;
-  const variantClasses =
-    variant === "pending"
-      ? "border-border bg-muted/40 text-foreground hover:bg-muted/60"
-      : "border-black/20 bg-black/10 text-black hover:bg-black/20";
   // Resolve canonical hive-attachment:// refs to fetchable route URLs.
   // For data: URIs and already-resolved API URLs this is a pass-through.
   const fetchableUrl = sessionId ? resolveAttachmentUrl(url, sessionId) : url;
@@ -559,7 +511,8 @@ function AttachmentChip({
       type="button"
       onClick={handleClick}
       disabled={isUploading || (!onClick && !hasOpenable)}
-      className={`flex items-center gap-2 h-14 pl-1.5 pr-3 rounded-lg border text-xs transition-colors disabled:cursor-default ${variantClasses}`}
+      title={name.original || undefined}
+      className="flex items-center gap-2 h-14 pl-1.5 pr-3 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted/60 text-xs transition-colors disabled:cursor-default"
     >
       <div className="relative w-11 h-11 flex-shrink-0">
         {showThumbPreview ? (
@@ -1946,6 +1899,10 @@ function parseQnA(content: string): { q: string; a: string }[] | null {
   return pairs;
 }
 
+/** A bubble created within this window materializes on mount; older ones
+ *  (history, or rows the lazy window re-mounts on scroll) appear instantly. */
+const FRESH_MESSAGE_MS = 4000;
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
@@ -2004,6 +1961,10 @@ const MessageBubble = memo(
       !isQueen && msg.role === "worker"
         ? workerIdFromStreamId(msg.streamId)
         : null;
+    const [fresh] = useState(
+      () => msg.createdAt != null && Date.now() - msg.createdAt < FRESH_MESSAGE_MS,
+    );
+    const enterFx = fresh ? " fx-msg-in" : "";
 
     if (msg.type === "run_divider") {
       return (
@@ -2150,34 +2111,24 @@ const MessageBubble = memo(
       return (
         <div className="flex flex-col items-end gap-1 group">
           <div
-            className={`max-w-[75%] bg-primary text-black text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " ring-1 ring-amber-500/50" : ""}`}
+            className={`hive-user-bubble relative max-w-[75%] text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " ring-1 ring-amber-500/50" : ""}${enterFx}`}
           >
             {msg.images && msg.images.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {msg.images.map((img, i) => (
-                  img._generated ? (
-                    <GeneratedImageCard
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      credits={img._credits}
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  ) : (
-                    <AttachmentChip
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      byteSize={img._byteSize}
-                      credits={img._credits}
-                      variant="history"
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  )
-                ))}
-              </div>
+              <MessageAttachments
+                images={msg.images}
+                sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                onOpenImage={(i) => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                renderGenerated={(img, i) => (
+                  <GeneratedImageCard
+                    key={i}
+                    url={img.image_url.url}
+                    fileName={img._fileName}
+                    credits={img._credits}
+                    sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                    onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                  />
+                )}
+              />
             )}
             {msg.content &&
               (() => {
@@ -2198,11 +2149,7 @@ const MessageBubble = memo(
                   );
                 }
                 return (
-                  <SkillMarkerText
-                    text={cleanedContent}
-                    tone="onPrimary"
-                    className="block"
-                  />
+                  <SkillMarkerText text={cleanedContent} className="block" />
                 );
               })()}
             {(msg.queued || msg.createdAt) && (
@@ -2332,36 +2279,26 @@ const MessageBubble = memo(
             )}
           </div>
           <div
-            className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
+            className={`relative text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
               isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
-            }`}
+            }${enterFx}`}
           >
             {msg.images && msg.images.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {msg.images.map((img, i) => (
-                  img._generated ? (
-                    <GeneratedImageCard
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      credits={img._credits}
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  ) : (
-                    <AttachmentChip
-                      key={i}
-                      url={img.image_url.url}
-                      fileName={img._fileName}
-                      byteSize={img._byteSize}
-                      credits={img._credits}
-                      variant="history"
-                      sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
-                      onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
-                    />
-                  )
-                ))}
-              </div>
+              <MessageAttachments
+                images={msg.images}
+                sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                onOpenImage={(i) => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                renderGenerated={(img, i) => (
+                  <GeneratedImageCard
+                    key={i}
+                    url={img.image_url.url}
+                    fileName={img._fileName}
+                    credits={img._credits}
+                    sessionId={msg.attachmentSessionId ?? feedbackSessionId ?? undefined}
+                    onClick={() => onImageClick?.(msg.images!, i, msg.attachmentSessionId ?? feedbackSessionId ?? undefined)}
+                  />
+                )}
+              />
             )}
             {msg.innerTurns && msg.innerTurns.length > 1 ? (
               // Merged multi-inner-turn bubble presented as an activity
@@ -4369,7 +4306,6 @@ export default function ChatPanel({
                       fileName={img._fileName}
                       byteSize={img._byteSize}
                       isUploading={isUploadingThis}
-                      variant="pending"
                       sessionId={sessionId ?? undefined}
                     />
                     <button
@@ -4625,10 +4561,15 @@ function ImageCarouselModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
-          <span className="text-xs text-muted-foreground">
-            {images.length > 1
-              ? `${index + 1} of ${images.length}`
-              : isFile ? "File preview" : "Image preview"}
+          <span className="flex items-center gap-2 min-w-0 text-xs text-muted-foreground">
+            <span className="truncate font-medium text-foreground" title={current._fileName}>
+              {current._fileName ? attachmentLabel(current._fileName).label : isFile ? "File preview" : "Image preview"}
+            </span>
+            {images.length > 1 && (
+              <span className="flex-shrink-0 font-mono text-[10.5px] tabular-nums">
+                {index + 1} / {images.length}
+              </span>
+            )}
           </span>
           <div className="flex items-center gap-1">
             {!isFile && !isUnresolved && (

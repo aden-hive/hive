@@ -45,7 +45,7 @@ export default function SidebarQueenItem({ queen, isActive, liveness }: SidebarQ
     <NavLink
       to={`/queen/${queen.id}`}
       className={({ isActive: isRouteActive }) =>
-        `group flex items-center gap-2.5 px-3 py-1.5 mx-2 rounded-md text-[12.5px] transition-colors ${
+        `fx-rail group flex items-center gap-2.5 px-3 py-1.5 mx-2 rounded-md text-[12.5px] transition-colors ${
           isRouteActive
             ? "bg-sidebar-active-bg text-foreground font-medium"
             : "text-foreground/70 hover:bg-sidebar-item-hover hover:text-foreground"
@@ -71,12 +71,11 @@ export default function SidebarQueenItem({ queen, isActive, liveness }: SidebarQ
         )}
       </span>
       <div className="min-w-0 flex-1 flex items-center gap-2">
-        <span
-          className="truncate font-medium"
-        >
+        {/* The name keeps its width; the role gives way first. */}
+        <span className="truncate font-medium shrink-0 max-w-full">
           {queen.name}
         </span>
-        <span className="text-[11.5px] text-sidebar-muted truncate">
+        <span className="text-[11.5px] text-sidebar-muted truncate min-w-0">
           {queen.title.replace(/^Head of\s+/i, "")}
         </span>
       </div>
