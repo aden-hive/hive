@@ -112,7 +112,17 @@ The **[architecture overview](docs/architecture/README.md)** goes deeper: the lo
 
 ## What's inside
 
-**Queens with a job and a memory.** Hive ships thirteen persona queens. Six are active out of the box (Growth, RevOps, Content, Lead Generation, Outbound, and Brand & Design); hire the rest from the Org Chart, or create your own. Each one keeps notes in markdown memory as she works, and relevant past conversations are recalled into her context automatically. [Measured on LongMemEval](docs/memory-benchmark.md): 88.4% on S, 82.0% on M.
+**Queens with a job and a memory.** Hive ships thirteen persona queens. Six are active out of the box (Growth, RevOps, Content, Lead Generation, Outbound, and Brand & Design); hire the rest from the Org Chart, or create your own. Each one keeps notes in markdown memory as she works, and relevant past conversations are recalled into her context automatically.
+
+**A memory you can measure.** A queen remembers you across sessions. She writes notes about you as she works, related past conversations are placed in front of her before each message, and she checks her memory before asking you for something you've already told her. We benchmark it on [LongMemEval](docs/memory-benchmark.md), run end to end through Hive and graded by the official judge, with `gpt-6.1-sol` answering:
+
+| | LongMemEval-S | LongMemEval-M |
+|---|---|---|
+| History per question | ~115k tokens | ~1.1M tokens |
+| **Hive** | **88.4%** | **82.0%** |
+| The same model reading the whole history | 96.8% | doesn't fit |
+
+When a whole history fits in the model's context, reading all of it is still more accurate than Hive's memory. When it doesn't, as on LongMemEval-M, memory is the only option. The [benchmark page](docs/memory-benchmark.md) has the methodology, per-type results, a comparison with other memory systems, and the limitations.
 
 **Built-in tools that run in-process.** Shell commands and background jobs, file editing, fast code search, PDFs, attachments and images, web scraping, charts (ECharts and Mermaid), CSV files, and image generation through Hive LLM. They run inside Hive itself, with no tool servers to start.
 
