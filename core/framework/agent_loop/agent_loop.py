@@ -372,6 +372,7 @@ def _queen_account_preflight(tc: Any) -> ToolResult | None:
         from aden_tools.credentials import CredentialStoreAdapter
         from aden_tools.credentials.store_adapter import is_strict_account_mode
     except Exception:
+        logger.debug("[AgentLoop] queen account preflight: credential imports unavailable", exc_info=True)
         return None
 
     if not is_strict_account_mode():
@@ -393,6 +394,7 @@ def _queen_account_preflight(tc: Any) -> ToolResult | None:
     try:
         adapter = CredentialStoreAdapter.default()
     except Exception:
+        logger.debug("[AgentLoop] queen account preflight: CredentialStoreAdapter.default() failed", exc_info=True)
         return None
 
     cred_name = adapter.get_credential_for_tool(tool_name)
@@ -405,6 +407,7 @@ def _queen_account_preflight(tc: Any) -> ToolResult | None:
     try:
         accounts = adapter._store.list_accounts(provider_name)  # noqa: SLF001
     except Exception:
+        logger.debug("[AgentLoop] queen account preflight: list_accounts failed", exc_info=True)
         return None
 
     if len(accounts) <= 1:
@@ -2026,7 +2029,7 @@ class AgentLoop(AgentProtocol):
                 try:
                     _iter_meta = ctx.iteration_metadata_provider()
                 except Exception:
-                    pass
+                    logger.debug("[AgentLoop] iteration_metadata_provider failed", exc_info=True)
             await self._publish_iteration(
                 stream_id,
                 node_id,
@@ -2099,7 +2102,7 @@ class AgentLoop(AgentProtocol):
 
                         mark_upstream_healthy()
                     except Exception:
-                        pass
+                        logger.debug("[AgentLoop] mark_upstream_healthy failed", exc_info=True)
                     _turn_ms = int((time.monotonic() - _turn_t0) * 1000)
                     logger.info(
                         "[%s] iter=%d: LLM done (%dms) — text=%d chars, real_tools=%d, outputs_set=%s, tokens=%s, accumulator=%s",
@@ -2239,7 +2242,7 @@ class AgentLoop(AgentProtocol):
                             if is_upstream_network_error(e):
                                 mark_upstream_degraded(f"{type(e).__name__}: {str(e)[:200]}")
                         except Exception:
-                            pass
+                            logger.debug("[AgentLoop] mark_upstream_degraded failed", exc_info=True)
                         _stream_retry_count += 1
                         delay = min(
                             self._config.stream_retry_backoff_base * (2 ** (_stream_retry_count - 1)),
@@ -5038,6 +5041,7 @@ class AgentLoop(AgentProtocol):
                         try:
                             _binding = _prov()
                         except Exception:
+                            logger.debug("[AgentLoop] colony_binding_provider failed", exc_info=True)
                             _binding = None
                     _content = await _sentineltool.handle(
                         tc.tool_input if isinstance(tc.tool_input, dict) else {},
@@ -5091,6 +5095,7 @@ class AgentLoop(AgentProtocol):
                         try:
                             _phase = (ctx.iteration_metadata_provider() or {}).get("phase")
                         except Exception:
+                            logger.debug("[AgentLoop] iteration_metadata_provider failed (phase lookup)", exc_info=True)
                             _phase = None
                     if _phase is not None and _phase != "independent":
                         result = ToolResult(
@@ -5188,6 +5193,7 @@ class AgentLoop(AgentProtocol):
                         try:
                             _phase = (ctx.iteration_metadata_provider() or {}).get("phase")
                         except Exception:
+                            logger.debug("[AgentLoop] iteration_metadata_provider failed (phase lookup)", exc_info=True)
                             _phase = None
                     if _phase is not None and _phase != "colony":
                         result = ToolResult(
@@ -6502,7 +6508,7 @@ class AgentLoop(AgentProtocol):
                 if _sid and isinstance(tc.tool_input, dict):
                     tc.tool_input["_hive_session"] = _sid
             except Exception:
-                pass
+                logger.debug("[AgentLoop] astrbot session routing injection failed", exc_info=True)
 
         # Queen strict-account preflight. The MCP tools run in a stdio
         # subprocess with its own CredentialStoreAdapter that can't see the
@@ -7157,6 +7163,7 @@ class AgentLoop(AgentProtocol):
 
                 anchor_idx = _history_cache_breakpoint_index(request_messages, model)
             except Exception:
+                logger.debug("[AgentLoop] history cache breakpoint lookup failed", exc_info=True)
                 anchor_idx = -1
 
         return {
