@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 from urllib import error as urlerror, parse as urlparse, request as urlrequest
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Public registration
 # ---------------------------------------------------------------------------
@@ -536,6 +538,7 @@ def cmd_queen_sessions(args: argparse.Namespace) -> int:
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
+                logger.debug("queen sessions: unreadable meta.json at %s", meta_path, exc_info=True)
                 meta = {}
         rows.append(
             {
@@ -616,6 +619,7 @@ def cmd_colony_list(args: argparse.Namespace) -> int:
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
+                logger.debug("colony list: unreadable metadata.json at %s", meta_path, exc_info=True)
                 meta = {}
         worker_count = sum(1 for f in path.iterdir() if f.is_file() and f.suffix == ".json" and f.stem not in _RESERVED_JSON_STEMS)
         rows.append(
@@ -656,7 +660,7 @@ def cmd_colony_info(args: argparse.Namespace) -> int:
         try:
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            logger.debug("colony info: unreadable metadata.json at %s", meta_path, exc_info=True)
 
     workers: dict[str, dict] = {}
     for f in sorted(colony_path.iterdir()):
@@ -675,7 +679,7 @@ def cmd_colony_info(args: argparse.Namespace) -> int:
                     "spawned_from": data.get("spawned_from", ""),
                 }
         except Exception:
-            pass
+            logger.debug("colony info: skipping unreadable worker file %s", f, exc_info=True)
 
     if args.json:
         print(json.dumps({"path": str(colony_path), "metadata": metadata, "workers": workers}, indent=2))
@@ -919,7 +923,7 @@ def _open_browser(url: str) -> None:
             )
             return
     except Exception:
-        pass
+        logger.debug("open browser: launching Chrome failed, falling back to system default", exc_info=True)
 
     try:
         if sys.platform == "darwin":
@@ -933,7 +937,7 @@ def _open_browser(url: str) -> None:
         elif sys.platform == "linux":
             subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
-        pass
+        logger.debug("open browser: system default launcher failed for %s", url, exc_info=True)
 
 
 def _ping_hive_gateway_availability(from_source: str) -> None:
