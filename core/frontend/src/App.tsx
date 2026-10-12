@@ -16,6 +16,7 @@ const SkillsLibrary = lazy(() => import("./pages/skills-library"));
 const MemoryLibrary = lazy(() => import("./pages/memory-library"));
 const CredentialsPage = lazy(() => import("./pages/credentials"));
 const NotFound = lazy(() => import("./pages/not-found"));
+const Vale = lazy(() => import("./pages/vale"));
 
 // Keying ColonyChat on the route param makes colony identity the component's
 // identity: switching colonies unmounts the old page instead of reusing its
@@ -51,6 +52,9 @@ function App() {
         />
         <Route path="/memory-library" element={<MemoryLibrary />} />
         <Route path="/credentials" element={<CredentialsPage />} />
+        {/* Apps built on Hive: the vale game (framework/apps/vale). */}
+        <Route path="/vale" element={<Vale />} />
+        <Route path="/vale/:gameId" element={<Vale />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

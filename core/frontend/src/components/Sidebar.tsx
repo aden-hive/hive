@@ -7,6 +7,7 @@ import {
   ChevronRight,
   MessageSquarePlus,
   Network,
+  Castle,
   KeyRound,
   Send,
   ChevronDown,
@@ -323,6 +324,10 @@ export default function Sidebar() {
             className="w-8 h-8 rounded-md flex items-center justify-center text-foreground/60 hover:text-foreground hover:bg-sidebar-item-hover transition-colors">
             <Network className="w-4 h-4" />
           </button>
+          <button onClick={() => navigate("/vale")} title="The Vale"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-foreground/60 hover:text-foreground hover:bg-sidebar-item-hover transition-colors">
+            <Castle className="w-4 h-4" />
+          </button>
           <button onClick={() => setLibraryExpanded((v) => !v)} title="Configuration"
             className="w-8 h-8 rounded-md flex items-center justify-center text-foreground/60 hover:text-foreground hover:bg-sidebar-item-hover transition-colors">
             <Settings className="w-4 h-4" />
@@ -417,6 +422,13 @@ export default function Sidebar() {
         >
           <Network className="w-[15px] h-[15px] opacity-70" />
           <span>Org Chart</span>
+        </button>
+        <button
+          onClick={() => navigate("/vale")}
+          className="flex items-center gap-2 px-3 py-[5px] rounded-md text-[12.5px] text-foreground/65 hover:bg-sidebar-item-hover hover:text-foreground transition-all duration-150"
+        >
+          <Castle className="w-[15px] h-[15px] opacity-70" />
+          <span>The Vale</span>
         </button>
         <button
           onClick={() => setLibraryExpanded((v) => !v)}
