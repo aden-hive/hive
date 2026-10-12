@@ -1,0 +1,4 @@
+- Paid the miners. Brannoc took his coin last and looked at me like a dog that wants to bite.
+- Cedric's buyer pays triple. Ten more cartloads and the crown's tax is covered — and my land.
+- Hal owes 12 silver. Useful.
+- If anyone asks, the shaking was blasting.

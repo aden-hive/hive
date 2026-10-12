@@ -1,0 +1,3 @@
+- The deer have gone uphill out of the lowland. Never seen them leave like that.
+- Frogs dead by the brook, reddish.
+- Heard wolves to the north three nights ago, farther down than usual.

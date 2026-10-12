@@ -1,0 +1,43 @@
+name = "Old Bram"
+short = "Bram"
+role = "shepherd of the high fold"
+public = "the old shepherd of the high fold below Barrow Hill; the oldest man in the vale"
+home = "fold"
+start = "fold"
+profession = "shepherd"
+theta = 2.6
+aliases = ["bram", "old bram", "the shepherd"]
+knows = ["verse1", "adventurer"]
+
+[items]
+tools = 2
+rope = 2
+wool = 2
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 35
+craft = 70
+lore = 50
+song = 60
+healing = 30
+hunting = 60
+arms = 60
+magic = 0
+persuade = 40
+stealth = 30
+trade = 25
+notice = 70
+
+[interests]
+wolves = 1.3
+ancient = 1.2
+omen = 0.9
+weather = 0.8
+danger = 0.8
+children = 0.6
+
+[ties]
+wynn = 0.9
+gytha = 0.3
+kell = 0.5
+isolde = 0.3

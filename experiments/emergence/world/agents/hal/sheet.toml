@@ -1,0 +1,44 @@
+name = "Hal Wainwright"
+short = "Hal"
+role = "the miller"
+public = "the miller at Hollowbrook Mill; talkative; a widower with a boy, Pip"
+home = "mill"
+start = "mill"
+profession = "miller"
+knows = ["tunnel_map", "sapper"]
+theta = 2.2
+aliases = ["hal", "wainwright", "the miller"]
+
+[items]
+flour = 4
+coin = 3
+map = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 55
+craft = 60
+lore = 30
+song = 20
+healing = 15
+hunting = 15
+arms = 25
+magic = 0
+persuade = 50
+stealth = 20
+trade = 50
+notice = 45
+
+[interests]
+water = 1.3
+rust = 0.9
+food = 1.0
+money = 0.8
+sickness = 0.8
+trade = 0.6
+children = 0.5
+
+[ties]
+maud = 0.6
+osric = -0.5
+brannoc = 0.5
+bagel = 0.3

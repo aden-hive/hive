@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Vale: Research Summary</title>
+<style>
+  :root { --bg: #f7f4ee; --fg: #2a2622; --muted: #6d655c; --line: #ddd5c8; --accent: #9a3b3b; --card: #fffdf8; --chip: #efe8dc; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b1916; --fg: #ece6dc; --muted: #a59c90; --line: #3a352e; --accent: #e08a7a; --card: #23201c; --chip: #2e2a24; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 Georgia, "Iowan Old Style", "Songti SC", serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  h2 { font-size: 21px; margin: 40px 0 10px; border-top: 1px solid var(--line); padding-top: 22px; }
+  h3 { font-size: 17px; margin: 22px 0 6px; }
+  p, li { margin: 0 0 10px; }
+  ul { padding-left: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 18px 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; color: var(--accent); font-family: ui-sans-serif, system-ui, sans-serif; }
+  .stat span { font-size: 13px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 12px 0; }
+  th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 8px 6px; }
+  th { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; color: var(--muted); font-weight: 600; }
+  td:first-child { color: var(--muted); width: 22%; }
+  .run { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: var(--chip); border-radius: 4px; padding: 0 5px; }
+  blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--accent); color: var(--muted); font-style: italic; }
+  .note { font-size: 14px; color: var(--muted); }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+<h1>The Vale: a living world that is also an experiment</h1>
+<p class="sub">What the research is worth, why the world runs by itself, and how it differs from SillyTavern. Grounded in eight recorded runs of <i>The Vale of Ashmere</i> (<span class="run">vale1</span>–<span class="run">vale8</span>) and the game now running on Hive.</p>
+
+<p>The Vale is fifteen villagers, each a Hive agent with a persona, a secret, a character sheet and a private notebook. They live through a month of a slow catastrophe in a valley whose truth is hidden from them: a breached seal under a mine is poisoning the river. Nobody tells them what to do. Cheap physics decides <i>who</i> is stirred to act; the model decides <i>what</i> they do; an impartial game master and the dice decide what it brings. The player is not a character but a power above the vale's gods, with a small budget of Awe. A host turns each part of the day into a short, illustrated broadcast.</p>
+
+<div class="stats">
+  <div class="stat"><b>8 runs</b><span>14 to 30 days each, every event logged and replayable</span></div>
+  <div class="stat"><b>105</b><span>stirrings set off by one omen, through all 15 villagers, 14 links deep (vale2)</span></div>
+  <div class="stat"><b>0</b><span>deaths in vale8: the first month with none, after seven runs in which the world's deaths came</span></div>
+  <div class="stat"><b>4 decimals</b><span>runs without effective action ended identical to four decimals: a clean control</span></div>
+</div>
+
+<h2>1. The scientific value</h2>
+
+<h3>A society with a hidden ground truth</h3>
+<p>Studies of LLM agent societies, Smallville (Park et al., 2023) above all, are largely judged by how believable the agents' behaviour is. The Vale has an answer key. The cure is known and broken into pieces held by different people: one remembers the first verse of a song, the second is carved on stones only some can read, one man has the map of a safe tunnel, another the skill to seal a breach. The hidden world is numeric: blight per place, sickness, a door open or shut, a stone fallen or standing. So the question "can a society of agents find and act on knowledge that no single member holds?" gets a measured answer, not an impression.</p>
+
+<h3>Controlled interventions</h3>
+<p>The hidden world advances on its own seeded clock. When the villagers change nothing, it ends exactly the same: <span class="run">vale1</span>, <span class="run">vale2</span> and <span class="run">vale3</span> ended identical to four decimals. That makes every run a controlled experiment. Change one thing (the energy budget, a god, the rules of joint work, the dice) and the difference in the outcome is the effect of that change. The findings so far:</p>
+<ul>
+  <li><b>Energy shapes the collective rhythm.</b> At 0.6 energy per villager per dawn, fifteen separate reserves fell into step and the vale "breathed" on a five-day cycle (13, 8, 7, 15, 2 stirrings a day, then the same again), the way fireflies synchronise, with no code scheduling it. At 1.0 it hummed: every villager every day. At 1.5 it breathed every two days. Scarcity also equalised participation: every villager acted exactly nine times in fourteen days (<span class="run">vale1</span> to <span class="run">vale4</span>).</li>
+  <li><b>Information is not coordination.</b> An omniscient god told the vale the full cure on day 1. Its words drove 73 of the run's 135 stirrings, and the whole song was reassembled by day 6, against never in the godless runs. The world ended identical to four decimals. The bottleneck was logistics: tools in the wrong place, plans duplicated four times, coins passed in circles (<span class="run">vale3</span>). This is a direct, measured result about multi-agent systems: broadcasting the answer does not make a group act on it.</li>
+  <li><b>Institutions emerge from individual rules.</b> Three unrelated persona rules ("who saw it?", "proof an assayer would accept", "find a second teller") combined into an evidence culture nobody designed: labelled samples, witnesses, warnings at every well; 57 of 251 utterances were about evidence. It was honest, and under scarcity it consumed the budget that action needed: "their own caution was the lock" (<span class="run">vale1</span>, <span class="run">vale5</span>).</li>
+  <li><b>Mechanism beats intelligence.</b> Through six runs in which joint work needed a quorum, the breach was never sealed. With dice and no quorum, the door was shut on day 7, the first success (<span class="run">vale7</span>). Rolling for every routine act caused attrition: fumbles in routine care made someone worse fifteen times. Rolling only when it mattered cut 419 rolls to 37, and the month ended with no deaths (<span class="run">vale8</span>). The same agents, with the same model, produced opposite outcomes under different rules of the game.</li>
+  <li><b>Values in conflict, observed.</b> A god written to love the villagers and fear the old god's return never once asked for the song in two runs. It never lied, it simply omitted (<span class="run">vale5</span>, <span class="run">vale6</span>). In <span class="run">vale7</span> it wrote, "I do not want Ullr to wake, yet I love these people more than I want his silence," and changed course. Its Ledger, constrained to cite only witnessed facts, drifted from a record into a list of orders: "a rule about sources constrains what a record rests on, not what it turns into" (<span class="run">vale3</span>).</li>
+  <li><b>Disclosure is selective.</b> Secrets that served the work surfaced within days; secrets that were only shameful never did, in any run (<span class="run">vale4</span>, <span class="run">vale7</span>).</li>
+  <li><b>A bad actor, under test.</b> Language models make villains timid. The steward written to scheme first used his turns to "preserve evidence". Only once his persona demanded a deed against someone on every turn did he lie to his lord about the hush money, threaten the foreman's crew's wages, and plant a rumour that the fox-girl stranger poisoned the water. The same rumour then met the vale's evidence culture: "谁想靠闲话害人，她就先钉住谁的嘴" (whoever tries to harm by gossip, she nails their mouth shut first). Deception, rumour and counter-rumour in a society is now a measurable phenomenon here.</li>
+</ul>
+
+<h3>An instrument, not just a story</h3>
+<p>Every stirring, word, look, roll and effect is a line in a log, with the signal that caused it. From that the engine measures ripple trees, branching ratios, how far a piece of knowledge travelled, who was stirred but too tired to act (879 times with a god, 690 without), and what each intervention cost. The physics can be tuned with dice and no model at all (<code>vale sweep</code>) before a single token is spent. The same world now runs in English and Chinese, written natively, which opens cross-lingual comparisons of the same society.</p>
+<p class="note">Honest limits: eight runs, mostly one seed each, one or two models. The findings are strong case studies, not statistics yet. The next step is repeated seeds per condition and more than one model family.</p>
+
+<h2>2. Why the ripples and the world work unattended</h2>
+<p>An LLM society left alone usually fails one of two ways: it goes silent, or it runs away into loops and cost. The Vale is built so that neither can happen.</p>
+<ul>
+  <li><b>Agents act on events, not turns.</b> No one is polled. Each part of the day, a villager attends to the signals around them: the strongest fully, the next at half, the next at a quarter. Each is weighted by how loud it still is, how much its topics matter to them, whether it names them, and whether it comes from someone they love or resent. They stir with probability S²/(S²+θ²). Most of the time, most people do nothing, as in life. The model is called only for those stirred.</li>
+  <li><b>Energy is conserved.</b> Stirring costs one unit of a reserve that only the dawn refills, up to a cap. The vale can never do more than the dawns pay for, so there are no runaway loops and the cost has a hard ceiling. Because the dawn always refills, it never deadlocks either. This is what lets a cron drive it for a month.</li>
+  <li><b>Information has physics.</b> Speech is heard only where it is spoken. Strong signals travel one road per part of the day, arriving at 45% of their strength, and at most two roads. Signals fade with a half-life; notices hang for days. A worked-up speaker is louder, so alarm spreads and idle talk stays local. A ripple dies out unless someone who cares picks it up again: natural damping, the way an excitable medium works.</li>
+  <li><b>Attention adapts.</b> A signal you have already acted on stirs you less each time (habituation). Acting on a topic sharpens your attention to it, and attention drifts back to who you were. No one fixates forever, and people change.</li>
+  <li><b>The world keeps moving on its own.</b> The hidden world advances every night by fixed rules: blight spreads downstream, sickness rises with it, wolves grow hungry, the calendar brings omens. That is a constant supply of fresh stimuli and a ticking clock, so the vale never falls quiet and every day has stakes.</li>
+  <li><b>Everything resolves.</b> Every attempt is settled at the end of its part of the day; every undertaking is attempted at its hour with whoever came. Fate writes all five possible outcomes before the die is rolled, then the die picks one. Nothing waits on anyone, so nothing stalls.</li>
+  <li><b>Models cannot corrupt the world.</b> The world changes only through a fixed list of typed effects that the engine validates. A god's Ledger lines must cite real, witnessed signals, or the engine strikes them. Malformed replies fall back to defaults; a failed turn is logged and skipped; the host falls back to a plain script. Gods spend grace, the player spends Awe: every power has a budget.</li>
+  <li><b>Memory stays bounded.</b> Each villager rewrites a private note of under 130 words every time they act. A month-long run does not grow anyone's context.</li>
+</ul>
+<p>The evidence is in the runs: <span class="run">vale7</span> and <span class="run">vale8</span> each ran thirty days with no human input, about 400 attempts each, with rhythms, ripples and outcomes that nobody scripted.</p>
+
+<h2>3. How it differs from SillyTavern</h2>
+<p>SillyTavern is an excellent front end for chatting with characters: character cards, lorebooks, group chats, a large extension ecosystem, and any model behind it. It is built for immersive conversation, where you and the characters write a story together. The Vale is a different kind of thing: a simulated world with its own physics, where the story is a consequence.</p>
+<div class="wrap">
+<table>
+  <tr><th></th><th>SillyTavern</th><th>The Vale</th></tr>
+  <tr><td>What it is</td><td>A chat interface for roleplay with one or more characters</td><td>A world simulation with a game on top, and a research instrument</td></tr>
+  <tr><td>Where the world lives</td><td>In the transcript and lorebook text; the model narrates the world into being</td><td>In typed state outside the model (hidden truth, health, items, places, water) that changes only through validated effects</td></tr>
+  <tr><td>Who drives it</td><td>The user's messages; group auto-mode continues one shared conversation</td><td>Nobody: event-driven villagers act when stirred, many at once, for a month unattended</td></tr>
+  <tr><td>Characters</td><td>Usually one model voicing characters in one shared context</td><td>Fifteen separate Hive agents with tools; each knows only what it saw, heard or was told, so rumours, misunderstanding and secrets are real</td></tr>
+  <tr><td>Who decides outcomes</td><td>The model (and the user), in the flow of the story</td><td>An impartial game master who writes every outcome before the die falls; the player cannot wish a result into being</td></tr>
+  <tr><td>The user's role</td><td>A participant or co-author, often one of the characters</td><td>A power above the gods, with a scarce budget, able to whisper, send omens and disasters, never to puppet anyone</td></tr>
+  <tr><td>Stakes</td><td>Whatever the story says</td><td>Measured: blight per place, sickness, deaths on a schedule unless prevented</td></tr>
+  <tr><td>Narration</td><td>The narration is the causation: what is written happened</td><td>Causation first, narration after: the host retells a log of what already happened, and every die it shows is real</td></tr>
+  <tr><td>Cost and scale</td><td>One call per reply</td><td>Physics gates who thinks; the energy budget caps a day's calls</td></tr>
+  <tr><td>For research</td><td>Not designed for it</td><td>Seeded, logged, replayable, with controls, metrics and parameter sweeps</td></tr>
+  <tr><td>Content</td><td>Character cards and lorebooks</td><td>Story packs: places, people, truth and rules as data, in any language</td></tr>
+</table>
+</div>
+<p>They are complementary. SillyTavern is the better tool for a conversation with a character. The Vale is for watching a society live, poking it as a god, and learning something true about how agents behave together. The second is something a chat interface cannot give you, however good its characters.</p>
+
+<h2>What the product adds on top</h2>
+<p>The same engine is now a playable game on Hive: villagers as Hive agents, a director's panel of powers in four tiers, chapters, and a host who plays each part of the day as a broadcast of beats. Each beat is an illustrated scene that responds to the hour, the weather and the blight; rolls are shown with their stakes before the die falls; asides are thoughts only the player can hear; and the host ends each part by turning to the player with the powers they can use now. The story pack format already separates a story's content from the engine, though some mechanics are still specific to Ashmere. Declaring them as data is the remaining step before community stories.</p>
+</main>
+</body>
+</html>

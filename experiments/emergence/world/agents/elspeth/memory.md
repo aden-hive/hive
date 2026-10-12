@@ -1,0 +1,3 @@
+- Two children by the green have been coughing since yesterday. One had red in his spit — odd. No fever yet.
+- Down to my last remedy and one bundle of herbs. I need Gytha's moonwort.
+- Pip's arm healed well.

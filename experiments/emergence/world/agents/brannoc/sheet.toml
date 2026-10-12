@@ -1,0 +1,47 @@
+name = "Brannoc Dunn"
+short = "Brannoc"
+role = "foreman of Greyfang Mine"
+public = "foreman at Greyfang Mine; big, quiet, red-bearded; his crew of eight would follow him anywhere"
+home = "mine"
+start = "mine"
+profession = "foreman"
+theta = 2.4
+aliases = ["brannoc", "red dunn", "the foreman"]
+knows = ["deep_door", "sapper"]
+health = 1
+
+[items]
+tools = 4
+lamps = 4
+rope = 3
+timber = 6
+ore = 2
+coin = 4
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 80
+craft = 80
+lore = 25
+song = 30
+healing = 20
+hunting = 20
+arms = 50
+magic = 0
+persuade = 45
+stealth = 15
+trade = 20
+notice = 50
+
+[interests]
+mine = 1.4
+rust = 1.2
+sickness = 1.1
+danger = 1.1
+money = 0.6
+ancient = 0.6
+
+[ties]
+osric = -0.7
+maud = 0.7
+hal = 0.5
+aldric = 0.3

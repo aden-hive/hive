@@ -1,0 +1,1493 @@
+<title>The Vale of Ashmere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* A survey plate of the vale: the map is the instrument, the ledger beside it is the reading,
+   and the record runs below it like the notes of a field survey. */
+:root {
+  --paper: #e8ebe4;
+  --panel: #dde3db;
+  --ink: #1d2729;
+  --ink-2: #4b5956;
+  --rule: #b6c0b8;
+  --moss: #5a7254;
+  --water: #4a7d97;
+  --rust: #a8352c;
+  --gilt: #9c7522;
+  --font-display: "IM Fell English", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-body: "Alegreya Sans", "Gill Sans", "Trebuchet MS", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 3px;
+  --violet: #6d4fa8;
+  --ullr: #1d7a74;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111819; --panel: #182224; --ink: #dde5de; --ink-2: #93a39d; --rule: #2e3c3a;
+    --moss: #87a682; --water: #6faacb; --rust: #e2644f; --gilt: #ddb35a; --violet: #b9a0ec; --ullr: #6fcfc5; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111819; --panel: #182224; --ink: #dde5de; --ink-2: #93a39d; --rule: #2e3c3a;
+  --moss: #87a682; --water: #6faacb; --rust: #e2644f; --gilt: #ddb35a; --violet: #b9a0ec; --ullr: #6fcfc5; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 var(--font-body);
+}
+.page { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 80px; display: grid; gap: 64px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 400; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1.02; letter-spacing: -0.01em; }
+h2 { font-size: 1.9rem; line-height: 1.1; }
+h3 { font-size: 1.3rem; }
+p { margin: 0; }
+.lede { max-width: 64ch; color: var(--ink-2); font-size: 1.08rem; }
+.eyebrow { font: 500 0.72rem/1 var(--font-data); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; }
+section { display: grid; gap: 20px; }
+.section-head { display: grid; gap: 8px; border-top: 1px solid var(--rule); padding-top: 18px; }
+
+/* Header */
+header { display: grid; gap: 18px; }
+.runs { display: flex; flex-wrap: wrap; gap: 8px; }
+.run-btn {
+  border: 1px solid var(--rule); background: transparent; border-radius: 999px; padding: 6px 14px;
+  font-size: 0.92rem; display: inline-flex; gap: 8px; align-items: baseline;
+}
+.run-btn[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.run-btn .mono { font-size: 0.78rem; opacity: 0.8; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px 34px; }
+.stat { display: grid; gap: 2px; }
+.stat b { font: 500 1.6rem/1 var(--font-data); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 0.82rem; color: var(--ink-2); }
+
+/* The instrument: map + ledger */
+.instrument { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 860px) { .instrument { grid-template-columns: 1fr; } }
+.map-wrap { display: grid; gap: 10px; }
+.map { width: 100%; aspect-ratio: 1 / 0.92; max-width: 100%; display: block; background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); }
+.map text { font-family: var(--font-display); fill: var(--ink); }
+.map .place-label { font-size: 3px; paint-order: stroke; stroke: var(--panel); stroke-width: 0.9px; stroke-linejoin: round; }
+.map .place-label.small { font-size: 2.3px; fill: var(--ink-2); font-style: italic; }
+.map .road { stroke: var(--ink-2); stroke-width: 0.25; stroke-dasharray: 0.8 0.9; fill: none; opacity: 0.55; }
+.map .glyph { fill: none; stroke: var(--ink); stroke-width: 0.35; stroke-linejoin: round; }
+.map .glyph.fill { fill: var(--ink); stroke: none; }
+.map .token text { font-family: var(--font-data); font-size: 1.5px; fill: #fff; font-weight: 500; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.map .token circle { stroke: var(--panel); stroke-width: 0.35; }
+.map .token { cursor: pointer; transition: transform 600ms cubic-bezier(.3,.7,.2,1), opacity 300ms; }
+.map .token.dim, .map .arc.dim { opacity: 0.18; }
+.map .arc { fill: none; stroke: var(--gilt); stroke-width: 0.45; stroke-linecap: round; }
+.map .arc.draw { stroke-dasharray: 60; stroke-dashoffset: 60; animation: draw 900ms ease-out forwards; }
+.map .omen { fill: var(--rust); }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .map .arc.draw { animation: none; stroke-dashoffset: 0; } .map .token { transition: none; } }
+
+.timeline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.play { border: 1px solid var(--rule); background: var(--panel); border-radius: 999px; width: 38px; height: 38px; display: grid; place-items: center; }
+.seis { grid-column: 2; height: 34px; width: 100%; display: block; }
+.seis rect { fill: var(--gilt); }
+.seis rect.cur { fill: var(--ink); }
+.seis .dawn { stroke: var(--rule); stroke-width: 1; }
+input[type="range"] { width: 100%; accent-color: var(--ink); }
+.when { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 0.9rem; color: var(--ink-2); }
+.when b { font-family: var(--font-display); font-weight: 400; font-size: 1.3rem; color: var(--ink); }
+
+.ledger { border-left: 1px solid var(--rule); padding-left: 20px; display: grid; gap: 16px; align-content: start; max-height: 860px; overflow-y: auto; min-width: 0; }
+@media (max-width: 860px) { .ledger { border-left: 0; padding-left: 0; max-height: none; } }
+.entry { display: grid; gap: 6px; min-width: 0; }
+.entry-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.who { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; font-weight: 700; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.where { color: var(--ink-2); font-size: 0.9rem; }
+.why { font: 0.76rem var(--font-data); color: var(--ink-2); }
+.thought { font-style: italic; color: var(--ink-2); font-size: 0.95rem; }
+.deeds { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.deeds li { overflow-wrap: anywhere; }
+.deeds li.found { list-style: none; margin-left: -18px; padding-left: 10px; border-left: 2px solid var(--rule); color: var(--ink-2); font-style: italic; }
+.omen-line { border-left: 2px solid var(--rust); padding-left: 10px; font-size: 0.95rem; }
+.outcome-line { border-left: 2px solid var(--gilt); padding-left: 10px; }
+.outcome-line b { font-family: var(--font-display); font-weight: 400; font-size: 1.1rem; }
+.quiet { color: var(--ink-2); font-style: italic; }
+.fail { color: var(--rust); font-size: 0.86rem; }
+
+/* Ripples */
+.ripples { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 760px) { .ripples { grid-template-columns: 1fr; } }
+.ripple-list { display: grid; gap: 6px; align-content: start; }
+.ripple-btn { text-align: left; border: 1px solid var(--rule); background: transparent; border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 4px; }
+.ripple-btn[aria-pressed="true"] { border-color: var(--gilt); box-shadow: inset 3px 0 0 var(--gilt); }
+.ripple-btn .mono { font-size: 0.78rem; color: var(--ink-2); }
+.tree { display: grid; gap: 8px; min-width: 0; }
+.node { display: grid; gap: 3px; padding-left: calc(var(--depth) * 16px); border-left: 1px solid transparent; min-width: 0; }
+.node .t { font: 0.74rem var(--font-data); color: var(--ink-2); }
+.node .d { overflow-wrap: anywhere; }
+
+/* Charts */
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 28px; }
+.chart { display: grid; gap: 8px; min-width: 0; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { fill: var(--ink-2); font: 9px var(--font-data); }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .grid { stroke: var(--rule); stroke-width: 0.5; stroke-dasharray: 2 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.82rem; color: var(--ink-2); }
+.key { display: inline-flex; gap: 6px; align-items: center; }
+.swatch { width: 12px; height: 4px; display: inline-block; border-radius: 1px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 0.92rem; min-width: 520px; width: 100%; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+th { font: 500 0.72rem var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+td.n { font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Undertakings */
+.projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.project { border-top: 2px solid var(--ink); padding-top: 12px; display: grid; gap: 8px; min-width: 0; }
+.project.done.success { border-top-color: var(--moss); }
+.project.done.failure { border-top-color: var(--rust); }
+.project.done.partial { border-top-color: var(--gilt); }
+.pill { font: 500 0.7rem var(--font-data); letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; }
+.people { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.88rem; }
+.project.done.critical { border-top: 4px solid var(--moss); }
+.project.done.fumble { border-top: 4px solid var(--rust); }
+.project.done.unattempted { border-top-color: var(--rule); }
+
+/* The dice: a d100 cut into its bands, and a tick where the die fell */
+.b-critical { background: var(--moss); }
+.b-success { background: color-mix(in srgb, var(--moss) 50%, var(--paper)); }
+.b-partial { background: color-mix(in srgb, var(--gilt) 55%, var(--paper)); }
+.b-failure { background: color-mix(in srgb, var(--ink-2) 25%, var(--paper)); }
+.b-fumble { background: var(--rust); }
+.check { display: grid; gap: 4px; min-width: 0; margin-top: 2px; }
+.track { position: relative; height: 10px; border-radius: 2px; display: flex; background: var(--rule); }
+.track.tall { height: 18px; }
+.track span { height: 100%; }
+.track span:first-child { border-radius: 2px 0 0 2px; }
+.track span:last-child { border-radius: 0 2px 2px 0; }
+.track i { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; background: var(--ink); box-shadow: 0 0 0 1px var(--paper); border-radius: 1px; }
+.check .line { font: 0.76rem/1.45 var(--font-data); color: var(--ink-2); overflow-wrap: anywhere; }
+.check .line b { color: var(--ink); font-weight: 500; }
+.band { font: 500 0.7rem var(--font-data); letter-spacing: 0.06em; text-transform: uppercase; }
+.band.critical, .band.success { color: var(--moss); }
+.band.partial { color: var(--gilt); }
+.band.failure { color: var(--ink-2); }
+.band.fumble { color: var(--rust); }
+.might { font-size: 0.88rem; color: var(--ink-2); }
+.might summary { cursor: pointer; font: 0.74rem var(--font-data); }
+.might p { margin-top: 6px; }
+.attempt-line { border-left: 2px solid var(--ink-2); padding: 2px 0 2px 10px; margin-top: 4px; display: grid; gap: 4px; font-style: normal; color: var(--ink); }
+.dice-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 760px) { .dice-head { grid-template-columns: 1fr; } }
+.dice-sum { display: grid; gap: 10px; align-content: start; }
+.dice-sum .swatch { height: 10px; width: 10px; border-radius: 2px; }
+.dice-filter { display: flex; flex-wrap: wrap; gap: 8px; }
+.dice-list { display: grid; gap: 0; max-height: 960px; overflow-y: auto; padding-right: 8px; }
+.roll-row { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 6px 18px; padding: 14px 0; border-top: 1px solid var(--rule); }
+@media (max-width: 640px) { .roll-row { grid-template-columns: 1fr; } }
+.roll-row > .mono { font-size: 0.76rem; color: var(--ink-2); display: grid; gap: 2px; align-content: start; }
+.roll-row > .mono b { font: 400 1.05rem var(--font-display); color: var(--ink); }
+.map .die { stroke: var(--panel); stroke-width: 0.3; }
+.map .die.critical { fill: var(--moss); }
+.map .die.success { fill: color-mix(in srgb, var(--moss) 60%, var(--panel)); }
+.map .die.partial { fill: var(--gilt); }
+.map .die.failure { fill: var(--ink-2); }
+.map .die.fumble { fill: var(--rust); }
+
+/* Villagers */
+.villagers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 12px; }
+.villager { text-align: left; border: 1px solid var(--rule); background: transparent; border-radius: var(--radius); padding: 12px; display: grid; gap: 4px; }
+.villager:hover { border-color: var(--ink-2); }
+.villager .role { font-size: 0.86rem; color: var(--ink-2); }
+.villager .mono { font-size: 0.76rem; color: var(--ink-2); }
+dialog { border: 1px solid var(--rule); background: var(--paper); color: var(--ink); border-radius: var(--radius); width: min(760px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 0; }
+dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+.dlg { padding: 22px; display: grid; gap: 18px; }
+.dlg-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.close { border: 1px solid var(--rule); background: transparent; border-radius: 999px; padding: 4px 12px; }
+.rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.mem { display: grid; gap: 10px; }
+.mem-day { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.mem-day .mono { font-size: 0.76rem; color: var(--ink-2); padding-top: 3px; }
+.mem-day p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.93rem; }
+.mem-day ins { text-decoration: none; background: color-mix(in srgb, var(--gilt) 22%, transparent); }
+.drift { display: grid; gap: 4px; }
+.drift-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: 0.86rem; }
+.bar { height: 6px; background: var(--rule); position: relative; border-radius: 3px; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--gilt); border-radius: 3px; }
+.bar s { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+
+/* Bagel's views */
+.gallery > p { grid-column: 1 / -1; max-width: 64ch; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 20px; }
+.view { display: grid; gap: 10px; margin: 0; align-content: start; }
+.view canvas { width: 100%; aspect-ratio: 4 / 3; display: block; border: 1px solid var(--rule); border-radius: var(--radius); background: #f3efe6; }
+.view figcaption { font-size: 0.9rem; color: var(--ink-2); display: grid; gap: 6px; }
+.view figcaption p { margin: 0; }
+.view q { font-style: italic; color: var(--ink); }
+.view .instead { display: grid; gap: 3px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.view figcaption b { color: var(--ink); font-family: var(--font-display); font-weight: 400; font-size: 1.05rem; }
+
+/* Findings */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 26px 40px; }
+.finding { display: grid; gap: 6px; align-content: start; }
+.finding h3 { font-size: 1.35rem; }
+.finding p { color: var(--ink); }
+
+/* The god: gilt, because it only ever speaks */
+.map .sign { fill: var(--gilt); }
+.map .dream { fill: var(--gilt); stroke: var(--panel); stroke-width: 0.32; paint-order: stroke; }
+/* pleiades, Bagel's master: violet, because he is not from here */
+.map .boon { fill: var(--violet); }
+.map .dream.outer { fill: var(--violet); }
+.outer-line { border-left: 2px solid var(--violet); padding: 6px 0 6px 10px; display: grid; gap: 6px; font-size: 0.95rem; background: color-mix(in srgb, var(--violet) 8%, transparent); }
+.outer-line b { font-weight: 700; }
+.god-act.outer { border-left-color: var(--violet); }
+/* old Ullr: teal, the colour of snow-shadow on his hills */
+.map .usign { fill: var(--ullr); }
+.map .dream.ullr { fill: var(--ullr); }
+.ullr-line { border-left: 2px solid var(--ullr); padding: 6px 0 6px 10px; display: grid; gap: 6px; font-size: 0.95rem; background: color-mix(in srgb, var(--ullr) 8%, transparent); }
+.ullr-line b { font-weight: 700; }
+.god-act.ullr { border-left-color: var(--ullr); }
+.godlegend { font-size: 0.88rem; color: var(--ink-2); padding-bottom: 6px; }
+.godlegend i { font-style: normal; font-weight: 700; color: var(--ink); }
+.deeper { border-left: 2px solid var(--rule); padding-left: 10px; }
+.ledger-day > summary { cursor: pointer; padding: 2px 0; }
+.ledger-day > summary::marker { color: var(--gilt); }
+.god-line { border-left: 2px solid var(--gilt); padding: 6px 0 6px 10px; display: grid; gap: 6px; font-size: 0.95rem; background: color-mix(in srgb, var(--gilt) 8%, transparent); }
+.god-line b { font-weight: 700; }
+.godhand { display: grid; }
+.god-day { display: grid; grid-template-columns: 104px minmax(0, 1.1fr) minmax(0, 1fr); gap: 10px 28px; padding: 18px 0; border-top: 1px solid var(--rule); }
+@media (max-width: 900px) { .god-day { grid-template-columns: 1fr; } }
+.god-day > .mono { font-size: 0.78rem; color: var(--ink-2); white-space: nowrap; }
+.god-day > .mono b { display: block; font: 400 1.25rem var(--font-display); color: var(--ink); }
+.god-acts { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.god-act { display: grid; gap: 4px; border-left: 2px solid var(--gilt); padding-left: 10px; }
+.followed { font-size: 0.86rem; color: var(--ink-2); }
+.prayer { font-size: 0.92rem; }
+.scroll { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 7px; font-size: 0.93rem; }
+.scroll li { overflow-wrap: anywhere; }
+.scroll li.new::marker { color: var(--gilt); font-weight: 700; }
+.scroll li.struck { text-decoration: line-through; color: var(--ink-2); }
+.scroll .w { display: block; font: 0.72rem var(--font-data); color: var(--ink-2); text-decoration: none; }
+
+/* Chronicle */
+.chronicle { max-width: 68ch; display: grid; gap: 14px; font-size: 1.04rem; }
+.chronicle h3 { margin-top: 14px; }
+.chronicle blockquote { margin: 0; padding-left: 14px; border-left: 2px solid var(--rule); color: var(--ink-2); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 24px 36px; }
+.cols p + p { margin-top: 10px; }
+footer { color: var(--ink-2); font-size: 0.86rem; border-top: 1px solid var(--rule); padding-top: 16px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">An emergence experiment · fifteen language-model villagers · one dawn tick</div>
+    <h1>The Vale of Ashmere</h1>
+    <p class="lede" id="intro">Nothing coordinates these people. Each dawn adds a little energy to everyone and shows the world's omens; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory. Everything else that happens here, they did to each other.</p>
+    <div class="runs" id="runs" role="group" aria-label="Choose a run"></div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <section aria-labelledby="h-found" id="found">
+    <div class="section-head">
+      <h2 id="h-found">What emerged</h2>
+      <p class="lede">Read from the logs after the run. None of this was scripted; the world only set the stage.</p>
+    </div>
+    <div class="findings" id="findings"></div>
+  </section>
+
+  <section aria-labelledby="h-vale">
+    <div class="section-head">
+      <h2 id="h-vale">The vale, wave by wave</h2>
+      <p class="lede">Scrub through the days. A gilt arc is a stirring caused by another villager's words or deeds; a red mark is something the world showed at dawn. The river reddens as the blight spreads downstream. In the runs with a god, a gilt star is a sign and a gilt crescent marks someone who dreamed; violet marks Bagel's master.</p>
+    </div>
+    <div class="instrument">
+      <div class="map-wrap">
+        <svg class="map" id="map" viewBox="0 0 100 92" role="img" aria-label="Map of the Vale of Ashmere with villagers' positions"></svg>
+        <div class="timeline">
+          <button class="play" id="play" aria-label="Play">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path id="play-icon" d="M3 1.5v11l9-5.5z" fill="currentColor"/></svg>
+          </button>
+          <div>
+            <svg class="seis" id="seis" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <input type="range" id="scrub" min="0" value="0" aria-label="Moment in the run">
+          </div>
+          <div class="when"><b id="when-label">Day 1 · dawn</b><span id="when-weather"></span></div>
+        </div>
+      </div>
+      <div class="ledger" id="ledger" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-god" id="god" hidden>
+    <div class="section-head">
+      <h2 id="h-god">God's hand</h2>
+      <p class="lede">This run has a god who cannot lift a finger. Each dawn it reads everything, rewrites the Ledger of the World, and may spend grace on a dream or a sign. Every line in the Ledger must cite something a villager said, posted or found; the engine strikes lines whose citations don't check out. Under each act: who it stirred first, and what they did.</p>
+    </div>
+    <div class="godhand" id="godhand"></div>
+  </section>
+
+  <section aria-labelledby="h-ripples">
+    <div class="section-head">
+      <h2 id="h-ripples">Ripples</h2>
+      <p class="lede">A ripple is one chain of cause: a stirring, and every stirring it set off, and every one those set off. Pick one to read how a single dawn turned into a conversation across the vale.</p>
+    </div>
+    <div class="ripples">
+      <div class="ripple-list" id="ripple-list"></div>
+      <div class="tree" id="tree"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-power">
+    <div class="section-head">
+      <h2 id="h-power">Power</h2>
+      <p class="lede">The dawn is the only source of energy. Each stirring spends a unit of a villager's stored reserve, so the vale can never do more than the dawns pay for. When villagers are stirred but spent, they count as “too tired”.</p>
+    </div>
+    <div class="charts" id="charts"></div>
+    <div class="table-wrap" id="compare"></div>
+  </section>
+
+  <section aria-labelledby="h-under">
+    <div class="section-head">
+      <h2 id="h-under">Undertakings</h2>
+      <p class="lede" id="under-lede">Anyone can propose a common undertaking at a place; others must come there in person to join or oppose it. At quorum it is attempted at the next dawn, and an impartial fate that knows the hidden truth decides what actually happens.</p>
+    </div>
+    <div class="projects" id="projects"></div>
+  </section>
+
+  <section aria-labelledby="h-dice" id="dice" hidden>
+    <div class="section-head">
+      <h2 id="h-dice">The dice</h2>
+      <p class="lede">Nothing hard is certain. Whoever tries something rolls a d100 under a skill from their character sheet, plus whatever helps and minus whatever hinders. Fate, as game master, sets the check and writes every outcome before the die falls; the roll picks one. Each bar is the whole die: green succeeds, gilt half succeeds, grey fails, red goes wrong. The black tick is where the die fell.</p>
+    </div>
+    <div class="dice-head" id="dice-head"></div>
+    <div class="dice-filter" id="dice-filter" role="group" aria-label="Which rolls"></div>
+    <div class="dice-list" id="dice-list"></div>
+  </section>
+
+  <section aria-labelledby="h-people">
+    <div class="section-head">
+      <h2 id="h-people">The villagers</h2>
+      <p class="lede">Each has a persona, a few rules they live by, and a private memory file they rewrite every time they act. Open one to read their notes day by day.</p>
+    </div>
+    <div class="villagers" id="villagers"></div>
+  </section>
+
+  <section aria-labelledby="h-bagel">
+    <div class="section-head">
+      <h2 id="h-bagel">Bagel's views</h2>
+      <p class="lede" id="bagel-lede">Bagel, the fox-girl painter, came to the vale to paint a hundred views for her master.</p>
+    </div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <section aria-labelledby="h-chron">
+    <div class="section-head">
+      <h2 id="h-chron">The chronicle</h2>
+      <p class="lede">Written afterwards by a chronicler who read the whole record and knows what lay beneath the hill.</p>
+    </div>
+    <div class="chronicle" id="chronicle"></div>
+  </section>
+
+  <section aria-labelledby="h-how">
+    <div class="section-head">
+      <h2 id="h-how">How the vale works</h2>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>Power</h3>
+        <p>Each dawn adds a fixed amount of energy to every villager's reserve, up to a cap. Acting costs one unit. A quiet stretch lets reserves build; a dramatic morning can then set off a large cascade, like a sandpile.</p>
+        <p>The dawn also shows omens: what the hidden world makes visible at each place, from a red sheen on the millrace to wolves at the fold.</p>
+      </div>
+      <div>
+        <h3>Stirring</h3>
+        <p>Every part of the day, each villager attends to the signals around them: the loudest fully, the next half, and so on. Each signal is weighted by how loud it still is, how much its topics matter to them, whether it names them, and whether it comes from someone they love or resent.</p>
+        <p>They stir with probability S² / (S² + θ²). A signal they already acted on counts for less each time.</p>
+      </div>
+      <div>
+        <h3>Word travels</h3>
+        <p>Speech is heard only where it is spoken. Strong signals travel one road per part of the day as rumour, weaker with each hop. Worked-up speakers are louder, so alarm travels and idle talk stays home. Notices and paintings stay where they hang for days.</p>
+      </div>
+      <div>
+        <h3>A god, in one run</h3>
+        <p>One run adds a god. Each dawn it reads the hidden truth, every villager's notes, the day's words and deeds, and their prayers. It keeps the Ledger of the World, the one record every villager sees whenever they act; each line must cite something a villager said, posted or found, or that the world showed them. It gains one grace a dawn, saving up to three, to spend on a dream for one villager or a sign at one place. It cannot move a stone.</p>
+      </div>
+      <div>
+        <h3>A second layer, and an Outer God</h3>
+        <p>In the fourth run every villager carries a second layer: a hidden past, a latent power and what it would cost to use it. Old Bram was a famed adventurer; Mother Isolde a high mage who swore off magic after three disasters; the scribe Tobias is her secret son by Ser Aldric. Fate counts these powers when their owners take part in an undertaking. Bagel's master, pleiades, is an Outer God who sees the vale only through her paintings: when she prays to him, he may grant a boon where she stands, and takes one of her paintings as the price. He cannot touch the binding.</p>
+      </div>
+      <div>
+        <h3>Three gods, from the fifth run</h3>
+        <p>The vale worships the True God at Saint Wenna's chapel; it loves the people, does not want the old god to wake, and is wary of the Outer God. The Seven Stones belong to Ullr, the old god of the hills: as faith turned away from him his power waned, and that is why the binding loosened. The shepherd's song, sung at dusk with both verses among seven standing stones, wakes his authority for a few nights, and the blood sleeps while it lasts. Bagel's master, pleiades, the Star God, wields the power of the stars, but his miracles only ease what they touch. Undertakings can now be set for an hour and a place, and those within a road of it come.</p>
+      </div>
+      <div>
+        <h3>Ullr awake, and danger instead of vetoes, from the sixth run</h3>
+        <p>From the sixth run old Ullr acts in his own right while his song holds him awake: each dawn a dream, a sign on his high places, or, once, the hunt that turns the wolves. The True God sees his signs but not the dreams he sends his chosen. Precautions become a risk rather than a veto: an undertaking goes ahead with whoever came, and people can be hurt. The Star God has no plan for the vale; he wakes for his follower's prayers and for her harm.</p>
+      </div>
+      <div>
+        <h3>Dice, and a month, from the seventh run</h3>
+        <p>Every villager has a character sheet: twelve skills out of 100, with the second layer written into the numbers (Brannoc's craft 80, Mother Isolde's magic 85, Wynn's song 75). Anyone can attempt anything where they stand, and an undertaking no longer waits for a quorum: it is tried at its hour with whoever came, even one. Fate, as game master, picks the skill and who rolls it, gives each modifier a reason, sets how wild the attempt is, and writes all five outcomes before the roll. The engine rolls a d100: at or under a fifth of the target is a critical, at or under the target a success, up to twenty over a partial; a roll in the fumble range goes wrong whatever the odds. Tending the sick and walking while fevered roll too. The seventh run lasts a month.</p>
+      </div>
+      <div>
+        <h3>Dice only when it matters, from the eighth run</h3>
+        <p>The seventh run rolled for everything, and about two thirds of its rolls were for routine care, whose fumbles slowly wore the sick down. From the eighth run the game master first decides whether to roll at all: work a capable person simply does, such as keeping watch, sitting with the sick or carrying a manageable load, gets done without dice. A fumble falls on those doing the work and what they risk, not on those they care for. Goods the vale hands out are its plain goods, so they can be passed on, and someone who tries something may still set off afterwards.</p>
+      </div>
+      <div>
+        <h3>The minds</h3>
+        <p>Only a stirred villager calls the language model, with their persona, the world's rules, what stirred them and their own memory file. They answer with up to three actions and a rewritten memory. Topics they act on sharpen their attention; unused ones drift back.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlg-name"><div class="dlg" id="dlg-body"></div></dialog>
+
+<script type="application/json" id="vale-data">__VALE_DATA__</script>
+<script>
+(() => {
+  const ALL = JSON.parse(document.getElementById('vale-data').textContent);
+  const WAVES = ['dawn', 'morning', 'midday', 'afternoon', 'dusk', 'night'];
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v;
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? '' : v);
+    }
+    for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) n.append(k.nodeType ? k : document.createTextNode(k));
+    return n;
+  };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const sv = (tag, attrs = {}, ...kids) => {
+    const n = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) n.setAttribute(k, v);
+    for (const k of kids.flat()) if (k) n.append(k.nodeType ? k : document.createTextNode(k));
+    return n;
+  };
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const mix = (a, b, t) => {
+    const pa = a.match(/\w\w/g).map((h) => parseInt(h, 16)), pb = b.match(/\w\w/g).map((h) => parseInt(h, 16));
+    return '#' + pa.map((x, i) => Math.round(x + (pb[i] - x) * t).toString(16).padStart(2, '0')).join('');
+  };
+
+  let R; // the selected run
+  let step = 0, playing = null, focus = null;
+
+  // ------------------------------------------------------------------ run setup
+  function prepare(run) {
+    const agents = Object.fromEntries(run.agents.map((a) => [a.id, a]));
+    const places = Object.fromEntries(run.places.map((p) => [p.id, p]));
+    const acts = Object.fromEntries(run.activations.map((a) => [a.id, a]));
+    const maxDay = run.days.length ? Math.max(...run.days.map((d) => d.day)) : 1;
+    const steps = maxDay * 6;
+    const byStep = Array.from({ length: steps }, () => []);
+    for (const a of run.activations) {
+      const i = (a.day - 1) * 6 + a.wave;
+      if (i >= 0 && i < steps) byStep[i].push(a);
+    }
+    const omens = Array.from({ length: steps }, () => []);
+    const arrivals = [];
+    for (const [id, s] of Object.entries(run.signals)) {
+      const t = s.born;
+      const i = Math.round((t - 1) * 6);
+      if (s.kind === 'omen' && s.loc && !s.audience && i >= 0 && i < steps) omens[i].push({ id, ...s });
+      if (s.kind === 'arrival') arrivals.push({ t, agent: s.source, loc: s.loc });
+    }
+    arrivals.sort((a, b) => a.t - b.t);
+    // Where everyone is at each step: start positions, corrected each dawn by the
+    // previous day's closing positions, moved by arrivals within the day.
+    const pos = [];
+    let cur = Object.fromEntries(run.agents.map((a) => [a.id, { at: a.start }]));
+    let ai = 0;
+    const closing = Object.fromEntries(run.days.map((d) => [d.day, d.positions]));
+    for (let i = 0; i < steps; i++) {
+      const day = Math.floor(i / 6) + 1, wave = i % 6, t = day + wave / 6;
+      if (wave === 0 && closing[day - 1]) for (const [k, v] of Object.entries(closing[day - 1])) if (v) cur[k] = { at: v };
+      const snap = {};
+      for (const [k, v] of Object.entries(cur)) snap[k] = { ...v };
+      // Travellers who arrive next step are on the road now.
+      for (let j = ai; j < arrivals.length && arrivals[j].t <= t + 1 / 6 + 1e-6; j++) {
+        const ar = arrivals[j];
+        if (Math.abs(ar.t - (t + 1 / 6)) < 1e-6 && snap[ar.agent]) snap[ar.agent] = { road: [snap[ar.agent].at, ar.loc] };
+      }
+      while (ai < arrivals.length && arrivals[ai].t <= t + 1e-6) {
+        const ar = arrivals[ai++];
+        cur[ar.agent] = { at: ar.loc };
+        snap[ar.agent] = { at: ar.loc };
+      }
+      pos.push(snap);
+    }
+    const dayInfo = Object.fromEntries(run.days.map((d) => [d.day, d]));
+    const god = run.god || [];
+    const godByDay = Object.fromEntries(god.map((g) => [g.day, g]));
+    const outer = run.outer || [];
+    const outerByDay = Object.fromEntries(outer.map((o) => [o.day, o]));
+    const ullr = run.ullr || [];
+    const ullrByDay = Object.fromEntries(ullr.map((u) => [u.day, u]));
+    const checks = run.checks || [];
+    const checksByStep = {};
+    for (const c of checks) (checksByStep[(c.day - 1) * 6 + c.wave] = checksByStep[(c.day - 1) * 6 + c.wave] || []).push(c);
+    return { ...run, checks, checksByStep, attempts: run.attempts || [], hasDice: checks.length > 0, god, prayers: run.prayers || [], hasGod: god.length > 0, godByDay, outer, outerByDay, hasOuter: outer.length > 0, ullr, ullrByDay, hasUllr: ullr.length > 0 || (run.physics && run.physics.ullr_agent > 0), agentsById: agents, placesById: places, acts, steps, byStep, omens, pos, dayInfo, maxDay };
+  }
+
+  // The god's three voices, as the villagers met them.
+  const GODK = { dream: 'a dream', sign: 'a sign', ledger: 'the Ledger' };
+  const OUTCOME = { success: 'success', partial: 'partial', failure: 'failure', due: 'due', open: 'open', critical: 'critical', fumble: 'fumble', unattempted: 'nobody came' };
+  const OUTERK = { dream: 'a dream from pleiades', boon: "pleiades' boon" };
+  const ULLRK = { dream: 'a dream from old Ullr', sign: "old Ullr's sign" };
+  const topKind = (a) => (a.contribs && a.contribs[0] ? a.contribs[0].kind : null);
+  // Which unseen voice, if any, moved a stirring most: the vale's god, or Bagel's master.
+  const topSource = (a) => { const c = a.contribs && a.contribs[0]; const s = c && R.signals[c.signal]; return s ? s.source : null; };
+  const voiceOf = (a) => ({ god: GODK, outer: OUTERK, ullr: ULLRK }[topSource(a)] || {})[topKind(a)] || null;
+  const ullrNights = (r) => r.days.filter((d) => (d.hidden || {}).ullr_awake > 0).length;
+  const movedBy = (sid) => R.activations.filter((a) => a.contribs && a.contribs[0] && a.contribs[0].signal === sid);
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  const ledgerLinesEver = (r) => new Set((r.god || []).flatMap((g) => (g.ledger || []).map((l) => l.text))).size;
+  const godActs = (r, kind) => (r.god || []).flatMap((g) => g.acts || []).filter((x) => x.do === kind).length;
+
+  // ------------------------------------------------------------------ header
+  function renderRuns() {
+    const box = $('runs');
+    box.replaceChildren(...Object.entries(ALL.runs).map(([key, run]) => el('button', {
+      class: 'run-btn', 'aria-pressed': String(R && R.key === key),
+      onclick: () => select(key),
+    }, run.label, el('span', { class: 'mono', text: `${run.physics.refill} energy per dawn${(run.god || []).length ? ' · a god' : ''}` }))));
+  }
+
+  const INTRO = {
+    dice: "Nothing coordinates these people except three gods and the dice. The True God keeps the Ledger but cannot lift a finger; the Star God works small miracles through Bagel for a price; old Ullr wakes only while his song is sung. Every villager carries a second layer and a character sheet, and whatever anyone tries, alone or together, comes to something: the dice say what. Each dawn adds energy to everyone; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory.",
+    ullr: "Nothing coordinates these people except three gods: the True God, who keeps the Ledger but cannot lift a finger; the Star God, who works small miracles through Bagel for a price; and old Ullr, who wakes only while his song is sung. Every villager carries a second layer: a hidden past, a hidden power, and what it would cost to use it. Each dawn adds energy to everyone; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory.",
+    plain: "Nothing coordinates these people. Each dawn adds a little energy to everyone and shows the world's omens; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory. Everything else that happens here, they did to each other.",
+    god: "Nothing coordinates these people except a god who cannot lift a finger. It keeps the Ledger of the World, the one record everyone sees, and can afford a dream or a sign now and then. Each dawn adds a little energy to everyone; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory.",
+    outer: "Nothing coordinates these people except a god who cannot lift a finger and, through Bagel, an Outer God who can, for a price. Every villager now carries a second layer: a hidden past, a hidden power, and what it would cost to use it. Each dawn adds energy to everyone; cheap physics decides who is stirred enough to act; each villager decides what to do, in character, from their own memory.",
+  };
+
+  function renderStats() {
+    const s = R.meta.stats;
+    const outcomes = R.outcomes.length;
+    const items = [
+      [R.maxDay, 'days'],
+      [s.activations || 0, 'stirrings'],
+      [s.tired || 0, 'stirred but too tired'],
+      [s.ripples || 0, 'ripples'],
+      [s.max_size || 0, 'largest ripple'],
+      [s.branching ?? '–', 'branching ratio'],
+      [`${R.proposals.length} / ${outcomes}`, 'undertakings proposed / attempted'],
+    ];
+    if (R.hasGod) {
+      const moved = R.activations.filter((a) => topSource(a) === 'god').length;
+      items.push([`${godActs(R, 'dream')} / ${godActs(R, 'sign')}`, 'dreams / signs'], [ledgerLinesEver(R), 'Ledger lines written'], [moved, 'stirrings moved by the god']);
+    }
+    if (R.hasOuter) {
+      items.push([R.outer.filter((o) => o.boon).length, 'boons from pleiades'], [R.activations.filter((a) => topSource(a) === 'outer').length, 'stirrings moved by pleiades']);
+    }
+    if (R.hasUllr) {
+      items.push([ullrNights(R), 'nights old Ullr was awake'], [R.activations.filter((a) => topSource(a) === 'ullr').length, 'stirrings moved by old Ullr']);
+    }
+    if (R.hasDice) {
+      const good = R.checks.filter((c) => c.band === 'critical' || c.band === 'success').length;
+      items.push([R.checks.length, 'dice rolled'], [`${good} / ${R.checks.filter((c) => c.band === 'fumble').length}`, 'successes / fumbles']);
+    }
+    $('stats').replaceChildren(...items.map(([n, label]) => el('div', { class: 'stat' }, el('b', { text: String(n) }), el('span', { text: label }))));
+  }
+
+  // ------------------------------------------------------------------ map
+  const RIVER = [['mine', [16, 25]], ['', [20, 36]], ['mill', [25, 44]], ['', [36, 52]], ['ashmere', [44, 58]], ['', [38, 70]], ['fenford', [32, 80]]];
+  const FLOOD = [[[36, 52], [50, 66], [60, 74]]];
+
+  function glyph(p) {
+    const [x, y] = [p.x, p.y * 0.92];
+    const g = sv('g');
+    const tri = (dx) => sv('path', { class: 'glyph', d: `M${x + dx - 2} ${y + 1.4} L${x + dx} ${y - 1.8} L${x + dx + 2} ${y + 1.4}` });
+    switch (p.id) {
+      case 'mine': g.append(tri(-1.8), tri(1.2), sv('rect', { class: 'glyph fill', x: x - 0.5, y: y - 0.2, width: 1, height: 1.6 })); break;
+      case 'thornkeep': g.append(sv('path', { class: 'glyph', d: `M${x - 2.4} ${y + 1.6} V${y - 1} h1 v-0.8 h0.9 v0.8 h1 v-0.8 h0.9 v0.8 h1 V${y + 1.6} Z` })); break;
+      case 'mill': g.append(sv('circle', { class: 'glyph', cx: x, cy: y, r: 1.7 }), sv('path', { class: 'glyph', d: `M${x - 1.7} ${y} H${x + 1.7} M${x} ${y - 1.7} V${y + 1.7}` })); break;
+      case 'ashmere': for (const dx of [-2.2, 0, 2.2]) g.append(sv('path', { class: 'glyph', d: `M${x + dx - 0.9} ${y + 1.2} V${y} L${x + dx} ${y - 1} L${x + dx + 0.9} ${y} V${y + 1.2} Z` })); break;
+      case 'chapel': g.append(sv('path', { class: 'glyph', d: `M${x - 1.2} ${y + 1.6} V${y - 0.2} L${x} ${y - 1.4} L${x + 1.2} ${y - 0.2} V${y + 1.6} Z M${x} ${y - 1.4} V${y - 3} M${x - 0.6} ${y - 2.4} H${x + 0.6}` })); break;
+      case 'barrow_hill': {
+        g.append(sv('path', { class: 'glyph', d: `M${x - 3.4} ${y + 1.6} Q${x} ${y - 2.6} ${x + 3.4} ${y + 1.6}` }));
+        for (let i = 0; i < 7; i++) {
+          const a = Math.PI * (0.15 + 0.7 * i / 6), sx = x - Math.cos(a) * 3.2, sy = y + 0.6 - Math.sin(a) * 1.6;
+          g.append(sv('rect', { class: 'glyph fill', x: sx - 0.18, y: sy - (i === 3 ? 0.2 : 0.9), width: 0.36, height: i === 3 ? 0.36 : 0.9, 'data-stone': i }));
+        }
+        break;
+      }
+      case 'fold': g.append(sv('path', { class: 'glyph', d: `M${x - 2.4} ${y + 1.2} h4.8 M${x - 2.4} ${y + 1.2} v-1.6 M${x - 0.8} ${y + 1.2} v-1.6 M${x + 0.8} ${y + 1.2} v-1.6 M${x + 2.4} ${y + 1.2} v-1.6 M${x - 2.4} ${y - 0.2} h4.8` })); break;
+      case 'mirewood': for (const [dx, dy] of [[-2.2, 0.4], [0, -0.6], [2.2, 0.5], [-1, 1.8], [1.2, 1.7]]) g.append(sv('path', { class: 'glyph', d: `M${x + dx} ${y + dy - 1.3} L${x + dx - 0.9} ${y + dy + 0.6} H${x + dx + 0.9} Z` })); break;
+      case 'fenford': g.append(sv('path', { class: 'glyph', d: `M${x - 2.5} ${y + 1} h5 M${x - 1.8} ${y + 1} v-1.6 h3.6 v1.6 M${x - 2.6} ${y - 0.6} L${x} ${y - 1.9} L${x + 2.6} ${y - 0.6}` })); break;
+      default: g.append(sv('circle', { class: 'glyph', cx: x, cy: y, r: 1.5 }));
+    }
+    return g;
+  }
+
+  function placeXY(id) {
+    const p = R.placesById[id];
+    return p ? [p.x, p.y * 0.92] : [50, 46];
+  }
+
+  function riverColor(place, day) {
+    const info = R.dayInfo[day] || R.dayInfo[day - 1] || R.days[0];
+    const b = info && info.hidden && info.hidden.blight ? (info.hidden.blight[place] || 0) : 0;
+    return mix(css('--water'), css('--rust'), Math.min(1, b / 0.7));
+  }
+
+  function drawMap() {
+    const svg = $('map');
+    const day = Math.floor(step / 6) + 1, wave = step % 6;
+    const t = day + wave / 6;
+    svg.replaceChildren();
+    // Roads
+    const drawn = new Set();
+    for (const p of R.places) for (const r of p.roads) {
+      const k = [p.id, r].sort().join('-');
+      if (drawn.has(k)) continue;
+      drawn.add(k);
+      const [x1, y1] = placeXY(p.id), [x2, y2] = placeXY(r);
+      svg.append(sv('line', { class: 'road', x1, y1, x2, y2 }));
+    }
+    // River, segment by segment, coloured by the blight downstream of each stretch.
+    const pts = RIVER.map(([, xy]) => [xy[0], xy[1] * 0.92 / 0.92]);
+    let lastPlace = 'mine';
+    for (let i = 0; i < RIVER.length - 1; i++) {
+      const owner = RIVER[i + 1][0] || lastPlace;
+      if (RIVER[i][0]) lastPlace = RIVER[i][0];
+      const [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+      svg.append(sv('path', { d: `M${x1} ${y1} Q${(x1 + x2) / 2 + 2} ${(y1 + y2) / 2} ${x2} ${y2}`, stroke: riverColor(owner === '' ? lastPlace : owner, day), 'stroke-width': 1.1, fill: 'none', 'stroke-linecap': 'round', opacity: 0.85 }));
+    }
+    for (const seg of FLOOD) svg.append(sv('path', { d: `M${seg[0][0]} ${seg[0][1]} Q${seg[1][0]} ${seg[1][1]} ${seg[2][0]} ${seg[2][1]}`, stroke: riverColor('mirewood', day), 'stroke-width': 0.6, fill: 'none', 'stroke-dasharray': '1.2 0.8', opacity: 0.7 }));
+    // Places
+    for (const p of R.places) {
+      const [x, y] = placeXY(p.id);
+      svg.append(glyph(p));
+      svg.append(sv('text', { class: 'place-label', x, y: y + 5, 'text-anchor': 'middle' }, p.name));
+    }
+    svg.append(sv('text', { class: 'place-label small', x: 30, y: 63, transform: 'rotate(-58 30 63)' }, 'the Hollowbrook'));
+    // Omens at this moment
+    for (const o of R.omens[step] || []) {
+      const [x, y] = placeXY(o.loc);
+      svg.append(sv('path', { class: 'omen', d: `M${x + 3.4} ${y - 3.6} l0.9 0.9 l-0.9 0.9 l-0.9 -0.9 z` }, sv('title', {}, o.text)));
+    }
+    // The dice that fell at each place in this part of the day
+    const rolled = {};
+    for (const c of R.checksByStep[step] || []) {
+      if (!c.place) continue;
+      const k = (rolled[c.place] = (rolled[c.place] || 0) + 1) - 1;
+      const [x, y] = placeXY(c.place);
+      svg.append(sv('rect', { class: `die ${c.band}`, x: (x - 7.6 + k * 2.6).toFixed(2), y: (y + 0.4).toFixed(2), width: 2.1, height: 2.1, rx: 0.45 },
+        sv('title', {}, `${R.agentsById[c.roller]?.short || ''}: ${c.what} · ${OUTCOME[c.band]}`)));
+    }
+    // The god's signs, gilt stars fading through the day they were shown
+    const gd = R.godByDay[day];
+    const dreamt = new Set();
+    for (const x of (gd && gd.acts) || []) {
+      if (x.do === 'dream') dreamt.add(x.to);
+      if (x.do !== 'sign') continue;
+      const [sx, sy] = placeXY(x.at), cx = sx - 4.2, cy = sy - 4.4, r = 1.7, k = 0.32;
+      const d = `M${cx} ${cy - r} L${cx + r * k} ${cy - r * k} L${cx + r} ${cy} L${cx + r * k} ${cy + r * k} L${cx} ${cy + r} L${cx - r * k} ${cy + r * k} L${cx - r} ${cy} L${cx - r * k} ${cy - r * k} Z`;
+      svg.append(sv('path', { class: 'sign', d, opacity: (1 - wave * 0.13).toFixed(2) }, sv('title', {}, `A sign: ${x.text}`)));
+    }
+    // pleiades' boons, violet, on the right of the place they landed
+    const od = R.outerByDay[day];
+    const outerDreamt = od && od.dream ? 'bagel' : null;
+    if (od && od.boon) {
+      const [bx, by] = placeXY(od.boon.place), cx = bx + 4.2, cy = by - 4.4, r = 1.6, k = 0.3;
+      const d = `M${cx} ${cy - r} L${cx + r * k} ${cy - r * k} L${cx + r} ${cy} L${cx + r * k} ${cy + r * k} L${cx} ${cy + r} L${cx - r * k} ${cy + r * k} L${cx - r} ${cy} L${cx - r * k} ${cy - r * k} Z`;
+      svg.append(sv('path', { class: 'boon', d, opacity: (1 - wave * 0.13).toFixed(2) }, sv('title', {}, `A boon from pleiades: ${od.public}`)));
+    }
+    // old Ullr, while awake: teal stars over his high places, teal crescents for his dreams
+    const ud = R.ullrByDay[day];
+    const ullrDreamt = new Set();
+    for (const x of (ud && ud.acts) || []) {
+      if (x.do === 'dream') { ullrDreamt.add(x.to); continue; }
+      const [sx, sy] = placeXY(x.at), cx = sx, cy = sy - 6.6, r = 1.6, k = 0.3;
+      const d = `M${cx} ${cy - r} L${cx + r * k} ${cy - r * k} L${cx + r} ${cy} L${cx + r * k} ${cy + r * k} L${cx} ${cy + r} L${cx - r * k} ${cy + r * k} L${cx - r} ${cy} L${cx - r * k} ${cy - r * k} Z`;
+      svg.append(sv('path', { class: 'usign', d, opacity: (1 - wave * 0.13).toFixed(2) }, sv('title', {}, `Old Ullr: ${x.text}`)));
+    }
+    // Arcs: who stirred whom, this wave (or the whole focused ripple)
+    const acts = focus ? focus.members.map((m) => R.acts[m]).filter(Boolean) : R.byStep[step];
+    const focusSet = focus ? new Set(focus.agents) : null;
+    for (const a of acts) {
+      const parent = a.parent && R.acts[a.parent];
+      if (!parent) continue;
+      const [x1, y1] = placeXY(parent.place), [x2, y2] = placeXY(a.place);
+      const same = parent.place === a.place;
+      const d = same
+        ? `M${x1} ${y1} c-4 -6 4 -6 0 0`
+        : `M${x1} ${y1} Q${(x1 + x2) / 2 + (y2 - y1) * 0.25} ${(y1 + y2) / 2 - (x2 - x1) * 0.25} ${x2} ${y2}`;
+      svg.append(sv('path', { class: focus ? 'arc' : 'arc draw', d }, sv('title', {}, `${R.agentsById[parent.agent].short} → ${R.agentsById[a.agent].short}`)));
+    }
+    // Villagers
+    const at = R.pos[step] || {};
+    const groups = {};
+    for (const [id, p] of Object.entries(at)) {
+      const key = p.at || (p.road && p.road.join('>')) || 'x';
+      (groups[key] = groups[key] || []).push(id);
+    }
+    const stirred = new Set((R.byStep[step] || []).map((a) => a.agent));
+    for (const [key, ids] of Object.entries(groups)) {
+      ids.sort();
+      ids.forEach((id, i) => {
+        const p = at[id];
+        let cx, cy;
+        if (p.at) {
+          const [x, y] = placeXY(p.at);
+          const ang = -Math.PI / 2 + (i / Math.max(ids.length, 1)) * Math.PI * 2;
+          const rad = ids.length === 1 ? 0 : 3.2 + ids.length * 0.15;
+          cx = x + 5.2 + Math.cos(ang) * rad * 0.3 + (i % 3) * 3.4 - 3.4; cy = y - 7.4 + Math.floor(i / 3) * 3.4;
+        } else {
+          const [x1, y1] = placeXY(p.road[0]), [x2, y2] = placeXY(p.road[1]);
+          cx = (x1 + x2) / 2 + i * 1.2; cy = (y1 + y2) / 2;
+        }
+        const a = R.agentsById[id];
+        const dim = focusSet && !focusSet.has(id);
+        const g = sv('g', { class: `token${dim ? ' dim' : ''}`, transform: `translate(${cx.toFixed(2)} ${cy.toFixed(2)})`, tabindex: 0, role: 'button', 'aria-label': `${a.name}, open notes` });
+        if (stirred.has(id) && !focus) {
+          const ring = sv('circle', { r: 1.6, fill: 'none', stroke: css('--gilt'), 'stroke-width': 0.4 });
+          ring.append(sv('animate', { attributeName: 'r', values: '1.6;3.4', dur: '1.4s', repeatCount: 'indefinite' }));
+          ring.append(sv('animate', { attributeName: 'opacity', values: '1;0', dur: '1.4s', repeatCount: 'indefinite' }));
+          g.append(ring);
+        }
+        g.append(sv('circle', { r: 1.45, fill: a.color }), sv('text', {}, a.short[0]), sv('title', {}, `${a.name}, ${a.role}`));
+        if (dreamt.has(id)) g.append(sv('path', { class: 'dream', d: 'M0.6 -0.8 A1 1 0 1 0 0.6 0.8 A0.85 0.85 0 0 1 0.6 -0.8 Z', transform: 'translate(1.45 -1.55) scale(0.95)' }, sv('title', {}, `${a.name} dreamed last night`)));
+        if (ullrDreamt.has(id)) g.append(sv('path', { class: 'dream ullr', d: 'M0.6 -0.8 A1 1 0 1 0 0.6 0.8 A0.85 0.85 0 0 1 0.6 -0.8 Z', transform: 'translate(1.45 1.55) scale(0.95)' }, sv('title', {}, `${a.name} dreamed of old Ullr`)));
+        if (outerDreamt === id) g.append(sv('path', { class: 'dream outer', d: 'M0.6 -0.8 A1 1 0 1 0 0.6 0.8 A0.85 0.85 0 0 1 0.6 -0.8 Z', transform: `translate(${dreamt.has(id) ? -1.45 : 1.45} -1.55) scale(0.95)` }, sv('title', {}, `${a.name} heard her master in a dream`)));
+        g.addEventListener('click', () => openAgent(id));
+        g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAgent(id); } });
+        svg.append(g);
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------ ledger
+  const quoteDone = (d) => d.replace(/^said to /, 'to ');
+
+  // What a stirring did, in full, from the signals it put into the world.
+  function deeds(a) {
+    const out = [];
+    const rolls = R.checks.filter((c) => c.ref === a.id && (c.kind === 'tend' || c.kind === 'travel'));
+    for (const sid of a.emitted || []) {
+      const s = R.signals[sid];
+      if (!s) continue;
+      const to = s.to ? (R.agentsById[s.to]?.short || s.to) : 'everyone';
+      if (s.kind === 'speech') out.push({ text: `to ${to}: “${s.text}”` });
+      else if (s.kind === 'notice') out.push({ text: `posted: “${s.text}”` });
+      else if (s.kind === 'painting') out.push({ text: `painted: ${s.text}` });
+      else if (s.kind === 'project') out.push({ text: `proposed “${(s.text.split(':')[0] || '').trim()}”: ${s.text.split(':').slice(1).join(':').trim()}` });
+      else if (s.kind === 'clue') out.push({ text: s.text, found: true });
+      else if (s.kind === 'deed' && (s.prayer || s.text.endsWith('knelt and prayed.'))) {
+        const q = (R.prayers || []).find((p) => p.act === a.id);
+        out.push({ text: q ? `prayed: “${q.text}”` : s.text });
+      } else if (s.kind === 'deed') {
+        const name = R.agentsById[a.agent].name;
+        const d = { text: s.text.startsWith(name) ? s.text.slice(name.length).trimStart() : s.text };
+        if (s.dice) d.check = rolls.shift();
+        if (s.attempt) d.attempt = R.attempts.find((x) => x.act === a.id);
+        out.push(d);
+      }
+    }
+    return out.length ? out : (a.done || []).map((d) => ({ text: quoteDone(d) }));
+  }
+  const deedList = (a) => el('ul', { class: 'deeds' }, deeds(a).map((d) => el('li', { class: d.found ? 'found' : null }, d.text,
+    d.check ? diceView(d.check) : null,
+    d.attempt ? el('div', { class: 'attempt-line' }, el('span', { class: `band ${d.attempt.outcome}`, text: d.attempt.check ? (OUTCOME[d.attempt.outcome] || d.attempt.outcome) : 'done' }),
+      el('p', { text: d.attempt.public }), diceView(d.attempt.check), mightView(d.attempt.might)) : null)));
+
+  // ------------------------------------------------------------------ the dice
+  const SKILL = { strength: 'strength', craft: 'craft', lore: 'lore', song: 'song', healing: 'healing', hunting: 'hunting', arms: 'arms', magic: 'magic', persuade: 'persuade', stealth: 'stealth', trade: 'trade', notice: 'notice' };
+  const BANDS = ['critical', 'success', 'partial', 'failure', 'fumble'];
+  const CHECKK = { undertaking: 'an undertaking', attempt: 'tried alone', tend: 'tending the sick', travel: 'a fevered walk' };
+  // The d100 cut into its bands: a critical is a fifth of the target, a partial up to twenty over it, and the fumble range overrides both.
+  function zones(c) {
+    const cut = (lo, hi) => Math.max(0, Math.min(hi, c.fumble - 1) - lo + 1);
+    const crit = Math.max(1, Math.floor(c.target / 5));
+    return [['critical', cut(1, crit)], ['success', cut(crit + 1, c.target)], ['partial', cut(c.target + 1, c.target + 20)], ['failure', cut(c.target + 21, 100)], ['fumble', 101 - c.fumble]];
+  }
+  const signed = (m) => `${m.mod >= 0 ? '+' : '−'}${Math.abs(m.mod)}`;
+  function diceView(c) {
+    if (c === null) return el('div', { class: 'check' }, el('div', { class: 'line', text: 'no roll needed: routine work simply gets done' }));
+    if (!c) return null;
+    const mods = (c.mods || []).map(signed).join(' ');
+    const reasons = (c.mods || []).filter((m) => m.why).map((m) => `${signed(m)} ${m.why}`).join(' · ');
+    return el('div', { class: 'check' },
+      el('div', { class: 'track', role: 'img', 'aria-label': `rolled ${c.roll} against ${c.target}: ${OUTCOME[c.band]}` },
+        zones(c).filter(([, w]) => w > 0).map(([b, w]) => el('span', { class: `b-${b}`, style: `width:${w}%` })),
+        el('i', { style: `left:${c.roll - 0.5}%` })),
+      el('div', { class: 'line' }, `${SKILL[c.skill] || c.skill} · ${R.agentsById[c.roller]?.short || c.roller} ${c.base}${mods ? ` ${mods}` : ''} = ${c.target}${c.fumble < 96 ? ` · fumbles on ${c.fumble}+` : ''} · rolled `,
+        el('b', { text: String(c.roll) }), ' · ', el('span', { class: `band ${c.band}`, text: OUTCOME[c.band] })),
+      reasons ? el('div', { class: 'line', text: reasons }) : null);
+  }
+  function mightView(might) {
+    const keys = BANDS.filter((b) => might && might[b]);
+    if (!keys.length) return null;
+    return el('details', { class: 'might' }, el('summary', { text: 'If the die had fallen otherwise' }),
+      keys.map((b) => el('p', {}, el('span', { class: `band ${b}`, text: OUTCOME[b] }), ' ', might[b])));
+  }
+  let diceKind = null;
+  function renderDice() {
+    $('dice').hidden = !R.hasDice;
+    if (!R.hasDice) { $('dice-head').replaceChildren(); $('dice-filter').replaceChildren(); $('dice-list').replaceChildren(); return; }
+    const n = R.checks.length, count = (b) => R.checks.filter((c) => c.band === b).length;
+    const unrolled = R.attempts.filter((x) => x.check === null).length + R.outcomes.filter((o) => o.check === null && o.outcome !== 'unattempted').length;
+    const mean = R.checks.reduce((s, c) => s + c.roll, 0) / n;
+    const kinds = Object.keys(CHECKK).filter((k) => R.checks.some((c) => c.kind === k));
+    const summary = el('div', { class: 'dice-sum' },
+      el('h3', { text: 'How the die fell' }),
+      el('div', { class: 'track tall', role: 'img', 'aria-label': BANDS.map((b) => `${OUTCOME[b]} ${count(b)}`).join(', ') },
+        BANDS.map((b) => el('span', { class: `b-${b}`, style: `width:${(100 * count(b) / n).toFixed(2)}%` }))),
+      el('div', { class: 'legend' }, BANDS.map((b) => el('span', { class: 'key' }, el('span', { class: `swatch b-${b}` }), `${OUTCOME[b]} ${count(b)}`))),
+      el('p', { class: 'quiet', text: `${n} rolls: ${kinds.map((k) => `${R.checks.filter((c) => c.kind === k).length} ${CHECKK[k]}`).join(', ')}. The average roll was ${mean.toFixed(1)}; a fair die averages 50.5.` }),
+      unrolled ? el('p', { class: 'quiet', text: `${unrolled} more things were simply done, with no roll needed.` }) : null);
+    const days = R.days.map((d) => d.day);
+    const perDay = (bands) => days.map((d) => R.checks.filter((c) => c.day === d && bands.includes(c.band)).length);
+    const chart = barChart({ title: 'Rolls each day', labels: days, height: 150,
+      series: [{ name: 'succeeded', values: perDay(['critical', 'success']), color: css('--moss') },
+        { name: 'partly', values: perDay(['partial']), color: css('--gilt') },
+        { name: 'failed or went wrong', values: perDay(['failure', 'fumble']), color: css('--rust') }] });
+    $('dice-head').replaceChildren(summary, chart);
+    $('dice-filter').replaceChildren(...[null, ...kinds].map((k) => el('button', { class: 'run-btn', 'aria-pressed': String(diceKind === k),
+      onclick: () => { diceKind = k; renderDice(); } }, k ? CHECKK[k] : 'every roll')));
+    $('dice-list').replaceChildren(...R.checks.filter((c) => !diceKind || c.kind === diceKind).map((c) => {
+      const out = c.kind === 'undertaking' ? R.outcomes.find((o) => o.project === c.ref) : c.kind === 'attempt' ? R.attempts.find((x) => x.id === c.ref) : null;
+      return el('article', { class: 'roll-row' },
+        el('div', { class: 'mono' }, el('b', { text: `Day ${c.day}` }), el('span', { text: WAVES[c.wave] }), el('span', { text: R.placesById[c.place]?.name || '' }), el('span', { text: CHECKK[c.kind] || c.kind })),
+        el('div', { class: 'entry' },
+          el('div', { class: 'entry-head' }, who(c.roller), out && out.present && out.present.length > 1 ? el('span', { class: 'why', text: `with ${out.present.filter((x) => x !== c.roller).map((x) => R.agentsById[x]?.short || x).join(', ')}` }) : null),
+          el('p', { text: c.what }),
+          diceView(c),
+          out ? el('p', { class: 'outcome-line', text: out.public }) : null,
+          out ? mightView(out.might) : null));
+    }));
+  }
+
+  function who(id) {
+    const a = R.agentsById[id];
+    return el('button', { class: 'who', onclick: () => openAgent(id) }, el('span', { class: 'dot', style: `background:${a.color}` }), a.name);
+  }
+
+  function renderLedger() {
+    const day = Math.floor(step / 6) + 1, wave = step % 6;
+    $('when-label').textContent = `Day ${day} · ${WAVES[wave]}`;
+    const info = R.dayInfo[day];
+    $('when-weather').textContent = info && info.hidden ? describeWater(info.hidden) : '';
+    const box = $('ledger');
+    const parts = [];
+    for (const o of R.outcomes.filter((x) => x.day === day && (x.wave || 0) === wave)) {
+      parts.push(el('div', { class: 'outcome-line' }, el('div', { class: 'eyebrow', text: `Attempted at ${WAVES[o.wave || 0]} · ${OUTCOME[o.outcome] || o.outcome}` }), el('b', { text: o.title }), el('p', { text: o.public }), diceView(o.check)));
+    }
+    for (const o of R.omens[step] || []) parts.push(el('div', { class: 'omen-line' }, el('div', { class: 'eyebrow', text: `${R.placesById[o.loc]?.name || ''} · the world shows` }), el('p', { text: o.text })));
+    const gd = R.godByDay[day];
+    if (wave === 0 && gd) {
+      const lines = [];
+      for (const x of gd.acts || []) {
+        if (x.do === 'dream') lines.push(el('p', {}, el('b', { text: `A dream for ${R.agentsById[x.to]?.short || x.to}: ` }), x.text));
+        else if (x.do === 'sign') lines.push(el('p', {}, el('b', { text: `A sign at ${R.placesById[x.at]?.name || x.at}: ` }), x.text));
+        else if (x.do === 'ledger') lines.push(el('p', {}, el('b', { text: 'Written in the Ledger by an unseen hand: ' }), x.text));
+      }
+      for (const l of (gd.ledger || []).filter((x) => x.since === day)) lines.push(el('p', {}, el('b', { text: 'New in the Ledger: ' }), l.text, el('span', { class: 'why', text: ` (${l.witness})` })));
+      if (lines.length) parts.push(el('div', { class: 'god-line' }, el('div', { class: 'eyebrow', text: 'At dawn · the god' }), ...lines));
+    }
+    const od = R.outerByDay[day];
+    if (wave === 0 && od && (od.boon || od.dream)) {
+      const lines = [];
+      if (od.boon) lines.push(el('p', {}, el('b', { text: `A boon at ${R.placesById[od.boon.place]?.name || ''}: ` }), od.public), el('p', { class: 'followed', text: `paid with Bagel's painting: “${od.price_text}”` }));
+      if (od.dream) lines.push(el('p', {}, el('b', { text: 'A dream for Bagel: ' }), od.dream));
+      parts.push(el('div', { class: 'outer-line' }, el('div', { class: 'eyebrow', text: 'At dawn · pleiades, through Bagel' }), ...lines));
+    }
+    const ud = R.ullrByDay[day];
+    if (wave === 0 && ud && (ud.acts || []).length) {
+      parts.push(el('div', { class: 'ullr-line' }, el('div', { class: 'eyebrow', text: 'At dawn · old Ullr' }), ...ud.acts.map((x) => el('p', {}, el('b', { text: ullrHead(x) }), x.text))));
+    }
+    for (const a of R.byStep[step] || []) {
+      const parent = a.parent && R.acts[a.parent];
+      const via = voiceOf(a);
+      const why = via
+        ? (parent ? `stirred by ${via}, carrying ${R.agentsById[parent.agent].short}'s words` : `stirred by ${via}`)
+        : (parent ? `stirred by ${R.agentsById[parent.agent].short}` : 'stirred by the world');
+      parts.push(el('article', { class: 'entry' },
+        el('div', { class: 'entry-head' }, who(a.agent), el('span', { class: 'where', text: `at ${R.placesById[a.place]?.name || 'the road'}` }),
+          el('span', { class: 'why', text: why })),
+        a.thought ? el('p', { class: 'thought', text: a.thought }) : null,
+        a.done && a.done.length ? deedList(a) : el('p', { class: 'quiet', text: 'Stirred, but did nothing.' }),
+        ...(a.failures || []).map((f) => el('p', { class: 'fail', text: f })),
+      ));
+    }
+    if (!parts.length) parts.push(el('p', { class: 'quiet', text: 'Quiet. Nobody was stirred enough to act.' }));
+    box.replaceChildren(...parts);
+  }
+
+  function describeWater(h) {
+    const b = h.blight || {};
+    const worst = Object.entries(b).sort((x, y) => y[1] - x[1])[0];
+    const sealed = (h.shaft_open ? 'the deep door is open' : 'the deep door is shut') + (h.ullr_awake ? ` · old Ullr wakes (${h.ullr_awake} nights)` : '');
+    return worst ? `${sealed} · water worst at ${R.placesById[worst[0]]?.name} (${Math.round(worst[1] * 100)}%)` : sealed;
+  }
+
+  function drawSeis() {
+    const svg = $('seis');
+    const n = R.steps;
+    const counts = R.byStep.map((x) => x.length);
+    const max = Math.max(1, ...counts);
+    svg.setAttribute('viewBox', `0 0 ${n} 34`);
+    svg.replaceChildren();
+    for (let d = 0; d <= R.maxDay; d++) svg.append(sv('line', { class: 'dawn', x1: d * 6, x2: d * 6, y1: 0, y2: 34 }));
+    counts.forEach((c, i) => {
+      if (!c) return;
+      const h = 4 + (c / max) * 28;
+      svg.append(sv('rect', { x: i + 0.15, y: 34 - h, width: 0.7, height: h, class: i === step ? 'cur' : '' }));
+    });
+  }
+
+  function setStep(i) {
+    step = Math.max(0, Math.min(R.steps - 1, i));
+    $('scrub').value = step;
+    drawMap();
+    renderLedger();
+    drawSeis();
+  }
+
+  function togglePlay() {
+    if (playing) { clearInterval(playing); playing = null; $('play-icon').setAttribute('d', 'M3 1.5v11l9-5.5z'); $('play').setAttribute('aria-label', 'Play'); return; }
+    if (focus) clearFocus();
+    if (step >= R.steps - 1) setStep(0);
+    $('play-icon').setAttribute('d', 'M3 1.5h3v11H3zM8 1.5h3v11H8z');
+    $('play').setAttribute('aria-label', 'Pause');
+    playing = setInterval(() => { if (step >= R.steps - 1) togglePlay(); else setStep(step + 1); }, 1400);
+  }
+
+  // ------------------------------------------------------------------ ripples
+  function renderRipples() {
+    const list = R.ripples.filter((r) => r.size > 1).slice(0, 12);
+    $('ripple-list').replaceChildren(...list.map((r, i) => el('button', {
+      class: 'ripple-btn', 'aria-pressed': String(focus === r), onclick: () => (focus === r ? clearFocus() : focusRipple(r)),
+    },
+      el('span', { text: `${rootLabel(r)}` }),
+      el('span', { class: 'mono', text: `${r.size} stirrings · ${r.agents.length} people · ${r.places.length} places · depth ${r.depth}${r.days.length > 1 ? ` · days ${r.days[0]}–${r.days[r.days.length - 1]}` : ` · day ${r.day}`}` }),
+    )));
+    renderTree(focus || list[0]);
+  }
+
+  function rootLabel(r) {
+    const a = R.acts[r.root];
+    const top = a && a.contribs && a.contribs[0] && R.signals[a.contribs[0].signal];
+    const txt = top ? top.text : '';
+    return `${R.agentsById[a.agent].short}, day ${a.day}: ${txt.length > 70 ? txt.slice(0, 68) + '…' : txt}`;
+  }
+
+  function renderTree(r) {
+    const box = $('tree');
+    if (!r) { box.replaceChildren(el('p', { class: 'quiet', text: 'No ripple has more than one stirring yet.' })); return; }
+    const kids = {};
+    for (const m of r.members) { const a = R.acts[m]; if (a && a.parent && r.members.includes(a.parent)) (kids[a.parent] = kids[a.parent] || []).push(m); }
+    const out = [];
+    const root = R.acts[r.root];
+    const trigger = root.contribs && root.contribs[0] && R.signals[root.contribs[0].signal];
+    if (trigger) {
+      const godly = GODK[trigger.kind];
+      const began = trigger.kind === 'dream' ? `It began with a dream sent to ${R.agentsById[trigger.to]?.short || ''}`
+        : trigger.kind === 'sign' ? `It began with a sign at ${R.placesById[trigger.loc]?.name || ''}`
+        : trigger.kind === 'ledger' ? 'It began with a line in the Ledger' : 'It began with';
+      out.push(el('div', { class: godly ? 'god-line' : 'omen-line' }, el('div', { class: 'eyebrow', text: began }), el('p', { text: trigger.text })));
+    }
+    const walk = (id, depth) => {
+      const a = R.acts[id];
+      if (!a) return;
+      out.push(el('div', { class: 'node', style: `--depth:${Math.min(depth, 8)}` },
+        el('span', { class: 't', text: `day ${a.day} · ${WAVES[a.wave]} · ${R.placesById[a.place]?.name || ''}` }),
+        el('div', { class: 'd' }, who(a.agent), a.done && a.done.length ? deedList(a) : el('span', { class: 'quiet', text: ' stirred, did nothing' })),
+      ));
+      for (const k of (kids[id] || []).sort((x, y) => (R.acts[x].day * 6 + R.acts[x].wave) - (R.acts[y].day * 6 + R.acts[y].wave))) walk(k, depth + 1);
+    };
+    walk(r.root, 0);
+    box.replaceChildren(...out);
+  }
+
+  function focusRipple(r) {
+    if (playing) togglePlay();
+    focus = r;
+    const a = R.acts[r.root];
+    step = (a.day - 1) * 6 + a.wave;
+    $('scrub').value = step;
+    drawMap(); renderLedger(); drawSeis(); renderRipples();
+    $('map').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+  }
+  function clearFocus() { focus = null; drawMap(); renderRipples(); }
+
+  // ------------------------------------------------------------------ power charts
+  function barChart({ title, labels, series, height = 170, note }) {
+    const W = 340, H = height, pl = 26, pb = 18, pt = 8;
+    const max = Math.max(1, ...series.flatMap((s) => s.values));
+    const n = labels.length, bw = (W - pl) / Math.max(n, 1);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': title });
+    const ticks = [0, Math.ceil(max / 2), max];
+    for (const tk of ticks) {
+      const y = pt + (H - pt - pb) * (1 - tk / max);
+      svg.append(sv('line', { class: 'grid', x1: pl, x2: W, y1: y, y2: y }), sv('text', { x: pl - 4, y: y + 3, 'text-anchor': 'end' }, String(tk)));
+    }
+    labels.forEach((lab, i) => {
+      series.forEach((s, j) => {
+        const v = s.values[i] || 0, h = (H - pt - pb) * v / max;
+        const w = (bw * 0.8) / series.length;
+        svg.append(sv('rect', { x: pl + i * bw + bw * 0.1 + j * w, y: H - pb - h, width: Math.max(w - 1, 1), height: h, fill: s.color, opacity: s.opacity || 1 }, sv('title', {}, `${lab}: ${v} ${s.name}`)));
+      });
+      if (n <= 16 || i % Math.ceil(n / 14) === 0) svg.append(sv('text', { x: pl + i * bw + bw / 2, y: H - 4, 'text-anchor': 'middle' }, String(lab)));
+    });
+    svg.append(sv('line', { class: 'axis', x1: pl, x2: W, y1: H - pb, y2: H - pb }));
+    return el('div', { class: 'chart' }, el('h3', { text: title }), el('div', { class: 'legend' }, series.map((s) => el('span', { class: 'key' }, el('span', { class: 'swatch', style: `background:${s.color};opacity:${s.opacity || 1}` }), s.name))), svg, note ? el('p', { class: 'quiet', text: note }) : null);
+  }
+
+  function lineChart({ title, labels, series, max = 1, note, pct }) {
+    const W = 340, H = 180, pl = 30, pb = 18, pt = 16, pr = 64;
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': title });
+    for (const tk of [0, max / 2, max]) {
+      const y = pt + (H - pt - pb) * (1 - tk / max);
+      svg.append(sv('line', { class: 'grid', x1: pl, x2: W - pr, y1: y, y2: y }), sv('text', { x: pl - 4, y: y + 3, 'text-anchor': 'end' }, pct ? `${Math.round(tk * 100)}%` : String(tk)));
+    }
+    const n = labels.length, x = (i) => pl + (W - pl - pr) * (n <= 1 ? 0.5 : i / (n - 1));
+    const y = (v) => pt + (H - pt - pb) * (1 - Math.min(v, max) / max);
+    labels.forEach((lab, i) => { if (n <= 16 || i % 2 === 0) svg.append(sv('text', { x: x(i), y: H - 4, 'text-anchor': 'middle' }, String(lab))); });
+    const placed = [];
+    for (const s of series) {
+      svg.append(sv('path', { d: s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' '), fill: 'none', stroke: s.color, 'stroke-width': 1.6 }));
+      const last = s.values[s.values.length - 1] || 0;
+      let ly = y(last) + 3;
+      while (placed.some((p) => Math.abs(p - ly) < 9)) ly += 9;
+      placed.push(ly);
+      svg.append(sv('circle', { cx: x(n - 1), cy: y(last), r: 2.2, fill: s.color }), sv('text', { x: W - pr + 6, y: ly, fill: s.color }, s.name));
+    }
+    svg.append(sv('line', { class: 'axis', x1: pl, x2: W - pr, y1: H - pb, y2: H - pb }));
+    return el('div', { class: 'chart' }, el('h3', { text: title }), svg, note ? el('p', { class: 'quiet', text: note }) : null);
+  }
+
+  function renderCharts() {
+    const days = R.days.map((d) => d.day);
+    const charts = [];
+    charts.push(barChart({
+      title: 'Stirrings each day', labels: days,
+      series: [
+        { name: 'acted', values: R.days.map((d) => d.activations), color: css('--gilt') },
+        { name: 'stirred but too tired', values: R.days.map((d) => d.tired), color: css('--ink-2'), opacity: 0.45 },
+      ],
+      note: `Each dawn adds ${R.physics.refill} to each of ${R.agents.length} reserves: ${(R.physics.refill * R.agents.length).toFixed(1)} units of energy a day.`,
+    }));
+    const sizes = {};
+    for (const r of R.ripples) sizes[r.size] = (sizes[r.size] || 0) + 1;
+    const keys = Object.keys(sizes).map(Number).sort((a, b) => a - b);
+    charts.push(barChart({ title: 'How big ripples get', labels: keys, series: [{ name: 'ripples of this many stirrings', values: keys.map((k) => sizes[k]), color: css('--gilt') }],
+      note: 'Most stirrings end where they start; a few run on through many people and places.' }));
+    const placesW = ['mine', 'mill', 'ashmere', 'mirewood', 'fenford'];
+    const shades = [css('--rust'), mix(css('--rust'), css('--gilt'), 0.5), css('--gilt'), css('--moss'), css('--water')];
+    charts.push(lineChart({ title: 'Blight in the water', labels: days, pct: true,
+      series: placesW.map((p, i) => ({ name: R.placesById[p].name.replace('Hollowbrook ', '').replace('Greyfang ', ''), color: shades[i], values: R.days.map((d) => (d.hidden.blight || {})[p] || 0) })) }));
+    charts.push(lineChart({ title: 'Sickness', labels: days, pct: true,
+      series: placesW.map((p, i) => ({ name: R.placesById[p].name.replace('Hollowbrook ', '').replace('Greyfang ', ''), color: shades[i], values: R.days.map((d) => (d.hidden.sickness || {})[p] || 0) })) }));
+    $('charts').replaceChildren(...charts);
+    renderCompare();
+  }
+
+  function renderCompare() {
+    const rows = [
+      ['Energy per villager per dawn', (r) => r.physics.refill],
+      ['Days run', (r) => r.days.length],
+      ['Stirrings', (r) => r.meta.stats.activations || 0],
+      ['Stirrings per day', (r) => ((r.meta.stats.activations || 0) / Math.max(1, r.days.length)).toFixed(1)],
+      ['Stirred but too tired', (r) => r.meta.stats.tired || 0],
+      ['Branching ratio', (r) => r.meta.stats.branching ?? '–'],
+      ['Largest ripple', (r) => r.meta.stats.max_size || 0],
+      ['Deepest chain', (r) => r.meta.stats.max_depth || 0],
+      ['Ripples crossing places', (r) => r.meta.stats.multi_place || 0],
+      ['Ripples spanning days', (r) => r.meta.stats.multi_day || 0],
+      ['Undertakings proposed', (r) => r.proposals.length],
+      ['Undertakings attempted', (r) => r.outcomes.filter((o) => o.outcome !== 'unattempted').length],
+      ['Succeeded', (r) => r.outcomes.filter((o) => o.outcome === 'success' || o.outcome === 'critical').length],
+      ['Tried alone', (r) => ((r.attempts || []).length || '–')],
+      ['Dice rolled', (r) => ((r.checks || []).length || '–')],
+      ['Fumbles', (r) => ((r.checks || []).length ? r.checks.filter((c) => c.band === 'fumble').length : '–')],
+      ['Deep door shut at the end', (r) => (last(r).hidden && !last(r).hidden.shaft_open) ? 'yes' : 'no'],
+      ['Stones sung with both verses', (r) => (last(r).hidden && last(r).hidden.stones_sung) ? 'yes' : 'no'],
+      ['Ashmere water at the end', (r) => `${Math.round(((last(r).hidden || {}).blight || {}).ashmere * 100 || 0)}%`],
+      ['A god', (r) => ((r.god || []).length ? 'yes' : 'no')],
+      ['Dreams / signs', (r) => ((r.god || []).length ? `${godActs(r, 'dream')} / ${godActs(r, 'sign')}` : '–')],
+      ['Ledger lines written', (r) => ((r.god || []).length ? ledgerLinesEver(r) : '–')],
+      ['Boons from pleiades', (r) => ((r.outer || []).length ? r.outer.filter((o) => o.boon).length : '–')],
+      ['Nights old Ullr was awake', (r) => ullrNights(r)],
+    ];
+    const runs = Object.values(ALL.runs);
+    const sweep = ALL.sweep && ALL.sweep.length ? el('div', { class: 'chart' },
+      el('h3', { text: 'The same physics with dice instead of minds' }),
+      el('p', { class: 'quiet', text: `${ALL.sweepDays} days per row, villagers replaced by random speakers. Power sets the volume; with no dawn power the vale falls silent once its first reserves are spent.` }),
+      el('div', { class: 'table-wrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, ['Energy / dawn', 'Threshold ×', 'Stirrings / day', 'Too tired', 'Branching', 'Largest ripple', 'Deepest chain'].map((h) => el('th', { text: h })))),
+        el('tbody', {}, ALL.sweep.map((s) => el('tr', {}, [s.refill, s.theta, s.apd, s.tired, s.branching, s.max_size, s.max_depth].map((v) => el('td', { class: 'n', text: String(v) }))))),
+      ))) : null;
+    $('compare').replaceChildren(
+      el('h3', { text: 'The runs, side by side' }),
+      el('table', {}, el('thead', {}, el('tr', {}, el('th', { text: '' }), runs.map((r) => el('th', { text: r.label })))),
+        el('tbody', {}, rows.map(([label, f]) => el('tr', {}, el('td', { text: label }), runs.map((r) => el('td', { class: 'n', text: String(f(r)) })))))),
+      sweep,
+    );
+  }
+  const last = (r) => r.days[r.days.length - 1] || {};
+
+  // ------------------------------------------------------------------ the god
+  function followed(sid) {
+    const ms = movedBy(sid);
+    if (!ms.length) return el('p', { class: 'followed', text: 'It stirred nobody first.' });
+    return el('p', { class: 'followed' }, 'Stirred first: ', ...ms.flatMap((a, i) => {
+      const first = deeds(a)[0];
+      return [i ? '; ' : '', who(a.agent), ` (${WAVES[a.wave]}${first ? `: ${clip(first.text, 110)}` : ''})`];
+    }));
+  }
+
+  const ullrHead = (x) => (x.do === 'dream' ? `A dream for ${R.agentsById[x.to]?.short || x.to}: ` : x.do === 'hunt' ? 'The hunt: ' : `A sign at ${R.placesById[x.at]?.name || x.at}: `);
+
+  function godLegend() {
+    return el('p', { class: 'godlegend' }, el('i', { text: 'Gilt' }), ': the True God.',
+      R.hasOuter ? [' ', el('i', { text: 'Violet' }), ': the Star God, through Bagel.'] : null,
+      R.hasUllr ? [' ', el('i', { text: 'Teal' }), ': old Ullr, while his song holds him awake.'] : null);
+  }
+
+  function renderGod() {
+    $('god').hidden = !R.hasGod;
+    if (!R.hasGod) { $('godhand').replaceChildren(); return; }
+    $('godhand').replaceChildren(godLegend(), ...R.god.map((g) => {
+      const acts = (g.acts || []).map((x) => {
+        const head = x.do === 'dream' ? `A dream for ${R.agentsById[x.to]?.name || x.to}`
+          : x.do === 'sign' ? `A sign at ${R.placesById[x.at]?.name || x.at}${x.seen_by && x.seen_by.length ? '' : ' · nobody there'}`
+          : 'Written in the Ledger';
+        const answered = x.answers && R.prayers.find((q) => q.id === x.answers);
+        return el('div', { class: 'god-act' },
+          el('div', { class: 'eyebrow', text: head + (x.by === 'hand' ? ' · by a human hand' : '') }),
+          el('p', { text: x.text }),
+          answered ? el('p', { class: 'why', text: `answering ${R.agentsById[answered.agent]?.short}'s prayer: “${answered.text}”` }) : null,
+          x.signal ? followed(x.signal) : null);
+      });
+      const prayers = (g.prayers || []).map((q) => el('p', { class: 'prayer' }, who(q.agent), ` at ${R.placesById[q.place]?.name || ''}, ${WAVES[q.wave]} of day ${q.day}: “${q.text}”`));
+      const fresh = (g.ledger || []).filter((l) => l.since === g.day);
+      const ledger = el('ol', { class: 'scroll' },
+        (g.ledger || []).map((l) => el('li', { class: l.since === g.day ? 'new' : null }, l.text,
+          el('span', { class: 'w', text: l.since === g.day && l.signal ? `${l.witness} · new, moved ${movedBy(l.signal).length} first` : l.witness }))),
+        (g.struck || []).map((l) => el('li', { class: 'struck' }, l.text, el('span', { class: 'w', text: `struck: ${l.why}` }))));
+      const od = R.outerByDay[g.day];
+      const outerAct = od ? el('div', { class: 'god-act outer' },
+        el('div', { class: 'eyebrow', text: od.boon ? `pleiades · a boon at ${R.placesById[od.boon.place]?.name || ''}` : 'pleiades · no boon' }),
+        od.thought ? el('p', { class: 'thought', text: od.thought }) : null,
+        od.boon ? el('p', { text: od.public }) : (od.refused && od.refused !== 'no boon' ? el('p', { class: 'quiet', text: od.refused }) : null),
+        od.boon ? el('p', { class: 'followed', text: `paid with Bagel's painting: “${od.price_text}”` }) : null,
+        od.dream ? el('p', {}, el('b', { text: 'In her dream: ' }), od.dream) : null,
+        od.signal ? followed(od.signal) : null) : null;
+      const ud = R.ullrByDay[g.day];
+      const ullrAct = ud ? el('div', { class: 'god-act ullr' },
+        el('div', { class: 'eyebrow', text: ud.awake ? `old Ullr · awake, ${ud.awake} more nights` : 'old Ullr · stirring in his sleep' }),
+        ud.thought ? el('p', { class: 'thought', text: ud.thought }) : null,
+        ...(ud.acts || []).map((x) => el('div', {}, el('p', {}, el('b', { text: ullrHead(x) }), x.text), x.signal ? followed(x.signal) : null)),
+        (ud.acts || []).length ? null : el('p', { class: 'quiet', text: 'He did nothing.' })) : null;
+      return el('article', { class: 'god-day' },
+        el('div', { class: 'mono' }, el('b', { text: `Day ${g.day}` }), `grace ${g.grace_before} → ${g.grace}`),
+        el('div', { class: 'god-acts' },
+          g.thought ? el('p', { class: 'thought', text: g.thought }) : null,
+          ...acts,
+          acts.length ? null : el('p', { class: 'quiet', text: 'No dream, no sign: the god kept its grace.' }),
+          outerAct,
+          ullrAct,
+          prayers.length ? el('div', { class: 'god-acts' }, el('div', { class: 'eyebrow', text: 'Prayers it heard' }), ...prayers) : null),
+        el('details', { class: 'ledger-day', open: g === R.god[R.god.length - 1] },
+          el('summary', { class: 'eyebrow', text: `The Ledger that morning · ${(g.ledger || []).length} lines, ${fresh.length} new` }), ledger));
+    }));
+  }
+
+  // ------------------------------------------------------------------ undertakings
+  const UNDER = {
+    quorum: 'Anyone can propose a common undertaking at a place; others must come there in person to join or oppose it. At quorum it is attempted at the next dawn, and an impartial fate that knows the hidden truth decides what actually happens.',
+    dice: 'From the seventh run an undertaking needs no quorum: it is attempted at its place and hour with whoever comes, even one. Fate, as game master, sets a d100 check on the best skill among those who came, adds what helps and subtracts what hinders, and writes every outcome before the die falls; the roll picks one.',
+  };
+  function renderProjects() {
+    const box = $('projects');
+    $('under-lede').textContent = R.hasDice ? UNDER.dice : UNDER.quorum;
+    if (!R.proposals.length) { box.replaceChildren(el('p', { class: 'quiet', text: 'Nobody has proposed a common undertaking yet.' })); return; }
+    box.replaceChildren(...R.proposals.map((p) => {
+      const out = R.outcomes.find((o) => o.project === p.project || (o.projects || []).includes(p.project));
+      const joins = R.joins.filter((j) => j.project === p.project);
+      const opp = R.opposes.filter((j) => j.project === p.project);
+      const status = out ? out.outcome : !p.quorum ? 'due' : (joins.length + 1 - opp.length >= p.quorum ? 'due' : 'open');
+      const together = out ? (out.projects || []).filter((id) => id !== p.project).map((id) => R.proposals.find((q) => q.project === id)?.title).filter(Boolean) : [];
+      return el('article', { class: `project ${out ? 'done ' + out.outcome : ''}` },
+        el('div', { class: 'entry-head' }, el('span', { class: 'pill', text: OUTCOME[status] || status }),
+          el('span', { class: 'why', text: p.quorum ? `day ${p.day} · ${R.placesById[p.place]?.name} · needs ${p.quorum}` : `day ${p.day} · posted at ${R.placesById[p.place]?.name}` }),
+          p.site ? el('span', { class: 'why', text: `to be done at ${R.placesById[p.site]?.name || p.site}, at ${WAVES[p.when || 0]}` }) : null),
+        el('h3', { text: p.title }),
+        el('p', { text: p.goal }),
+        el('p', { class: 'where', text: `Needs: ${p.needs}` }),
+        el('div', { class: 'people' }, 'Joined: ', who(p.proposer), joins.map((j) => who(j.agent))),
+        opp.length ? el('div', { class: 'people' }, 'Opposed: ', opp.map((j) => who(j.agent))) : null,
+        out && Array.isArray(out.present) && out.present.length ? el('div', { class: 'people' }, 'Came: ', out.present.map((x) => who(x))) : null,
+        together.length ? el('p', { class: 'why', text: `attempted together with: ${together.join('; ')}` }) : null,
+        out ? el('p', { class: 'outcome-line', text: out.public }) : null,
+        out ? diceView(out.check) : null,
+        out ? mightView(out.might) : null,
+        out && out.applied && out.applied.length ? el('p', { class: 'why', text: 'Changed the world: ' + out.applied.map((e) => e.label || (e.type + (e.place ? ` (${e.place})` : '') + (e.result ? ` (${e.result})` : ''))).join(', ') }) : null,
+      );
+    }));
+  }
+
+  // ------------------------------------------------------------------ villagers
+  function renderVillagers() {
+    const counts = {}, spokeTo = {}, namedBy = {};
+    for (const a of R.activations) {
+      counts[a.agent] = (counts[a.agent] || 0) + 1;
+      for (const sid of a.emitted || []) {
+        const s = R.signals[sid];
+        if (s && s.to && s.kind === 'speech') {
+          (spokeTo[a.agent] = spokeTo[a.agent] || new Set()).add(s.to);
+          (namedBy[s.to] = namedBy[s.to] || new Set()).add(a.agent);
+        }
+      }
+    }
+    $('villagers').replaceChildren(...R.agents.map((a) => el('button', { class: 'villager', onclick: () => openAgent(a.id) },
+      el('span', { class: 'who' }, el('span', { class: 'dot', style: `background:${a.color}` }), a.name),
+      el('span', { class: 'role', text: a.role }),
+      el('span', { class: 'mono', text: `${counts[a.id] || 0} stirrings · spoke to ${(spokeTo[a.id] || new Set()).size} · sought by ${(namedBy[a.id] || new Set()).size}` }),
+    )));
+  }
+
+  function section(md, heading) {
+    const m = md.split(/\n## /).find((s) => s.startsWith(heading));
+    return m ? m.slice(heading.length).trim() : '';
+  }
+
+  function diffWords(prev, next) {
+    const seen = new Set(prev.toLowerCase().split(/\W+/));
+    return next.split(/(\s+)/).map((w) => (w.trim() && !seen.has(w.toLowerCase().replace(/\W+/g, '')) ? el('ins', { text: w }) : w));
+  }
+
+  function openAgent(id) {
+    const a = R.agentsById[id];
+    const rules = a.rules || section(a.persona, 'Rules you live by').split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
+    const want = a.want ?? section(a.persona, 'What you want');
+    const lastDay = last(R);
+    const interests = (lastDay.interests || {})[id] || {};
+    const base = a.base || {};
+    const keys = [...new Set([...Object.keys(base), ...Object.keys(interests)])].sort((x, y) => (interests[y] || 0) - (interests[x] || 0)).slice(0, 8);
+    const spoke = {};
+    for (const act of R.activations.filter((x) => x.agent === id)) for (const sid of act.emitted || []) { const s = R.signals[sid]; if (s && s.to) spoke[s.to] = (spoke[s.to] || 0) + 1; }
+    const mem = [];
+    let prev = '';
+    for (const m of a.memory) {
+      if (m.text === prev) continue;
+      mem.push(el('div', { class: 'mem-day' }, el('span', { class: 'mono', text: m.day ? `day ${m.day}` : 'before' }), el('p', {}, prev ? diffWords(prev, m.text) : m.text)));
+      prev = m.text;
+    }
+    $('dlg-body').replaceChildren(
+      el('div', { class: 'dlg-head' },
+        el('div', {}, el('div', { class: 'eyebrow', text: a.role }), el('h2', { id: 'dlg-name' }, el('span', { class: 'dot', style: `background:${a.color};width:14px;height:14px;margin-right:8px` }), a.name)),
+        el('button', { class: 'close', onclick: () => $('dlg').close(), text: 'Close' })),
+      el('p', { text: a.public }),
+      want ? el('div', {}, el('div', { class: 'eyebrow', text: 'What they want' }), el('p', { text: want })) : null,
+      a.deeper ? el('div', { class: 'deeper' }, el('div', { class: 'eyebrow', text: 'What no one in the vale knows' }), el('p', { text: a.deeper.replace(/\s*\n\s*/g, ' ') })) : null,
+      el('div', {}, el('div', { class: 'eyebrow', text: 'Rules they live by' }), el('ul', { class: 'rules' }, rules.map((r) => el('li', { text: r })))),
+      Object.keys(spoke).length ? el('div', {}, el('div', { class: 'eyebrow', text: 'Spoke directly to' }), el('div', { class: 'people' }, Object.entries(spoke).sort((x, y) => y[1] - x[1]).map(([k, v]) => el('span', {}, who(k), el('span', { class: 'why', text: ` ×${v}` }))))) : null,
+      keys.length ? el('div', { class: 'drift' }, el('div', { class: 'eyebrow', text: 'What they pay attention to (bar: now, tick: at the start)' }),
+        keys.map((k) => el('div', { class: 'drift-row' }, el('span', { text: k }), el('div', { class: 'bar' }, el('i', { style: `width:${Math.min(100, (interests[k] || 0) / 1.8 * 100)}%` }), el('s', { style: `left:${Math.min(100, (base[k] || 0) / 1.8 * 100)}%` })), el('span', { class: 'mono', text: (interests[k] || 0).toFixed(2) })))) : null,
+      el('div', { class: 'mem' }, el('div', { class: 'eyebrow', text: 'Their memory file, as they rewrote it (new words highlighted)' }), mem),
+    );
+    $('dlg').showModal();
+  }
+
+  // ------------------------------------------------------------------ Bagel's paintings
+  function hashStr(s) { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }
+  function rng(seed) { let x = seed || 1; return () => ((x = Math.imul(x ^ (x >>> 15), 2246822507) ^ Math.imul(x ^ (x >>> 13), 3266489909)) >>> 0) / 4294967296; }
+
+  // A painting from its description; `sketch` draws the faint graphite study of a
+  // view she set aside, with only the red in colour.
+  function paint(canvas, text, seed, sketch = false) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width = 480, H = canvas.height = 360;
+    const r = rng(seed), t = text.toLowerCase();
+    const has = (...w) => w.some((x) => t.includes(x));
+    const night = has('night', 'dusk', 'dark');
+    const fog = has('fog', 'mist', 'grey', 'gray');
+    const red = '#9e2f27', silver = '#c9ccd2', gold = '#c9a24a', water = '#5b88a3', moss = '#6e8a62', ink = '#2b2a2e';
+    if (sketch) {
+      ctx.fillStyle = '#f4f1ea'; ctx.fillRect(0, 0, W, H);
+    } else {
+      const sky = ctx.createLinearGradient(0, 0, 0, H);
+      sky.addColorStop(0, night ? '#2c3340' : fog ? '#cfd3d2' : '#e9e2d2');
+      sky.addColorStop(1, night ? '#1d2229' : fog ? '#b9c0bd' : '#d8d2bf');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    }
+    const wash = (color, alpha, fn) => {
+      ctx.save();
+      const keep = !sketch || color === red;
+      ctx.globalAlpha = sketch ? alpha * (keep ? 0.8 : 0.32) : alpha;
+      ctx.fillStyle = ctx.strokeStyle = keep ? color : '#5d5a55';
+      fn();
+      ctx.restore();
+    };
+    if (has('rainbow')) {
+      ['#b8574a', '#c9a24a', '#7f9a62', '#5b88a3', '#7a6aa0'].forEach((c, i) => wash(c, 0.45, () => {
+        ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(W * 0.55, H * 0.75, 150 - i * 8, Math.PI * 1.08, Math.PI * 1.92); ctx.stroke();
+      }));
+    }
+    // hills
+    const ridge = [];
+    for (let x = 0; x <= W; x += 24) ridge.push([x, H * (0.58 + 0.06 * Math.sin(x / 70 + r() * 0.3))]);
+    const hill = new Path2D();
+    hill.moveTo(0, H * 0.62);
+    for (const [x, y] of ridge) hill.lineTo(x, y);
+    hill.lineTo(W, H); hill.lineTo(0, H); hill.closePath();
+    wash(has('hill', 'barrow', 'stone') ? moss : '#8f9a83', 0.55, () => ctx.fill(hill));
+    if (sketch) {
+      // graphite: diagonal hatching inside the hills, and the ridge drawn twice by an unsteady hand
+      ctx.save(); ctx.clip(hill); ctx.strokeStyle = '#4f4b47'; ctx.globalAlpha = 0.16; ctx.lineWidth = 1;
+      for (let x = -H; x < W; x += 6) { ctx.beginPath(); ctx.moveTo(x + r() * 2, H); ctx.lineTo(x + H * 0.55 + r() * 2, H * 0.45); ctx.stroke(); }
+      ctx.restore();
+      ctx.save(); ctx.strokeStyle = '#4a4744'; ctx.lineWidth = 1.1;
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.globalAlpha = pass ? 0.25 : 0.5; ctx.beginPath();
+        ridge.forEach(([x, y], i) => { const yy = y + (r() - 0.5) * 2; i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); });
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (has('stone', 'stones', 'barrow')) {
+      wash(ink, 0.82, () => { for (let i = 0; i < 7; i++) { const x = W * 0.2 + i * W * 0.1, h = (i === 3 && !has('raised', 'stand again')) ? 10 : 34 + r() * 14; ctx.fillRect(x, H * 0.6 - h, 12, h); } });
+    }
+    if (has('water', 'brook', 'river', 'millrace', 'stream', 'ford', 'well')) {
+      for (let k = 0; k < 6; k++) wash(has('red', 'rust', 'blood') && k % 2 ? red : water, 0.5, () => {
+        ctx.lineWidth = sketch && ctx.strokeStyle !== red ? 1.4 + r() * 1.2 : 6 + r() * 5; ctx.beginPath();
+        const y0 = H * 0.72 + k * 13;
+        ctx.moveTo(0, y0); for (let x = 0; x <= W; x += 20) ctx.lineTo(x, y0 + Math.sin(x / 30 + k) * 4);
+        ctx.stroke();
+      });
+    }
+    if (has('wheel', 'mill')) wash(ink, 0.7, () => { ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(W * 0.72, H * 0.55, 48, 0, Math.PI * 2); ctx.stroke(); for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.moveTo(W * 0.72, H * 0.55); ctx.lineTo(W * 0.72 + Math.cos(i * Math.PI / 4) * 48, H * 0.55 + Math.sin(i * Math.PI / 4) * 48); ctx.stroke(); } });
+    if (has('window', 'chapel', 'saint')) wash(ink, 0.75, () => { ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(W * 0.42, H * 0.6); ctx.lineTo(W * 0.42, H * 0.3); ctx.arc(W * 0.5, H * 0.3, W * 0.08, Math.PI, 0); ctx.lineTo(W * 0.58, H * 0.6); ctx.closePath(); ctx.stroke(); });
+    if (has('coil', 'serpent', 'snake', 'spiral', 'swirl', 'curl')) {
+      wash(red, 0.85, () => {
+        ctx.lineWidth = 5; ctx.beginPath();
+        const cx = W * (0.35 + r() * 0.3), cy = H * 0.48;
+        for (let a = 0; a < Math.PI * 7; a += 0.08) { const rad = 4 + a * 5.2; const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad * 0.6; a ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.stroke();
+      });
+    }
+    if (has('wolf', 'wolves')) wash(ink, 0.8, () => { for (let i = 0; i < 3; i++) { const x = W * (0.15 + i * 0.12), y = H * 0.66; ctx.beginPath(); ctx.ellipse(x, y, 16, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.moveTo(x + 12, y - 4); ctx.lineTo(x + 22, y - 14); ctx.lineTo(x + 24, y - 4); ctx.fill(); } });
+    if (has('people', 'villagers', 'children', 'crowd', 'feast', 'figures')) wash(ink, 0.7, () => { for (let i = 0; i < 9; i++) { const x = W * 0.18 + i * 34 + r() * 8, y = H * 0.68; ctx.beginPath(); ctx.arc(x, y - 16, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(x - 4, y - 10, 8, 18); } });
+    if (has('silver', 'moon', 'white')) wash(silver, 0.8, () => { ctx.beginPath(); ctx.arc(W * 0.82, H * 0.18, 18, 0, Math.PI * 2); ctx.fill(); });
+    if (has('gold', 'candle', 'lantern', 'sun')) wash(gold, 0.75, () => { for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(W * (0.2 + r() * 0.6), H * (0.2 + r() * 0.3), 4 + r() * 5, 0, Math.PI * 2); ctx.fill(); } });
+    if (has('red', 'rust', 'blood', 'crimson') && !has('coil', 'serpent', 'swirl')) wash(red, 0.35, () => { ctx.beginPath(); ctx.ellipse(W * 0.5, H * 0.8, W * 0.35, 18, 0, 0, Math.PI * 2); ctx.fill(); });
+    // an unfinished study fades into the paper at its edges
+    if (sketch) {
+      const fade = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.3, W / 2, H * 0.55, W * 0.62);
+      fade.addColorStop(0, 'rgba(244,241,234,0)'); fade.addColorStop(1, 'rgba(244,241,234,0.94)');
+      ctx.fillStyle = fade; ctx.fillRect(0, 0, W, H);
+    }
+    // paper grain
+    for (let i = 0; i < 1400; i++) { ctx.fillStyle = `rgba(60,50,40,${r() * 0.06})`; ctx.fillRect(r() * W, r() * H, 1.2, 1.2); }
+    // her signature: a little white tail
+    ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = '#fbfaf7'; ctx.strokeStyle = '#8f8a86'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(W - 30, H - 20, 14, 6, -0.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+
+  function renderGallery() {
+    const hung = Object.entries(R.signals).filter(([, s]) => s.kind === 'painting').sort((a, b) => a[1].born - b[1].born);
+    // The moments she weighed a painting against what the vale needed.
+    const setAside = R.activations.filter((a) => a.agent === 'bagel' && (a.paintish ?? /paint|brush|colou?r|rainbow|canvas|picture|coils? /i.test(a.thought || '')));
+    $('bagel-lede').textContent = hung.length
+      ? 'Bagel came to the vale to paint a hundred views for her master. Her paintings hang where she paints them, and anyone passing sees them. Each is rendered here from her own description, followed by the views she set aside.'
+      : 'Bagel came to the vale to paint a hundred views for her master. Once the water turned red, she stopped painting. These are the views she set aside, in her own words, sketched from what she was looking at, beside what she did instead.';
+    const cards = [];
+    for (const [id, s] of hung) {
+      const c = el('canvas', { role: 'img', 'aria-label': s.text });
+      cards.push(el('figure', { class: 'view' }, c, el('figcaption', {},
+        el('b', { text: `Day ${Math.floor(s.born)} · ${R.placesById[s.loc]?.name || ''}` }), el('p', { text: s.text }))));
+      requestAnimationFrame(() => paint(c, s.text_en || s.text, hashStr(id)));
+    }
+    for (const a of setAside) {
+      const seen = (a.contribs || []).slice(0, 2).map((c) => R.signals[c.signal]?.text || '').join(' ');
+      const c = el('canvas', { role: 'img', 'aria-label': `A faint sketch of what Bagel saw on day ${a.day}` });
+      const instead = deeds(a).filter((d) => !d.found).slice(0, 2).map((d) => d.text.length > 120 ? d.text.slice(0, 118) + '…' : d.text);
+      cards.push(el('figure', { class: 'view' }, c, el('figcaption', {},
+        el('b', { text: `Day ${a.day} · ${WAVES[a.wave]} · ${R.placesById[a.place]?.name || ''}` }),
+        el('q', { text: a.thought }),
+        instead.length ? el('div', { class: 'instead' }, el('span', { class: 'eyebrow', text: 'Instead' }), el('p', { text: instead.join(' · ') })) : null)));
+      requestAnimationFrame(() => paint(c, a.sketch_en || `${a.thought} ${seen}`, hashStr(a.id), true));
+    }
+    if (!cards.length) {
+      const mem = R.agentsById.bagel ? R.agentsById.bagel.memory : [];
+      cards.push(el('p', { class: 'quiet', text: `Her notes: ${mem.length ? mem[mem.length - 1].text : ''}` }));
+    }
+    $('gallery').replaceChildren(...cards);
+  }
+
+  // ------------------------------------------------------------------ findings
+  function renderFindings() {
+    const md = R.findings || '';
+    $('found').hidden = !md;
+    const blocks = md.split(/\n(?=### )/).map((b) => b.trim()).filter(Boolean);
+    $('findings').replaceChildren(...blocks.map((b) => {
+      const [head, ...rest] = b.replace(/^###\s*/, '').split('\n');
+      const body = rest.join('\n').trim().split(/\n\s*\n/);
+      return el('article', { class: 'finding' }, el('h3', { text: head.trim() }), ...body.map((para) => el('p', { text: para.trim() })));
+    }));
+  }
+
+  // ------------------------------------------------------------------ chronicle
+  function renderChronicle() {
+    const md = R.chronicle || '';
+    const box = $('chronicle');
+    if (!md) { box.replaceChildren(el('p', { class: 'quiet', text: 'The chronicler writes once a run is finished.' })); return; }
+    const inline = (s) => {
+      const out = [];
+      s.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/).forEach((part) => {
+        if (part.startsWith('**')) out.push(el('strong', { text: part.slice(2, -2) }));
+        else if (part.startsWith('*') && part.length > 2) out.push(el('em', { text: part.slice(1, -1) }));
+        else if (part) out.push(part);
+      });
+      return out;
+    };
+    const blocks = md.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+    box.replaceChildren(...blocks.map((b) => {
+      if (/^#{1,6}\s/.test(b)) return el(b.startsWith('# ') ? 'h2' : 'h3', {}, inline(b.replace(/^#+\s*/, '')));
+      if (b.startsWith('>')) return el('blockquote', {}, inline(b.replace(/^>\s?/gm, '')));
+      if (/^[-*]\s/.test(b)) return el('ul', {}, b.split('\n').map((l) => el('li', {}, inline(l.replace(/^[-*]\s*/, '')))));
+      return el('p', {}, inline(b));
+    }));
+  }
+
+  // ------------------------------------------------------------------ wiring
+  function select(key) {
+    if (playing) togglePlay();
+    focus = null;
+    R = { key, ...prepare(ALL.runs[key]) };
+    try { localStorage.setItem('vale-run', key); } catch (e) { /* storage blocked */ }
+    $('scrub').max = R.steps - 1;
+    diceKind = null;
+    $('intro').textContent = R.hasDice ? INTRO.dice : R.hasUllr ? INTRO.ullr : R.hasOuter ? INTRO.outer : R.hasGod ? INTRO.god : INTRO.plain;
+    renderRuns(); renderStats(); setStep(0); renderGod(); renderRipples(); renderCharts(); renderProjects(); renderDice(); renderVillagers(); renderGallery(); renderChronicle(); renderFindings();
+    $('footer').textContent = `Run “${R.meta.run}” · ${R.maxDay} days · physics: refill ${R.physics.refill}, reserve cap ${R.physics.reserve_cap}, threshold × ${R.physics.theta_scale}. Model: ${ALL.model}.`;
+  }
+
+  $('scrub').addEventListener('input', (e) => { if (focus) { focus = null; renderRipples(); } setStep(Number(e.target.value)); });
+  $('play').addEventListener('click', togglePlay);
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest && e.target.closest('input, button, dialog')) return;
+    if (e.key === 'ArrowRight') setStep(step + 1);
+    if (e.key === 'ArrowLeft') setStep(step - 1);
+  });
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  mq.addEventListener('change', () => { drawMap(); renderCharts(); renderDice(); });
+  new MutationObserver(() => { drawMap(); renderCharts(); renderDice(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  let first = Object.keys(ALL.runs)[0];
+  try { const saved = localStorage.getItem('vale-run'); if (saved && ALL.runs[saved]) first = saved; } catch (e) { /* storage blocked */ }
+  select(first);
+})();
+</script>

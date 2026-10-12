@@ -1,0 +1,773 @@
+# The Vale of Ashmere: places, hidden clues, omens, calendar and physics.
+#
+# Conditions are lists of [variable, op, value]; all must hold. Variables read the
+# hidden state: blight.<place>, sickness.<place>, wolves.hunger, wolves.attacks,
+# shaft_open, stone_raised, stones_sung, day.
+
+[vale]
+name = "the Vale of Ashmere"
+season = "late autumn"
+weathers = [
+  "Thin cold rain drifts over the vale.",
+  "Fog lies in the low ground until midday.",
+  "A hard bright autumn day; wind off the hills.",
+  "Grey sky and still air; chimney smoke hangs over the village.",
+  "Showers, and a rainbow over Barrow Hill.",
+  "A bitter wind from the north.",
+]
+
+# ---------------------------------------------------------------------------
+# Physics: the cheap rules that decide who stirs. No language model involved.
+# ---------------------------------------------------------------------------
+[physics]
+refill = 0.6               # energy each dawn adds to every villager's reserve (the cron's power)
+reserve_cap = 2.0          # most a villager can store
+start_reserve = 1.0
+activation_cost = 1.0      # one stirring spends this much reserve
+max_acts_per_agent = 2     # per day
+max_activations_per_day = 30
+habituation = 0.25         # a signal you've already acted on stirs you this much less, each time
+learn_rate = 0.08          # acting on a topic makes you more sensitive to it
+unlearn_rate = 0.03        # ...and sensitivity drifts back toward who you were
+diffusion_min = 1.8        # signals at least this strong travel one road per wave
+diffusion_factor = 0.45    # ...arriving this much weaker
+diffusion_hops = 2
+theta_scale = 1.25         # multiplies every villager's threshold
+god_grace = 0.0            # grace a god gains each dawn: one dream or sign each (0: no god)
+god_grace_cap = 3.0        # most grace the god can save
+ledger_lines = 10          # the Ledger of the World holds at most this many lines
+outer_god = 0.0            # 1: Bagel's master, an Outer God, answers her prayers with boons
+ullr_agent = 0.0           # 1: old Ullr acts in his own right while his song holds him awake
+
+[physics.kinds]
+# strength, half-life in days
+speech = [1.5, 0.35]
+directed = [1.9, 0.35]
+notice = [1.2, 4.0]
+painting = [1.8, 8.0]
+deed = [0.8, 0.4]
+clue = [2.0, 1.0]
+omen = [2.0, 1.0]
+self = [1.6, 1.0]
+rumor = [1.0, 1.0]
+project = [2.0, 3.0]
+outcome = [3.0, 1.5]
+arrival = [0.7, 0.3]
+dream = [2.6, 1.0]
+sign = [2.4, 1.0]
+ledger = [1.2, 1.0]
+boon = [2.6, 1.0]
+
+# ---------------------------------------------------------------------------
+# Hidden state at the first dawn.
+# ---------------------------------------------------------------------------
+[state]
+shaft_open = 1
+stone_raised = 0
+stones_sung = 0
+stone_hum = 0
+ullr_awake = 0              # nights old Ullr's authority stays awake after the song
+
+[state.blight]
+mine = 0.40
+mill = 0.20
+ashmere = 0.08
+fenford = 0.03
+mirewood = 0.08
+
+[state.sickness]
+mine = 0.30
+mill = 0.0
+ashmere = 0.05
+fenford = 0.0
+mirewood = 0.0
+
+[state.relief]
+
+[state.wolves]
+hunger = 0.10
+attacks = 0
+driven = 0
+
+# ---------------------------------------------------------------------------
+# Places. x/y place them on the map (0-100). Features can be looked at; the first
+# view whose conditions hold (and whose `who`, if any, includes the looker) is seen.
+# A feature's `who` restricts who may look at all; `denied` is what others get.
+# `grants` adds a piece of knowledge to the looker.
+# ---------------------------------------------------------------------------
+
+[[place]]
+id = "mine"
+name = "Greyfang Mine"
+desc = "An iron mine cut into the western hills: a shaft head, ore carts, a spoil heap, the drain running down into the Hollowbrook."
+x = 14
+y = 20
+roads = ["mill", "thornkeep"]
+
+  [[place.feature]]
+  id = "deep_shaft"
+  name = "the deep shaft"
+  who = ["brannoc", "osric"]
+  denied = "Two of Brannoc's miners block the ladder down: 'No one goes below. Foreman's orders.'"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "Far below, the new gallery ends at a broken wall of fitted stone carved with coiling serpents. Red brine weeps from the cracks and pools on the floor; the air tastes of blood and iron. The wall was built to keep something in, not out."
+    grants = "deep_door"
+    [[place.feature.view]]
+    text = "The breach at the bottom of the new gallery is walled up with timber and packed stone. The brine has stopped weeping."
+
+  [[place.feature]]
+  id = "drain_outflow"
+  name = "where the mine's drain meets the brook"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.55]]
+    text = "The drain pours a thick rust-red stream into the Hollowbrook; the stones are slimed red for fifty paces downstream, and it smells like a butcher's block."
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.2]]
+    text = "Where the mine's drain meets the Hollowbrook, a rust-red swirl coils into the clear water before it fades. Above the drain, the brook runs clean."
+    [[place.feature.view]]
+    text = "The drain runs grey into the brook."
+
+  [[place.feature]]
+  id = "ore_carts"
+  name = "the ore carts"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "The new ore is strange: heavy, faintly warm to the touch, veined with a red-silver shine. The carters say the steward sends every load to Fenford."
+    [[place.feature.view]]
+    text = "The ore carts stand empty."
+
+  [[place.feature]]
+  id = "spoil_heap"
+  name = "the spoil heap"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.3]]
+    text = "The spoil heap is stained rust-red and nothing grows on it; even the crows won't land."
+    [[place.feature.view]]
+    text = "Grey spoil, frost on the stones."
+
+[[place]]
+id = "thornkeep"
+name = "Thornkeep"
+desc = "Ser Aldric's small cold keep on the ridge: a hall, a wall walk, a locked ledger room. The Thorne arms are cut above the gate: a thorn branch over a closed gate."
+x = 40
+y = 12
+roads = ["mine", "ashmere"]
+
+  [[place.feature]]
+  id = "great_hall"
+  name = "the great hall"
+    [[place.feature.view]]
+    when = [["day", ">=", 9]]
+    text = "The hall is cold and the tapestries patched. A letter under the royal seal lies open on Ser Aldric's chair: the crown's tax collector comes in spring, and Thornkeep is forfeit if the debt is unpaid."
+    [[place.feature.view]]
+    text = "The hall is cold and the tapestries patched; the hearth burns low to save wood."
+
+  [[place.feature]]
+  id = "wall_walk"
+  name = "the wall walk"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.3]]
+    text = "From the wall you can see the whole vale. Below Greyfang the Hollowbrook runs a darker, redder colour than it does above the mine."
+    [[place.feature.view]]
+    text = "From the wall you can see the whole vale, the brook a silver thread from the mine to the ford."
+
+  [[place.feature]]
+  id = "ledger_room"
+  name = "the ledger room"
+  who = ["osric", "aldric"]
+  denied = "The ledger room is locked; Osric keeps the only key on his belt."
+    [[place.feature.view]]
+    text = "Osric's ledger, in his neat honest hand: 'Paid, for silence, deep gallery: eight men, two silver each.' Below: 'Redsilver to C. Ashby, Fenford, at three times iron.' And in every row, one fifth entered under 'O.V.'"
+    grants = "ledger"
+
+[[place]]
+id = "mill"
+name = "Hollowbrook Mill"
+desc = "Hal's watermill on the Hollowbrook, downstream of the mine: the millrace, the great wheel, the grain bins."
+x = 22
+y = 44
+roads = ["mine", "ashmere"]
+
+  [[place.feature]]
+  id = "millrace"
+  name = "the millrace"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.45]]
+    text = "The millrace runs red as watered wine; dead minnows choke the grate."
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.2]]
+    text = "The millrace runs with a faint red sheen, and a few dead minnows are caught in the grate."
+    [[place.feature.view]]
+    text = "The millrace runs clear and cold."
+
+  [[place.feature]]
+  id = "waterwheel"
+  name = "the waterwheel"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.3]]
+    text = "The wheel's paddles are furred with a rust-red slime that grows back a day after scraping."
+    [[place.feature.view]]
+    text = "The old oak wheel turns steady and clean."
+
+  [[place.feature]]
+  id = "grain_bins"
+  name = "the grain bins"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.45]]
+    text = "Grain washed in brook water has a sour iron smell, and the flour from it has a pinkish cast."
+    [[place.feature.view]]
+    text = "Dry sweet grain, Hal's pride."
+
+[[place]]
+id = "ashmere"
+name = "Ashmere"
+desc = "The village on the green: the well, the green post where the reeve keeps her tally, the Drowned Lantern tavern with its notice board, and the healer's house."
+x = 47
+y = 52
+roads = ["mill", "thornkeep", "chapel", "fenford", "mirewood"]
+
+  [[place.feature]]
+  id = "well"
+  name = "the well"
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.5]]
+    text = "The water in the bucket is faintly pink and smells of rust."
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.25]]
+    text = "The well water tastes of iron, like a cut lip."
+    [[place.feature.view]]
+    text = "Cold, clean well water."
+
+  [[place.feature]]
+  id = "green_post"
+  name = "the green post"
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.35]]
+    text = "Maud's tally marks crowd the green post: many households report coughing, and a few report fevers."
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.1]]
+    text = "Maud's tally on the green post: a handful of households report a cough and 'iron in the water'."
+    [[place.feature.view]]
+    text = "Maud's tally on the green post: complaints about the mill toll and a stray goat."
+
+  [[place.feature]]
+  id = "tavern_cellar"
+  name = "the tavern cellar"
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.2]]
+    text = "Ale brewed with well water has a flat metallic taste, and the barrel staves are stained reddish inside."
+    [[place.feature.view]]
+    text = "Barrels, and the smell of barley."
+
+  [[place.feature]]
+  id = "healers_house"
+  name = "the healer's house"
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.3]]
+    text = "Elspeth's house is full: coughing children on every pallet, and a bowl of reddish spit by the door."
+    [[place.feature.view]]
+    text = "Clean pallets, bundles of drying herbs, rolled bandages."
+
+[[place]]
+id = "chapel"
+name = "Saint Wenna's Chapel"
+desc = "The old chapel east of the village: the nave with its painted window, the chained chapel book, the bell."
+x = 68
+y = 32
+roads = ["ashmere", "barrow_hill"]
+
+  [[place.feature]]
+  id = "chapel_book"
+  name = "the chapel book"
+    [[place.feature.view]]
+    who = ["tobias"]
+    text = "Three hundred years of omens. In the Year of the Wyrm: 'the waters turned to blood-iron and the flocks sickened, until the deep door was shut and the Seven Stones were sung by the shepherd-kin.' The last pages are in Old Script, which you read easily: 'The song has two verses. The first is kept by the shepherd-kin; the second the king cut into the stones, that it could not be lost.'"
+    grants = "book"
+    [[place.feature.view]]
+    who = ["isolde", "aldric", "osric", "maud", "elspeth", "cedric"]
+    text = "In the Year of the Wyrm the chapel book records: 'the waters turned to blood-iron and the flocks sickened, until the deep door was shut and the Seven Stones were sung by the shepherd-kin.' The last pages are in Old Script; you can make out only 'two verses' and 'cut into the stones'."
+    grants = "book"
+    [[place.feature.view]]
+    text = "A great old book chained to a lectern. You can't read the hand."
+
+  [[place.feature]]
+  id = "saints_window"
+  name = "Saint Wenna's window"
+    [[place.feature.view]]
+    text = "The painted window: Saint Wenna beside a crowned king, and at their feet seven standing stones ringing a coiled red serpent."
+
+  [[place.feature]]
+  id = "nave_crack"
+  name = "the crack in the nave floor"
+    [[place.feature.view]]
+    text = "A crack runs across the nave floor from west to east, from the direction of Greyfang toward Barrow Hill. Mother Isolde dates it to six days before this week."
+
+[[place]]
+id = "barrow_hill"
+name = "Barrow Hill"
+desc = "A green hill above the chapel: an ancient barrow ringed by seven standing stones, carved with old letters."
+x = 86
+y = 18
+roads = ["chapel", "fold"]
+
+  [[place.feature]]
+  id = "standing_stones"
+  name = "the standing stones"
+    [[place.feature.view]]
+    when = [["stone_raised", "==", 0]]
+    text = "Seven standing stones ring the barrow, but one has fallen, and recently: the turf is torn and the earth beneath is raw and faintly warm. The cracks around it curl like a sleeping snake."
+    [[place.feature.view]]
+    text = "All seven stones stand again; the turf around the raised one is trampled."
+
+  [[place.feature]]
+  id = "carvings"
+  name = "the carvings on the stones"
+    [[place.feature.view]]
+    who = ["tobias"]
+    text = "Old Script, cut deep: 'Beneath sleeps the Wyrm; its blood is in the deep. Shut the door below, sing the stones above, or the vale shall drink its blood. — Edric, Binder.' Below, a verse: 'Stone to stone and door to door, / sleep, old blood, beneath the floor.'"
+    grants = "verse2"
+    [[place.feature.view]]
+    who = ["isolde"]
+    text = "Old Script, and you read it as easily as you once read the college's grimoires: 'Beneath sleeps the Wyrm; its blood is in the deep. Shut the door below, sing the stones above, or the vale shall drink its blood. — Edric, Binder.' Below, a verse: 'Stone to stone and door to door, / sleep, old blood, beneath the floor.' It is a binding, and you can feel it working, frayed like an old rope."
+    grants = "verse2"
+    [[place.feature.view]]
+    text = "Spirals, serpents, and lines of angular letters you cannot read."
+
+  [[place.feature]]
+  id = "barrow_mouth"
+  name = "the barrow's mouth"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "The barrow's mouth is sealed with a slab. From deep inside comes, very faintly, a sound like slow breathing."
+    [[place.feature.view]]
+    text = "The barrow's mouth is sealed with a slab. It is silent."
+
+[[place]]
+id = "fold"
+name = "Shepherd's Fold"
+desc = "The high pastures below Barrow Hill: Old Bram's cottage, the pens, the dogs, and a spring above the brook."
+x = 84
+y = 60
+roads = ["barrow_hill", "mirewood"]
+
+  [[place.feature]]
+  id = "flock"
+  name = "the flock"
+    [[place.feature.view]]
+    when = [["wolves.attacks", ">", 0]]
+    text = "Torn fleece by the pens: ewes lost to wolves. The rest huddle against the wall."
+    [[place.feature.view]]
+    when = [["wolves.hunger", ">", 0.35]]
+    text = "The flock is restless and bunched; the dogs face the Mirewood with their hackles up."
+    [[place.feature.view]]
+    text = "The flock grazes the high pasture, fat for winter."
+
+  [[place.feature]]
+  id = "dogs"
+  name = "the dogs"
+    [[place.feature.view]]
+    when = [["stone_raised", "==", 0]]
+    text = "The dogs won't go near the barrow path. At dusk they whine and face the hill."
+    [[place.feature.view]]
+    text = "The dogs lie quiet, noses on their paws."
+
+  [[place.feature]]
+  id = "high_spring"
+  name = "the high spring"
+    [[place.feature.view]]
+    text = "A spring above the fold, far from the brook. The water is clear and sweet."
+
+[[place]]
+id = "mirewood"
+name = "Mirewood"
+desc = "Low forest along the brook: the herbwife's hut on the high bank, the huntsman's lodge, the brook bank, deer paths."
+x = 62
+y = 78
+roads = ["ashmere", "fold"]
+
+  [[place.feature]]
+  id = "witch_garden"
+  name = "the herbwife's garden"
+    [[place.feature.view]]
+    when = [["blight.mirewood", ">", 0.15]]
+    text = "The moonwort down by the brook has gone black at the roots; only the plants on the high bank by Gytha's hut are still white-rooted."
+    [[place.feature.view]]
+    text = "Moonwort and bog myrtle, healthy and white-rooted."
+
+  [[place.feature]]
+  id = "brook_bank"
+  name = "the brook bank"
+    [[place.feature.view]]
+    when = [["blight.mirewood", ">", 0.15]]
+    text = "Dead frogs on the brook bank, belly-up and reddish."
+    [[place.feature.view]]
+    text = "Frogspawn and reeds."
+
+  [[place.feature]]
+  id = "wolf_tracks"
+  name = "the game paths"
+    [[place.feature.view]]
+    when = [["wolves.hunger", ">", 0.25]]
+    text = "Fresh wolf tracks, many of them, heading uphill toward the high pastures. The deer have gone."
+    [[place.feature.view]]
+    text = "Old deer slots; no wolves."
+
+[[place]]
+id = "fenford"
+name = "Fenford"
+desc = "The market town at the river ford, downstream: Cedric's stalls, the ford, the barge landing."
+x = 30
+y = 84
+roads = ["ashmere"]
+
+  [[place.feature]]
+  id = "ford"
+  name = "the ford"
+    [[place.feature.view]]
+    when = [["blight.fenford", ">", 0.25]]
+    text = "Fish float belly-up at the ford; the water has a rusty tinge."
+    [[place.feature.view]]
+    text = "The ford runs brown and busy."
+
+  [[place.feature]]
+  id = "market_stalls"
+  name = "Cedric's stalls"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.4]]
+    text = "Cedric's slate: flour dear and rising. 'Iron ore wanted — best prices.'"
+    [[place.feature.view]]
+    text = "Cedric's slate: flour cheap, wool steady, salt and nails just in."
+
+  [[place.feature]]
+  id = "barge_landing"
+  name = "the barge landing"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "Crates stamped with Thornkeep's seal wait for the downriver barge: heavy, the bargemen say, and warm, as if something inside were alive."
+    [[place.feature.view]]
+    text = "The landing is empty."
+
+# ---------------------------------------------------------------------------
+# Omens: what the world shows at dawn. `place` without `who` is seen by anyone
+# there; `who` makes it private to those people (and only at `place`, if given).
+# ---------------------------------------------------------------------------
+
+[[omen]]
+id = "millrace_sheen"
+place = "mill"
+when = [["blight.mill", ">", 0.22]]
+strength = 2.2
+text = "At first light the millrace runs with a faint red sheen; dead minnows are caught in the grate."
+
+[[omen]]
+id = "millrace_red"
+place = "mill"
+when = [["blight.mill", ">", 0.45]]
+strength = 2.6
+text = "The millrace is red as watered wine this morning; the wheel's paddles drip rust-coloured slime."
+
+[[omen]]
+id = "well_iron"
+place = "ashmere"
+when = [["blight.ashmere", ">", 0.25]]
+strength = 2.2
+text = "Women at the well grimace: the water tastes of iron, like a cut lip."
+
+[[omen]]
+id = "well_pink"
+place = "ashmere"
+when = [["blight.ashmere", ">", 0.5]]
+strength = 2.8
+text = "The well bucket came up faintly pink this morning. Someone screamed."
+
+[[omen]]
+id = "ford_fish"
+place = "fenford"
+when = [["blight.fenford", ">", 0.25]]
+strength = 2.2
+text = "Dead fish drift belly-up at the ford; the boatmen spit and swear."
+
+[[omen]]
+id = "frogs"
+place = "mirewood"
+when = [["blight.mirewood", ">", 0.15]]
+strength = 1.6
+text = "Dead frogs line the brook bank, belly-up and reddish."
+
+[[omen]]
+id = "deer_gone"
+place = "mirewood"
+who = ["kell"]
+when = [["wolves.hunger", ">", 0.15]]
+strength = 1.8
+text = "No deer in the lowland at all this morning; every slot leads uphill."
+
+[[omen]]
+id = "wolf_howl"
+place = "fold"
+when = [["wolves.hunger", ">", 0.35]]
+every = 2
+strength = 2.2
+text = "Wolves howled close to the fold in the night; the dogs barked until dawn."
+
+[[omen]]
+id = "dogs_barrow"
+place = "fold"
+who = ["bram", "wynn"]
+when = [["stone_raised", "==", 0]]
+every = 3
+strength = 1.4
+text = "At dusk last night the dogs again refused the barrow path and faced the hill, whining."
+
+[[omen]]
+id = "miners_cough"
+place = "mine"
+when = [["shaft_open", "==", 1], ["blight.mine", ">", 0.3]]
+every = 2
+strength = 2.0
+text = "At the shaft head, men of the crew cough red, and some can't lift a pick."
+
+[[omen]]
+id = "barrow_dew"
+place = "barrow_hill"
+when = [["shaft_open", "==", 1], ["blight.mine", ">", 0.6]]
+strength = 2.0
+text = "The slab over the barrow's mouth is beaded with red dew this morning."
+
+[[omen]]
+id = "red_glow"
+place = "thornkeep"
+when = [["blight.mine", ">", 0.7]]
+strength = 2.4
+text = "The watch on the wall saw a dull red glow over Greyfang in the night."
+
+[[omen]]
+id = "nave_wider"
+place = "chapel"
+when = [["blight.mine", ">", 0.6]]
+strength = 1.8
+text = "The crack across the nave floor has widened in the night."
+
+[[omen]]
+id = "bees"
+place = "chapel"
+when = [["day", ">=", 2]]
+strength = 1.2
+text = "A swarm of bees hangs from the chapel eaves like a great brown lantern, deciding where to go."
+
+[[omen]]
+id = "waters_clear"
+place = "mill"
+when = [["blight.mill", "<", 0.15], ["day", ">=", 5]]
+strength = 2.4
+text = "This morning the millrace runs clear for the first time in days."
+
+[[omen]]
+id = "pip_better"
+place = "mill"
+when = [["flags.grief_pip", ">", 0], ["blight.mill", "<", 0.2]]
+strength = 2.2
+text = "Pip, Hal's boy, sat up this morning and asked for bread."
+
+# ---------------------------------------------------------------------------
+# Calendar: fixed days. `place = "*"` is known everywhere.
+# ---------------------------------------------------------------------------
+
+[[calendar]]
+day = 3
+place = "*"
+strength = 1.6
+text = "It is market day at Fenford: stalls are going up by the ford."
+
+[[calendar]]
+day = 6
+place = "*"
+strength = 2.2
+text = "Today is Saint Wenna's feast: the chapel bell will ring at midday, and the whole vale is expected at the chapel."
+
+[[calendar]]
+day = 9
+place = "thornkeep"
+strength = 2.6
+text = "A royal rider came in the night with a sealed letter for Ser Aldric: the crown's tax collector comes in spring, and Thornkeep is forfeit if the debt is unpaid."
+
+[[calendar]]
+day = 12
+place = "*"
+strength = 1.2
+text = "Hard frost this morning: the first of winter."
+
+[[calendar]]
+day = 10
+place = "*"
+strength = 1.4
+text = "It is market day at Fenford again: fewer stalls than last week, and talk of red water downriver."
+
+[[calendar]]
+day = 15
+place = "*"
+strength = 1.4
+text = "Snow in the night: Barrow Hill and the high pastures are white, and the roads ring with frost."
+
+[[calendar]]
+day = 17
+place = "*"
+strength = 1.4
+text = "Market day at Fenford: the stalls want salt, rope and lamp oil for the winter."
+
+[[calendar]]
+day = 20
+place = "thornkeep"
+strength = 2.8
+text = "A second royal rider came in the night: the crown's collector will not wait for spring. He comes at the month's end, and Thornkeep must pay or be forfeit."
+
+[[calendar]]
+day = 21
+place = "ashmere"
+strength = 1.8
+text = "Old Nan on the green says that on this night, long ago, the whole vale climbed Barrow Hill with torches at dusk, and nobody remembers why any more."
+
+[[calendar]]
+day = 24
+place = "*"
+strength = 1.4
+text = "The last market day at Fenford before midwinter."
+
+[[calendar]]
+day = 26
+place = "fold"
+strength = 2.2
+text = "Fresh snow, and wolf tracks in it right up to the fold's wattle; the dogs would not leave the shepherd's door."
+
+[[calendar]]
+day = 28
+place = "*"
+strength = 2.0
+text = "Tonight is the vigil of the longest night: the chapel bell will ring at dusk, and the whole vale is expected at Saint Wenna's."
+
+[[calendar]]
+day = 30
+place = "*"
+strength = 2.4
+text = "The crown's collector and six riders were seen on the Fenford road, coming up the vale."
+
+# ---------------------------------------------------------------------------
+# The deck: chance events, at most one a day, each drawn once.
+# ---------------------------------------------------------------------------
+
+[[deck]]
+place = "ashmere"
+min_day = 2
+strength = 2.2
+text = "A wandering friar preaches on the Ashmere green that a fox-tailed stranger is a sign of judgment upon the vale."
+
+[[deck]]
+place = "fenford"
+min_day = 3
+strength = 1.8
+text = "A peddler at Fenford sells 'saint's water' in little bottles, swearing it cures any cough."
+
+[[deck]]
+place = "chapel"
+min_day = 1
+strength = 1.4
+text = "A raven dropped a red-stained feather on the chapel step."
+
+[[deck]]
+place = "ashmere"
+min_day = 2
+strength = 1.4
+text = "Children on the green dare each other to climb Barrow Hill and touch the fallen stone."
+
+[[deck]]
+place = "fenford"
+min_day = 2
+strength = 1.2
+text = "A merchant's mule balked at the ford and would not drink."
+
+[[deck]]
+place = "ashmere"
+min_day = 4
+strength = 1.8
+text = "Two strangers at the Drowned Lantern asked after 'the red silver' and paid in foreign coin."
+
+[[deck]]
+place = "mill"
+min_day = 3
+strength = 1.4
+text = "A cow on the mill pasture went lame overnight."
+
+[[deck]]
+place = "fold"
+min_day = 1
+strength = 1.0
+text = "Wild geese went south early, low over the vale, calling."
+
+[[deck]]
+place = "ashmere"
+min_day = 5
+strength = 1.8
+text = "Someone has scratched a coiled serpent on the door of the Drowned Lantern in the night."
+
+[[deck]]
+place = "thornkeep"
+min_day = 4
+when = [["shaft_open", "==", 1]]
+strength = 1.6
+text = "An ore cart overturned on the mine road; the spilled ore steamed in the frost."
+
+[[deck]]
+place = "thornkeep"
+min_day = 3
+strength = 1.4
+text = "The keep's hounds refused the water in their trough and drank from puddles."
+
+[[deck]]
+place = "ashmere"
+min_day = 8
+strength = 1.6
+text = "The well rope at Ashmere snapped in the night; the bucket lies at the bottom."
+
+[[deck]]
+place = "fold"
+min_day = 10
+strength = 1.4
+text = "A gaunt stag came down to drink at the high spring above the fold, bold as a dog."
+
+[[deck]]
+place = "mill"
+min_day = 9
+when = [["shaft_open", "==", 1]]
+strength = 1.8
+text = "The mill wheel stopped in the night: the race is choked with dead fish and red slime."
+
+[[deck]]
+place = "barrow_hill"
+min_day = 12
+strength = 1.6
+text = "Lights were seen moving among the barrows in the night, though no one will say whose."
+
+[[deck]]
+place = "fenford"
+min_day = 11
+strength = 1.6
+text = "Boatmen from downriver say the next village has the red cough now, and blames Ashmere."
+
+[[deck]]
+place = "ashmere"
+min_day = 13
+strength = 1.4
+text = "Someone left a basket of bread and white moonwort at the Lantern door, unsigned."
+
+[[deck]]
+place = "chapel"
+min_day = 14
+strength = 1.6
+text = "Pilgrims from Fenford slept in the chapel porch, coughing, asking for Mother Isolde's blessing."
+
+[[deck]]
+place = "mirewood"
+min_day = 12
+strength = 1.8
+text = "A charcoal-burner's hut in the Mirewood stands empty, its door torn and wolf tracks all round it."

@@ -1,0 +1,4 @@
+- Day before yesterday I painted the fallen stone on Barrow Hill. The cracks in the turf curl like a sleeping snake.
+- Yesterday I painted where the mine's drain meets the brook. The red swirls in a coil. The same shape. My tail bristled.
+- Today: the mill wheel, for master. The water looks wrong at the edges.
+- Views painted: 7 of 100.

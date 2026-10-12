@@ -1,0 +1,46 @@
+name = "Osric Vane"
+short = "Osric"
+role = "steward of Thornkeep"
+public = "Ser Aldric's steward; runs the keep's accounts and the mine's business"
+home = "thornkeep"
+start = "thornkeep"
+profession = "steward"
+theta = 2.2
+aliases = ["osric", "vane", "the steward"]
+knows = ["literate", "deep_door", "hidden_stores"]
+
+[items]
+lamps = 2
+tools = 4
+rope = 4
+timber = 6
+coin = 30
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 30
+craft = 25
+lore = 45
+song = 10
+healing = 10
+hunting = 15
+arms = 20
+magic = 0
+persuade = 65
+stealth = 45
+trade = 75
+notice = 60
+
+[interests]
+money = 1.4
+mine = 1.3
+law = 1.0
+trade = 1.0
+danger = 0.7
+stranger = 0.5
+
+[ties]
+aldric = 0.5
+brannoc = -0.4
+cedric = 0.4
+hal = 0.2
+maud = -0.5

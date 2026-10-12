@@ -1,0 +1,4 @@
+- The carved wall. Serpents. The brine. I keep seeing it.
+- Ned and Cob coughing red. Me too now.
+- Osric says keep digging the red vein; it pays triple.
+- Haven't been to the Lantern since. Can't look at people.
