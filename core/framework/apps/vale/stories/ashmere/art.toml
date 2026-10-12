@@ -1,0 +1,182 @@
+# The Vale of Ashmere, drawn: how each villager's portrait and each place's picture is made.
+# The same in every language. The page draws them; a story may instead give a painted
+# picture with `image = "people/hal.png"` (a file under this story's art/ folder).
+#
+# People: skin, hair (colour), style (short, long, bun, braids, wild, receding, slick, none),
+# beard (none, stubble, full, long, goatee), hat (none, cap, scarf, circlet, miner, wimple,
+# hat, merchant, hood), coat, trim (a second colour), age (young, adult, old), and extras:
+# flour, quill, apron, fur, bow, herbs, maid, fox.
+# Places: kind (mine, keep, mill, village, chapel, stones, pasture, forest, ford) and
+# `water` when the blight shows in its stream.
+
+[people.hal]
+skin = "#e8b88f"
+hair = "#7a5230"
+style = "short"
+beard = "stubble"
+hat = "cap"
+coat = "#c98b2b"
+trim = "#efe4cc"
+age = "adult"
+extras = ["flour"]
+
+[people.maud]
+skin = "#f0c9a5"
+hair = "#5b3a24"
+style = "bun"
+hat = "scarf"
+coat = "#3f7d6e"
+trim = "#d9cfb8"
+age = "adult"
+
+[people.aldric]
+skin = "#e9c2a0"
+hair = "#bdbdbd"
+style = "short"
+beard = "full"
+hat = "circlet"
+coat = "#7a4b9c"
+trim = "#d8b24a"
+age = "old"
+
+[people.osric]
+skin = "#e6bf9d"
+hair = "#1f1a17"
+style = "slick"
+coat = "#2f2a2a"
+trim = "#9a3b3b"
+age = "adult"
+
+[people.brannoc]
+skin = "#d9a57f"
+hair = "#b4542b"
+style = "short"
+beard = "full"
+hat = "miner"
+coat = "#6b5a4a"
+trim = "#b4542b"
+age = "adult"
+
+[people.isolde]
+skin = "#f2d3b8"
+hair = "#8a8a8a"
+style = "none"
+hat = "wimple"
+coat = "#5a6fb0"
+trim = "#f4f1ea"
+age = "old"
+
+[people.gytha]
+skin = "#d8b08c"
+hair = "#a3a3a3"
+style = "wild"
+coat = "#4f8a3a"
+trim = "#8c6d3f"
+age = "old"
+extras = ["herbs"]
+
+[people.bram]
+skin = "#d2a27a"
+hair = "#ececec"
+style = "receding"
+beard = "long"
+hat = "hat"
+coat = "#8a7a52"
+trim = "#5c4e33"
+age = "old"
+
+[people.wynn]
+skin = "#f5d0b0"
+hair = "#a0522d"
+style = "braids"
+coat = "#d16a8f"
+trim = "#f6e7c8"
+age = "young"
+
+[people.tobias]
+skin = "#f0cba8"
+hair = "#3a2a1a"
+style = "short"
+coat = "#5e7f9e"
+trim = "#e8e2d4"
+age = "young"
+extras = ["quill"]
+
+[people.marta]
+skin = "#ecc09a"
+hair = "#8a3324"
+style = "bun"
+coat = "#b07a3c"
+trim = "#f3eee2"
+age = "adult"
+extras = ["apron"]
+
+[people.cedric]
+skin = "#e2b590"
+hair = "#6b4a2b"
+style = "short"
+beard = "goatee"
+hat = "merchant"
+coat = "#8f8a2e"
+trim = "#7a5a3a"
+age = "adult"
+extras = ["fur"]
+
+[people.elspeth]
+skin = "#f3d4b6"
+hair = "#c8a060"
+style = "long"
+coat = "#3f8fa0"
+trim = "#e9f1ee"
+age = "adult"
+
+[people.kell]
+skin = "#cf9f78"
+hair = "#3b2f22"
+style = "short"
+hat = "hood"
+coat = "#55703a"
+trim = "#3e5229"
+age = "young"
+extras = ["bow"]
+
+[people.bagel]
+skin = "#fbe6da"
+hair = "#e4e4ee"
+style = "long"
+coat = "#e89ab8"
+trim = "#ffffff"
+age = "young"
+extras = ["fox", "maid"]
+
+[places.mine]
+kind = "mine"
+water = true
+
+[places.thornkeep]
+kind = "keep"
+
+[places.mill]
+kind = "mill"
+water = true
+
+[places.ashmere]
+kind = "village"
+water = true
+
+[places.chapel]
+kind = "chapel"
+
+[places.barrow_hill]
+kind = "stones"
+
+[places.fold]
+kind = "pasture"
+
+[places.mirewood]
+kind = "forest"
+water = true
+
+[places.fenford]
+kind = "ford"
+water = true

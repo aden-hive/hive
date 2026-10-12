@@ -1,0 +1,44 @@
+name = "哈尔·韦恩赖特"
+short = "哈尔"
+role = "磨坊主"
+public = "空溪磨坊的磨坊主；健谈；鳏夫，有个儿子，名叫皮普"
+home = "mill"
+start = "mill"
+profession = "miller"
+knows = ["tunnel_map", "sapper"]
+theta = 2.2
+aliases = ["hal", "wainwright", "the miller", "哈尔", "哈尔·韦恩赖特", "磨坊主", "韦恩赖特"]
+
+[items]
+flour = 4
+coin = 3
+map = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 55
+craft = 60
+lore = 30
+song = 20
+healing = 15
+hunting = 15
+arms = 25
+magic = 0
+persuade = 50
+stealth = 20
+trade = 50
+notice = 45
+
+[interests]
+water = 1.3
+rust = 0.9
+food = 1.0
+money = 0.8
+sickness = 0.8
+trade = 0.6
+children = 0.5
+
+[ties]
+maud = 0.6
+osric = -0.5
+brannoc = 0.5
+bagel = 0.3

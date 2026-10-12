@@ -1,0 +1,44 @@
+name = "伊索尔德嬷嬷"
+short = "伊索尔德"
+role = "圣文娜礼拜堂的女修院长"
+public = "圣文娜礼拜堂的女修院长兼堂内簿册保管人"
+home = "chapel"
+start = "chapel"
+profession = "prioress"
+theta = 2.3
+aliases = ["isolde", "mother isolde", "the prioress", "伊索尔德", "伊索尔德嬷嬷", "圣文娜礼拜堂的女修院长"]
+knows = ["literate", "high_magic", "old_script"]
+
+[items]
+bread = 4
+candles = 3
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 20
+craft = 20
+lore = 80
+song = 50
+healing = 45
+hunting = 5
+arms = 5
+magic = 85
+persuade = 60
+stealth = 15
+trade = 15
+notice = 55
+
+[interests]
+faith = 1.4
+omen = 1.3
+sickness = 1.0
+ancient = 0.9
+magic = 0.9
+gathering = 0.9
+stranger = 0.7
+
+[ties]
+gytha = -0.6
+aldric = 0.5
+tobias = 0.2
+elspeth = 0.4
+bagel = -0.3

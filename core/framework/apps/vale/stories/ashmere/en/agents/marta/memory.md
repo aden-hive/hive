@@ -1,0 +1,3 @@
+- The ale from the cellar barrel has tasted flat and odd for two days. Brewed with well water.
+- Brannoc and his miners haven't been in for six days. Strange — they drink here every rest-day.
+- The fox-eared painter paid two weeks in advance in old coin. Doesn't talk much. Blushed when I said her painting of the green was lovely.

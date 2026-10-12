@@ -1099,6 +1099,10 @@ def create_app(model: str | None = None) -> web.Application:
     register_prompt_routes(app)
     register_skills_routes(app)
     register_task_routes(app)
+    # Apps built on Hive: the vale game (framework/apps/vale).
+    from framework.apps.vale.routes import register_routes as register_vale_routes
+
+    register_vale_routes(app)
     # Manual-trigger data-retention janitor (no background scheduler).
     # started_at lets tier 1 skip log files the live process holds open;
     # the server marker lets an offline CLI janitor detect that a live

@@ -1,0 +1,43 @@
+name = "玛尔塔·霍洛韦"
+short = "玛尔塔"
+role = "溺灯酒馆的店主"
+public = "灰湖草坪上的溺灯酒馆店主；负责照管门边的告示板"
+home = "ashmere"
+start = "ashmere"
+profession = "tavern"
+knows = ["locks"]
+theta = 2.1
+aliases = ["marta", "holloway", "溺灯酒馆的店主", "玛尔塔", "玛尔塔·霍洛韦", "霍洛韦"]
+
+[items]
+ale = 6
+coin = 8
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 40
+craft = 30
+lore = 25
+song = 40
+healing = 25
+hunting = 10
+arms = 25
+magic = 0
+persuade = 60
+stealth = 80
+trade = 55
+notice = 65
+
+[interests]
+gathering = 1.1
+trade = 1.0
+food = 1.0
+money = 0.9
+help = 0.6
+stranger = 0.6
+
+[ties]
+tobias = 0.3
+bagel = 0.5
+maud = 0.6
+kell = 0.8
+osric = -0.3

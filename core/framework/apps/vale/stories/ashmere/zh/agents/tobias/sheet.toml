@@ -1,0 +1,41 @@
+name = "托拜厄斯·奎尔"
+short = "托拜厄斯"
+role = "游方抄写员"
+public = "一位寄宿在溺灯酒馆的游方抄写员；搜集传说；能读懂古老的文字"
+home = "ashmere"
+start = "ashmere"
+profession = "scribe"
+theta = 2.0
+aliases = ["tobias", "quill", "the scribe", "奎尔", "托拜厄斯", "托拜厄斯·奎尔", "游方抄写员"]
+knows = ["literate", "old_script", "signet", "mage_blood"]
+
+[items]
+ink = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 25
+craft = 15
+lore = 85
+song = 35
+healing = 15
+hunting = 5
+arms = 5
+magic = 25
+persuade = 55
+stealth = 25
+trade = 30
+notice = 55
+
+[interests]
+ancient = 1.4
+omen = 1.0
+faith = 0.8
+stranger = 0.8
+art = 0.7
+money = 0.5
+
+[ties]
+marta = 0.4
+isolde = 0.3
+bagel = 0.4
+bram = 0.2

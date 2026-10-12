@@ -1,0 +1,3 @@
+- The alchemist's man said "wyrm-iron" and laughed. Triple price. Ten more carts promised.
+- The fish at the ford looked poorly this morning; the boatmen grumble.
+- Market day is the third day: bring salt, nails, cloth.

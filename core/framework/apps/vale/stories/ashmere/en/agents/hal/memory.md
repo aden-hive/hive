@@ -1,0 +1,4 @@
+- The wheel ran slow three days back; I cleared weed from the grate.
+- Six days ago Brannoc came by white as flour and said "the hill shook". I felt nothing at the mill.
+- The fox-eared girl, Bagel, sits on the bank painting the wheel. She frowns at the water a lot.
+- Owe Osric 12 silver by midwinter.

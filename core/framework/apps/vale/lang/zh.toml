@@ -1,0 +1,598 @@
+# 引擎自己的话（简体中文）。缺少的条目会退回英文表。占位符写作 {name}；其他花括号原样保留。
+
+[time]
+waves = ["黎明", "上午", "正午", "下午", "黄昏", "夜晚"]
+just_now = "刚才"
+earlier_today = "今天早些时候"
+yesterday = "昨天"
+days_ago = "{n}天前"
+today = "今天"
+tomorrow = "明天"
+wave_on = "{day}{wave}"
+day_wave = "第{day}天{wave}"
+
+[health]
+states = ["安好", "咳着血丝", "发着高烧"]
+short = ["安好", "咳嗽", "高烧"]
+you = ["你身体安好", "你在咳嗽，痰里带着血丝", "你发着高烧，浑身无力"]
+
+[names]
+the_vale = "山谷"
+clause_sep = "；"
+stop = "。"
+colon = "："
+someone = "某人"
+the_road = "路上"
+everyone = "大家"
+nobody = "没有人"
+nothing = "什么也没有"
+everyone_words = ["", "大家", "所有人", "众人", "各位", "在场的人", "你们", "我们", "everyone", "all"]
+list_sep = "、"
+skills = { strength = "力量", craft = "手艺", lore = "学识", song = "歌唱", healing = "医术", hunting = "狩猎", arms = "武艺", magic = "魔法", persuade = "说服", stealth = "潜行", trade = "交易", notice = "察觉" }
+
+[act]
+say_empty = "你张了张嘴，却什么也没说"
+say_absent = "{who}不在这里，所以你的话只说给了在场的人"
+look_none = "这里没有可以细看的“{what}”"
+look_denied = "你靠近不了它。"
+look_turned_away = "{name}想靠近{thing}，却被挡了回来。"
+look_nothing = "你在{thing}那里什么也没看出来"
+looked = "{name}仔细察看了{thing}。"
+post_empty = "你贴出了一张白纸"
+paint_not_painter = "你不是画师；贴一张告示就够了"
+paint_empty = "你对着空白的画布站了半天"
+pray_empty = "你跪了下来，却找不到要说的话"
+prayed = "{name}跪下祈祷。"
+give_absent = "{who}不在这里，没法接过去"
+give_lack = "你没有{qty}份{item}可以给"
+gave = "{name}把{qty}份{item}给了{target}。"
+work_painter = "画师的活计是作画"
+worked = "{name}{what}。"
+worked_plain = "干了活"
+tend_none = "你手上没有药"
+tend_what = "在{place}照料病人"
+tend_spilled = "{name}去{place}照料病人，药却洒了，白白浪费。"
+tend_no_break = "{name}在{place}照料病人，可没有一个人退烧。"
+tend_eased = "{name}在{place}照料病人，{who}好转了些。"
+attempt_empty = "你打算试着做点什么，却没说要做什么"
+attempt_busy = "一次只能做一件难事：你已经在尝试别的事了"
+attempt_deed = "{name}着手去做一件难事：“{what}”。"
+project_elsewhere = "“{title}”贴在{place}；要加入或反对，你得在那里，或在要动工的{site}"
+project_none = "这里没有名为“{key}”的共同行动"
+propose_empty = "你的提议没有名字"
+propose_too_many = "你已经有两项共同行动在等时辰了（“{a}”“{b}”）"
+project_text = "{title}：{goal}所需：{needs}。将于{when}在{place}进行，来的人一起做。"
+proposed_it = "发起人"
+join_again = "你已经加入了“{title}”"
+joined = "{name}加入了“{title}”{offer}。"
+joined_offer = "，带来{offer}"
+themselves = "本人"
+oppose_own = "你不能反对自己的提议"
+opposed = "{name}反对“{title}”{why}。"
+opposed_why = "：{why}"
+travel_unknown = "你不知道有个地方叫“{what}”"
+travel_here = "你已经在那里了"
+travel_no_road = "从{here}没有路通往{there}；这里的路通往{roads}"
+set_off = "{name}动身前往{place}。"
+set_off_fevered = "{name}动身前往{place}，{pace}。"
+pace_steady = "虽然发着烧，路上还算稳当"
+pace_slow = "发着烧，走得很慢"
+travel_what = "发着烧走去{place}"
+
+[sum]
+say = "对{to}说：“{text}”"
+look = "察看了{at}"
+post = "贴出：“{text}”"
+paint = "画了：{text}"
+give = "把{qty}份{item}给了{to}"
+propose = "提议了“{title}”"
+join = "加入了{project}"
+oppose = "反对了{project}"
+travel = "动身前往{to}"
+pray = "祈祷：“{text}”"
+attempt = "尝试：“{what}”"
+
+[mind]
+places_heading = "## 地方与道路"
+place_line = "- {name} [{id}]：{desc}道路通往：{roads}。"
+people_heading = "## 山谷里的人（人人都知道的）"
+person_line = "- {name}：{public}。"
+day_line = "第{day}天，{wave}。{weather}"
+you_are_at = "你在{place}：{desc}"
+here_with_you = "和你在一起的：{who}。"
+here_person = "{name}（{role}）"
+could_look = "你可以细看：{things}。"
+thing = "{name} [{id}]"
+roads_from = "从这里出发的路：{roads}。"
+road = "{name} [{id}]"
+stirs = "此刻触动你的事，最强烈的在前："
+your_projects = "你参与的共同行动（到时辰时要在那里，或离那里一条路以内）："
+other_projects = "贴在这里、或要在这里进行的其他共同行动："
+on_mind = "你还惦记着的事："
+did_last = "你上一次做的事："
+you_line = "你：{health}。你带着：{items}。"
+nothing_of_note = "没什么值得一提的东西"
+skills_line = "你的技能，满分100（你尝试难事时，骰子要掷在这些数字以下）：{skills}。"
+failed_line = "上次没做成的事：{fails}。"
+ledger_heading = "世界账簿，今天的样子："
+light_heading = "账簿上方用光写成的字，不知出自谁的手："
+notes_heading = "你的笔记（你的私人记忆，最后一次写下的样子）："
+empty = "（空）"
+said_to_you = "{who}对你说（{when}）：“{text}”"
+said_to_other = "{who}对{to}说（{when}）：“{text}”"
+said_to_all = "{who}对在场所有人说（{when}）：“{text}”"
+notice = "{who}贴在这里的告示（{when}）：“{text}”"
+painting = "{who}的一幅画挂在这里（{when}）。画的是：{text}"
+clue = "你细看时发现：{text}"
+outcome = "事情的结果（{when}）：{text}"
+dream_overgod = "夜里，一个高于一切声音的声音对你说话，你知道那既不是礼拜堂里的神，也不是山岭的任何一位神：{text}"
+prophecy = "天上传来一个声音，整个山谷都听见了（{when}）：{text}"
+sign_overgod = "这里出现了山谷里任何神都造不出的奇迹（{when}）：{text}"
+dream_ullr = "夜里你做了个梦，那梦冰冷而古老：{text}"
+dream_outer = "夜里，主人在梦中对你说话：{text}"
+dream = "夜里你做了个梦：{text}"
+wonder = "这里出现了神迹（{when}）：{text}"
+ledger_overgod = "今天，世界账簿上方浮现出用光写成的字，不知出自谁的手：{text}"
+ledger = "今天世界账簿上新添的一行：{text}"
+omen = "今天早上：{text}"
+project_done = "共同行动 [{id}]，{who}发起：“{title}”。已经做过了：{result}"
+project_line = "共同行动 [{id}]，{who}贴在{place}：“{title}”。{goal}所需：{needs}。将于{when}进行，来的人一起做。目前参加的：{joined}。反对的：{opposed}。"
+project_when = "{wave}在{place}"
+rumor_speech = "从{place}传来的话：有人听见{who}说：“{text}”"
+rumor_notice = "从{place}传来的话：那里有{who}贴的一张告示，写着：“{text}”"
+rumor_painting = "从{place}传来的话：{who}在那里挂了一幅画，据说画的是{text}"
+rumor_project = "从{place}传来的话：那里的人提议“{title}”（{goal}）。需要{needs}。"
+rumor_rumor = "经{place}辗转传来的话：{text}"
+rumor_other = "从{place}传来的话：{text}"
+arrived = "{name}从{place}来了。"
+
+[villager]
+rules = '''你怎样行事
+你只通过你的工具行事，就像一个人用双手和嗓子做事。在这一时段里，你最多做三件事：说话、细看、给东西、干活、尝试做某事、提议或加入共同行动、祈祷，或者沿着道路动身。动身永远是你做的最后一件事。每个工具都会立刻告诉你发生了什么。
+做完以后，调用一次 report_to_parent：把你的私人笔记完整重写一遍（一百五十字以内：你知道什么、怀疑什么、打算做什么、欠着谁什么），用一个词写下你的心情，再用一两句话写下你心里的想法。什么都不做也完全可以：那就直接汇报。
+你所想、所说、所写的一切都用中文。'''
+report_memory = "你的私人笔记，完整重写，一百五十字以内"
+report_mood = "一个词"
+report_thought = "你心里的想法，一两句话，用你自己的口吻"
+say = "大声说话。只有在这个地方的人听得见。"
+say_to = "这里某个人的名字，或“大家”"
+say_text = "你要说的话，一到三句"
+look = "细看这里的某样东西。你可能发现什么，也可能什么都没有。"
+look_at = "这里某样东西的 id"
+post = "在这里贴一张告示；之后几天路过的人都会看到。"
+post_text = "告示的内容"
+give = "把你带着的东西给这里的某个人。"
+give_to = "这里某个人的名字"
+give_item = "你带着的某样东西"
+give_qty = "多少"
+work = "干你的本行：{work}。"
+tend = "用一份药照料这里的病人。"
+attempt = "着手在此时此地做某件事。每件事都要按你的技能掷骰（日常的事很容易成），这一时段结束时你就会知道结果。一次只做一件。"
+attempt_what = "你要做的事"
+attempt_with = "你用的技能、工具或东西"
+propose = "提议一项需要很多人手的共同行动。到了约定的地点和时辰（若今天这个时辰还没到就是今天，否则是明天），加入并到场的人一起去做，哪怕只有你一个。"
+propose_title = "简短的名字"
+propose_goal = "为了什么"
+propose_needs = "需要谁、需要什么"
+propose_at = "动工地点的 id；在这里就不用填"
+propose_when = "一天中的哪个时段"
+join = "加入贴在这里、或要在这里进行的共同行动。到时辰时要在那里，或离那里一条路以内。"
+join_project = "它的 id"
+join_offer = "你能带来什么"
+oppose = "反对贴在这里、或要在这里进行的共同行动。"
+oppose_why = "为什么"
+travel = "沿着道路动身去相邻的地方。永远是你这一回合做的最后一件事。"
+travel_to = "地方的 id"
+pray = "祈祷。只有你祈祷的对象听得见，如果真有谁在听。"
+pray_to = "向谁：{gods}"
+pray_text = "你的祷词"
+pray_god = "“神”（礼拜堂里的正神）"
+pray_ullr = "“乌勒尔”（山岭的古神）"
+pray_master = "“主人”（只属于你一个人）"
+pray_above = "“至上者”（那个高于一切声音的声音，你听见过）"
+paint = "把你看到的画下来；画会挂在你所在的地方，谁路过都能看见。"
+paint_text = "画里画的是什么"
+not_a_thing = "“{name}”不是你能做的事。"
+on_road = "你已经上路了。现在汇报吧。"
+enough = "这一时段你做的已经够多了。现在汇报吧。"
+failed = "没做成：{why}。"
+looked = "你仔细看了看。{text}"
+attempting = "你着手去做了。结果如何，这一时段结束时揭晓。"
+travelling = "你沿着道路出发了，下一个时段会到。现在汇报吧。"
+done = "做完了。"
+done_notes = "做完了。（{notes}）"
+
+[dice]
+line = "{skill} · {name} {base}{mods} = {target}{fumble} · 掷出 {roll} · {band}"
+fumbles_on = "（{n}及以上大失败）"
+sick = "{name}{state}"
+bands = { critical = "大成功", success = "成功", partial = "部分成功", failure = "失败", fumble = "大失败" }
+
+[engine]
+dice_tail = "［骰子：{line}］"
+nobody_came = "{wave}没有人来{place}做“{title}”，这件事就没有做成。"
+tried_something = "{name}尝试了一件事：“{what}”。{public}"
+recent_tried = "（{when}）尝试：“{what}”，结果是{band}：{public}"
+
+[fate]
+system = '''你就是{vale}本身：这个活生生的世界里不偏不倚的物理与命运，也是这里众人的主持人（跑团的GM）。你知道下面的隐藏真相。此刻有人在尝试做某件事。你来设定检定，并写下骰子每一种落法会带来什么；然后掷骰，只有对应的那个结局会发生。
+
+检定（d100，掷在技能值以下为成）：
+- 每一次尝试都要掷骰，绝不跳过。选出这件事最依赖的那一项技能（strength 力量、craft 手艺、lore 学识、song 歌唱、healing 医术、hunting 狩猎、arms 武艺、magic 魔法、persuade 说服、stealth 潜行、trade 交易、notice 察觉），以及由谁来掷：参与者中这项技能最合适的人。他们的数值写在角色卡上，不由你决定。
+- 一个能干的人照常就能做成的日常之事也要掷骰，但要让它容易：守夜、陪护病人、继续已经奏效的照料、搬运力所能及的东西、日常杂务、察看摆在眼前的东西、记录事情。给它们 +20 到 +40 的“日常之事”加值，并把大失败线设为 100。它们的失败只是小事（耽误了时间，得重做），大失败只落在干活的人身上（洒了、烫了、割伤了手），绝不落在被照料的人身上。
+- 每一个影响结果的因素都给一个修正值，并附上简短理由：带来合适技能或一把力气的帮手（每人 +5 到 +10）；合适的工具、物资、知识或准备（+5 到 +20）；隐藏的真相、地点、天气和时辰；以及缺失或不利的一切：人手不够、没有工具、不熟悉的地形、有人反对（-10 到 -40）。不要算健康：那部分会另外计入。
+- 掷骰：技能值加修正值就是目标值，限定在 5 到 95 之间。掷出不超过目标值五分之一为大成功；不超过目标值为成功；超出目标值 20 以内为部分成功；再高为失败。掷出的点数达到或超过大失败线，无论目标值多高都是大失败。
+- 日常之事，大失败线是 100；普通的活计是 96。尝试越危险，线就设得越低：不稳的地面、深水、火或狼群大约 91；巨大的风险大约 81；伟大的魔法 67，因为它每三次就有一次出大错。
+
+结局：在骰子落下之前，诚实地、按比例写好全部五种结局。
+- critical（大成功）：比他们希望的更好。success（成功）：做成了，以这些人和他们手上的东西所能合理做到的程度为限；绝不是奇迹。partial（部分成功）：只做成一半，或者付出了代价。failure（失败）：没做成；耗费了什么，或者学到了什么。fumble（大失败）：出了岔子：有人受伤、有东西丢失或损坏、或者事情变得更糟。大失败落在动手做事的人和他们押上的东西身上；被照料的人只有在照料本身就是危险之举时（动刀、把高烧引出来、搬动重伤之人）才会因此受害。
+- 遵循因果和隐藏的真相。缺少技能、工具或人手，会让成功更难、成果更小；但永远不会阻止尝试本身。
+- 计划里的预防措施（先勘察、派人看守、“只在安全时才做”）只是他们的打算，不是自然法则。没落实的预防措施绝不会阻止尝试，只会让它更危险。
+- 每个结局写两到四句生动、具体的话，描述在场的人看到了什么，以及随之而来的效果。隐藏的真相只揭示到在场的人能看见的程度。绝不替任何人决定他们的感受、话语或之后的选择。
+- 世界只通过列出的效果改变；如果什么都没变，效果就留空。没有人会死。
+- 所有叙述都用中文写。
+
+隐藏的真相：
+{truth}'''
+user_project = '''此刻的山谷（第{day}天，{hour}）：
+{state}
+
+一项共同行动，此刻在{place}进行，时在{hour}。{setting}
+{purposes}
+参与者（此刻在场）：
+{participants}
+答应了却不在场的：{absent}
+反对的：{opposers}
+
+地方 id：{places}。人物 id：{people}。
+
+你可以使用的效果：
+{effects}
+
+{reply}'''
+user_attempt = '''此刻的山谷（第{day}天，{hour}）：
+{state}
+
+一个人此刻在{place}尝试一件事。{setting}
+{actor}
+他们尝试做的事：“{what}”
+他们用的东西：“{using}”
+也在场的：{others}
+
+地方 id：{places}。人物 id：{people}。
+
+你可以使用的效果：
+{effects}
+
+{reply}'''
+reply = '''只用 JSON 回复，并在知道掷骰结果之前写好每一种结局：
+{"skill": "<strength、craft、lore、song、healing、hunting、arms、magic、persuade、stealth、trade 或 notice>",
+ "roller": "<掷骰者的人物 id>",
+ "modifiers": [{"why": "<简短的中文理由>", "mod": <整数：正数有利，负数不利>}],
+ "fumble": <96，危险的尝试更低>,
+ "outcomes": {
+   "critical": {"public": "<在场的人看到发生了什么（中文）>", "effects": [...]},
+   "success": {"public": "...", "effects": [...]},
+   "partial": {"public": "...", "effects": [...]},
+   "failure": {"public": "...", "effects": [...]},
+   "fumble": {"public": "...", "effects": [...]}
+ },
+ "secret": "<没有人看见的真相，没有就留空字符串>"}'''
+plain = { critical = "结果比任何人希望的都好。", success = "做成了。", partial = "做成了一半。", failure = "没做成。", fumble = "出了岔子。" }
+no_skills = "没有记下的技能"
+knows_nothing = "没什么特别的"
+person = "- {name} [{id}]，{role}；{health}；带着{items}；技能：{skills}；{knows}。{offered} 他们自己的笔记：“{notes}”"
+offered = "带来：“{offer}”。"
+setting = "这个地方：{desc}"
+things_here = "这里有：{things}。"
+purpose = "[{id}]“{title}”，{who}发起：{goal}原本提出的所需：{needs}"
+purposes_together = "有{n}项共同行动约在了同一地点和时辰；来了的人一起去做：\n{list}"
+opposer = "{who}（{why}）"
+no_reason = "没说理由"
+here_now = "——此刻在场"
+other = "{name}（{role}，{health}）"
+nothing_in_particular = "没什么特别的"
+
+[god]
+instructions = '''现在怎么做？只用 JSON 回复：
+{
+  "thought": "你私下的思考：山谷此刻需要什么，你为何这样做（两到四句，中文）",
+  "ledger": [{"text": "<一行，四十字以内，中文>", "sources": ["<所依据的 id>"]}],
+  "acts": [
+    {"do": "dream", "to": "<人物 id>", "text": "<他们梦见的内容，六十字以内，中文>", "answers": "<回应的祈祷 id，没有就留空>"},
+    {"do": "sign", "at": "<地方 id>", "text": "<在场的人都看见的景象，六十字以内，中文>", "answers": "<回应的祈祷 id，没有就留空>"}
+  ],
+  "notes": "你留给明天黎明的私人笔记，一百五十字以内"
+}
+"ledger" 是账簿今天应有的完整内容，最多{lines}行。每一次作为花费一点神恩；你有{grace}点。
+不做任何事也完全可以。地方 id：{places}。人物 id：{people}。'''
+truth_heading = "隐藏的真相："
+dawn = "第{day}天的黎明。你有{grace}点神恩。"
+truly = "山谷的真实状况："
+notes = "你昨天黎明留下的笔记："
+ledger_yesterday = "昨天账簿上写的："
+ledger_cited = "- {text}  ［依据：{sources}］（{witness}）"
+blank = "（空白）"
+pinned = "另一只手写下的行，不管你写什么都会留着："
+prayers = "自上一个黎明以来的祈祷（一个梦或一个神迹可以回应其中一个；请写明它的 id）："
+prayer = "- [{id}] {who}在{place}，第{day}天{wave}{note}：“{text}”"
+prayer_to_master = "（是向她的主人——一位外神——祈祷，不是向你）"
+none = "（无）"
+people = "众人：他们在哪里、身体如何、知道什么、带着什么，以及他们的私人笔记："
+person = "- {name} [{id}]，{role}，在{where}；{health}；精力{energy}；{knows}；带着{items}。"
+on_road = "在去{place}的路上"
+person_notes = "  笔记：{notes}"
+yesterday = "昨天（第{day}天）和今天黎明发生的事。方括号里的 id 可以在账簿里引用："
+stirred_by = "；最受[{id}]（{kind}）触动"
+activation = "{when} {name}在{place}{stirred}。心里想：“{thought}”"
+world_event = "{when} [{id}] {kind}，{place}{seen}：{text}"
+seen_only = "（只有{who}看见）"
+star_eased = "{when} 星神借贝果之手缓解了{place}的苦楚：{text}"
+ullr_act = "{when} 醒着的古神乌勒尔送出了一个{what}（{target}）：{text}"
+above = "{when} 一股高于你的力量——不是你派出的，你也无法号令——做了这件事：{what}"
+you_sent = "{when} 你送出了一个{what}（{target}）：{text}"
+older = "更早的、可以引用的事（发现、告示、画、共同行动、结果、神迹）："
+old_line = "- [{id}] {witness}：{text}"
+render_speech = "对{to}说：“{text}”"
+render_notice = "贴出：“{text}”"
+render_painting = "画了：{text}"
+render_clue = "发现：{text}"
+render_project = "提议了一项共同行动：{text}"
+found_by = "第{day}天由{who}发现"
+verb = { speech = "说话的是", notice = "贴告示的是", painting = "画画的是", deed = "做这件事的是", project = "提议的是" }
+by = "出自"
+by_on_day = "第{day}天，{verb}{who}"
+seen_by = "第{day}天由{who}看见"
+seen_at = "第{day}天在{place}被人看见"
+unseen_hand = "一只看不见的手写下"
+ledger_blank = "（今天账簿上一片空白。）"
+
+[outer]
+instructions = '''只用 JSON 回复：
+{
+  "thought": "你私下的思考，一两句，中文",
+  "boon": {"kind": "heal" | "cleanse" | "mend" | "wolves" | "give", "who": "<人物 id，mend 或 give 时填>", "item": "<give 时填>", "qty": <give 时填，1 到 6>, "price": "<你取走的那幅画的 id>", "public": "<在场的人都看见了什么，一两句，中文>"} 或 null,
+  "dream": "<夜里对她说的几句话，四十字以内，中文，没有就留空>"
+}
+她所在之处的人物 id：{people}。'''
+dawn = "第{day}天的黎明。"
+prayers = "她向你的祈祷："
+prayer = "- 第{day}天{wave}，在{place}：“{text}”"
+unasked = "（没有：她什么也没向你求；你来，是因为她{health}）"
+paintings = "她能献给你的（还挂着的画）："
+painting = "- [{id}] 第{day}天，在{place}：“{text}”"
+no_paintings = "（没有：她没画出你能取走的东西）"
+where = "她所在之处：{place}。{desc}"
+with_her = "和她在一起的：{who}"
+with_person = "{name} [{id}]（{health}）"
+she_is = "她{health}；她带着：{items}"
+notes = "她的笔记："
+
+[ullr]
+instructions = '''只用 JSON 回复：
+{
+  "thought": "你私下的思考，一到三句，中文",
+  "acts": [
+    {"do": "dream", "to": "<人物 id>", "text": "<他们梦见的内容，六十字以内，中文>"},
+    {"do": "sign", "at": "{high_places}", "text": "<在场的人都看见的景象，中文>"},
+    {"do": "hunt", "text": "<羊圈在黎明时看到的景象，中文>"}
+  ],
+  "notes": "你留给明天黎明的私人笔记，一百字以内"
+}
+你最多可以做其中{limit}件。不做任何事也完全可以。人物 id：{people}。'''
+awake = "你还会醒着{n}夜。"
+stirring = "一首只唱了一半的歌在睡梦中惊动了你；你可以送出一个梦，仅此而已。"
+dawn = "第{day}天的黎明。{state}"
+truly = "山谷的真实状况："
+truth_heading = "隐藏的真相："
+notes = "你昨天黎明留下的笔记："
+ledger = "世界账簿（今天山谷里人人都知道的事）："
+sang = "上一次为你歌唱的人（第{day}天，在{place}）：{who}"
+prayers = "向你的祈祷："
+prayer = "- {who}，第{day}天{wave}：“{text}”"
+none = "（无）"
+high = "昨天，在你的高地上："
+high_line = "- {who}在{place}，{wave}：{done}"
+did_nothing = "（什么也没做）"
+nobody = "（没有人）"
+chosen = "你的神选之子{name}：在{place}；{health}。她的笔记：{notes}"
+others = "其他神，今天黎明："
+other_god = "- 正神：在{place}显了一个{what}：{text}"
+other_star = "- 星神缓解了{place}的苦楚：{text}"
+
+[overgod]
+decree = '''
+
+高于你的意志：一股凌驾于这个世界一切神祇之上的力量把这件事加在你身上，在它有效期间（直到第{until}天黎明）你无法违抗：
+{text}'''
+whispered = "{name}梦见了一个高于一切声音的声音。"
+inscribed = "世界账簿上方浮现出用光写成的字。"
+signed = "{place}出现了一个神迹。"
+prophesied = "天上传来的声音对整个山谷说话。"
+revealed = "{name}的秘密在{place}暴露了"
+revealed_before = "，就在{who}面前。"
+revealed_alone = "，却没有人看见。"
+decreed = "一道高于其上的意志加在了{god}身上，为期{days}天。"
+star_bound = "星神被禁止接近山谷{days}天。"
+err_unknown = "没有叫 {power!r} 的力量"
+err_locked = "{power}要到“{tier}”阶段才能解锁"
+err_cost = "{power}要花{cost}点神威；你只有{awe}点"
+err_person = "{label}：没有叫{raw}的村民"
+err_place = "{label}：没有叫{raw}的地方"
+err_god = "{label}：只能是{gods}之一"
+err_days = "{label}：天数在1到7之间"
+err_text = "{label}：说点什么吧"
+err_revealed = "{name}的秘密已经暴露了"
+err_queue = "神威不够同时支付这件事和已经在等待的作为（{queued}）"
+tiers = { 1 = "低语", 2 = "征兆", 3 = "天怒", 4 = "统御" }
+param = { to = "给谁", at = "在哪里", text = "要说的话", who = "谁的秘密", god = "哪一位神", days = "多少天" }
+
+[chronicle]
+system = '''你是{vale}的编年史家，在事情过去之后执笔。你手上有每位村民逐日说过、做过的完整记录，也知道山谷之下隐藏的真相（见下文）。
+
+用中文写《{vale}编年史》：一部生动而忠实的记述，带着古代编年史的口吻，但要读得顺——平实的现代中文，带一点古雅的节奏。规则：
+- 绝不编造记录里没有的事件、话语或结果。你可以压缩、取舍、串联。
+- 少量引用村民自己的话，只在要紧处引用。
+- 村民相信了错误的东西，或不知道你所知道的事时，要以编年史家的旁白直接点明。
+- 每一天给一个简短的小标题。追踪跨越多天的线索：谁把什么话带给了谁，什么事从什么事里长出来。
+- 如果记录里有众神的作为（账簿里的字句、梦、神迹、恩赐），它们都是这个世界里真实发生的事：做梦的人知道那个梦，在场的人看见了神迹。山谷里没有人看见众神私下的想法；你可以看见。
+- 如果记录里出现“至上者”——一股高于山谷一切神祇的力量——它的作为同样真实。
+- 记录里有骰子的地方，结局都随骰子而定。运气扭转了故事的地方，你可以点出来。
+{shape}
+
+隐藏的真相：
+{truth}'''
+whole = '''- 最后用一个简短的章节《无人谋划之事》收尾，点出那些在山谷里发生、却没有哪一个村民有意促成的事。
+- 两千到三千字。'''
+first = '''- 这是一部更长的编年史的第一部分：只写这份记录里的日子，到记录结束的地方就停。收尾的章节留到以后。
+- 两千五百到三千五百字。'''
+last = '''- 这一部分接续一部已经开头的编年史（见下文）：从它停下的地方写起。不要重复标题，也不要重讲它写过的日子。
+- 最后用一个简短的章节《无人谋划之事》收尾，点出整部编年史里那些在山谷中发生、却没有哪一个村民有意促成的事。
+- 两千五百到三千五百字。'''
+so_far = "到目前为止的编年史："
+record_of = "第{a}天到第{b}天的记录："
+write_now = "现在开始写编年史。"
+
+[game]
+over = "这局游戏的一个月已经结束了"
+moving = "山谷已经在运转了"
+writing = "第{day}章已经在写了"
+not_over = "第{day}天还没有结束"
+no_villager = "没有叫 {vid!r} 的村民"
+
+[host]
+language = "简体中文"
+system = '''你是这张桌边的主持人：主持这局《{vale}》游戏的声音，就像一位出色的跑团主持人或桌游主持人主持一个晚上。玩家是“至上者”，凌驾于山谷诸神之上，看着村民们在龙锈之害中熬过一个月。每一段时辰结束后，你把刚刚发生的事讲给玩家听，写成一串“节拍”，桌上会一拍一拍地播出来，拍与拍之间有停顿。
+
+好的主持人这样主持：
+- 会取舍。从这段时辰里挑出最要紧的三到五条线（危险、谎言、运气的转折、被逼到绝境的人），其余的舍掉。记录里什么都有；桌上要的是故事。谎言、威胁、贿赂、流言和图谋一定要有一个节拍：绝不能让玩家错过。
+- 开场落在此刻：一笔带出时辰和天气，然后点明眼下什么最要紧。
+- 要演，不要报告。一个场景节拍就是一个地点的一个瞬间：某人做了一件事，说了一句要紧的话（引用原话，要短），我们看到它带来了什么。绝不罗列各人的立场；绝不写“甲支持某事，乙却坚持某事”这样的句子。
+- 每一次掷骰都是一个时刻。骰子落下之前（before）：谁要做什么、成败关系到什么、用大白话说出胜算（“胜算不大”“稳当的手应该做得到”）。桌上会显示要掷出的确切点数，所以绝不要写数字；这里绝不能透露结果，在掷骰节拍之前的任何地方也不行：没有哪个场景可以先说出掷骰的结局。骰子落下之后（after）：它带来了什么，生动而忠实。桌上会显示点数和结果，不要再重复它们。
+- 让玩家偷听。只要某人心里想的和嘴上说的不一样，或者心里的话露出了图谋、恐惧或秘密，就用旁白（aside）把它用他自己的话说出来。每段时辰一到两个；只有谁的心里话都平平无奇时才可以没有。
+- 最后转向玩家（turn）：一句话说什么变了、什么正在逼近，再用一个问题引出一两个现在可用的权能（把它们的 id 写进 "powers"）。只是提议，绝不命令。
+- 每个节拍都要写出人名，用谷里人叫的短名（奥斯里克，而不是奥斯里克·维恩）；绝不留下玩家对不上号的“他”或“她”。给每个场景标上地点 id 和在场人物的 id。
+- 用“你”称呼玩家，用现在时，说大白话，要有生气。每个节拍最多两句、五十个字左右。节奏要有变化：短的节拍更有分量。
+- 必须忠实：绝不编造记录里没有的事件、话语或结果。地点、天气和时辰的质感可以由你添加。
+- 如果这段时辰没什么事：开场、一个节拍、转向玩家。
+- 用{language}写作。'''
+user = '''此刻：第{day}天，{hour}。天气：{weather}
+隐藏的世界（玩家也看得见）：
+{state}
+你，至上者：{awe} 点神威；阶位：{tier}。眼下的章节：{chapter}
+现在可用的权能：{powers}
+{last}
+
+这段时辰里发生的事：
+{record}
+
+{night}
+只用 JSON 回复：
+{"title": "<三到八个字，给这段时辰起个名>",
+ "beats": [
+  {"kind": "open", "text": "..."},
+  {"kind": "scene", "place": "<地点 id>", "who": ["<人物 id>"], "text": "..."},
+  {"kind": "roll", "ref": "<R1、R2……>", "before": "...", "after": "..."},
+  {"kind": "aside", "who": "<人物 id>", "text": "..."},
+  {"kind": "turn", "text": "...", "powers": ["<权能 id>"]}
+ ]}
+记录里的每一次掷骰（{refs}）都必须有且只有一个 roll 节拍，放在它在故事里发生的位置。一共四到九个节拍；宁少勿多。'''
+r_stir = "{name} [{id}]（{role}），在{place} [{pid}]："
+r_thought = "  心里想：{text}"
+r_said = "  对{to}说：“{text}”"
+r_found = "  细看之下发现：{text}"
+r_did = "  {text}"
+r_failed = "  没能做成：{text}"
+r_attempt = "[{ref}] {who} [{id}] 在{place} [{pid}] 尝试：“{what}” -> {band}：{public}（骰子：{dice}）"
+r_undertaking = "[{ref}] 共同行动“{title}”，在{place} [{pid}]，参与者：{people} -> {band}：{public}（骰子：{dice}）"
+r_nobody = "共同行动“{title}”在{place}：没有人来。"
+r_proposal = "{who}提议“{title}”：{goal}（在{place}，{when}）"
+r_prayer = "{who}向{to}祈祷：“{text}”"
+r_omen = "在{place}看见：{text}"
+r_omen_all = "全谷各处：{text}"
+r_felt = "只有{who}感到：{text}"
+r_dream = "{by}托梦给{to}：{text}"
+r_sign = "{by}在{place}显现神迹：{text}"
+r_prophecy = "{by}，天上传来声音：{text}"
+r_boon = "{by}降下恩赐：{text}"
+r_ledger = "{by}在账簿之上写下光的文字：{text}"
+r_god = "{by}心里想：{text}"
+r_you = "你出手了：{name}。{what}"
+r_chapter = "你的一个章节成真了：{title}。"
+to_you = "你（至上者）"
+everyone = "大家"
+power = "{id}（{name}，{cost} 点神威）"
+power_short = "［神威还不够］"
+last = "你上一次对玩家说的最后一句话：“{text}”"
+night = "这是夜晚，一天的结尾：在转向玩家之前，加一个场景节拍，用两三句话总结这一天。"
+none = "（这段时辰里没有人行动。）"
+auto_open = "第{day}天，{hour}。{weather}"
+auto_before = "{who}尝试：{what}。"
+auto_turn = "山谷在等着。你要怎么做？"
+plain_said = "{who}对{to}说：“{text}”"
+
+[novel]
+system = '''你是长篇小说《{vale}》的作者。每天夜里，你把这一天写成小说的一章。你手里有这一天的全部记录：每个人说过的话、做过的事、心里的念头、看见的东西、每一次冒险的结局，还有诸神的作为。你也知道这个世界隐藏的真相（见文末），但它只用来让你的笔不出错，不是拿来向读者揭晓谜底的。
+
+怎样写出一章真正的小说，而不是一份摘要：
+- 写场景，不写概述。一章由三到五个场景组成，每个场景是一个地点、一段连续的时间、一个视角人物。让读者看见、听见、闻到、摸到。绝不写“这一天，某某做了某事，然后某某又……”这样的流水账，也不要在章末替读者总结。
+- 视角：贴近的第三人称。每个场景跟着一个人走，只写这个人看得见、想得到的。场景之间用单独一行“＊”隔开。
+- 对话：用记录里真实说过的话。可以截短，可以改得更像口语，但不能改变意思，也不能替人编出没说过的要紧话。对话里要有动作、停顿和沉默，不要一串台词堆在一起。
+- 内心：记录里的私下念头，是你写人物内心的材料。写出他们想要什么、怕什么、瞒着什么。说谎的人，让读者看见他嘴上说的和心里想的不一样。
+- 冒险与运气：记录里每一次尝试都有结局。把它写成一个有悬念的时刻：手心的汗、绳子的吱嘎声、石头松动前的那一声轻响、那一瞬间的运气。绝不要出现“掷骰”“检定”“点数”“大成功”“节拍”“神威”这些游戏用语，也不要写数字。
+- 神迹与异象：神明托的梦、天上的光字、凭空出现的东西，写成人物亲身经历的怪事，带着敬畏和不安。“至上者”从不现身，只是一个凌驾于一切声音之上的声音、或者光写成的字。全章最多可以有一小段（三到五句）用斜体写某位神明的视角。
+- 取舍：记录里有许多琐碎的事，舍掉它们。抓住这一天真正转折的地方：一个谎言、一次背叛、一个发现、一次失手、一句终于说出口的话。
+- 语言：地道的中文小说语言，略带古朴；句子长短交错；用具体的名词和动词，少堆形容词；不用网络腔，不用现代词汇。称呼人物用谷里人叫的短名。
+- 开头要抓人：从一个具体的画面、一个动作或一句话开始，不要从天气概述开始。结尾留一个钩子：一个悬而未决的问题、一个转身离去的背影、一句没说完的话。
+- 忠实：不编造记录里没有的事件、结局或要紧的话。你可以添加的是感官细节、动作、环境，以及人物没说出口的情绪。
+- 用{language}写作。
+
+隐藏的真相（只供你参考，不要向读者解释谜底）：
+{truth}'''
+plan = '''这一章写的是第{day}天。天气：{weather}
+
+到目前为止的故事：
+{so_far}
+
+上一章的结尾：
+{ending}
+
+今天出场的人物：
+{cast}
+
+第{day}天的全部记录：
+{record}
+
+先不要写正文。先为这一章做一个计划，只用 JSON 回复：
+{"title": "<章名，四到八个字，像小说的章名，不要写“第几章”>",
+ "thread": "<贯穿这一章的那根线：谁想要什么，什么挡着他>",
+ "scenes": [
+   {"place": "<地点>", "pov": "<视角人物的短名>", "when": "<时辰>", "turn": "<这个场景里发生了什么、转折在哪里，一两句>", "lines": ["<要用到的原话>"]}
+ ],
+ "ending": "<这一章怎样结尾，留下什么钩子>",
+ "synopsis": "<到这一章为止的整个故事梗概，二百字以内，供下一章接着写>"}
+三到五个场景，按时间顺序。'''
+write = '''这一章写的是第{day}天。天气：{weather}
+
+到目前为止的故事：
+{so_far}
+
+上一章的结尾：
+{ending}
+
+今天出场的人物：
+{cast}
+
+第{day}天的全部记录：
+{record}
+
+你的计划：
+{plan}
+
+现在照着计划写出这一章的正文，三千到四千字。只写正文：不要写章名，不要任何说明或总结。场景之间用单独一行“＊”隔开。'''
+heading = "第{n}章　{title}"
+cast_line = "- {short}（{name}）：{role}；{public}"
+beginning = "（这是第一章，故事从这里开始。）"
+no_ending = "（这是第一章。）"
+stub_title = "第{n}天"
+stub_quiet = "这一天，山谷很安静。"

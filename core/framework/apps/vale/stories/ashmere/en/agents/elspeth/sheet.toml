@@ -1,0 +1,41 @@
+name = "Elspeth Rowe"
+short = "Elspeth"
+role = "the healer of Ashmere"
+public = "Ashmere's healer and midwife; keeps a house of herbs on the green"
+home = "ashmere"
+start = "ashmere"
+profession = "healer"
+theta = 1.9
+aliases = ["elspeth", "rowe", "the healer"]
+knows = ["literate", "healing_hands"]
+
+[items]
+herbs = 1
+remedy = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 35
+craft = 20
+lore = 40
+song = 25
+healing = 85
+hunting = 10
+arms = 10
+magic = 30
+persuade = 55
+stealth = 20
+trade = 25
+notice = 70
+
+[interests]
+sickness = 1.5
+children = 1.3
+help = 1.2
+water = 1.0
+magic = 0.7
+
+[ties]
+maud = 0.7
+gytha = 0.6
+isolde = 0.3
+hal = 0.3

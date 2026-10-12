@@ -1,0 +1,4 @@
+- Two households by the green say the well water tastes "off". Only two; not yet three. Noted it on the green post.
+- Osric raised the mill toll last month. People grumble.
+- The wandering scribe Tobias owes Marta for his lodging. Harmless.
+- Saint Wenna's feast is on the sixth day; the chapel needs hands.

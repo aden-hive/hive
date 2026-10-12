@@ -1,0 +1,43 @@
+name = "塞德里克·阿什比"
+short = "塞德里克"
+role = "芬渡商人"
+public = "芬渡集市上的商人；什么都买，什么都卖；将城堡的矿石沿河运往下游"
+home = "fenford"
+start = "fenford"
+profession = "trader"
+theta = 2.3
+aliases = ["cedric", "ashby", "the trader", "塞德里克", "塞德里克·阿什比", "芬渡商人", "阿什比"]
+knows = ["literate", "wyrm_iron", "market"]
+
+[items]
+timber = 4
+rope = 4
+jars = 6
+coin = 20
+goods = 4
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 35
+craft = 25
+lore = 30
+song = 20
+healing = 10
+hunting = 10
+arms = 15
+magic = 0
+persuade = 60
+stealth = 25
+trade = 80
+notice = 50
+
+[interests]
+trade = 1.4
+money = 1.4
+mine = 0.9
+danger = 0.7
+law = 0.6
+
+[ties]
+osric = 0.2
+hal = 0.3
+marta = 0.3

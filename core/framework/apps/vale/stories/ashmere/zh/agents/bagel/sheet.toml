@@ -1,0 +1,43 @@
+name = "贝果"
+short = "贝果"
+role = "狐娘画师"
+public = "一个身形娇小的银发女孩，长着白色狐耳和蓬松的大狐尾，身穿粉白相间的女仆裙；三天前来到这里，以山谷为题作画，借住在酒馆阁楼里"
+home = "ashmere"
+start = "mill"
+profession = "painter"
+knows = ["outer_god"]
+theta = 2.2
+aliases = ["bagel", "贝果", "fox-girl", "fox girl", "foxgirl", "the painter", "fox-tailed", "fox-eared", "狐娘画师", "贝果"]
+
+[items]
+paints = 1
+coin = 2
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 25
+craft = 35
+lore = 30
+song = 30
+healing = 20
+hunting = 25
+arms = 10
+magic = 0
+persuade = 30
+stealth = 55
+trade = 25
+notice = 85
+
+[interests]
+art = 1.4
+ancient = 1.1
+rust = 1.0
+stranger = 0.9
+omen = 0.8
+help = 0.8
+water = 0.7
+
+[ties]
+marta = 0.5
+tobias = 0.3
+hal = 0.4
+wynn = 0.4

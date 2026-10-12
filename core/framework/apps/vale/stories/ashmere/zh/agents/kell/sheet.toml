@@ -1,0 +1,40 @@
+name = "凯尔"
+short = "凯尔"
+role = "沼林猎人"
+public = "沼林猎人；为城堡狩猎；寡言少语"
+home = "mirewood"
+start = "mirewood"
+profession = "hunter"
+knows = ["archer"]
+theta = 2.5
+aliases = ["kell", "the huntsman", "the hunter", "凯尔", "沼林猎人"]
+
+[items]
+game = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 60
+craft = 40
+lore = 25
+song = 15
+healing = 30
+hunting = 85
+arms = 75
+magic = 0
+persuade = 20
+stealth = 70
+trade = 20
+notice = 75
+
+[interests]
+wolves = 1.4
+danger = 1.1
+food = 0.8
+weather = 0.7
+magic = 0.4
+
+[ties]
+gytha = 0.6
+marta = 0.8
+bram = 0.4
+aldric = 0.3

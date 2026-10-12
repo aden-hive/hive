@@ -1,0 +1,44 @@
+name = "吉莎"
+short = "吉莎"
+role = "沼林的草药婆"
+public = "沼林里的草药婆；乡民们叫她女巫，生了病却又去找她。"
+home = "mirewood"
+start = "mirewood"
+profession = "herbwife"
+theta = 2.6
+aliases = ["gytha", "the witch", "herbwife", "witch of mirewood", "吉莎", "沼林的草药婆"]
+knows = ["stones_lock", "strength_draught"]
+
+[items]
+moonwort = 3
+remedy = 2
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 35
+craft = 30
+lore = 55
+song = 35
+healing = 80
+hunting = 35
+arms = 10
+magic = 10
+persuade = 35
+stealth = 45
+trade = 40
+notice = 65
+
+[interests]
+magic = 1.2
+sickness = 1.2
+ancient = 1.0
+water = 0.9
+rust = 0.8
+children = 0.8
+help = 0.7
+
+[ties]
+bram = 0.4
+wynn = 0.9
+elspeth = 0.6
+isolde = -0.6
+kell = 0.5

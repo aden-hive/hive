@@ -1,0 +1,295 @@
+# 灰湖谷，中文版：故事里引擎不管的一切都在这里。
+# 地点、征兆和日历在 world.toml；人物在 agents/；真相在 truth.md。
+# 键名、地点 id、人物 id 和物品 id 与英文版相同，引擎只认这些。
+
+[story]
+id = "ashmere"
+lang = "zh"
+title = "灰湖谷"
+vale = "灰湖谷"
+blurb = "十五位村民，每一位都是一个 Hive 智能体，各有过往、秘密和角色卡，要在龙锈之害中熬过一个月。三位神明看顾着他们：正神、星神和古神乌勒尔。而你，在这三者之上。"
+river = "空溪发源于灰牙矿，流经空溪磨坊和灰湖，向下直到芬渡；涨水时会漫进沼林。"
+
+[gods]
+names = { world = "山谷", god = "神", outer = "星神", ullr = "乌勒尔", overgod = "至上者" }
+titles = { god = "正神", outer = "星神", ullr = "古神乌勒尔" }
+follower = "bagel"          # 星神的仆从：只有她能向星神祈祷
+chosen = "wynn"             # 古神乌勒尔的神选之子，正神看不见她
+hidden_from_god = ["true_voice"]
+master_words = ["主人", "星神", "master", "pleiades"]
+ullr_words = ["乌勒尔", "古神", "ullr", "old god"]
+above_words = ["至上", "上天", "天上", "苍天", "声音", "above", "voice", "sky"]
+high_places = ["barrow_hill", "fold", "mirewood"]
+
+[persona]
+want = "你想要什么"
+rules = "你的处世规则"
+deeper = "更深的秘密"
+
+[place_aliases]
+"村子" = "ashmere"
+"村里" = "ashmere"
+"村庄" = "ashmere"
+"草坪" = "ashmere"
+"酒馆" = "ashmere"
+"溺灯" = "ashmere"
+"城堡" = "thornkeep"
+"荆棘堡" = "thornkeep"
+"古冢" = "barrow_hill"
+"七石" = "barrow_hill"
+"石阵" = "barrow_hill"
+"羊圈" = "fold"
+"集市" = "fenford"
+"渡口" = "fenford"
+"矿" = "mine"
+"磨坊" = "mill"
+"礼拜堂" = "chapel"
+"教堂" = "chapel"
+"树林" = "mirewood"
+"森林" = "mirewood"
+"沼泽" = "mirewood"
+village = "ashmere"
+green = "ashmere"
+tavern = "ashmere"
+keep = "thornkeep"
+barrows = "barrow_hill"
+stones = "barrow_hill"
+shepherds_fold = "fold"
+market = "fenford"
+greyfang = "mine"
+wood = "mirewood"
+
+# 每门手艺干活时做出什么，以及干活的人被告知做了什么。
+[professions.miller]
+hint = "在磨坊磨面"
+makes = { flour = 2 }
+deed = "磨了一批面粉"
+[professions.foreman]
+hint = "带着矿工在灰牙矿采矿"
+makes = { ore = 2 }
+deed = "让矿工们从新巷道里运出了矿石"
+at = "mine"
+away = "你的矿工和镐头都在灰牙矿"
+[professions.herbwife]
+hint = "在小屋采月草、熬药"
+makes = { moonwort = 1, remedy = 1 }
+deed = "采了月草，熬了一剂药"
+at = "home"
+away = "你的草药和蒸锅都在自家小屋里"
+[professions.hunter]
+hint = "进林子打猎"
+makes = { game = 1 }
+deed = "从林子里带回了野味"
+[professions.shepherd]
+hint = "照看羊群"
+makes = { wool = 1 }
+deed = "照看了羊群"
+[professions.trader]
+hint = "在摊位上做买卖"
+makes = { coin = 2 }
+deed = "在摊位上做了点小买卖"
+[professions.tavern]
+hint = "酿酒、招呼客人"
+makes = { ale = 2 }
+deed = "酿了酒，招呼了客人"
+[professions.steward]
+hint = "管账"
+makes = { coin = 3 }
+deed = "理了一阵账目"
+[professions.courier]
+hint = "跑腿挣铜币"
+makes = { coin = 1 }
+deed = "跑了趟腿，挣了一枚铜币"
+[professions.scribe]
+hint = "替人写信、抄书挣铜币"
+makes = { coin = 1 }
+deed = "替人写了封信，挣了一枚铜币"
+[professions.prioress]
+hint = "领人祈祷，照管礼拜堂"
+deed = "在礼拜堂领众人祈祷"
+[professions.lord]
+hint = "升堂理事，照管城堡"
+deed = "升堂理事"
+[professions.reeve]
+hint = "听人诉苦，记好草坪木桩上的账"
+deed = "听了几桩诉苦，更新了草坪木桩上的记数"
+[professions.healer]
+hint = "用草药或月草制药"
+nothing = "你没有草药或月草可以制药"
+recipes = [
+  { uses = { moonwort = 1 }, makes = { remedy = 2 }, deed = "用月草熬了两剂药" },
+  { uses = { herbs = 1 }, makes = { remedy = 1 }, deed = "用自己的草药做了一剂药" },
+]
+[professions.painter]
+hint = "作画（用 paint 动作）"
+
+# 物品：村民读到的名字、他们可能用的别名，以及在长名字里指代它的词。
+# 第一个匹配上的物品胜出，所以水排在装它的罐子前面。中文按子串匹配，单字要小心：
+# “药”会吞掉“药草”，所以药剂只认成词的说法；“药水”“墨水”不算水。
+[items]
+water = { name = "水", aliases = ["清水", "净水", "一罐水", "一罐清水", "泉水", "井水"], match = ["(?<![药墨汤])水(?![车道渠])", "\\bwater\\b"] }
+jars = { name = "罐子", aliases = ["罐", "陶罐", "带盖的罐子", "坛子", "瓮", "器皿"], match = ["罐|坛|瓮|瓶|器皿", "\\b(jars?|vessels?|crocks?|pots?)\\b"] }
+timber = { name = "木材", aliases = ["木头", "木料", "木梁", "横梁", "木板"], match = ["木材|木料|木头|木梁|横梁|梁木|木板|木垛|支架|撑木|支柱", "\\b(timbers?|beams?|planks?|cribbing|cribs?|braces?|props?|shores?)\\b"] }
+rope = { name = "绳子", aliases = ["绳", "绳索", "麻绳"], match = ["绳", "\\bropes?\\b"] }
+lamps = { name = "灯", aliases = ["油灯", "灯笼", "矿灯", "提灯"], match = ["油灯|灯笼|矿灯|马灯|灯盏|(?<!溺)灯(?!馆)", "\\b(lamps?|lanterns?)\\b"] }
+tools = { name = "工具", aliases = ["撬棍", "撬杠", "杠杆", "家伙什"], match = ["工具|撬棍|撬杠|杠杆|镐|铁锹|铲|锤", "\\b(tools?|levers?|picks?|crowbars?|shovels?)\\b"] }
+remedy = { name = "药剂", aliases = ["药", "汤药", "药汤", "药水", "药膏", "解药"], match = ["药剂|汤药|药汤|药水|药膏|膏药|解药|良药|补药|药丸|(?<!草)药(?!草)", "\\b(remed\\w*|draughts?|tonics?|salves?|medicines?)\\b"] }
+moonwort = { name = "月草", aliases = ["白根月草"], match = ["月草", "\\bmoonwort\\b"] }
+herbs = { name = "草药", aliases = ["药草"], match = ["草药|药草", "\\bherbs?\\b"] }
+map = { name = "地图", aliases = ["工程师的地图", "旧地图", "隧道图", "坑道图", "图纸"], match = ["地图|图纸|舆图|坑道图|隧道图", "\\bmaps?\\b"] }
+coin = { name = "铜币", aliases = ["钱", "铜板", "银币", "银子", "硬币"], match = ["铜币|银币|金币|铜板|银子|硬币|钱", "\\b(coins?|silver|coppers?)\\b"] }
+bread = { name = "面包", aliases = ["一条面包", "饼"], match = ["面包|饼", "\\b(bread|loaf|loaves)\\b"] }
+ore = { name = "矿石", aliases = ["矿", "矿砂"], match = ["矿石|矿砂|龙铁", "\\bore\\b"] }
+wool = { name = "羊毛", match = ["羊毛", "\\bwool\\b"] }
+flour = { name = "面粉", aliases = ["麦粉"], match = ["面粉|麦粉", "\\bflour\\b"] }
+ale = { name = "麦酒", aliases = ["酒", "啤酒"], match = ["麦酒|啤酒|(?<![^\\s])酒(?!馆)", "\\bale\\b"] }
+candles = { name = "蜡烛", aliases = ["烛"], match = ["蜡烛|烛", "\\bcandles?\\b"] }
+game = { name = "野味", aliases = ["猎物"] }
+goods = { name = "货物", aliases = ["货"] }
+ink = { name = "墨水", aliases = ["墨"] }
+paints = { name = "颜料", aliases = ["油彩"] }
+
+# 话题，以及唤起它们的词。村民的兴趣是这些话题上的权重。中文按子串匹配。
+[lexicon]
+water = ["水", "河", "溪", "空溪", "井", "磨坊水道", "渡口", "喝", "泉", "water", "river", "brook", "well"]
+rust = ["锈", "红", "铁", "血", "卤水", "猩红", "古龙", "赤银", "龙铁", "rust", "blood"]
+sickness = ["病", "咳", "发热", "发烧", "高烧", "热病", "龙锈之害", "瘟", "疫", "灰唇", "嘴唇发灰", "寒热", "垂死", "毒", "腐烂", "瘸", "干呕", "呕吐", "痰", "sick", "fever", "cough"]
+mine = ["矿", "竖井", "矿脉", "灰牙", "巷道", "坑道", "隧道", "挖掘", "深门", "mine", "shaft"]
+money = ["钱", "铜币", "银币", "银子", "债", "税", "价钱", "价格", "付钱", "支付", "账", "金子", "金币", "什一税", "欠", "赚", "coin", "debt", "tax"]
+law = ["领主", "荆堡", "总管", "管事", "请愿", "法令", "律法", "奥德里克", "奥斯里克", "法庭", "公道", "城堡", "爵士", "lord", "law"]
+faith = ["圣徒", "文娜", "祈祷", "祷告", "礼拜堂", "神明", "正神", "上帝", "罪", "神圣", "祝福", "保佑", "神父", "嬷嬷", "女修院长", "经文", "天堂", "pray", "chapel", "saint"]
+omen = ["预兆", "征兆", "兆头", "乌鸦", "梦", "异象", "发光", "诅咒", "天谴", "审判", "警告", "凶兆", "omen", "sign", "dream"]
+magic = ["女巫", "巫婆", "巫术", "咒", "法术", "魔法", "符咒", "草药", "月草", "药剂", "药水", "吉莎", "茶", "药膏", "witch", "spell", "herb"]
+ancient = ["古冢", "石头", "七石", "石阵", "国王", "王", "埃德里克", "雕刻", "刻着", "传说", "歌", "牧歌", "诗", "古文字", "蛇", "古老", "符文", "barrow", "stone", "song"]
+wolves = ["狼", "嚎", "足迹", "爪印", "狩猎", "打猎", "wolf", "wolves"]
+danger = ["危险", "袭击", "害怕", "恐惧", "小心", "当心", "逃", "火", "坍塌", "塌方", "地震", "震动", "杀", "尖叫", "danger", "fire"]
+food = ["面包", "面粉", "谷", "麦", "饭", "麦酒", "羊肉", "野味", "收成", "饿", "吃", "粮", "bread", "food"]
+trade = ["集市", "买", "卖", "商人", "货", "货车", "芬渡", "小贩", "驳船", "塞德里克", "摊", "market", "trade"]
+stranger = ["陌生", "外乡", "外地", "旅人", "旅客", "狐", "外人", "修士", "贝果", "尾巴", "stranger", "bagel"]
+art = ["画", "颜料", "色彩", "颜色", "画布", "素描", "写生", "paint"]
+help = ["帮", "求求", "请你", "需要", "快来", "救", "援手", "能不能", "可不可以", "愿不愿意", "help", "please"]
+children = ["孩子", "小孩", "儿童", "婴儿", "男孩", "女孩", "宝宝", "皮普", "儿子", "女儿", "娃", "child", "pip"]
+gathering = ["宴", "节日", "集市日", "聚", "集会", "会议", "大家", "所有人", "一起", "众人", "feast", "gather"]
+death = ["死", "去世", "坟", "葬礼", "尸", "埋", "丧", "dead", "death"]
+weather = ["霜", "雨", "雪", "暴风", "风", "雾", "冷", "寒", "frost", "rain", "snow"]
+
+# 每样知识，主持人被告知的说法（sheet.toml 的 `knows`，或观察所得）。
+[knows]
+verse1 = "能背出牧歌的第一段"
+verse2 = "读过刻在古冢石头上的牧歌第二段"
+tune = "会唱牧歌的调子"
+deep_door = "见过深巷道里那面刻字的墙"
+ledger = "读过奥斯里克的账本"
+book = "读过礼拜堂那本书里关于“赤红之年”的记载"
+stones_lock = "知道七石是锁住某种古老之物的锁"
+old_script = "认得古文字"
+literate = "识字"
+wyrm_iron = "听人把那种矿石叫作龙铁"
+adventurer = "曾经是大名鼎鼎的冒险者铁手布拉姆：知道怎样在他的指挥下，用撬杠、绳索和六个壮劳力把倒下的立石重新竖起来，还亲手杀过一头恐狼"
+high_magic = "立誓修道之前是高阶法师：仍能施展大法术（封住破口、抬起巨石、让水连续几天保持洁净），但她的大法术大约每三次就有一次出大岔子"
+knight = "受过训练的骑士"
+men_at_arms = "在荆堡统领四名强壮忠诚的侍卫"
+signet = "戴着一枚刻有索恩家纹的印章戒指，是他作为弃婴被留下时身上带着的"
+mage_blood = "身上流着法师的血：古老的刻字会对他说话"
+strength_draught = "能熬一种苦药，让一个咳嗽的病人硬撑着干一整天重活"
+true_voice = "是古神乌勒尔的神选之子，只是没人知道，她自己更不知道：当她在七石之间唱起牧歌，乌勒尔的权柄会借她醒来，而且醒得久得多"
+muster = "身为管事，可以征召二十个壮劳力，为大家干一天公活"
+healing_hands = "有一双疗愈之手：能把重病之人的高热引到自己身上"
+tunnel_map = "手里有老国王的工程师绘制的灰牙矿地下坑道图，上面标着一条干燥的平硐，能从水面以上安全通到深处的矿道"
+sapper = "曾是王家工兵：懂得用木垛支撑巷道，用木垛和碎石封住破口"
+hidden_stores = "在荆堡的地窖里藏着木材、绳子、工具和灯"
+locks = "退隐的神偷：任何锁都开得了，任何墙都爬得上"
+market = "在芬渡的摊位上有绳子、木材和带盖的罐子出售"
+archer = "西边几道山谷里最好的弓手；知道狼窝在哪里，带上两个靠得住的帮手，就能杀掉或赶走狼群"
+outer_god = "侍奉一位外神——星神，星神能借她之手降下恩赐"
+
+# 命运可以改变什么。type 和键名是引擎的，必须原样照写；说明是故事的。
+[fate]
+effects = '''  {"type": "seal_shaft"}  —— 深巷道里的破口重新封上
+  {"type": "reopen_shaft"}
+  {"type": "raise_stone"}  —— 古冢丘上倒下的那块石头重新立起来
+  {"type": "sing", "verses": 1 或 2}  —— 在七石之间唱起牧歌（两段都唱、石头又已立起时，古神乌勒尔的权柄会醒来一阵）
+  {"type": "purify", "place": "<地点 id>", "amount": 0.05 到 0.3}  —— 那里的水暂时变干净一些
+  {"type": "heal", "place": "<地点 id>", "amount": 0.05 到 0.4}  —— 那里的病人好转一些
+  {"type": "wolves", "result": "driven_off" | "killed" | "failed"}
+  {"type": "item", "who": "<人物 id>", "item": "<物品 id：water（一罐清水）、jars（罐子）、timber（木材）、rope（绳子）、lamps（灯）、tools（工具）、remedy（药剂）、herbs（草药）、moonwort（月草）、map（地图）、coin（铜币）、bread（面包）、ore（矿石）、wool（羊毛）、flour（面粉）、ale（麦酒）或 game（野味）>", "qty": <正数为得到，负数为失去>}
+  {"type": "health", "who": "<人物 id>", "change": 1（更糟）或 -1（好转）}
+  {"type": "confine", "who": "<人物 id>", "days": 1 到 3}  —— 被关进荆堡
+  {"type": "tie", "a": "<人物 id>", "b": "<人物 id>", "change": -0.5 到 0.5}  —— a 现在对 b 的感情变化
+  {"type": "reveal", "text": "<从此在场所有人都看得明明白白的事>"}'''
+
+# 隐藏的世界，主持人、神明和编年史家所知道的样子。
+[state]
+door_open = "灰牙矿底下的深门是开着的：龙血正在往外渗。"
+door_shut = "灰牙矿底下的深门又关上了。"
+stone_raised = "古冢丘上倒下的那块石头已经重新立起；"
+stone_fallen = "古冢丘上倒下的那块石头仍然倒着；"
+ullr_awake = "古神乌勒尔的权柄还会醒着 {n} 夜，古血沉睡"
+ullr_asleep = "古神乌勒尔的权柄沉睡着"
+ullr_hum = "；一首唱了一半的歌让龙锈之害稍稍缓了一些"
+water = "水：{levels}。"
+water_level = "{place}{level}"
+levels = ["干净", "略有污染", "受了污染", "污染严重"]
+sickness = "疫病：{levels}（0 为无人患病，1 为人人患病）。"
+sick_level = "{place} {n}"
+wolves = "狼群：饥饿 {hunger}，至今袭击羊圈 {attacks} 次。"
+
+[nature]
+sick_mine = ["灰牙矿有几个矿工在井口咳嗽。", "灰牙矿的矿工一半咳出了红痰，有两个已经干不了活。", "灰牙矿发起了热病：矿工们嘴唇发灰，躺在工棚里。"]
+sick_other = ["{place}有几个人干咳，有人说水里有股铁锈味。", "{place}许多人家都在咳嗽：痰里带红，还有个孩子嘴唇发灰。", "{place}热病蔓延：一家家整户卧床，嘴唇发灰。人们害怕了。"]
+woke_coughing = "你咳醒了，痰里带着红。"
+woke_fevered = "今早你发着热，浑身无力；嘴唇发凉，走远路是不可能了。"
+wolves_in_fold = "夜里狼钻进了羊圈：两只母羊被撕开，布拉姆的一条狗也挂了彩。"
+deaths = { ashmere = "住在井边的老寡妇阿格尼丝夜里死了，嘴唇发灰。她女儿在草坪上哭号。", mine = "布兰诺克手下的科布夜里死了，嘴唇上带着红。", mill = "哈尔那匹老母马在磨坊的草场上躺下，再也没有起来。", fenford = "天亮时，人们发现摆渡的老瓦特死在自己船里，嘴唇发灰；船夫们都不肯再过河了。" }
+griefs = { grief_ashmere = "夜里灰湖又死了两个人，箍桶匠和他的老母亲。草坪上一片哭号。", grief_pip = "哈尔的儿子皮普嘴唇发灰，烧得滚烫；吉莎说，越小的孩子走得越快。", grief_mine = "布兰诺克手下的内德夜里死了；矿工们一路咳着，把他抬下山送进了礼拜堂。" }
+
+# 至上者：它的权能叫什么，落下时山谷看到的是什么。
+[overgod]
+powers = { whisper = ["低语", "以凌驾一切声音之上的声音，托梦给一位村民。听见的人从此可以向你祈祷。"], inscribe = ["铭刻", "在账簿之上写下光的文字，每个村民行动时都会读到。"], sign = ["神迹", "在一处地点显现奇迹，在场的人都看得见。"], prophecy = ["预言", "天上传来声音，全谷都听得见。"], reveal = ["揭露", "一位村民藏着的秘密，在身边众人面前自己显露出来。"], collector = ["收债官", "王室的收债官提前几周来到荆堡讨债。"], flood = ["洪水", "空溪决堤：龙锈之害蔓延到沼林和芬渡，热病随之而来。"], plague = ["瘟疫", "热病席卷一处地点。"], wildfire = ["野火", "沼林起火；狼群被赶向羊圈。"], raiders = ["劫匪", "劫匪洗劫一处地点：抢走财物，打伤人。"], winter = ["严冬", "连下三天雪：道路难行，黎明给的力气也少了。"], earthquake = ["地震", "大地震动：深门的封印可能裂开，石头可能再次倒下。"], decree = ["神谕", "把你的意志加在山谷的一位神明身上，持续数日；它不能违抗。"], wake_ullr = ["唤醒乌勒尔", "唤醒古神乌勒尔的权柄三夜，不论牧歌唱了没有。"], bind_star = ["缚住星神", "星神在几天之内无法触及山谷。"], heal = ["治愈", "一处地点所有病人都痊愈如初。"], cleanse = ["净水", "一处地点的水变得清澈干净。"], raise_stone = ["立石", "倒下的第七块石头重新立起。"] }
+chapters = { voice = ["至上之声", "让山谷里有人向你——至上者——祈祷。"], wound = ["伤口", "灰牙矿底下的深门被关上。"], song = ["古老的歌", "在七石之间唱起牧歌，两段俱全。"], waking = ["苏醒", "古神乌勒尔的权柄醒来。"] }
+collector_keep = "黎明时分，王室的收债官带着六名骑手来了，比约定早了好几周，要荆堡在他离开前用钱或矿石还债。"
+collector_word = "消息顺着每条路传开：王室的收债官提前来了荆堡，债若还不上，他就要收走城堡。"
+collector_done = "王室的收债官到了荆堡。"
+flood = "夜里空溪决了堤：低处的房子里积着浑黄的水，沼林成了一片湖，去芬渡的路淹在洪水底下。"
+flood_done = "空溪发了洪水。"
+quake = "夜里大地震动。每座屋顶都落下尘土，礼拜堂的裂缝又宽了一掌，狗对着古冢丘狂吠。"
+quake_done = "大地震动"
+quake_seal = "深门的封印裂开了"
+quake_stone = "第七块石头又倒了"
+hurt = "。受伤的有：{who}。"
+fire = "夜里大火烧过沼林。浓烟笼罩着山谷，鹿和狼都往山上逃，朝羊圈去了。"
+fire_done = "大火烧过沼林；狼群被赶向羊圈"
+plague = "一夜之间，一场热病席卷了{place}，比以往任何一次都快。"
+plague_done = "瘟疫袭击了{place}"
+fevered = "。发热的有：{who}。"
+winter = "一夜之间雪积到膝盖，寒气透过每一面墙。路难走，谁都没有多余的力气。"
+winter_done = "严冬降临山谷，持续三天。"
+raiders = "天还没亮，劫匪就翻过山来到{place}，能拿的都拿走了，然后扬长而去。"
+raiders_done = "劫匪洗劫了{place}"
+robbed = "；被抢的有：{who}"
+hurt_semi = "；受伤的有：{who}。"
+wake = "正午时分，七石周围结了一圈霜，古冢丘上的空气里有雪和陈铁的味道。"
+wake_done = "古神乌勒尔被唤醒三夜。"
+healed = "一道不知从何而来的光充满了{place}，那里所有人的高热一下子都退了。"
+healed_done = "{place}所有病人都痊愈如初。"
+cleansed = "{place}的水一下子清澈如镜，从此一直如此。"
+cleansed_done = "{place}的水变干净了。"
+stone = "黎明时分，倒下的第七块石头立在了古冢丘上它原来的位置，仿佛从未倒下，没有一点撬杠或绳索的痕迹。"
+stone_done = "第七块石头重新立起。"
+
+[overgod.secrets]
+aldric = "奥德里克爵士以为四下无人，展开一张磨旧的纸：多年来以他的名义为一个弃婴付的学费，底下是一个女人的笔迹写的一个名字：“伊索尔德”。"
+bagel = "贝果跪下时，她最新那幅画上的颜料从里面亮了起来，仿佛天外极远处有谁正透过它往这边看，满天星辰似乎都转向她面朝的方向。"
+bram = "老布拉姆的袖子在门柱上挂破了，前臂露出一个旧烙印：铁连队的交叉双斧。有人想起了那首歌谣——杀死霍尔特恐狼的铁手布拉姆。"
+brannoc = "一张折好的纸从布兰诺克的外衣里掉出来：一份王家工兵的退役文书，在哈勒围城时签发，上面写着他和哈尔·韦恩赖特的名字。"
+cedric = "塞德里克的货里有个封好的木桶渗了：桶塞上冒出一颗颗红卤水，一股铁味，签条上写着“交炼金术士。货到付四十金币。”"
+elspeth = "埃尔斯佩丝以为没人看见，把双手按在一个发热的额头上；高热从病人脸上退去，明明白白地升到了她自己脸上，她晃了一晃。"
+gytha = "吉莎低声咒骂，把伊索尔德嬷嬷叫作烧了卡罗、毒了芬尼克那口井的女巫，又把老布拉姆叫作她的父亲。"
+hal = "哈尔的外衣敞开，一张旧地图滑出来一半：老国王的工程师绘制的灰牙矿和古冢丘底下的坑道图，上面用红笔标着一条干燥的平硐。"
+isolde = "伊索尔德嬷嬷面前的一支蜡烛火苗乱晃，她两指一并、念了一个字，不碰烛火就让它定住了：这是高阶法师的手法，一个女修院长不该会。"
+kell = "有人听见凯尔低声对狗说，老布拉姆从前就是铁手布拉姆，那个杀了霍尔特恐狼的人。"
+marta = "玛尔塔用一根弯针打开了一扇锁着的门，比倒一杯麦酒还快：这是“提灯”的手法，王都最出名的神偷。"
+maud = "莫德一慌，说漏了嘴：三十二年前她是圣文娜礼拜堂接生婆的帮手，见过一个新生儿的襁褓里系着一枚印章戒指——闭门之上的一枝荆棘。"
+osric = "一封信从奥斯里克的账本里掉出来：是他临终的母亲写的，说荆堡的老领主是他的父亲；信后面别着多年来以奥德里克名义为托拜厄斯·奎尔付的学费。"
+tobias = "一枚戒指连着绳子从托拜厄斯的衣领里滑了出来：闭门之上的一枝荆棘，正是荆堡大门上方刻着的家纹。"
+wynn = "温不经意地哼起她祖父的调子，大地应和了：山底下传来低沉的嗡鸣，在场每个人的脚底都感觉得到。"

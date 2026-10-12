@@ -1,0 +1,777 @@
+# The Vale of Ashmere: places, hidden clues, omens, calendar and physics.
+#
+# Conditions are lists of [variable, op, value]; all must hold. Variables read the
+# hidden state: blight.<place>, sickness.<place>, wolves.hunger, wolves.attacks,
+# shaft_open, stone_raised, stones_sung, day.
+
+[vale]
+name = "灰湖谷"
+season = "深秋"
+weathers = [
+  "细冷的雨丝飘过山谷。",
+  "雾气笼罩着低洼地，直到正午才散。",
+  "秋日晴朗，寒意凛冽；风从群山吹来。",
+  "天空灰暗，空气凝滞；烟囱里冒出的烟悬在村庄上空。",
+  "阵雨，古冢丘上空挂着一道彩虹。",
+  "凛冽的风从北方吹来。",
+]
+
+# What each weather looks like, in the same order, for the pictures.
+weather_kinds = ["rain", "fog", "clear", "overcast", "showers", "wind"]
+
+# ---------------------------------------------------------------------------
+# Physics: the cheap rules that decide who stirs. No language model involved.
+# ---------------------------------------------------------------------------
+[physics]
+refill = 0.6               # energy each dawn adds to every villager's reserve (the cron's power)
+reserve_cap = 2.0          # most a villager can store
+start_reserve = 1.0
+activation_cost = 1.0      # one stirring spends this much reserve
+max_acts_per_agent = 2     # per day
+max_activations_per_day = 30
+habituation = 0.25         # a signal you've already acted on stirs you this much less, each time
+learn_rate = 0.08          # acting on a topic makes you more sensitive to it
+unlearn_rate = 0.03        # ...and sensitivity drifts back toward who you were
+diffusion_min = 1.8        # signals at least this strong travel one road per wave
+diffusion_factor = 0.45    # ...arriving this much weaker
+diffusion_hops = 2
+theta_scale = 1.25         # multiplies every villager's threshold
+god_grace = 0.0            # grace a god gains each dawn: one dream or sign each (0: no god)
+god_grace_cap = 3.0        # most grace the god can save
+ledger_lines = 10          # the Ledger of the World holds at most this many lines
+outer_god = 0.0            # 1: Bagel's master, an Outer God, answers her prayers with boons
+ullr_agent = 0.0           # 1: old Ullr acts in his own right while his song holds him awake
+
+[physics.kinds]
+# strength, half-life in days
+speech = [1.5, 0.35]
+directed = [1.9, 0.35]
+notice = [1.2, 4.0]
+painting = [1.8, 8.0]
+deed = [0.8, 0.4]
+clue = [2.0, 1.0]
+omen = [2.0, 1.0]
+self = [1.6, 1.0]
+rumor = [1.0, 1.0]
+project = [2.0, 3.0]
+outcome = [3.0, 1.5]
+arrival = [0.7, 0.3]
+dream = [2.6, 1.0]
+sign = [2.4, 1.0]
+ledger = [1.2, 1.0]
+boon = [2.6, 1.0]
+prophecy = [2.8, 1.0]       # the One Above, heard by everyone
+
+# ---------------------------------------------------------------------------
+# Hidden state at the first dawn.
+# ---------------------------------------------------------------------------
+[state]
+shaft_open = 1
+stone_raised = 0
+stones_sung = 0
+stone_hum = 0
+ullr_awake = 0              # nights old Ullr's authority stays awake after the song
+
+[state.blight]
+mine = 0.40
+mill = 0.20
+ashmere = 0.08
+fenford = 0.03
+mirewood = 0.08
+
+[state.sickness]
+mine = 0.30
+mill = 0.0
+ashmere = 0.05
+fenford = 0.0
+mirewood = 0.0
+
+[state.relief]
+
+[state.wolves]
+hunger = 0.10
+attacks = 0
+driven = 0
+
+# ---------------------------------------------------------------------------
+# Places. x/y place them on the map (0-100). Features can be looked at; the first
+# view whose conditions hold (and whose `who`, if any, includes the looker) is seen.
+# A feature's `who` restricts who may look at all; `denied` is what others get.
+# `grants` adds a piece of knowledge to the looker.
+# ---------------------------------------------------------------------------
+
+[[place]]
+id = "mine"
+name = "灰牙矿"
+desc = "一座开凿在西部群山中的铁矿：竖井井口、矿车、废石堆，还有一路流入空溪的排水沟。"
+x = 14
+y = 20
+roads = ["mill", "thornkeep"]
+
+  [[place.feature]]
+  id = "deep_shaft"
+  name = "深井"
+  who = ["brannoc", "osric"]
+  denied = "布兰诺克手下的两名矿工挡住向下的梯子：“谁也不许下去。工头的命令。”"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "地下深处，新巷道的尽头是一面破损的石墙，石块严密砌合，墙上刻着盘绕的蛇。红卤水从裂缝中渗出，在地上积成水洼；空气里满是血腥味和铁味。这面墙是为了把某种东西关在里面，而不是挡在外面。"
+    grants = "deep_door"
+    [[place.feature.view]]
+    text = "新巷道尽头的破口已用木料和填实的石块封住。红卤水不再渗出。"
+
+  [[place.feature]]
+  id = "drain_outflow"
+  name = "矿井排水沟汇入溪流的地方"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.55]]
+    text = "排水沟将一股黏稠的锈红色污水倾入空溪；下游五十步内的石头都裹着一层红色黏垢，气味像屠夫的砧板。"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.2]]
+    text = "矿井排水沟汇入空溪处，一缕锈红色的水流在清水中盘旋，随后渐渐散去。排水沟上游的溪水依旧清澈。"
+    [[place.feature.view]]
+    text = "灰色的水从排水沟流入溪中。"
+
+  [[place.feature]]
+  id = "ore_carts"
+  name = "矿车"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "新挖出的矿石很古怪：沉甸甸的，摸上去微微发暖，纹理中泛着赤银色的光泽。车夫们说，总管把每一车都运往芬渡。"
+    [[place.feature.view]]
+    text = "矿车空空地停在那里。"
+
+  [[place.feature]]
+  id = "spoil_heap"
+  name = "废石堆"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.3]]
+    text = "废石堆染成了锈红色，寸草不生；连乌鸦也不肯落下。"
+    [[place.feature.view]]
+    text = "灰色的废石，石上结着霜。"
+
+[[place]]
+id = "thornkeep"
+name = "荆堡"
+desc = "奥德里克爵士在山脊上的小城堡，寒气逼人：一座大厅、一条城墙步道、一间上锁的账簿室。城门上方刻着索恩家纹：闭门之上的一枝荆棘。"
+x = 40
+y = 12
+roads = ["mine", "ashmere"]
+
+  [[place.feature]]
+  id = "great_hall"
+  name = "大厅"
+    [[place.feature.view]]
+    when = [["day", ">=", 9]]
+    text = "大厅里寒气逼人，挂毯上满是补丁。一封盖着王室印玺的信摊在奥德里克爵士的椅子上：王室税吏将于春天到来，若欠债仍未偿清，荆堡便要被没收。"
+    [[place.feature.view]]
+    text = "大厅里寒气逼人，挂毯上满是补丁；为了省柴，壁炉里的火烧得很小。"
+
+  [[place.feature]]
+  id = "wall_walk"
+  name = "城墙步道"
+    [[place.feature.view]]
+    when = [["blight.mine", ">", 0.3]]
+    text = "站在城墙上，整座山谷尽收眼底。灰牙下游的空溪，比矿场上游的溪水更暗、更红。"
+    [[place.feature.view]]
+    text = "站在城墙上，整座山谷尽收眼底，溪流如一缕银线，从矿场延伸到浅滩渡口。"
+
+  [[place.feature]]
+  id = "ledger_room"
+  name = "账簿室"
+  who = ["osric", "aldric"]
+  denied = "账簿室上了锁；唯一的钥匙挂在奥斯里克的腰带上。"
+    [[place.feature.view]]
+    text = "奥斯里克的账本，字迹工整，记述直白：“已付，封口费，深层矿道：八人，每人两枚银币。”下方写着：“赤银售予芬渡的C. 阿什比，价为铁的三倍。”每一行都有五分之一记在“O.V.”名下。"
+    grants = "ledger"
+
+[[place]]
+id = "mill"
+name = "空溪磨坊"
+desc = "哈尔在空溪上的水磨坊，位于矿场下游：磨坊水道、巨大的水轮、谷仓。"
+x = 22
+y = 44
+roads = ["mine", "ashmere"]
+
+  [[place.feature]]
+  id = "millrace"
+  name = "磨坊水道"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.45]]
+    text = "磨坊水道里的水红得像掺了水的葡萄酒；死去的小鱼堵住了拦栅。"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.2]]
+    text = "磨坊水道里的流水泛着淡淡的红光，几条死去的小鱼卡在拦栅上。"
+    [[place.feature.view]]
+    text = "磨坊水道里的流水清澈冰冷。"
+
+  [[place.feature]]
+  id = "waterwheel"
+  name = "水轮"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.3]]
+    text = "水轮的桨板上覆着一层锈红色的黏液，刮掉后隔一天就又长了出来。"
+    [[place.feature.view]]
+    text = "老橡木水轮干干净净，稳稳地转着。"
+
+  [[place.feature]]
+  id = "grain_bins"
+  name = "谷仓"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.45]]
+    text = "用溪水淘洗过的谷物带着一股酸涩的铁腥味，磨出的面粉也泛着淡粉色。"
+    [[place.feature.view]]
+    text = "干燥清香的谷物，是哈尔的骄傲。"
+
+[[place]]
+id = "ashmere"
+name = "灰湖"
+desc = "草坪上的村庄：水井、管事记录账目的草坪告示柱、带着告示板的溺灯酒馆，还有医者的住处。"
+x = 47
+y = 52
+roads = ["mill", "thornkeep", "chapel", "fenford", "mirewood"]
+
+  [[place.feature]]
+  id = "well"
+  name = "水井"
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.5]]
+    text = "桶里的水微微泛粉，带着铁锈味。"
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.25]]
+    text = "井水有股铁腥味，像嘴唇破了时尝到的味道。"
+    [[place.feature.view]]
+    text = "冰凉、清澈的井水。"
+
+  [[place.feature]]
+  id = "green_post"
+  name = "草坪上的告示柱"
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.35]]
+    text = "草坪上的告示柱密密麻麻刻着莫德的统计记号：许多人家报有人咳嗽，还有几家报有人发烧。"
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.1]]
+    text = "莫德在草坪告示柱上的统计：有几户人家报有人咳嗽，还说“水里有铁味”。"
+    [[place.feature.view]]
+    text = "莫德在草坪告示柱上的统计：有人抱怨磨坊收费，还有人提到一只走失的山羊。"
+
+  [[place.feature]]
+  id = "tavern_cellar"
+  name = "酒馆地窖"
+    [[place.feature.view]]
+    when = [["blight.ashmere", ">", 0.2]]
+    text = "用井水酿的麦酒味道寡淡，带着金属味，酒桶木板的内侧也染上了淡红色。"
+    [[place.feature.view]]
+    text = "一只只木桶，空气里飘着大麦的气味。"
+
+  [[place.feature]]
+  id = "healers_house"
+  name = "医者的家"
+    [[place.feature.view]]
+    when = [["sickness.ashmere", ">", 0.3]]
+    text = "埃尔斯佩丝家里已经挤满了人：每张草铺上都有咳嗽的孩子，门边放着一碗泛红的痰。"
+    [[place.feature.view]]
+    text = "干净的草铺、成束晾干的草药、卷好的绷带。"
+
+[[place]]
+id = "chapel"
+name = "圣文娜礼拜堂"
+desc = "村东的古老礼拜堂：中殿里有彩绘玻璃窗，还有用铁链锁着的礼拜堂典籍和一口钟。"
+x = 68
+y = 32
+roads = ["ashmere", "barrow_hill"]
+
+  [[place.feature]]
+  id = "chapel_book"
+  name = "礼拜堂典籍"
+    [[place.feature.view]]
+    who = ["tobias"]
+    text = "书中记载了三百年来的预兆。古龙之年那一页写着：“水化血铁，羊群染病，直至深门闭合，牧人族向七石唱起牧歌，方才止息。”末尾几页用古文字写成，你读来毫不费力：“牧歌有两段。第一段由牧人族保管；第二段由国王刻在石上，以免失传。”"
+    grants = "book"
+    [[place.feature.view]]
+    who = ["isolde", "aldric", "osric", "maud", "elspeth", "cedric"]
+    text = "礼拜堂典籍在古龙之年的记载中写道：“水化血铁，羊群染病，直至深门闭合，牧人族向七石唱起牧歌，方才止息。”末尾几页用古文字写成，你只能辨认出“两段”和“刻在石上”。"
+    grants = "book"
+    [[place.feature.view]]
+    text = "一本厚重的古书，用铁链锁在读经台上。你认不出上面的字迹。"
+
+  [[place.feature]]
+  id = "saints_window"
+  name = "圣文娜之窗"
+    [[place.feature.view]]
+    text = "彩绘玻璃窗上，圣文娜站在一位戴王冠的国王身旁；他们脚下，七块立石围着一条盘曲的红蛇。"
+
+  [[place.feature]]
+  id = "nave_crack"
+  name = "中殿地板上的裂缝"
+    [[place.feature.view]]
+    text = "一道裂缝自西向东横贯中殿地板，从灰牙方向延伸向古冢丘。伊索尔德嬷嬷判断，裂缝出现在本周开始前的第六天。"
+
+[[place]]
+id = "barrow_hill"
+name = "古冢丘"
+desc = "礼拜堂上方的一座青翠山丘：七块刻着古老文字的立石，环绕着一座古冢。"
+x = 86
+y = 18
+roads = ["chapel", "fold"]
+
+  [[place.feature]]
+  id = "standing_stones"
+  name = "竖石群"
+    [[place.feature.view]]
+    when = [["stone_raised", "==", 0]]
+    text = "七块竖石环绕着古冢，但其中一块倒下了，而且是最近才倒的：草皮被扯破，底下露出的泥土新鲜，还带着微微的暖意。周围的裂缝蜷曲如一条沉睡的蛇。"
+    [[place.feature.view]]
+    text = "七块石头都重新立了起来；扶起的那块石头周围，草皮被踩得凌乱。"
+
+  [[place.feature]]
+  id = "carvings"
+  name = "石上的刻纹"
+    [[place.feature.view]]
+    who = ["tobias"]
+    text = "古文字，刻痕很深：‘古龙沉睡于地下，其血深藏地底。闭合下方之门，向上方之石吟唱，否则山谷将饮下龙血。——缚者埃德里克。’下方刻着一段诗：‘石连石兮门对门，/ 古血沉睡地底深。’"
+    grants = "verse2"
+    [[place.feature.view]]
+    who = ["isolde"]
+    text = "这是古文字，你读来毫不费力，就像当年阅读法师学院的魔法典籍一样：‘古龙沉睡于地下，其血深藏地底。闭合下方之门，向上方之石吟唱，否则山谷将饮下龙血。——缚者埃德里克。’下方刻着一段诗：‘石连石兮门对门，/ 古血沉睡地底深。’这是一道束缚法术，你能感觉到它仍在运作，却已如旧绳般磨损松散。"
+    grants = "verse2"
+    [[place.feature.view]]
+    text = "螺旋、蛇形纹样，还有一行行棱角分明、你读不懂的文字。"
+
+  [[place.feature]]
+  id = "barrow_mouth"
+  name = "古冢入口"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "古冢入口被一块石板封住。深处隐隐传来极轻的声响，仿佛缓慢的呼吸。"
+    [[place.feature.view]]
+    text = "古冢入口被一块石板封住。里面一片寂静。"
+
+[[place]]
+id = "fold"
+name = "牧人羊圈"
+desc = "古冢丘下的高处牧场：老布拉姆的小屋、畜栏、狗，以及溪流上方的一眼泉。"
+x = 84
+y = 60
+roads = ["barrow_hill", "mirewood"]
+
+  [[place.feature]]
+  id = "flock"
+  name = "羊群"
+    [[place.feature.view]]
+    when = [["wolves.attacks", ">", 0]]
+    text = "畜栏边散落着撕碎的羊毛：有母羊遭了狼害。剩下的羊紧挨着墙挤成一团。"
+    [[place.feature.view]]
+    when = [["wolves.hunger", ">", 0.35]]
+    text = "羊群躁动不安，挤作一团；狗朝着沼林，颈背的毛根根竖起。"
+    [[place.feature.view]]
+    text = "羊群在高处牧场吃草，已养得膘肥体壮，准备过冬。"
+
+  [[place.feature]]
+  id = "dogs"
+  name = "狗"
+    [[place.feature.view]]
+    when = [["stone_raised", "==", 0]]
+    text = "狗不肯靠近通往古冢的小径。到了黄昏，它们便朝着山丘呜咽。"
+    [[place.feature.view]]
+    text = "狗安静地趴着，鼻子搁在爪子上。"
+
+  [[place.feature]]
+  id = "high_spring"
+  name = "高处的泉眼"
+    [[place.feature.view]]
+    text = "羊圈上方的一眼泉，离溪流很远。泉水清澈甘甜。"
+
+[[place]]
+id = "mirewood"
+name = "沼林"
+desc = "沿溪延伸的低地树林：高岸上草药婆的小屋、猎人的木屋、溪岸、鹿径。"
+x = 62
+y = 78
+roads = ["ashmere", "fold"]
+
+  [[place.feature]]
+  id = "witch_garden"
+  name = "草药婆的园子"
+    [[place.feature.view]]
+    when = [["blight.mirewood", ">", 0.15]]
+    text = "下方溪边的月草根部已经发黑；只有吉莎小屋旁高岸上的月草，根部仍然洁白。"
+    [[place.feature.view]]
+    text = "月草和香杨梅，长势健旺，根须洁白。"
+
+  [[place.feature]]
+  id = "brook_bank"
+  name = "溪岸"
+    [[place.feature.view]]
+    when = [["blight.mirewood", ">", 0.15]]
+    text = "溪岸上躺着死青蛙，肚皮朝天，泛着红色。"
+    [[place.feature.view]]
+    text = "蛙卵和芦苇。"
+
+  [[place.feature]]
+  id = "wolf_tracks"
+  name = "兽径"
+    [[place.feature.view]]
+    when = [["wolves.hunger", ">", 0.25]]
+    text = "许多新鲜的狼脚印沿山坡向上，通往高处的牧场。鹿都不见了。"
+    [[place.feature.view]]
+    text = "陈旧的鹿蹄印；没有狼。"
+
+[[place]]
+id = "fenford"
+name = "芬渡"
+desc = "下游河流浅滩渡口旁的集镇：塞德里克的摊位、渡口、驳船码头。"
+x = 30
+y = 84
+roads = ["ashmere"]
+
+  [[place.feature]]
+  id = "ford"
+  name = "渡口"
+    [[place.feature.view]]
+    when = [["blight.fenford", ">", 0.25]]
+    text = "渡口的鱼肚皮朝天浮在水上；河水泛着铁锈色。"
+    [[place.feature.view]]
+    text = "渡口水色浑褐，往来繁忙。"
+
+  [[place.feature]]
+  id = "market_stalls"
+  name = "塞德里克的摊位"
+    [[place.feature.view]]
+    when = [["blight.mill", ">", 0.4]]
+    text = "塞德里克的石板告示：面粉价高，还在上涨。“求购铁矿石——出价最优。”"
+    [[place.feature.view]]
+    text = "塞德里克的石板告示：面粉便宜，羊毛价格平稳，盐和钉子刚到货。"
+
+  [[place.feature]]
+  id = "barge_landing"
+  name = "驳船码头"
+    [[place.feature.view]]
+    when = [["shaft_open", "==", 1]]
+    text = "盖着荆堡印记的木箱正等着装上下行的驳船：船夫们说，箱子很沉，还透着温热，仿佛里面有什么活物。"
+    [[place.feature.view]]
+    text = "码头空无一物。"
+
+# ---------------------------------------------------------------------------
+# Omens: what the world shows at dawn. `place` without `who` is seen by anyone
+# there; `who` makes it private to those people (and only at `place`, if given).
+# ---------------------------------------------------------------------------
+
+[[omen]]
+id = "millrace_sheen"
+place = "mill"
+when = [["blight.mill", ">", 0.22]]
+strength = 2.2
+text = "天刚亮，磨坊水道里的流水泛着淡淡的红光；死去的小鱼卡在格栅里。"
+
+[[omen]]
+id = "millrace_red"
+place = "mill"
+when = [["blight.mill", ">", 0.45]]
+strength = 2.6
+text = "今天上午，磨坊水道红得像掺了水的葡萄酒；水车桨板上滴着铁锈色的黏液。"
+
+[[omen]]
+id = "well_iron"
+place = "ashmere"
+when = [["blight.ashmere", ">", 0.25]]
+strength = 2.2
+text = "井边的女人们皱起了脸：井水有股铁腥味，像嘴唇破了时尝到的味道。"
+
+[[omen]]
+id = "well_pink"
+place = "ashmere"
+when = [["blight.ashmere", ">", 0.5]]
+strength = 2.8
+text = "今天上午，井里提上来的一桶水泛着淡粉色。有人尖叫起来。"
+
+[[omen]]
+id = "ford_fish"
+place = "fenford"
+when = [["blight.fenford", ">", 0.25]]
+strength = 2.2
+text = "死鱼肚皮朝天地漂在渡口水面上；船夫们又吐唾沫又骂娘。"
+
+[[omen]]
+id = "frogs"
+place = "mirewood"
+when = [["blight.mirewood", ">", 0.15]]
+strength = 1.6
+text = "溪岸上到处是死青蛙，肚皮朝天，泛着红色。"
+
+[[omen]]
+id = "deer_gone"
+place = "mirewood"
+who = ["kell"]
+when = [["wolves.hunger", ">", 0.15]]
+strength = 1.8
+text = "今天上午，低地里一头鹿也没有；所有鹿蹄印都通向山坡上方。"
+
+[[omen]]
+id = "wolf_howl"
+place = "fold"
+when = [["wolves.hunger", ">", 0.35]]
+every = 2
+strength = 2.2
+text = "夜晚，狼群在羊圈近旁嚎叫；狗一直吠到黎明。"
+
+[[omen]]
+id = "dogs_barrow"
+place = "fold"
+who = ["bram", "wynn"]
+when = [["stone_raised", "==", 0]]
+every = 3
+strength = 1.4
+text = "昨晚黄昏，狗又不肯走通往古冢的小路，朝着山丘呜呜哀鸣。"
+
+[[omen]]
+id = "miners_cough"
+place = "mine"
+when = [["shaft_open", "==", 1], ["blight.mine", ">", 0.3]]
+every = 2
+strength = 2.0
+text = "矿井口，矿工们咳出红沫，有些人连镐都举不起来。"
+
+[[omen]]
+id = "barrow_dew"
+place = "barrow_hill"
+when = [["shaft_open", "==", 1], ["blight.mine", ">", 0.6]]
+strength = 2.0
+text = "今天上午，古冢入口上方的石板凝满了红色露珠。"
+
+[[omen]]
+id = "red_glow"
+place = "thornkeep"
+when = [["blight.mine", ">", 0.7]]
+strength = 2.4
+text = "夜晚，城墙上的守卫看见灰牙上空泛着暗红的光。"
+
+[[omen]]
+id = "nave_wider"
+place = "chapel"
+when = [["blight.mine", ">", 0.6]]
+strength = 1.8
+text = "教堂中殿地板上的裂缝在夜晚变宽了。"
+
+[[omen]]
+id = "bees"
+place = "chapel"
+when = [["day", ">=", 2]]
+strength = 1.2
+text = "一群蜜蜂悬在礼拜堂的屋檐下，像一盏硕大的褐色灯笼，还在决定往哪里去。"
+
+[[omen]]
+id = "waters_clear"
+place = "mill"
+when = [["blight.mill", "<", 0.15], ["day", ">=", 5]]
+strength = 2.4
+text = "今天上午，磨坊水道多日来头一回流着清水。"
+
+[[omen]]
+id = "pip_better"
+place = "mill"
+when = [["flags.grief_pip", ">", 0], ["blight.mill", "<", 0.2]]
+strength = 2.2
+text = "哈尔的儿子皮普今天上午坐起身来，开口要面包吃。"
+
+# ---------------------------------------------------------------------------
+# Calendar: fixed days. `place = "*"` is known everywhere.
+# ---------------------------------------------------------------------------
+
+[[calendar]]
+day = 3
+place = "*"
+strength = 1.6
+text = "今天是芬渡的集市日：渡口旁正在搭起摊位。"
+
+[[calendar]]
+day = 6
+place = "*"
+strength = 2.2
+text = "今天是圣文娜的瞻礼日：礼拜堂的钟将在正午敲响，全谷的人都该到礼拜堂来。"
+
+[[calendar]]
+day = 9
+place = "thornkeep"
+strength = 2.6
+text = "夜晚，一名王室信使骑马赶到，给奥德里克爵士送来一封密封的信：王室的收税官将在春天到来，若欠款未清，荆堡便会被没收。"
+
+[[calendar]]
+day = 12
+place = "*"
+strength = 1.2
+text = "今天上午结了严霜：这是入冬以来的头一场。"
+
+[[calendar]]
+day = 10
+place = "*"
+strength = 1.4
+text = "又到芬渡的集市日了：摊位比上周少，大家都在谈论下游的红水。"
+
+[[calendar]]
+day = 15
+place = "*"
+strength = 1.4
+text = "夜晚下了雪：古冢丘和高处的牧场一片雪白，道路冻得踩上去铿铿作响。"
+
+[[calendar]]
+day = 17
+place = "*"
+strength = 1.4
+text = "芬渡的集市日：摊贩们正求购过冬用的盐、绳索和灯油。"
+
+[[calendar]]
+day = 20
+place = "thornkeep"
+strength = 2.8
+text = "夜晚，第二名王室信使骑马赶到：王室的收税官不肯等到春天了。他将在月底到来，荆堡必须偿清欠款，否则就会被没收。"
+
+[[calendar]]
+day = 21
+place = "ashmere"
+strength = 1.8
+text = "草坪上的老南说，很久以前的这个夜晚，全谷的人都在黄昏时举着火把登上古冢丘，如今却已经没人记得是为了什么。"
+
+[[calendar]]
+day = 24
+place = "*"
+strength = 1.4
+text = "这是隆冬节前芬渡的最后一个集市日。"
+
+[[calendar]]
+day = 26
+place = "fold"
+strength = 2.2
+text = "新雪上留着狼的足迹，一直延伸到羊圈的编枝围栏边；狗怎么也不肯离开牧羊人的门口。"
+
+[[calendar]]
+day = 28
+place = "*"
+strength = 2.0
+text = "今晚是最长之夜的守夜礼：礼拜堂的钟将在黄昏敲响，全谷的人都该到圣文娜礼拜堂来。"
+
+[[calendar]]
+day = 30
+place = "*"
+strength = 2.4
+text = "有人看见王室的收税官和六名骑手走在芬渡路上，正沿山谷而来。"
+
+# ---------------------------------------------------------------------------
+# The deck: chance events, at most one a day, each drawn once.
+# ---------------------------------------------------------------------------
+
+[[deck]]
+place = "ashmere"
+min_day = 2
+strength = 2.2
+text = "一名云游修士在灰湖草坪上布道，声称那个长着狐尾的陌生人，是山谷将受审判的神迹。"
+
+[[deck]]
+place = "fenford"
+min_day = 3
+strength = 1.8
+text = "芬渡的一个小贩兜售装在小瓶里的“圣水”，信誓旦旦地说什么咳嗽都能治。"
+
+[[deck]]
+place = "chapel"
+min_day = 1
+strength = 1.4
+text = "一只渡鸦将一根染红的羽毛丢在了礼拜堂的台阶上。"
+
+[[deck]]
+place = "ashmere"
+min_day = 2
+strength = 1.4
+text = "草坪上的孩子们互相激将，要爬上古冢丘，摸一摸倒下的那块石头。"
+
+[[deck]]
+place = "fenford"
+min_day = 2
+strength = 1.2
+text = "一个商人的骡子在浅滩渡口踟蹰不前，也不肯喝水。"
+
+[[deck]]
+place = "ashmere"
+min_day = 4
+strength = 1.8
+text = "溺灯酒馆里来了两个陌生人，打听“赤银”的事，付的是异国铜币。"
+
+[[deck]]
+place = "mill"
+min_day = 3
+strength = 1.4
+text = "磨坊牧场上的一头牛一夜之间瘸了腿。"
+
+[[deck]]
+place = "fold"
+min_day = 1
+strength = 1.0
+text = "野雁早早南迁，低低掠过山谷，鸣叫着飞去。"
+
+[[deck]]
+place = "ashmere"
+min_day = 5
+strength = 1.8
+text = "有人趁着夜晚，在溺灯酒馆的门上刻了一条盘蛇。"
+
+[[deck]]
+place = "thornkeep"
+min_day = 4
+when = [["shaft_open", "==", 1]]
+strength = 1.6
+text = "一辆矿车在矿道上翻了，洒出的矿石在霜寒中冒着热气。"
+
+[[deck]]
+place = "thornkeep"
+min_day = 3
+strength = 1.4
+text = "城堡里的猎犬不肯喝槽里的水，却去喝水洼里的水。"
+
+[[deck]]
+place = "ashmere"
+min_day = 8
+strength = 1.6
+text = "灰湖的井绳在夜晚断了，水桶落在井底。"
+
+[[deck]]
+place = "fold"
+min_day = 10
+strength = 1.4
+text = "一头瘦骨嶙峋的雄鹿下来，到羊圈上方高处的泉眼喝水，胆子大得像条狗。"
+
+[[deck]]
+place = "mill"
+min_day = 9
+when = [["shaft_open", "==", 1]]
+strength = 1.8
+text = "磨坊的水轮在夜晚停了：磨坊水道被死鱼和红色黏泥堵住了。"
+
+[[deck]]
+place = "barrow_hill"
+min_day = 12
+strength = 1.6
+text = "有人看见夜晚有灯火在古冢之间移动，却没人肯说那是谁的灯火。"
+
+[[deck]]
+place = "fenford"
+min_day = 11
+strength = 1.6
+text = "从下游来的船夫说，邻村如今也染上了咳血病，还把这事怪到了灰湖头上。"
+
+[[deck]]
+place = "ashmere"
+min_day = 13
+strength = 1.4
+text = "有人在溺灯门口留了一篮面包和白色月草，没有署名。"
+
+[[deck]]
+place = "chapel"
+min_day = 14
+strength = 1.6
+text = "从芬渡来的朝圣者睡在礼拜堂门廊里，咳嗽不止，求伊索尔德嬷嬷赐福。"
+
+[[deck]]
+place = "mirewood"
+min_day = 12
+strength = 1.8
+text = "沼林里一间烧炭人的小屋空无一人，门被撕坏，四周尽是狼的足迹。"

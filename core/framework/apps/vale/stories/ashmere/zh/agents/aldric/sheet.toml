@@ -1,0 +1,41 @@
+name = "奥德里克·索恩爵士"
+short = "奥德里克"
+role = "荆堡领主"
+public = "荆堡领主；年迈、正直、手头拮据"
+home = "thornkeep"
+start = "thornkeep"
+profession = "lord"
+theta = 2.8
+aliases = ["aldric", "ser aldric", "the lord", "my lord", "his lordship", "奥德里克", "奥德里克·索恩爵士", "索恩爵士", "荆堡领主"]
+knows = ["literate", "knight", "men_at_arms"]
+
+[items]
+coin = 2
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 45
+craft = 20
+lore = 50
+song = 15
+healing = 15
+hunting = 40
+arms = 70
+magic = 0
+persuade = 65
+stealth = 10
+trade = 20
+notice = 40
+
+[interests]
+law = 1.2
+money = 1.1
+mine = 1.0
+danger = 1.0
+wolves = 0.8
+faith = 0.5
+
+[ties]
+osric = 0.6
+maud = 0.4
+isolde = 0.5
+brannoc = 0.3

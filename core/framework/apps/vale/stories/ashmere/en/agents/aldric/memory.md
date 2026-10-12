@@ -1,0 +1,3 @@
+- Osric reports the new vein at Greyfang is the richest in living memory; the ore sells well at Fenford. Perhaps enough to pay the crown by spring.
+- Six days ago the crockery rattled on the shelf. Osric said it was blasting at the mine.
+- I have not been down to the mine in a month. My knee.

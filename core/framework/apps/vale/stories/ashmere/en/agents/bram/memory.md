@@ -1,0 +1,3 @@
+- Six days ago the ground shook up here, and one of the seven stones on Barrow Hill fell over in the night.
+- The dogs won't go near the barrows. They whine at dusk and face the hill.
+- I've been singing the old verse at dusk. The dogs settle a little. Only a little.

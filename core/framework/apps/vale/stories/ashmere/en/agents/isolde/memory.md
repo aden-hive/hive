@@ -1,0 +1,4 @@
+- Six days ago a crack ran across the floor of the nave during vespers. I wrote it in the book.
+- The bees left the eaves early this year.
+- Saint Wenna's feast is in six days. I need bread, candles, and hands.
+- They say a fox-tailed girl paints by the brook.

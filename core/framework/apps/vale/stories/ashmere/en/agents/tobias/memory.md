@@ -1,0 +1,3 @@
+- Marta says there are seven standing stones on Barrow Hill and a barrow older than the chapel. Must see.
+- Heard at the bar that "the hill shook" six days ago; Osric's men say it was blasting.
+- Owe Marta two weeks. Promised to letter her a new sign.

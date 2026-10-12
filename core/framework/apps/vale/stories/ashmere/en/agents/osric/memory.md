@@ -1,0 +1,6 @@
+- Paid the miners. Brannoc took his coin last and looked at me like a dog that wants to bite.
+- Cedric's buyer pays triple. Ten more cartloads and the crown's tax is covered — and my land. Cedric has gone soft about the cask; keep him close.
+- Hal owes 12 silver. Useful.
+- If anyone asks, the shaking was blasting.
+- The fox-girl came three days before the first cough. Worth saying to Maud, softly, as a worry.
+- Tobias wears the ring. He must leave the vale before anyone looks at it closely.

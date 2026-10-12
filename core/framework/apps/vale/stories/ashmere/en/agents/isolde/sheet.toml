@@ -1,0 +1,44 @@
+name = "Mother Isolde"
+short = "Isolde"
+role = "prioress of Saint Wenna's Chapel"
+public = "prioress of Saint Wenna's Chapel and keeper of the chapel book"
+home = "chapel"
+start = "chapel"
+profession = "prioress"
+theta = 2.3
+aliases = ["isolde", "mother isolde", "the prioress"]
+knows = ["literate", "high_magic", "old_script"]
+
+[items]
+bread = 4
+candles = 3
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 20
+craft = 20
+lore = 80
+song = 50
+healing = 45
+hunting = 5
+arms = 5
+magic = 85
+persuade = 60
+stealth = 15
+trade = 15
+notice = 55
+
+[interests]
+faith = 1.4
+omen = 1.3
+sickness = 1.0
+ancient = 0.9
+magic = 0.9
+gathering = 0.9
+stranger = 0.7
+
+[ties]
+gytha = -0.6
+aldric = 0.5
+tobias = 0.2
+elspeth = 0.4
+bagel = -0.3

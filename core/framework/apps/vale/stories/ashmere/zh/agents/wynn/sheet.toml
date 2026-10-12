@@ -1,0 +1,42 @@
+name = "温·布兰布尔"
+short = "温"
+role = "跑腿人"
+public = "老布拉姆的孙女，十五岁；为了一枚铜币，在谷中四处传话、跑腿。"
+home = "fold"
+start = "fold"
+profession = "courier"
+theta = 1.6
+aliases = ["wynn", "bramble", "布兰布尔", "温", "温·布兰布尔", "跑腿人"]
+knows = ["tune", "true_voice"]
+
+[items]
+coin = 1
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 35
+craft = 15
+lore = 20
+song = 75
+healing = 15
+hunting = 40
+arms = 10
+magic = 0
+persuade = 45
+stealth = 60
+trade = 20
+notice = 65
+
+[interests]
+danger = 1.2
+stranger = 1.2
+ancient = 1.1
+help = 0.9
+magic = 0.9
+mine = 0.8
+art = 0.8
+
+[ties]
+bram = 0.9
+gytha = 0.8
+bagel = 0.5
+kell = 0.4

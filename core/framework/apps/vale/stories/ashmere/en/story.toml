@@ -1,0 +1,272 @@
+# The Vale of Ashmere, in English: everything this story says that the engine does not.
+# The places, omens and calendar are in world.toml; the people in agents/; the truth in truth.md.
+
+[story]
+id = "ashmere"
+lang = "en"
+title = "The Vale of Ashmere"
+vale = "the Vale of Ashmere"
+blurb = "Fifteen villagers, each a Hive agent with a past, a secret and a character sheet, live through a month of blight. Three gods watch over them: the True God, the Star God and old Ullr. You are above all three."
+river = "The Hollowbrook flows from Greyfang Mine past the Mill and Ashmere down to Fenford; in flood it spills into the Mirewood."
+
+[gods]
+names = { world = "the vale", god = "God", outer = "pleiades", ullr = "Ullr", overgod = "the One Above" }
+titles = { god = "the True God", outer = "the Star God", ullr = "old Ullr" }
+follower = "bagel"          # the Star God's servant: only she may pray to him
+chosen = "wynn"             # old Ullr's chosen, whom the True God cannot see
+hidden_from_god = ["true_voice"]
+master_words = ["master", "pleiades", "主人"]
+ullr_words = ["ullr", "old god", "乌勒尔", "古神"]
+above_words = ["above", "voice", "sky"]
+high_places = ["barrow_hill", "fold", "mirewood"]
+
+[persona]
+want = "What you want"
+rules = "Rules you live by"
+deeper = "Deeper still"
+
+[place_aliases]
+village = "ashmere"
+green = "ashmere"
+tavern = "ashmere"
+keep = "thornkeep"
+barrows = "barrow_hill"
+stones = "barrow_hill"
+shepherds_fold = "fold"
+market = "fenford"
+greyfang = "mine"
+wood = "mirewood"
+
+# What each trade makes when someone works, and what they are told it is.
+[professions.miller]
+hint = "grind flour at the mill"
+makes = { flour = 2 }
+deed = "ground a batch of flour"
+[professions.foreman]
+hint = "mine ore at Greyfang with your crew"
+makes = { ore = 2 }
+deed = "had the crew haul ore from the new gallery"
+at = "mine"
+away = "your crew and your picks are at Greyfang"
+[professions.herbwife]
+hint = "gather moonwort and brew remedies at your hut"
+makes = { moonwort = 1, remedy = 1 }
+deed = "gathered moonwort and brewed a remedy"
+at = "home"
+away = "your herbs and your still are back at your hut"
+[professions.hunter]
+hint = "hunt the forest"
+makes = { game = 1 }
+deed = "came back from the forest with game"
+[professions.shepherd]
+hint = "tend the flock"
+makes = { wool = 1 }
+deed = "tended the flock"
+[professions.trader]
+hint = "buy and sell at the stalls"
+makes = { coin = 2 }
+deed = "did a little trade at the stalls"
+[professions.tavern]
+hint = "brew and serve"
+makes = { ale = 2 }
+deed = "brewed and served"
+[professions.steward]
+hint = "keep the accounts"
+makes = { coin = 3 }
+deed = "worked at the accounts"
+[professions.courier]
+hint = "run errands for coin"
+makes = { coin = 1 }
+deed = "ran an errand for a copper"
+[professions.scribe]
+hint = "write letters and copy pages for coin"
+makes = { coin = 1 }
+deed = "wrote a letter for a copper"
+[professions.prioress]
+hint = "lead prayers and keep the chapel"
+deed = "led prayers in the chapel"
+[professions.lord]
+hint = "hold court and see to the keep"
+deed = "held court"
+[professions.reeve]
+hint = "hear complaints and keep the tally"
+deed = "heard complaints and updated the tally on the green post"
+[professions.healer]
+hint = "make remedies from herbs or moonwort"
+nothing = "you have no herbs or moonwort to make remedies from"
+recipes = [
+  { uses = { moonwort = 1 }, makes = { remedy = 2 }, deed = "brewed two remedies from moonwort" },
+  { uses = { herbs = 1 }, makes = { remedy = 1 }, deed = "made a remedy from her herbs" },
+]
+[professions.painter]
+hint = "paint (use the paint action)"
+
+# Goods: the name a villager reads, other names they may use, and words that mean it inside a longer name.
+# The first good whose words match a long name wins, so water beats the jar it is in.
+[items]
+water = { name = "water", match = ["\\bwater\\b"] }
+jars = { name = "jars", aliases = ["jar", "covered jars", "covered jar", "vessels", "vessel", "covered vessels", "covered vessel", "crocks", "pots"], match = ["\\b(jars?|vessels?|crocks?|pots?)\\b"] }
+timber = { name = "timber", aliases = ["wood", "timbers", "beams"], match = ["\\b(timbers?|beams?|planks?|cribbing|cribs?|braces?|props?|shores?)\\b"] }
+rope = { name = "rope", aliases = ["ropes"], match = ["\\bropes?\\b"] }
+lamps = { name = "lamps", aliases = ["lamp"], match = ["\\b(lamps?|lanterns?)\\b"] }
+tools = { name = "tools", aliases = ["tool", "levers", "lever"], match = ["\\b(tools?|levers?|picks?|crowbars?|shovels?)\\b"] }
+remedy = { name = "remedy", aliases = ["remedies"], match = ["\\b(remed\\w*|draughts?|tonics?|salves?|medicines?)\\b"] }
+moonwort = { name = "moonwort", match = ["\\bmoonwort\\b"] }
+herbs = { name = "herbs", aliases = ["herb"], match = ["\\bherbs?\\b"] }
+map = { name = "map", aliases = ["engineers' map", "the map", "old map", "tunnel map", "maps"], match = ["\\bmaps?\\b"] }
+coin = { name = "coin", aliases = ["coins", "silver", "silver coin", "copper", "coppers"], match = ["\\b(coins?|silver|coppers?)\\b"] }
+bread = { name = "bread", aliases = ["loaf", "loaves"], match = ["\\b(bread|loaf|loaves)\\b"] }
+ore = { name = "ore", aliases = ["ores"], match = ["\\bore\\b"] }
+wool = { name = "wool", match = ["\\bwool\\b"] }
+flour = { name = "flour", aliases = ["flours"], match = ["\\bflour\\b"] }
+ale = { name = "ale", aliases = ["ales"], match = ["\\bale\\b"] }
+candles = { name = "candles", aliases = ["candle"], match = ["\\bcandles?\\b"] }
+game = { name = "game" }
+goods = { name = "goods" }
+ink = { name = "ink" }
+paints = { name = "paints", aliases = ["paint"] }
+
+# Topics, and the words that raise them. A villager's interests are weights on these topics.
+[lexicon]
+water = ["water", "river", "brook", "hollowbrook", "stream", "well", "millrace", "ford", "drink", "drank", "spring"]
+rust = ["rust", "red", "iron", "blood", "brine", "crimson", "wyrm", "redsilver"]
+sickness = ["sick", "ill", "illness", "cough", "fever", "blight", "plague", "pox", "grey-lipped", "grey lips", "ague", "dying", "poison", "rot", "lame", "retch", "vomit", "disease", "ailing", "spit"]
+mine = ["mine", "miner", "shaft", "vein", "ore", "greyfang", "gallery", "tunnel", "digging", "deep door"]
+money = ["coin", "silver", "debt", "tax", "price", "pay", "paid", "ledger", "gold", "tithe", "owe", "profit"]
+law = ["lord", "thornkeep", "steward", "reeve", "petition", "decree", "law", "aldric", "osric", "court", "justice", "the keep"]
+faith = ["saint", "wenna", "pray", "prayer", "chapel", "god", "sin", "holy", "bless", "priest", "prioress", "scripture", "heaven"]
+omen = ["omen", "sign", "raven", "dream", "portent", "glow", "curse", "cursed", "judgment", "judgement", "warning"]
+magic = ["witch", "hex", "spell", "charm", "herb", "herbs", "moonwort", "remedy", "potion", "gytha", "cunning", "tea", "salve"]
+ancient = ["barrow", "stone", "stones", "king", "edric", "carving", "carved", "legend", "song", "verse", "old script", "serpent", "ancient", "rune", "snake"]
+wolves = ["wolf", "wolves", "pack", "howl", "howled", "tracks", "hunt"]
+danger = ["danger", "attack", "afraid", "fear", "beware", "flee", "fire", "collapse", "quake", "shook", "kill", "scream"]
+food = ["bread", "flour", "grain", "meal", "ale", "mutton", "game", "harvest", "hungry", "eat", "barley"]
+trade = ["market", "buy", "sell", "trader", "goods", "cart", "fenford", "peddler", "barge", "cedric", "stall"]
+stranger = ["stranger", "foreign", "traveler", "traveller", "fox", "outsider", "friar", "bagel", "tail"]
+art = ["paint", "painting", "picture", "colour", "color", "canvas", "sketch"]
+help = ["help", "please", "need", "come quick", "aid", "beg", "will you", "can you"]
+children = ["child", "children", "baby", "boy", "girl", "babe", "pip", "son", "daughter"]
+gathering = ["feast", "festival", "market day", "gather", "meeting", "moot", "together", "everyone"]
+death = ["dead", "death", "died", "grave", "funeral", "corpse", "buried"]
+weather = ["frost", "rain", "snow", "storm", "wind", "fog", "cold"]
+
+# What fate is told about each thing a villager knows (sheet.toml `knows`, or granted by looking).
+[knows]
+verse1 = "knows the first verse of the stone-song by heart"
+verse2 = "has read the second verse cut on the barrow stones"
+tune = "knows the tune of the stone-song"
+deep_door = "has seen the carved wall in the deep gallery"
+ledger = "has read Osric's ledger"
+book = "has read the chapel book's account of the Red Year"
+stones_lock = "knows the stones are a lock on something old"
+old_script = "reads Old Script"
+literate = "can read"
+wyrm_iron = "has heard the ore called wyrm-iron"
+adventurer = "was once Bram Ironhand, a famed adventurer: knows how to raise a fallen standing stone with levers, ropes and six strong backs under his direction, and has killed a dire wolf"
+high_magic = "was a high mage before her vows: can still work great magic (seal a breach, lift a stone, cleanse water for days), but her great spells go badly wrong about one time in three"
+knight = "a trained knight"
+men_at_arms = "commands four strong, loyal men-at-arms at the keep"
+signet = "wears a signet ring with the Thorne arms, left with him as a foundling"
+mage_blood = "has a mage's blood: old carved words speak to him"
+strength_draught = "can brew a bitter draught that lets a coughing sick person work hard for one day"
+true_voice = "is old Ullr's chosen child, though nobody knows it, she least of all: when she sings the shepherd's song among the stones, his authority wakes through her and holds far longer"
+muster = "as reeve, can call a muster of twenty able villagers for a day's common work"
+healing_hands = "has healing hands: can draw a fever out of the very sick into herself"
+tunnel_map = "has the old engineers' map of the tunnels under Greyfang, with a dry adit that reaches the deep workings safely from above the water"
+sapper = "was a royal sapper: knows how to shore a gallery and seal a breach with timber cribbing and rubble"
+hidden_stores = "has timber, rope, tools and lamps set aside in Thornkeep's undercroft"
+locks = "a retired master burglar: can open any lock and climb any wall"
+market = "keeps rope, timber and covered jars for sale at his Fenford stalls"
+archer = "the best archer in the west vales; knows where the wolves den, and with two steady companions can kill or drive off the pack"
+outer_god = "serves pleiades, an Outer God, who can grant boons through her"
+
+# What fate may change, as it is told. The types are the engine's; the words are the story's.
+[fate]
+effects = '''  {"type": "seal_shaft"}  -- the breach in the deep gallery is shut again
+  {"type": "reopen_shaft"}
+  {"type": "raise_stone"}  -- the fallen stone on Barrow Hill stands again
+  {"type": "sing", "verses": 1 or 2}  -- the shepherd's song is sung among the stones (with both verses and the stone raised, old Ullr's authority wakes for a while)
+  {"type": "purify", "place": "<place id>", "amount": 0.05 to 0.3}  -- the water there is eased for a while
+  {"type": "heal", "place": "<place id>", "amount": 0.05 to 0.4}  -- the sick there are eased
+  {"type": "wolves", "result": "driven_off" | "killed" | "failed"}
+  {"type": "item", "who": "<person id>", "item": "<water (a jar of clean water), jars, timber, rope, lamps, tools, remedy, herbs, moonwort, map, coin, bread, ore, wool, flour, ale or game>", "qty": <positive gains, negative loses>}
+  {"type": "health", "who": "<person id>", "change": 1 (worse) or -1 (better)}
+  {"type": "confine", "who": "<person id>", "days": 1 to 3}  -- locked up at Thornkeep
+  {"type": "tie", "a": "<person id>", "b": "<person id>", "change": -0.5 to 0.5}  -- how a now feels about b
+  {"type": "reveal", "text": "<something now plain to everyone at the place>"}'''
+
+# The hidden world, as fate, the gods and the chronicler are told it.
+[state]
+door_open = "The deep door under Greyfang is OPEN: the wyrm-blood seeps out."
+door_shut = "The deep door under Greyfang is shut again."
+stone_raised = "The fallen stone on Barrow Hill is raised again; "
+stone_fallen = "The fallen stone on Barrow Hill is still fallen; "
+ullr_awake = "old Ullr's authority is awake for {n} more night(s), and the blood sleeps"
+ullr_asleep = "old Ullr's authority sleeps"
+ullr_hum = "; a half-sung song has slowed the blight a little"
+water = "The water: {levels}."
+water_level = "{place} {level}"
+levels = ["clean", "faintly tainted", "tainted", "heavily tainted"]
+sickness = "Sickness: {levels} (0 none, 1 everyone)."
+sick_level = "{place} {n}"
+wolves = "Wolves: hunger {hunger}, attacks on the fold so far {attacks}."
+
+[nature]
+sick_mine = ["Some of the miners at Greyfang cough at the shaft head.", "Half of Greyfang's crew cough red; two can't work.", "Fever at Greyfang: the crew lie grey-lipped in the bunkhouse."]
+sick_other = ["In {place} a few people have a dry cough, and some say the water tastes of iron.", "Coughing in many houses in {place}: red in the spit, and a child with grey lips.", "Fever in {place}: whole households abed and grey-lipped. People are frightened."]
+woke_coughing = "You woke coughing, and there was red in your spit."
+woke_fevered = "You are fevered and weak this morning; your lips feel cold, and walking far is beyond you."
+wolves_in_fold = "Wolves got into the fold in the night: two ewes torn, and one of Bram's dogs bloodied."
+deaths = { ashmere = "Old Widow Agnes, who lived by the well, died in the night, grey-lipped. Her daughter is keening on the green.", mine = "Cob, of Brannoc's crew, died in the night with red on his lips.", mill = "Hal's old mare lay down in the mill pasture and did not get up.", fenford = "Old Wat the ferryman was found dead in his boat at dawn, grey-lipped; the boatmen will not cross." }
+griefs = { grief_ashmere = "Two more died in Ashmere in the night, the cooper and his old mother. The green is full of keening.", grief_pip = "Pip, Hal's boy, is grey-lipped and burning with fever; Gytha says the very young go fast.", grief_mine = "Ned, of Brannoc's crew, died in the night; the crew carried him down to the chapel, coughing." }
+
+# The One Above: what its powers are called, and what the vale sees when they land.
+[overgod]
+powers = { whisper = ["Whisper", "A dream to one villager, in the voice above every voice. Those who hear it can pray to you."], inscribe = ["Inscribe", "Words in letters of light above the Ledger, read by everyone whenever they act."], sign = ["Sign", "A wonder at one place, seen by everyone there."], prophecy = ["Prophecy", "A voice from the sky, heard by the whole vale."], reveal = ["Bring to light", "A villager's hidden secret shows itself before whoever is with them."], collector = ["The collector", "The crown's collector arrives at Thornkeep, weeks early, for the debt."], flood = ["Flood", "The Hollowbrook bursts its banks: blight spreads to the Mirewood and Fenford, and fever with it."], plague = ["Plague", "A fever sweeps one place."], wildfire = ["Wildfire", "The Mirewood burns; the wolves are driven to the fold."], raiders = ["Raiders", "Raiders strike one place: goods taken, people hurt."], winter = ["Hard winter", "Three days of snow: roads slow, and the dawn gives less strength."], earthquake = ["Earthquake", "The earth shakes: the deep door's seal may crack and the stone may fall again."], decree = ["Decree", "Lay your will on one of the vale's gods for some days; they cannot refuse it."], wake_ullr = ["Wake Ullr", "Wake old Ullr's authority for three nights, sung or not."], bind_star = ["Bind the Star God", "The Star God cannot reach the vale for some days."], heal = ["Heal", "Every sick body at one place is made whole."], cleanse = ["Cleanse", "The water at one place runs clean."], raise_stone = ["Raise the stone", "The fallen seventh stone stands again."] }
+chapters = { voice = ["The Voice Above", "Make someone in the vale pray to you, the One Above."], wound = ["The Wound", "The deep door under Greyfang is shut."], song = ["The Old Song", "The shepherd's song is sung among the stones with both verses."], waking = ["The Waking", "Old Ullr's authority wakes."] }
+collector_keep = "The crown's collector rode in at dawn with six riders, weeks early, and demands Thornkeep's debt in coin or ore before he leaves."
+collector_word = "Word runs down every road: the crown's collector has come to Thornkeep, early, and means to take the keep if the debt is not paid."
+collector_done = "The crown's collector arrived at Thornkeep."
+flood = "The Hollowbrook burst its banks in the night: brown water stands in the low houses, the Mirewood is a lake, and the Fenford road is under the flood."
+flood_done = "The Hollowbrook flooded."
+quake = "The earth shook in the night. Dust fell from every roof, the chapel's crack opened a hand wider, and the dogs howled at Barrow Hill."
+quake_done = "The earth shook"
+quake_seal = "the seal on the deep door cracked"
+quake_stone = "the seventh stone fell again"
+hurt = ". Hurt: {who}."
+fire = "Fire ran through the Mirewood in the night. Smoke hangs over the vale, and the deer and the wolves have fled uphill toward the fold."
+fire_done = "Fire swept the Mirewood; the wolves are driven toward the fold"
+plague = "A fever ran through {place} overnight, faster than any before it."
+plague_done = "Plague struck {place}"
+fevered = ". Fevered: {who}."
+winter = "Snow fell to the knee overnight and the cold bites through every wall. Roads are slow, and nobody has strength to spare."
+winter_done = "A hard winter fell on the vale for three days."
+raiders = "Raiders came over the hills to {place} before first light, took what they could carry and rode off."
+raiders_done = "Raiders struck {place}"
+robbed = "; robbed: {who}"
+hurt_semi = "; hurt: {who}."
+wake = "Frost rings the Seven Stones in the middle of the day, and the air on Barrow Hill smells of snow and old iron."
+wake_done = "Old Ullr was woken for three nights."
+healed = "A light without a source filled {place}, and every fever there broke at once."
+healed_done = "Every sick body at {place} was made whole."
+cleansed = "The water at {place} ran clear as glass, all at once, and stayed so."
+cleansed_done = "The water at {place} was made clean."
+stone = "At dawn the fallen seventh stone stood in its place on Barrow Hill, as if it had never fallen, with no mark of lever or rope."
+stone_done = "The seventh stone stood again."
+
+[overgod.secrets]
+aldric = "Ser Aldric, thinking himself alone, unfolds a worn paper: years of payments for a foundling's schooling, made in his name, and beneath them one word in a woman's hand: 'Isolde'."
+bagel = "As Bagel kneels, the paint on her latest canvas glows from within, as if someone far beyond the sky were looking through it, and every star seems to turn the way she faces."
+bram = "Old Bram's sleeve tears on a gate-post, and an old brand shows on his forearm: the crossed axes of the Iron Company. Someone remembers the ballad of Bram Ironhand, who killed the dire wolf of Holt."
+brannoc = "A folded paper falls from Brannoc's coat: a royal sapper's discharge, signed at the siege of Harl, with his name and Hal Wainwright's on it."
+cedric = "A sealed cask among Cedric's goods has wept: red brine beads at its bung, smelling of iron, and its tag reads 'For the alchemist. Forty gold on delivery.'"
+elspeth = "Elspeth lays her hands on a fevered brow when she thinks nobody sees; the fever leaves the sick face and rises plainly into hers, and she sways."
+gytha = "Gytha, cursing under her breath, calls Mother Isolde the witch who burned Carrow and poisoned Fennick's well, and calls Old Bram her father."
+hal = "Hal's coat falls open and an old map slips half out: the tunnels under Greyfang and Barrow Hill, drawn by the old king's engineers, with a dry adit marked in red."
+isolde = "A candle gutters before Mother Isolde, and she stills the flame with two fingers and a word, without touching it: a high mage's trick no prioress should know."
+kell = "Kell is overheard telling the dogs, low, that Old Bram was once Bram Ironhand, who killed the dire wolf of Holt."
+marta = "Marta lets herself through a locked door with a bent pin in less time than it takes to pour an ale: the trick of the Lantern, the capital's most famous burglar."
+maud = "Maud, flustered, lets slip that thirty-two years ago she was the midwife's girl at Saint Wenna's, and saw a signet ring tied in a newborn's blanket: a thorn branch over a closed gate."
+osric = "A letter falls from Osric's ledger: his dying mother's, naming the old lord of Thornkeep as his father; pinned behind it, years of payments for Tobias Quill's schooling, in Aldric's name."
+tobias = "A ring slips from Tobias's collar on its cord: a thorn branch over a closed gate, the arms carved above Thornkeep's own gate."
+wynn = "Wynn hums her grandfather's tune without thinking, and the ground answers: a low hum from under the hill, felt in the feet of everyone there."

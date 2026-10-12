@@ -1,0 +1,51 @@
+name = "奥斯里克·维恩"
+short = "奥斯里克"
+role = "荆堡总管"
+public = "奥德里克爵士的总管；掌管城堡的账目和矿场的生意"
+home = "thornkeep"
+start = "thornkeep"
+profession = "steward"
+theta = 1.5  # the most easily stirred in the vale: he is always working an angle
+aliases = ["osric", "vane", "the steward", "奥斯里克", "奥斯里克·维恩", "维恩", "荆堡总管"]
+knows = ["literate", "deep_door", "hidden_stores"]
+
+[items]
+lamps = 2
+tools = 4
+rope = 4
+timber = 6
+coin = 30
+
+[skills]  # out of 100, like a tabletop character sheet
+strength = 30
+craft = 25
+lore = 45
+song = 10
+healing = 10
+hunting = 15
+arms = 20
+magic = 0
+persuade = 70
+stealth = 55
+trade = 75
+notice = 60
+
+[interests]
+money = 1.4
+mine = 1.3
+law = 1.2
+trade = 1.0
+sickness = 1.0
+stranger = 1.0
+danger = 0.7
+gathering = 0.6
+
+[ties]
+aldric = 0.5
+brannoc = -0.4
+cedric = 0.4
+hal = 0.2
+maud = -0.5
+tobias = -0.4
+gytha = -0.3
+bagel = -0.2

@@ -54,6 +54,8 @@ lint.select = [
 ]
 
 lint.per-file-ignores."demos/*" = ["E501"]
+# The vale game is mostly prose: prompts, omens and secrets read better unwrapped.
+lint.per-file-ignores."framework/apps/vale/*" = ["E501"]
 lint.isort.combine-as-imports = true
 lint.isort.known-first-party = ["framework"]
 lint.isort.section-order = [

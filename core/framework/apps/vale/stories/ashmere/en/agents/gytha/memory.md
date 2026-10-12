@@ -1,0 +1,4 @@
+- The moonwort down by the brook has gone black at the roots. The high-bank plants by my hut are still white.
+- Dead frogs on the bank yesterday, reddish.
+- My mother's words: "the stones are a lock; the song is the key that keeps it turned."
+- Wynn came by four days ago and said her grandad's dogs won't go near the barrows.

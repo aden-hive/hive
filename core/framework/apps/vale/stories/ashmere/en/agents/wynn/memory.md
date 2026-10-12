@@ -1,0 +1,4 @@
+- The fallen stone on Barrow Hill! The dogs hate it. I touched it on a dare to myself. It was warm.
+- Aunt Gytha says the stones are "a lock". A lock on what?
+- There's a fox-girl painting at the mill. Fox ears! A real tail!
+- Carried Hal's letter to Fenford last week; got a copper.
