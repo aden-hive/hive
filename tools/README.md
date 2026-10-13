@@ -125,6 +125,7 @@ verbatim; system + credential paths are on a deny list).
 | `slack_*` | Send messages, manage channels, users, and files in Slack |
 | `discord_send_message`, `discord_get_messages`, `discord_list_channels`, `discord_list_guilds` | Send and read Discord messages |
 | `telegram_send_message`, `telegram_send_document` | Send messages and documents via Telegram Bot API |
+| `whatsapp_*` | Send messages, templates, images, and documents via WhatsApp Cloud API |
 
 ### Productivity & CRM
 
