@@ -27,6 +27,7 @@ function mergeFeed(feed: ValeFeedItem[], items: ValeFeedItem[]): ValeFeedItem[] 
 
 // The language a new vale is played in, remembered per browser; a Chinese browser starts in Chinese.
 const LANG_KEY = "vale.lang";
+const STORY_KEY = "vale.story";
 const SPEED_KEY = "vale.speed";
 function initialLang(): string {
   try {
@@ -43,6 +44,7 @@ function GameList() {
   const [games, setGames] = useState<ValeGameSummary[] | null>(null);
   const [stories, setStories] = useState<ValeStory[]>([]);
   const [lang, setLang] = useState(initialLang);
+  const [storyId, setStoryId] = useState(() => { try { return localStorage.getItem(STORY_KEY) ?? ""; } catch { return ""; } });
   const [name, setName] = useState("");
   const [days, setDays] = useState("30");
   const [model, setModel] = useState("");
@@ -54,14 +56,17 @@ function GameList() {
   useEffect(load, [load]);
   useEffect(() => { valeApi.stories().then((r) => setStories(r.stories)).catch((e) => setError(errorText(e))); }, []);
 
-  const story = stories[0];
+  const story = stories.find((s) => s.id === storyId) ?? stories[0];
   const langs = story ? Object.keys(story.langs) : [lang];
   const chosen = langs.includes(lang) ? lang : langs[0] ?? "en";
   const ui = valeStrings(chosen);
-  const head = story?.langs[chosen];
   const pickLang = (l: string) => {
     setLang(l);
     try { localStorage.setItem(LANG_KEY, l); } catch { /* not remembered, still used */ }
+  };
+  const pickStory = (id: string) => {
+    setStoryId(id);
+    try { localStorage.setItem(STORY_KEY, id); } catch { /* not remembered, still used */ }
   };
 
   const create = async () => {
@@ -85,23 +90,37 @@ function GameList() {
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
       <header className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-foreground">{head?.title ?? "The Vale"}</h1>
+          <h1 className="text-2xl font-semibold text-foreground whitespace-nowrap">{ui.lobbyTitle}</h1>
           {langs.length > 1 && (
-            <div className="flex gap-1" role="group" aria-label={ui.language}>
+            <div className="flex gap-1 shrink-0" role="group" aria-label={ui.language}>
               {langs.map((l) => (
                 <button key={l} onClick={() => pickLang(l)}
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] border ${l === chosen ? "bg-foreground text-background border-foreground" : "border-border/60 text-muted-foreground"}`}>
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] border whitespace-nowrap ${l === chosen ? "bg-foreground text-background border-foreground" : "border-border/60 text-muted-foreground"}`}>
                   {VALE_STRINGS[l]?.langName ?? l}
                 </button>
               ))}
             </div>
           )}
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">{head?.blurb} {ui.intro}</p>
+        <p className="text-sm text-muted-foreground leading-relaxed">{ui.intro}</p>
       </header>
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label={ui.world}>
+        {stories.map((s) => {
+          const h = s.langs[chosen] ?? Object.values(s.langs)[0];
+          const on = s.id === story?.id;
+          return (
+            <button key={s.id} role="radio" aria-checked={on} onClick={() => pickStory(s.id)}
+              className={`text-left rounded-lg border p-4 space-y-1.5 transition-colors ${on ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border/60 hover:border-border"}`}>
+              <div className="text-base font-semibold text-foreground">{h.title}</div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{h.blurb}</p>
+            </button>
+          );
+        })}
+      </div>
+
       <section className="rounded-lg border border-border/60 p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">{ui.newVale}</h2>
+        <h2 className="text-sm font-semibold text-foreground">{ui.newVale}{story ? <span className="font-normal text-muted-foreground">{ui.colon}{(story.langs[chosen] ?? Object.values(story.langs)[0]).title}</span> : null}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_7rem] gap-2">
           <input className={field} placeholder={ui.namePlaceholder} value={name} onChange={(e) => setName(e.target.value)} />
           <input className={field} type="number" min={1} max={60} value={days} onChange={(e) => setDays(e.target.value)} title={ui.daysTitle} />
@@ -213,28 +232,32 @@ function VillagerDrawer({ game, villager, ui, onClose }: { game: ValeGame; villa
 // ---------------------------------------------------------------------------- a game
 
 function TruthPanel({ game, ui }: { game: ValeGame; ui: ValeStrings }) {
-  const t = game.truth;
-  const placeName = (id: string) => game.places.find((p) => p.id === id)?.name.replace("Hollowbrook ", "").replace("Greyfang ", "") ?? id;
+  const { panel, weather } = game.truth;
+  const tone = (t?: string) => (t === "bad" ? "text-destructive" : t === "good" ? "text-primary" : "text-foreground");
   return (
     <div className="rounded-lg border border-border/60 p-3 space-y-2 text-xs">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{ui.onlyYou}</div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-foreground/90">
-        <span>{ui.deepDoor}{ui.colon}<b className={t.shaft_open ? "text-destructive" : "text-primary"}>{t.shaft_open ? ui.open : ui.shut}</b></span>
-        <span>{ui.seventhStone}{ui.colon}<b>{t.stone_raised ? ui.standing : ui.fallen}</b></span>
-        <span>{ui.ullr}{ui.colon}<b>{t.ullr_awake ? ui.awakeNights(t.ullr_awake) : t.stone_hum ? ui.stirring : ui.asleep}</b></span>
-        <span>{ui.wolves(pct(t.wolves.hunger), t.wolves.attacks)}</span>
-        {t.winter && <span className="text-primary">{ui.hardWinter}</span>}
-      </div>
-      <div className="grid grid-cols-[auto_1fr_auto] gap-x-2 gap-y-1 items-center">
-        {Object.entries(t.blight).map(([place, b]) => (
-          <div key={place} className="contents">
-            <span className="text-muted-foreground">{placeName(place)}</span>
-            <div className="h-1.5 rounded bg-muted overflow-hidden"><div className="h-full" style={{ width: pct(b), background: "#a8352c" }} /></div>
-            <span className="font-mono text-[10.5px] text-muted-foreground">{ui.blightSick(pct(b), pct(t.sickness[place] ?? 0))}</span>
-          </div>
-        ))}
-      </div>
-      {t.weather && <p className="text-muted-foreground italic">{t.weather}</p>}
+      {panel.facts.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-foreground/90">
+          {panel.facts.map((f, i) => (
+            <span key={i}>{f.label}{f.text ? <>{ui.colon}<b className={tone(f.tone)}>{f.text}</b></> : null}</span>
+          ))}
+        </div>
+      )}
+      {panel.bars.length > 0 && (
+        <div className="grid grid-cols-[auto_1fr_auto] gap-x-2 gap-y-1 items-center">
+          {panel.bars.map((b, i) => (
+            <div key={i} className="contents">
+              <span className="text-muted-foreground">{b.label}</span>
+              <div className="h-1.5 rounded bg-muted overflow-hidden">
+                <div className="h-full" style={{ width: pct(Math.max(0, Math.min(1, b.value))), background: b.tone === "bad" ? "#a8352c" : b.tone === "good" ? "#5a8f6a" : "#8a7a52" }} />
+              </div>
+              <span className="font-mono text-[10.5px] text-muted-foreground">{b.text ?? pct(b.value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {weather && <p className="text-muted-foreground italic">{weather}</p>}
     </div>
   );
 }
@@ -463,8 +486,8 @@ function GameView({ gameId }: { gameId: string }) {
           </div>
 
           <div className="space-y-3 min-w-0">
-            <ValeMap places={shown.places} villagers={shown.villagers} truth={shown.truth} stirred={stirred} marks={marks} onPick={setPicked}
-              title={game.story.title || game.name} ui={ui} art={game.art?.people ?? {}} />
+            <ValeMap places={shown.places} villagers={shown.villagers} scene={shown.truth.scene} art={game.art ?? {}} stirred={stirred} marks={marks} onPick={setPicked}
+              title={game.story.title || game.name} ui={ui} />
             <TruthPanel game={shown} ui={ui} />
             {shown.undertakings.length > 0 && (
               <div className="rounded-lg border border-border/60 p-3 text-xs space-y-1">

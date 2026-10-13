@@ -1,0 +1,41 @@
+name = "小满"
+short = "小满"
+role = "蜜娘的女儿"
+public = "蜜娘的女儿，十岁，学堂里最野的孩子，什么都敢爬"
+home = "apiary"
+start = "apiary"
+profession = "child"
+knows = ["climber"]
+theta = 1.6
+aliases = ["小满", "满满", "xiaoman"]
+
+[items]
+prism = 1
+
+[skills]  # out of 100
+strength = 25
+craft = 35
+lore = 25
+song = 50
+healing = 10
+hunting = 20
+arms = 5
+magic = 0
+persuade = 45
+stealth = 65
+trade = 10
+notice = 75
+
+[interests]
+light = 1.3
+glass = 1.2
+children = 1.0
+festival = 1.2
+sea = 0.8
+keeper = 0.9
+
+[ties]
+miniang = 0.9
+aheng = 0.3
+liu = 0.4
+chapo = 0.4

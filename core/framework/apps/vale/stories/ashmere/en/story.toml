@@ -2,6 +2,8 @@
 # The places, omens and calendar are in world.toml; the people in agents/; the truth in truth.md.
 
 [story]
+world = "the vale"
+premise = "watching its villagers live through a month of blight"
 id = "ashmere"
 lang = "en"
 title = "The Vale of Ashmere"
@@ -19,6 +21,13 @@ master_words = ["master", "pleiades", "主人"]
 ullr_words = ["ullr", "old god", "乌勒尔", "古神"]
 above_words = ["above", "voice", "sky"]
 high_places = ["barrow_hill", "fold", "mirewood"]
+
+# Whom a villager may pray to, as the pray tool names them.
+[gods.pray]
+god = "'God' (the True God of the chapel)"
+ullr = "'Ullr' (the old god of the hills)"
+outer = "'master' (yours alone)"
+above = "'the One Above' (the voice above every voice, which you have heard)"
 
 [persona]
 want = "What you want"
@@ -254,6 +263,8 @@ cleansed_done = "The water at {place} was made clean."
 stone = "At dawn the fallen seventh stone stood in its place on Barrow Hill, as if it had never fallen, with no mark of lever or rope."
 stone_done = "The seventh stone stood again."
 
+star_bound = "The Star God was bound from {world} for {days} days."
+
 [overgod.secrets]
 aldric = "Ser Aldric, thinking himself alone, unfolds a worn paper: years of payments for a foundling's schooling, made in his name, and beneath them one word in a woman's hand: 'Isolde'."
 bagel = "As Bagel kneels, the paint on her latest canvas glows from within, as if someone far beyond the sky were looking through it, and every star seems to turn the way she faces."
@@ -270,3 +281,24 @@ maud = "Maud, flustered, lets slip that thirty-two years ago she was the midwife
 osric = "A letter falls from Osric's ledger: his dying mother's, naming the old lord of Thornkeep as his father; pinned behind it, years of payments for Tobias Quill's schooling, in Aldric's name."
 tobias = "A ring slips from Tobias's collar on its cord: a thorn branch over a closed gate, the arms carved above Thornkeep's own gate."
 wynn = "Wynn hums her grandfather's tune without thinking, and the ground answers: a low hum from under the hill, felt in the feet of everyone there."
+
+# The player's truth panel (rules.toml [panel]).
+[panel]
+door = "Deep door"
+open = "open"
+shut = "shut"
+stone = "Seventh stone"
+standing = "standing"
+fallen = "fallen"
+ullr = "Ullr"
+awake = "awake ({n} nights)"
+stirring = "stirring"
+asleep = "asleep"
+wolves = "Wolves"
+wolves_text = "hunger {hunger}, {attacks} attacks"
+winter = "Hard winter"
+blight_sick = "blight {blight} · sick {sick}"
+
+# Engine phrases this story says its own way.
+[phrases.mind]
+dream_overgod = "In the night a voice above every voice spoke to you, and you knew it was not the chapel's God, nor any god of the hills: {text}"

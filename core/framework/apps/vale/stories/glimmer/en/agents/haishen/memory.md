@@ -1,0 +1,3 @@
+- The captain of the supply boat said again that sooner or later he'll stop coming if the lighthouse stays dark. Without the light, boats can't enter the harbour at night.
+- That old wretch from the Po family glared at me on the dock yesterday. I glared right back.
+- The glass float cast a rainbow across the deck this morning. When Xiaolan was little, she loved chasing that rainbow more than anything.

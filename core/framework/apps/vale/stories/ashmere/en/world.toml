@@ -29,6 +29,7 @@ start_reserve = 1.0
 activation_cost = 1.0      # one stirring spends this much reserve
 max_acts_per_agent = 2     # per day
 max_activations_per_day = 30
+pace = 0.0                 # 0: spend energy on whatever stirs first; above 0: spread the day's acts over the day
 habituation = 0.25         # a signal you've already acted on stirs you this much less, each time
 learn_rate = 0.08          # acting on a topic makes you more sensitive to it
 unlearn_rate = 0.03        # ...and sensitivity drifts back toward who you were
@@ -61,37 +62,6 @@ sign = [2.4, 1.0]
 ledger = [1.2, 1.0]
 boon = [2.6, 1.0]
 prophecy = [2.8, 1.0]       # the One Above, heard by everyone
-
-# ---------------------------------------------------------------------------
-# Hidden state at the first dawn.
-# ---------------------------------------------------------------------------
-[state]
-shaft_open = 1
-stone_raised = 0
-stones_sung = 0
-stone_hum = 0
-ullr_awake = 0              # nights old Ullr's authority stays awake after the song
-
-[state.blight]
-mine = 0.40
-mill = 0.20
-ashmere = 0.08
-fenford = 0.03
-mirewood = 0.08
-
-[state.sickness]
-mine = 0.30
-mill = 0.0
-ashmere = 0.05
-fenford = 0.0
-mirewood = 0.0
-
-[state.relief]
-
-[state.wolves]
-hunger = 0.10
-attacks = 0
-driven = 0
 
 # ---------------------------------------------------------------------------
 # Places. x/y place them on the map (0-100). Features can be looked at; the first

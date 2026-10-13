@@ -1,0 +1,45 @@
+name = "Aunt Hai"
+short = "Aunt Hai"
+role = "A fisherman's wife at the fishing harbour"
+public = "The loudest voice in the fishing harbour. She is fifty-eight, and since her husband Old Pu became lame, she alone has had the final say in everything aboard their boat."
+home = "harbour"
+start = "harbour"
+profession = "fisher"
+knows = []
+theta = 2.0
+aliases = ["a fisherman's wife at the fishing harbour", "aunt", "aunt hai", "hai", "haishen", "海大婶", "海婶", "海家"]
+
+[items]
+prism = 1
+fish = 4
+oil = 2
+coin = 3
+rope = 2
+
+[skills]  # out of 100
+strength = 55
+craft = 50
+lore = 20
+song = 40
+healing = 30
+hunting = 60
+arms = 20
+magic = 0
+persuade = 55
+stealth = 10
+trade = 50
+notice = 55
+
+[interests]
+sea = 1.4
+family = 1.3
+feud = 1.2
+home = 1.1
+festival = 0.6
+money = 0.6
+
+[ties]
+pobo = -0.6
+aqi = 0.6
+chapo = 0.4
+laomo = 0.3

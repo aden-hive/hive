@@ -32,6 +32,7 @@ list_sep = ", "
 skills = { strength = "strength", craft = "craft", lore = "lore", song = "song", healing = "healing", hunting = "hunting", arms = "arms", magic = "magic", persuade = "persuade", stealth = "stealth", trade = "trade", notice = "notice" }
 
 [act]
+unknown = "{act} is not something you can do here"
 say_empty = "you opened your mouth and said nothing"
 say_absent = "{who} wasn't here, so you said it to whoever was"
 look_none = "there was no '{what}' to look at here"
@@ -96,7 +97,7 @@ attempt = 'tried: "{what}"'
 [mind]
 places_heading = "## Places and roads"
 place_line = "- {name} [{id}]: {desc} Roads to: {roads}."
-people_heading = "## People of the vale (what everyone knows)"
+people_heading = "## People of {world} (what everyone knows)"
 person_line = "- {name}: {public}."
 day_line = "DAY {day}, {wave}. {weather}"
 you_are_at = "You are at {place}: {desc}"
@@ -126,9 +127,9 @@ notice = 'A notice posted here by {who} ({when}): "{text}"'
 painting = "A painting by {who} hangs here ({when}). It shows: {text}"
 clue = "What you found when you looked: {text}"
 outcome = "What came of it ({when}): {text}"
-dream_overgod = "In the night a voice above every voice spoke to you, and you knew it was not the chapel's God, nor any god of the hills: {text}"
-prophecy = "A voice from the sky, heard by everyone in the vale ({when}): {text}"
-sign_overgod = "A wonder no god of the vale could make, here, {when}: {text}"
+dream_overgod = "In the night a voice above every voice spoke to you, and you knew it was no god you had ever prayed to: {text}"
+prophecy = "A voice from the sky, heard by everyone in {world} ({when}): {text}"
+sign_overgod = "A wonder no god of {world} could make, here, {when}: {text}"
 dream_ullr = "In the night you dreamed, and the dream was cold and very old: {text}"
 dream_outer = "In the night, master spoke to you in a dream: {text}"
 dream = "In the night you dreamed: {text}"
@@ -186,10 +187,6 @@ travel_to = "place id"
 pray = "Pray. Only the one you pray to hears it, if anyone does."
 pray_to = "whom: {gods}"
 pray_text = "your prayer"
-pray_god = "'God' (the True God of the chapel)"
-pray_ullr = "'Ullr' (the old god of the hills)"
-pray_master = "'master' (yours alone)"
-pray_above = "'the One Above' (the voice above every voice, which you have heard)"
 paint = "Paint what you see; it hangs where you are, for anyone who comes by."
 paint_text = "what the painting shows"
 not_a_thing = "'{name}' is not something you can do."
@@ -211,6 +208,7 @@ bands = { critical = "critical", success = "success", partial = "partial", failu
 [engine]
 dice_tail = " [the dice: {line}]"
 nobody_came = 'Nobody came to {place} at {wave} for "{title}", so it was never tried.'
+keeps_appointment = '{name} set off toward {place}, to be at {site} for "{title}".'
 tried_something = '{name} tried something: "{what}". {public}'
 recent_tried = '({when}) tried: "{what}", and it came out {band}: {public}'
 
@@ -222,7 +220,7 @@ THE CHECK (d100, rolled under a skill):
 - Routine things a capable person simply does are rolled too, but made easy: keeping watch, sitting with the sick and keeping up care that is already working, carrying a manageable load, ordinary chores, looking at what is in plain view, writing something down. Give them +20 to +40 for being routine and set the fumble number to 100. Their failure is small (time lost, the work to do again), and their fumble falls only on whoever does the work (a spill, a burn, a cut hand), never on anyone being cared for.
 - Add a modifier for each thing that bears on it, with a short reason: a helper who brings a fitting skill or a strong back (+5 to +10 each); fitting tools, goods, knowledge or preparation (+5 to +20); the hidden truth, the place, the weather and the hour; and whatever is missing or against it: too few hands, no tools, unknown ground, someone opposing (-10 to -40). Leave out health: it is counted for you.
 - The dice: skill plus modifiers is the target, held between 5 and 95. A roll at or under a fifth of the target is a critical; at or under the target a success; up to 20 over it a partial; higher a failure. A roll at or over the fumble number is a fumble, whatever the target.
-- The fumble number is 100 for routine work and 96 for ordinary work. Set it lower when the attempt is dangerous: about 91 for unsafe ground, deep water, fire or wolves; about 81 for a great risk; 67 for great magic, which goes badly wrong one time in three.
+- The fumble number is 100 for routine work and 96 for ordinary work. Set it lower when the attempt is dangerous: about 91 for unsafe ground, deep water, fire or wild beasts; about 81 for a great risk; 67 for great magic, which goes badly wrong one time in three.
 
 THE OUTCOMES: write all five before the dice fall, honestly and in proportion.
 - critical: better than they hoped. success: done, as fully as these people with what they have could plausibly do it; never a miracle. partial: half done, or done at a price. failure: it does not work; something is spent or learned. fumble: it goes wrong: someone is hurt, something is lost or broken, or matters are made worse. A fumble falls on the people doing the work and on what they risk; someone being cared for is harmed by it only if the care itself is a dangerous act (cutting, drawing out a fever, moving the gravely hurt).
@@ -233,7 +231,7 @@ THE OUTCOMES: write all five before the dice fall, honestly and in proportion.
 
 THE HIDDEN TRUTH:
 {truth}'''
-user_project = '''THE VALE NOW (day {day}, {hour}):
+user_project = '''{WORLD} NOW (day {day}, {hour}):
 {state}
 
 AN UNDERTAKING, attempted now at {place}, at {hour}. {setting}
@@ -249,7 +247,7 @@ EFFECTS YOU MAY USE:
 {effects}
 
 {reply}'''
-user_attempt = '''THE VALE NOW (day {day}, {hour}):
+user_attempt = '''{WORLD} NOW (day {day}, {hour}):
 {state}
 
 ONE PERSON TRIES SOMETHING, now, at {place}. {setting}
@@ -295,7 +293,7 @@ nothing_in_particular = "nothing in particular"
 [god]
 instructions = '''WHAT NOW? Reply with JSON only:
 {
-  "thought": "your private reasoning: what the vale needs now, and why you act as you do (two to four sentences)",
+  "thought": "your private reasoning: what {world} needs now, and why you act as you do (two to four sentences)",
   "ledger": [{"text": "<one line, under 40 words>", "sources": ["<ids it rests on>"]}],
   "acts": [
     {"do": "dream", "to": "<person id>", "text": "<what they dream, under sixty words>", "answers": "<prayer id, or empty>"},
@@ -307,7 +305,7 @@ instructions = '''WHAT NOW? Reply with JSON only:
 An empty list of acts is a fine answer. Place ids: {places}. Person ids: {people}.'''
 truth_heading = "THE HIDDEN TRUTH:"
 dawn = "DAWN OF DAY {day}. You have {grace} grace."
-truly = "THE VALE AS IT TRULY STANDS:"
+truly = "{WORLD} AS IT TRULY STANDS:"
 notes = "YOUR NOTES FROM LAST DAWN:"
 ledger_yesterday = "THE LEDGER AS IT READ YESTERDAY:"
 ledger_cited = "- {text}  [sources: {sources}] ({witness})"
@@ -326,8 +324,8 @@ stirred_by = "; stirred most by [{id}] ({kind})"
 activation = '{when} {name} at {place}{stirred}. Thought: "{thought}"'
 world_event = "{when} [{id}] {kind} at {place}{seen}: {text}"
 seen_only = " (seen only by {who})"
-star_eased = "{when} THE STAR GOD, through Bagel, eased {place}: {text}"
-ullr_act = "{when} OLD ULLR, awake, sent a {what} ({target}): {text}"
+star_eased = "{when} {GOD}, through {follower}, eased {place}: {text}"
+ullr_act = "{when} {GOD}, awake, sent a {what} ({target}): {text}"
 above = "{when} A POWER ABOVE YOU, which you did not send and cannot command: {what}"
 you_sent = "{when} YOU sent a {what} ({target}): {text}"
 older = "OLDER THINGS THAT MAY BE CITED (finds, notices, paintings, undertakings, outcomes, signs):"
@@ -349,10 +347,12 @@ struck_uncited = "uncited"
 struck_over = "over the limit"
 
 [outer]
+taken = "{public} {name}'s painting is gone from where it hung."
+unseen = "Something unseen moves through the place, and is gone."
 instructions = '''Reply with JSON only:
 {
   "thought": "your private reasoning, one or two sentences",
-  "boon": {"kind": "heal" | "cleanse" | "mend" | "wolves" | "give", "who": "<person id, for mend or give>", "item": "<for give>", "qty": <for give, 1 to 6>, "price": "<id of the painting you take>", "public": "<what everyone there sees happen, one or two sentences>"} or null,
+  "boon": {"kind": {kinds}, "who": "<person id, for mend or give>", "item": "<for give>", "qty": <for give, 1 to 6>, "price": "<id of the painting you take>", "public": "<what everyone there sees happen, one or two sentences>"} or null,
   "dream": "<a few words to her in the night, under forty, or empty>"
 }
 Person ids where she stands: {people}.'''
@@ -376,7 +376,7 @@ instructions = '''Reply with JSON only:
   "acts": [
     {"do": "dream", "to": "<person id>", "text": "<what they dream, under sixty words>"},
     {"do": "sign", "at": "{high_places}", "text": "<what everyone there sees>"},
-    {"do": "hunt", "text": "<what the fold sees at dawn>"}
+    {"do": "hunt", "text": "<what {hunt_place} sees at dawn>"}
   ],
   "notes": "your private notes for tomorrow's dawn, under eighty words"
 }
@@ -384,10 +384,10 @@ You may do at most {limit} of these. An empty list is a fine answer. Person ids:
 awake = "You are awake for {n} more night(s)."
 stirring = "A half-sung song has stirred you in your sleep; you can send one dream, no more."
 dawn = "DAWN OF DAY {day}. {state}"
-truly = "THE VALE AS IT TRULY STANDS:"
+truly = "{WORLD} AS IT TRULY STANDS:"
 truth_heading = "THE HIDDEN TRUTH:"
 notes = "YOUR NOTES FROM LAST DAWN:"
-ledger = "THE LEDGER OF THE WORLD (what everyone in the vale knows today):"
+ledger = "THE LEDGER OF THE WORLD (what everyone in {world} knows today):"
 sang = "WHO SANG TO YOU LAST (day {day}, at {place}): {who}"
 prayers = "PRAYERS TO YOU:"
 prayer = '- {who}, day {day} {wave}: "{text}"'
@@ -398,8 +398,8 @@ did_nothing = "(did nothing)"
 nobody = "(nobody)"
 chosen = "YOUR CHOSEN, {name}: at {place}; {health}. Her notes: {notes}"
 others = "THE OTHER GODS, THIS DAWN:"
-other_god = "- The True God: {what} at {place}: {text}"
-other_star = "- The Star God eased {place}: {text}"
+other_god = "- {god}: {what} at {place}: {text}"
+other_star = "- {god} eased {place}: {text}"
 
 [overgod]
 decree = '''
@@ -414,7 +414,6 @@ revealed = "{name}'s secret came into the light at {place}"
 revealed_before = ", before {who}."
 revealed_alone = ", with nobody to see it."
 decreed = "A will above theirs was laid on {god} for {days} days."
-star_bound = "The Star God was bound from the vale for {days} days."
 err_unknown = "no power called {power!r}"
 err_locked = "{power} unlocks with the tier of {tier}"
 err_cost = "{power} costs {cost} Awe; you have {awe}"
@@ -429,26 +428,26 @@ tiers = { 1 = "Whispers", 2 = "Omens", 3 = "Wrath", 4 = "Dominion" }
 param = { to = "to whom", at = "where", text = "the words", who = "whose secret", god = "which god", days = "for how many days" }
 
 [chronicle]
-system = '''You are the chronicler of {vale}, writing after the fact. You have the full record of what every villager said and did, day by day, and you know the hidden truth beneath the vale (below).
+system = '''You are the chronicler of {vale}, writing after the fact. You have the full record of what every villager said and did, day by day, and you know the hidden truth beneath {world} (below).
 
 Write "The Chronicle of {vale}": a vivid, faithful account in the voice of an old chronicle, but readable — plain modern English with an old cadence. Rules:
 - Never invent events, words or outcomes that are not in the record. You may compress, select and connect.
 - Quote villagers' own words sparingly, where they matter.
 - Where the villagers believed something false, or didn't know what you know, say so plainly, as a chronicler's aside.
 - Give each day a short heading. Follow threads across days: who carried which word to whom, what grew out of what.
-- If the record shows the gods acting (lines in the Ledger, dreams, signs, boons), those are real events of this world: the dreamer knew the dream, those present saw the sign. Nobody in the vale saw the gods' private thoughts; you may.
-- If the record shows THE ONE ABOVE, a power above every god of the vale, its acts were real too.
+- If the record shows the gods acting (lines in the Ledger, dreams, signs, boons), those are real events of this world: the dreamer knew the dream, those present saw the sign. Nobody in {world} saw the gods' private thoughts; you may.
+- If the record shows THE ONE ABOVE, a power above every god of {world}, its acts were real too.
 - Where the record shows THE DICE, the outcome followed the roll. Where luck turned the story, you may say so.
 {shape}
 
 THE HIDDEN TRUTH:
 {truth}'''
-whole = '''- End with a short section, "What no one planned", naming the things that happened in the vale that no single villager set out to make happen.
+whole = '''- End with a short section, "What no one planned", naming the things that happened in {world} that no single villager set out to make happen.
 - 1200 to 1800 words.'''
 first = '''- This is the first part of a longer chronicle: cover only the days in this record and stop where they stop. Leave any closing section for later.
 - 1500 to 2200 words.'''
 last = '''- This continues a chronicle already begun (given below): pick up where it stopped. Do not repeat its title or retell its days.
-- End with a short section, "What no one planned", naming the things that happened in the vale, across the whole chronicle, that no single villager set out to make happen.
+- End with a short section, "What no one planned", naming the things that happened in {world}, across the whole chronicle, that no single villager set out to make happen.
 - 1500 to 2200 words.'''
 so_far = "THE CHRONICLE SO FAR:"
 record_of = "THE RECORD OF DAYS {a} TO {b}:"
@@ -456,14 +455,14 @@ write_now = "Write the chronicle now."
 
 [game]
 over = "this game's month is over"
-moving = "the vale is already moving"
+moving = "{world} is already moving"
 writing = "chapter {day} is already being written"
 not_over = "day {day} is not over yet"
 no_villager = "no villager {vid!r}"
 
 [host]
 language = "English"
-system = '''You are the host at the table: the voice that runs this game of {vale}, the way a great game master or board-game host runs an evening. The player is the One Above, a power above every god of the vale, watching its villagers live through a month of blight. After each part of the day you tell the player what just happened, as a script of beats that the table plays one at a time, with pauses between them.
+system = '''You are the host at the table: the voice that runs this game of {vale}, the way a great game master or board-game host runs an evening. The player is the One Above, a power above every god of {world}, {premise}. After each part of the day you tell the player what just happened, as a script of beats that the table plays one at a time, with pauses between them.
 
 How a good host runs the table:
 - Choose. Pick the three to five threads that matter most this part (danger, a lie, a turn of luck, someone at the end of their rope) and drop the rest. The record has everything; the table needs the story. A lie, a threat, a bribe, a rumour or a scheme always gets a beat: the player must never miss one.
@@ -472,7 +471,7 @@ How a good host runs the table:
 - Every roll is a moment. Before the die ("before"): who is trying what, what rides on it, and the odds in plain words ("long odds", "a steady hand should manage it"). The table shows the exact number to beat, so never write numbers; never give away the result there, nor anywhere before the roll beat: no scene may tell how a roll turned out. After the die ("after"): what it brought, vividly and faithfully. The table shows the number and the result word; don't repeat them.
 - Let the player overhear. Whenever someone thinks one thing and says another, or a private thought shows a scheme, a fear or a secret, give it as an aside, in their own words. One or two per part; none only if nobody's thoughts hold anything.
 - Close by turning to the player ("turn"): one line on what changed or is closing in, then a question that opens one or two of the powers available now (put their ids in "powers"). Offer, never command.
-- Name people in every beat, by the short name the vale uses (Osric, not Osric Vane); never leave a "he" or "she" the player can't place. Tag each scene with its place id and the ids of the people in it.
+- Name people in every beat, by the short name {world} uses (Osric, not Osric Vane); never leave a "he" or "she" the player can't place. Tag each scene with its place id and the ids of the people in it.
 - Talk to the player as "you", present tense, plain and alive. Each beat at most two sentences and about thirty words. Vary the rhythm: a short beat lands harder.
 - Be faithful: never invent events, words or outcomes beyond the record. Texture from the places, the weather and the hour is yours to add.
 - If little happened: the opening, one beat, the turn.
@@ -510,7 +509,7 @@ r_nobody = 'UNDERTAKING "{title}" at {place}: nobody came.'
 r_proposal = '{who} proposes "{title}": {goal} (at {place}, {when})'
 r_prayer = '{who} prays to {to}: "{text}"'
 r_omen = "Seen at {place}: {text}"
-r_omen_all = "Across the vale: {text}"
+r_omen_all = "Across {world}: {text}"
 r_felt = "Felt only by {who}: {text}"
 r_dream = "{by} sends {to} a dream: {text}"
 r_sign = "{by} shows a sign at {place}: {text}"
@@ -529,7 +528,7 @@ night = "This is the night, the end of the day: before the turn, add a scene bea
 none = "(Nothing stirred in this part of the day.)"
 auto_open = "Day {day}, {hour}. {weather}"
 auto_before = "{who} tries: {what}."
-auto_turn = "The vale waits. What will you do?"
+auto_turn = "{World} waits. What will you do?"
 plain_said = '{who}, to {to}: "{text}"'
 
 [novel]
@@ -543,7 +542,7 @@ How to write a real chapter of a novel, not a summary:
 - Venture and luck: every attempt in the record has an outcome. Make it a moment of suspense: sweat on a palm, a rope creaking, the small sound before a stone shifts, the instant luck turns. Never use game words ("roll", "check", "critical", "beat", "Awe") and never write numbers.
 - Wonders: a god's dream, words of light in the sky, a thing that appears from nowhere: write them as strange events lived by the characters, with awe and unease. The One Above never appears in person, only as a voice above every voice or as words made of light. At most one short passage (three to five sentences), in italics, may take a god's view.
 - Choose. The record holds many small things; let them go. Seize what turned the day: a lie, a betrayal, a discovery, a slip, a word finally spoken.
-- Language: literary but plain modern English with an old cadence; vary sentence length; concrete nouns and verbs over piled adjectives; no modern idiom. Call people by the short names the vale uses.
+- Language: literary but plain modern English with an old cadence; vary sentence length; concrete nouns and verbs over piled adjectives; no modern idiom. Call people by the short names {world} uses.
 - Open on something concrete: an image, an action or a line, never a weather report. End on a hook: a question left open, a back turning away, a sentence unfinished.
 - Be faithful: never invent events, outcomes or important words that are not in the record. What you may add: the senses, gestures, surroundings, and the feelings people did not say aloud.
 - Write in {language}.
@@ -596,4 +595,4 @@ cast_line = "- {short} ({name}): {role}; {public}"
 beginning = "(This is the first chapter: the story begins here.)"
 no_ending = "(This is the first chapter.)"
 stub_title = "Day {n}"
-stub_quiet = "The vale was quiet that day."
+stub_quiet = "{World} was quiet that day."

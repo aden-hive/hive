@@ -1,0 +1,46 @@
+name = "Granny Cha"
+short = "Granny Cha"
+role = "The proprietress of the teahouse"
+public = "The proprietress of the teahouse at the Teahouse Steps, seventy-six years old. She is the island's memory and knows a little about every family's affairs."
+home = "steps"
+start = "steps"
+profession = "teahouse"
+knows = ["lantern_song", "literate"]
+theta = 2.0
+aliases = ["cha", "chapo", "granny", "granny cha", "the proprietress of the teahouse", "茶坊", "茶婆", "茶婆婆"]
+
+[items]
+prism = 1
+tea = 5
+lantern = 2
+paper = 3
+coin = 3
+
+[skills]  # out of 100
+strength = 20
+craft = 55
+lore = 65
+song = 70
+healing = 40
+hunting = 5
+arms = 5
+magic = 0
+persuade = 70
+stealth = 20
+trade = 45
+notice = 65
+
+[interests]
+keeper = 1.3
+festival = 1.3
+feud = 1.0
+song = 1.0
+gathering = 1.0
+family = 0.8
+
+[ties]
+haishen = 0.4
+pobo = 0.3
+aheng = 0.5
+xiaoman = 0.4
+lu = 0.2

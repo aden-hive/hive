@@ -111,8 +111,8 @@ export default function NovelReader({
       ) : (
         <article className="rounded-lg border border-border/60 bg-card/40 overflow-hidden">
           <div className="relative aspect-[16/9] sm:aspect-[21/9]">
-            <SceneArt className="absolute inset-0 w-full h-full" place={place ? game.art?.places?.[place.id] : { kind: "vale" }}
-              s={{ hour, weather: undefined, blight: place ? game.truth.blight[place.id] ?? 0 : 0, shaftOpen: !!game.truth.shaft_open, stoneRaised: !!game.truth.stone_raised }}
+            <SceneArt className="absolute inset-0 w-full h-full" place={place ? game.art?.places?.[place.id] : { kind: (game.art?.panorama ?? "vale") as "vale" }}
+              s={{ hour, water: place ? Number(game.truth.scene.water?.[place.id] ?? 0) : 0, glow: place ? Number(game.truth.scene.glow?.[place.id] ?? 0) : 0, marks: game.truth.scene.marks }}
               people={pov ? [{ id: pov.id, name: pov.short, color: pov.color, art: game.art?.people?.[pov.id] }] : []}
               label={place?.name} imageBase={artBase(game.story.id)} />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />

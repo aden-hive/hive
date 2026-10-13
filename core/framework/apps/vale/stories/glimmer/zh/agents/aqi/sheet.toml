@@ -1,0 +1,43 @@
+name = "阿七"
+short = "阿七"
+role = "渔港的年轻渔夫"
+public = "海婶的侄子，二十四岁，渔港力气最大的年轻人，风浪再大也敢出海"
+home = "harbour"
+start = "harbour"
+profession = "fisher"
+knows = ["boatman"]
+theta = 2.0
+aliases = ["阿七", "七仔", "aqi"]
+
+[items]
+fish = 3
+oil = 3
+rope = 3
+coin = 1
+
+[skills]  # out of 100
+strength = 75
+craft = 45
+lore = 15
+song = 35
+healing = 20
+hunting = 65
+arms = 30
+magic = 0
+persuade = 30
+stealth = 25
+trade = 30
+notice = 55
+
+[interests]
+sea = 1.4
+light = 0.9
+festival = 0.8
+family = 0.8
+help = 1.0
+storm = 0.8
+
+[ties]
+haishen = 0.6
+laomo = 0.4
+aheng = 0.2

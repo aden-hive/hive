@@ -1,0 +1,42 @@
+name = "陆先生"
+short = "陆先生"
+role = "大陆来的商人"
+public = "大陆来的生意人，四十五岁，穿得体面，出手阔绰，说要买下灯塔改成旅馆"
+home = "steps"
+start = "steps"
+profession = "merchant"
+knows = ["letter", "elopement", "mainland", "literate"]
+theta = 1.8
+aliases = ["陆先生", "陆老板", "商人", "lu"]
+
+[items]
+coin = 30
+letter = 1
+cloth = 2
+resin = 2
+
+[skills]  # out of 100
+strength = 30
+craft = 30
+lore = 50
+song = 20
+healing = 15
+hunting = 10
+arms = 15
+magic = 0
+persuade = 75
+stealth = 40
+trade = 85
+notice = 60
+
+[interests]
+money = 1.3
+light = 1.0
+home = 1.1
+family = 0.9
+sea = 0.6
+feud = 0.6
+
+[ties]
+chapo = 0.3
+haishen = -0.2

@@ -81,6 +81,48 @@ def world(tmp_path: Path):
     w.close()
 
 
+# ---------------------------------------------------------------------------- attention
+
+
+@pytest.mark.parametrize(("pace", "fired"), [(0.0, 15), (1.0, 3)])
+def test_pace_spreads_the_days_energy_over_the_day(world: World, monkeypatch: pytest.MonkeyPatch, pace: float, fired: int) -> None:
+    sig = world.add_signal("omen", "Smoke over the mill.", None, "world", strength=3.0, audience=list(world.agents))
+    monkeypatch.setattr(physics, "stimulus", lambda w, a: [(sig.id, 50.0)])  # everyone is stirred
+    world.params["pace"] = pace
+    for a in world.agents.values():
+        a.reserve, a.loc = 1.0, a.loc or a.home
+    assert len(world.agents) == 15
+    assert len(physics.select(world)) == fired  # one act each, over six parts of the day: three at dawn
+    assert sum(a.reserve == 1.0 for a in world.agents.values()) == 15 - fired  # whoever waits keeps their energy
+
+
+def test_whoever_joined_an_undertaking_walks_to_it_in_time(world: World) -> None:
+    from framework.apps.vale import act, engine
+
+    world.wave = 1
+    hal = world.agents["hal"]  # at the mill, two roads from the chapel by way of the village
+    hal.loc = "mill"
+    act.propose(world, hal, {"title": "Mend the chapel roof", "at": "chapel", "when": "dusk"}, "a1")
+    engine._keep_appointments(world)
+    assert hal.loc is None and hal.travel["to"] == "ashmere"
+    world.wave = 2
+    engine._arrive(world)
+    engine._keep_appointments(world)
+    assert hal.loc == "ashmere" and hal.travel is None  # one road away: gathered in at the hour
+
+
+@pytest.mark.parametrize(("wave", "asked", "due"), [(1, "dusk", (1, 4)), (1, "morning", (2, 1)), (1, "midday", (1, 3)), (4, "night", (2, 1))])
+def test_an_undertaking_is_never_set_sooner_than_its_proposer_can_get_there(world: World, wave: int, asked: str, due: tuple[int, int]) -> None:
+    from framework.apps.vale import act
+
+    world.wave = wave
+    hal = world.agents["hal"]
+    hal.loc = "mill"  # two roads from the chapel: he can be one road away after one part on the road
+    act.propose(world, hal, {"title": "Mend the chapel roof", "at": "chapel", "when": asked}, "a1")
+    p = next(iter(world.projects.values()))
+    assert (p.due_day, p.when) == due
+
+
 # ---------------------------------------------------------------------------- the One Above
 
 
@@ -276,7 +318,8 @@ async def test_the_api_lists_stories_and_refuses_a_missing_language(tmp_path: Pa
     register_routes(app, GameManager(tmp_path / "games", game_factory=stub_game))
     async with TestClient(TestServer(app)) as client:
         stories = (await (await client.get("/api/vale/stories")).json())["stories"]
-        assert {s["id"]: sorted(s["langs"]) for s in stories} == {"ashmere": ["en", "zh"]}
+        assert {s["id"]: sorted(s["langs"]) for s in stories}["ashmere"] == ["en", "zh"]
+        assert "glimmer" in {s["id"] for s in stories}
         resp = await client.post("/api/vale/games", json={"lang": "zh", "seed": 1})
         assert resp.status == 201 and (await resp.json())["lang"] == "zh"
         resp = await client.post("/api/vale/games", json={"lang": "../en"})
@@ -367,3 +410,70 @@ async def test_the_api_reads_the_novel_and_refuses_an_unfinished_day(tmp_path: P
         assert (await (await client.get(f"/api/vale/games/{gid}/novel")).json()) == {"chapters": [], "writing": []}
         resp = await client.post(f"/api/vale/games/{gid}/novel/1")
         assert resp.status == 409 and "not over" in (await resp.json())["error"]
+
+
+# ---------------------------------------------------------------------------- worlds are data
+
+
+def _island(tmp_path: Path) -> World:
+    from framework.apps.vale.rules import load_rules
+
+    template = story_dir("glimmer", "zh")
+    physics = {**PHYSICS, **load_rules(template.parent / "rules.toml").get("physics", {})}
+    World.create(tmp_path / "isle", template=template, seed=5, overrides=physics).close()
+    w = World(tmp_path / "isle")
+    w.day = 1
+    return w
+
+
+def test_a_world_defined_by_data_alone_runs_its_own_mechanics(tmp_path: Path) -> None:
+    from framework.apps.vale import nature
+    from framework.apps.vale.fate import apply_effects
+
+    w = _island(tmp_path)
+    holders = [a.id for a in w.agents.values() if a.items.get("prism")]
+    assert len(holders) == 5
+    for who in holders:
+        assert apply_effects(w, [{"type": "set_prism", "who": who}], ref="t", present=[who], site="cape")
+    assert not apply_effects(w, [{"type": "set_prism", "who": holders[0]}], ref="t", present=[], site="cape")  # no prism left
+    assert not apply_effects(w, [{"type": "light"}], ref="t", present=[], site="cape")  # not every prism yet
+    w.hidden.update(lens=7, lamp=1.0, clockwork=1.0, harmony=0.8)
+    assert apply_effects(w, [{"type": "light"}], ref="t", present=[], site="cape") and w.hidden["lit"] == 1
+    for day in range(2, 9):
+        w.day = day
+        nature.advance(w)
+    assert w.hidden["boats"] == 1.0
+    assert "小澜和阿桐回来了" in w.hidden["events"][-1][2]
+    w.hidden["festival"] = 0.9
+    overgod.state(w)["ever"]["prayed"] = True
+    assert [c["chapter"] for c in overgod.advance_chapters(w)] == ["voice", "first_prism", "relit", "homecoming"]
+    w.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("lang", "title", "labels"), [("zh", "萤屿", ["灯塔", "棱镜"]), ("en", "Glimmer Isle", ["Lighthouse", "Prisms"])])
+async def test_an_island_day_runs(tmp_path: Path, lang: str, title: str, labels: list[str]) -> None:
+    manager = GameManager(tmp_path / "games", game_factory=stub_game)
+    game = manager.create(seed=5, story="glimmer", lang=lang)
+    for _ in range(6):
+        await game.step()
+    snap = game.snapshot()
+    assert snap["story"]["title"] == title and snap["clock"] == {"day": 2, "wave": 0}
+    assert [f["label"] for f in snap["truth"]["panel"]["facts"]][:2] == labels
+    assert snap["art"]["panorama"] == "isle"
+    await manager.close()
+
+
+def test_a_world_may_not_take_the_kernels_names() -> None:
+    from framework.apps.vale.rules import RuleError, WorldRules
+
+    with pytest.raises(RuleError, match="kernel keeps for itself"):
+        WorldRules({"state": {"clock": 0}})
+
+
+@pytest.mark.parametrize("source", ["().__class__", "__import__('os')", "open('x')", "lambda: 1"])
+def test_rules_cannot_reach_outside_the_language(world: World, source: str) -> None:
+    from framework.apps.vale.rules import RuleError, rules_for
+
+    with pytest.raises(RuleError):
+        rules_for(world).scope(world).eval(source)

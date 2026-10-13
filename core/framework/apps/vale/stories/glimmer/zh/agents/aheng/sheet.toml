@@ -1,0 +1,39 @@
+name = "阿蘅"
+short = "阿蘅"
+role = "守灯人的孙女"
+public = "灯婆潮音的孙女，十九岁，在大陆长大，坐补给船来岛上，说要住进灯塔的小屋"
+home = "cape"
+start = "harbour"
+profession = "keeper"
+knows = ["keeper_heir", "literate"]
+theta = 1.6
+aliases = ["阿蘅", "蘅", "守灯人的孙女", "灯婆的孙女", "aheng"]
+
+[items]
+key = 1
+letter = 1
+coin = 3
+
+[skills]  # out of 100
+strength = 35
+craft = 45
+lore = 60
+song = 55
+healing = 25
+hunting = 10
+arms = 10
+magic = 0
+persuade = 45
+stealth = 30
+trade = 25
+notice = 70
+
+[interests]
+light = 1.4
+keeper = 1.4
+glass = 1.2
+family = 1.0
+home = 0.9
+feud = 0.7
+
+[ties]

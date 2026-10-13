@@ -16,38 +16,45 @@ from typing import Any
 from .act import carried, goods
 from .fate import apply_effects
 from .llm import LLM, parse_json_object
-from .overgod import decree_for, star_bound
+from .overgod import bound, decree_for
+from .rules import rules_for
 from .world import World
 
-GIFTS = {"jars", "rope", "timber", "tools", "lamps", "remedy"}
+
+def _cfg(world: World, cfg: dict | None = None) -> dict:
+    """This world's patron: its follower, its offerings and boons (rules.toml ``[[god]]`` of kind ``patron``)."""
+    return cfg or next((g for g in rules_for(world).gods if g.get("kind") == "patron"), {})
 
 
-def follower(world: World) -> str:
-    """The Star God's servant in this story: the only one who prays to him, and the only one he sees through."""
-    return world.story.get("gods", {}).get("follower", "bagel")
+def follower(world: World, cfg: dict | None = None) -> str:
+    """The patron's servant: the only one who prays to it, and the only one it sees through."""
+    return str(_cfg(world, cfg).get("follower") or world.story.get("gods", {}).get("follower", ""))
 
 
-def enabled(world: World) -> bool:
-    return world.params.get("outer_god", 0) > 0
+def enabled(world: World, cfg: dict | None = None) -> bool:
+    switch = _cfg(world, cfg).get("switch")
+    return bool(_cfg(world, cfg)) and (not switch or world.params.get(switch, 0) > 0)
 
 
-def dawn(world: World, outer: Any, verbose: bool = True) -> None:
-    """If Bagel prayed to her master since the last dawn, or she is unwell, he answers (or doesn't)."""
+def dawn(world: World, outer: Any, verbose: bool = True, cfg: dict | None = None) -> None:
+    """If the follower prayed to their patron since the last dawn, or is unwell, the patron answers (or doesn't)."""
+    cfg = _cfg(world, cfg)
     h = world.hidden
-    prayers = h.get("prayers_master") or []
-    bagel = world.agents.get(follower(world))
-    # He has no plan for the vale; he wakes for her prayers, and for her harm.
-    if star_bound(world):
-        return  # bound by the One Above: her prayers wait until he can hear them again
-    if not enabled(world) or outer is None or bagel is None or not (prayers or bagel.health >= 1):
-        h["prayers_master"] = []
+    key = cfg.get("prayers", f"prayers_{cfg.get('id', 'outer')}")
+    prayers = h.get(key) or []
+    bagel = world.agents.get(follower(world, cfg))
+    # It has no plan for the world; it wakes for its follower's prayers, and for their harm.
+    if bound(world, cfg.get("id", "outer")):
+        return  # bound by the One Above: the prayers wait until it can hear them again
+    if not enabled(world, cfg) or outer is None or bagel is None or not (prayers or bagel.health >= 1):
+        h[key] = []
         return
-    paintings = _paintings(world)
-    reply = outer.act(world, _view(world, prayers, paintings))
+    paintings = _paintings(world, cfg)
+    reply = outer.act(world, _view(world, prayers, paintings, cfg))
     record: dict[str, Any] = {"prayers": prayers, "thought": str(reply.get("thought") or "")[:600], "error": reply.get("error")}
     boon = reply.get("boon")
     if isinstance(boon, dict):
-        done = _grant(world, bagel, boon, paintings)
+        done = _grant(world, bagel, boon, paintings, cfg)
         record.update(done)
     else:
         record["refused"] = "no boon"
@@ -55,7 +62,7 @@ def dawn(world: World, outer: Any, verbose: bool = True) -> None:
     if dream:
         sig = world.add_signal("dream", dream, None, "outer", to=bagel.id, audience=[bagel.id])
         record["dream"], record["dream_signal"] = dream, sig.id
-    h["prayers_master"] = []
+    h[key] = []
     world.log("outer", **record)
     if verbose:
         if record.get("boon"):
@@ -68,8 +75,8 @@ def dawn(world: World, outer: Any, verbose: bool = True) -> None:
             print(f"  ✷ pleiades, in Bagel's dream: {dream}"[:300], flush=True)
 
 
-def _paintings(world: World) -> dict[str, dict]:
-    """Bagel's paintings that haven't been taken yet, by signal id."""
+def _paintings(world: World, cfg: dict | None = None) -> dict[str, dict]:
+    """The follower's offerings (paintings, in Ashmere) that haven't been taken yet, by signal id."""
     from .analysis import load
 
     world.flush()
@@ -77,14 +84,17 @@ def _paintings(world: World) -> dict[str, dict]:
     return {
         e["id"]: e
         for e in load(world.dir)
-        if e["ev"] == "signal" and e.get("kind") == "painting" and e.get("source") == follower(world) and e["id"] not in taken
+        if e["ev"] == "signal"
+        and e.get("kind") == _cfg(world, cfg).get("offering", "painting")
+        and e.get("source") == follower(world, cfg)
+        and e["id"] not in taken
     }
 
 
-def _view(world: World, prayers: list[dict], paintings: dict[str, dict]) -> str:
+def _view(world: World, prayers: list[dict], paintings: dict[str, dict], cfg: dict | None = None) -> str:
     t = world.t
     sep = t("names.list_sep")
-    bagel = world.agents[follower(world)]
+    bagel = world.agents[follower(world, cfg)]
     health = t.get("health.states")
     place = world.places.get(bagel.loc or "", {})
     with_her = [a for a in world.present(bagel.loc) if a.id != bagel.id]
@@ -109,11 +119,17 @@ def _view(world: World, prayers: list[dict], paintings: dict[str, dict]) -> str:
         world.read_memory(bagel.id) or t("mind.empty"),
     ]
     people = ", ".join([bagel.id] + [a.id for a in with_her])
-    return "\n".join(out) + "\n\n" + t("outer.instructions", people=people)
+    kinds = " | ".join(f'"{k}"' for k in [*_cfg(world, cfg).get("boons", {}), "give"])
+    return "\n".join(out) + "\n\n" + t("outer.instructions", people=people, kinds=kinds)
 
 
-def _grant(world: World, bagel, boon: dict, paintings: dict[str, dict]) -> dict:
-    """Apply a boon if it is well formed and paid for. Returns what happened, for the log."""
+def _grant(world: World, bagel, boon: dict, paintings: dict[str, dict], cfg: dict | None = None) -> dict:
+    """Apply a boon if it is well formed and paid for. Returns what happened, for the log.
+
+    The world declares what each kind of boon does (``boons``: kind -> an effect, written as an
+    expression over ``here`` and ``who``) and which goods the patron may give (``gifts``).
+    """
+    cfg = _cfg(world, cfg)
     kind = str(boon.get("kind") or "").lower()
     price = str(boon.get("price") or "").strip("[] ")
     if price not in paintings:
@@ -122,18 +138,13 @@ def _grant(world: World, bagel, boon: dict, paintings: dict[str, dict]) -> dict:
     who = str(boon.get("who") or "").strip().lower()
     who = who if who in here else bagel.id
     loc = bagel.loc
-    if kind == "heal":
-        effect = {"type": "heal", "place": loc, "amount": 0.3}
-    elif kind == "cleanse":
-        effect = {"type": "purify", "place": loc, "amount": 0.3}
-    elif kind == "mend":
-        effect = {"type": "health", "who": who, "change": -1}
-    elif kind == "wolves":
-        effect = {"type": "wolves", "result": "driven_off"}
+    boons = cfg.get("boons", {})
+    if kind in boons:
+        effect = rules_for(world).scope(world, {"here": loc, "who": who}).eval(boons[kind])
     elif kind == "give":
         item = str(boon.get("item") or "").lower().strip()
         item = goods(world, item)
-        if item not in GIFTS:
+        if item not in set(cfg.get("gifts", [])):
             return {"refused": f"{item!r} is not a thing he gives"}
         try:
             qty = max(1, min(6, int(boon.get("qty") or 1)))
@@ -148,8 +159,8 @@ def _grant(world: World, bagel, boon: dict, paintings: dict[str, dict]) -> dict:
     painting = paintings[price]
     world.hidden.setdefault("taken", []).append(price)
     world.signals.pop(price, None)
-    public = re.sub(r"\s+", " ", str(boon.get("public") or "")).strip()[:400] or "Something unseen moves through the place, and is gone."
-    sig = world.add_signal("boon", f"{public} Bagel's painting is gone from where it hung.", loc, "outer")
+    public = re.sub(r"\s+", " ", str(boon.get("public") or "")).strip()[:400] or world.t("outer.unseen")
+    sig = world.add_signal("boon", world.t("outer.taken", public=public, name=bagel.short), loc, "outer")
     return {
         "boon": {"kind": kind, "place": loc, **{k: v for k, v in effect.items() if k != "type"}},
         "price": price,

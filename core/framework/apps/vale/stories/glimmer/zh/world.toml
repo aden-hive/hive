@@ -1,0 +1,415 @@
+# 萤屿：地点、线索、征兆、日历和物理。
+# 条件是 [变量, 运算符, 值] 的列表，必须全部成立；变量读的是隐藏的状态（见 ../rules.toml [state]）：
+# lens、lamp、clockwork、lit、harmony、festival、boats、sea、ebb、day。
+
+[vale]
+name = "萤屿"
+season = "初夏"
+weathers = [
+  "海风温软，阳光把茶坊的石阶晒得发烫。",
+  "清晨起了雾，灯塔的影子在雾里若隐若现。",
+  "午后一阵太阳雨，果坡上挂起了一道彩虹。",
+  "天阴着，海是铅灰色的，渔船都没出海。",
+  "风从海上来，晒网架上的渔网哗啦啦地响。",
+  "细雨落了一整天，蜂园里的花都低着头。",
+]
+
+# 每种天气的样子，顺序同上，给画面用。
+weather_kinds = ["clear", "fog", "showers", "overcast", "wind", "rain"]
+
+# ---------------------------------------------------------------------------
+# 物理：决定谁被触动的廉价规则。不调用语言模型。
+# ---------------------------------------------------------------------------
+[physics]
+refill = 0.6
+reserve_cap = 2.0
+start_reserve = 1.0
+activation_cost = 1.0
+max_acts_per_agent = 2
+max_activations_per_day = 30
+pace = 0.0                 # 0：先被触动就先花掉精力；大于 0：把一天的行动分散到一天里
+habituation = 0.25
+learn_rate = 0.08
+unlearn_rate = 0.03
+diffusion_min = 1.8
+diffusion_factor = 0.45
+diffusion_hops = 2
+theta_scale = 1.25
+god_grace = 0.0
+god_grace_cap = 3.0
+ledger_lines = 10
+outer_god = 0.0
+ullr_agent = 0.0
+
+[physics.kinds]
+speech = [1.5, 0.35]
+directed = [1.9, 0.35]
+notice = [1.2, 4.0]
+painting = [1.8, 8.0]
+deed = [0.8, 0.4]
+clue = [2.0, 1.0]
+omen = [2.0, 1.0]
+self = [1.6, 1.0]
+rumor = [1.0, 1.0]
+project = [2.0, 3.0]
+outcome = [3.0, 1.5]
+arrival = [0.7, 0.3]
+dream = [2.6, 1.0]
+sign = [2.4, 1.0]
+ledger = [1.2, 1.0]
+boon = [2.6, 1.0]
+prophecy = [2.8, 1.0]
+
+# ---------------------------------------------------------------------------
+# 地点。x/y 是它们在地图上的位置（0-100）。地点里的东西可以细看；第一个条件成立的
+# 样子会被看见。`grants` 让看的人知道一件事。
+# ---------------------------------------------------------------------------
+
+[[place]]
+id = "cape"
+name = "灯塔岬"
+desc = "岛东北角的高岬。白身红纹的灯塔立在礁石上，旁边是守灯人的石头小屋，屋顶长着海草。"
+x = 82
+y = 16
+roads = ["orchard"]
+
+  [[place.feature]]
+  id = "lens_frame"
+  name = "灯室里的镜框"
+    [[place.feature.view]]
+    when = [["lens", ">=", 7]]
+    text = "七个槽都嵌满了。阳光穿过棱镜，在灯室的墙上转出一圈一圈的虹，像有人在屋里放了一群萤火虫。"
+    [[place.feature.view]]
+    when = [["lens", ">=", 1]]
+    text = "铜镜框里已经嵌回了几块翅膀形的棱镜，空着的槽像缺了牙的嘴。嵌好的那几块，在阳光下微微发亮。"
+    [[place.feature.view]]
+    text = "灯室中间立着一个比人还高的铜镜框，围成一圈的七个槽全是空的。每个槽的形状都像一片萤火虫的翅膀。"
+
+  [[place.feature]]
+  id = "cottage"
+  name = "守灯人的小屋"
+    [[place.feature.view]]
+    text = "桌上压着一本守灯日志，最后一页的字迹很稳：“今夜两家又吵到了灯下。我把大镜拆成七片光，分给七户人家：海家的船，坡家的棚，茶坊的风，学堂的纸，蜜家的火，睡着的孩子；还有一片，我还给了海。等岛又成了一个，把我拼回来。——潮音”"
+    grants = "promise"
+
+  [[place.feature]]
+  id = "clockwork"
+  name = "转镜的机芯"
+    [[place.feature.view]]
+    when = [["clockwork", ">=", 1]]
+    text = "铜机芯上了油，轻轻一推就转了起来，发出均匀的嗒、嗒、嗒。"
+    [[place.feature.view]]
+    when = [["clockwork", ">", 0]]
+    text = "机芯被拆开清洗过，几个齿轮锃亮，可擒纵叉那里还空着。"
+    [[place.feature.view]]
+    text = "转镜的铜机芯锈死了，擒纵叉断了一个齿。机座上刻着一行小字：“墨师傅修，四十年前。”"
+
+  [[place.feature]]
+  id = "great_lamp"
+  name = "大灯"
+    [[place.feature.view]]
+    when = [["lamp", ">=", 1]]
+    text = "灯盏里盛满了琥珀色的灯油，新灯芯雪白。只差有人把它点亮。"
+    [[place.feature.view]]
+    when = [["lamp", ">", 0]]
+    text = "灯盏里有了一层灯油，可还远远不够；灯芯是新搓的，只有一半长。"
+    [[place.feature.view]]
+    text = "大灯的灯盏干了，灯芯早就烂成一撮灰。灯座上刻着守灯人的方子：“蜡三，鱼油七，松脂一撮。”"
+
+[[place]]
+id = "orchard"
+name = "果坡"
+desc = "岛东边向阳的坡地，一层层果树一直排到坡顶。坡伯家的看守棚在最高处，从那里看得见灯塔。"
+x = 68
+y = 38
+roads = ["cape", "steps", "apiary"]
+
+  [[place.feature]]
+  id = "hut_window"
+  name = "看守棚的窗"
+    [[place.feature.view]]
+    text = "看守棚只有一扇小窗，窗上嵌的不是玻璃片，而是一块厚厚的翅膀形透镜。透过它看灯塔，灯塔是倒过来的。"
+
+  [[place.feature]]
+  id = "stone_wall"
+  name = "坡下的石墙"
+    [[place.feature.view]]
+    when = [["harmony", ">=", 0.6]]
+    text = "石墙被人拆开了一个口子，口子两边的石头上，一边放着一篮果子，一边放着一串晒干的鱼。"
+    [[place.feature.view]]
+    text = "果坡和渔港之间的小路上，有人用石头垒了一道矮墙，墙上长满青苔。十九年来，墙这边的果子和墙那边的鱼，谁也没越过它。"
+
+  [[place.feature]]
+  id = "trees"
+  name = "果树"
+    [[place.feature.view]]
+    text = "最老的那棵果树上刻着两个名字，一个是“澜”，一个是“桐”，刻痕已经被树皮撑得很宽。"
+
+[[place]]
+id = "apiary"
+name = "蜂园"
+desc = "岛北面的花坡。蜜娘的蜂箱一排排摆在野花里，她和女儿小满住在坡下的小屋。"
+x = 42
+y = 22
+roads = ["orchard", "steps", "caves"]
+
+  [[place.feature]]
+  id = "smoker"
+  name = "蜜娘的熏烟器"
+    [[place.feature.view]]
+    text = "熏烟器的盖子上嵌着一块翅膀形的厚玻璃。蜜娘用它聚阳光点引火绒，“比火石好用，”她说。"
+
+  [[place.feature]]
+  id = "rainbow_stone"
+  name = "小满床头的彩虹石"
+    [[place.feature.view]]
+    text = "小满床头用红绳挂着一块“彩虹石”，翅膀的形状。早上太阳照进来，满墙都是虹。小满说那是外婆在她出生那年留下的。"
+
+  [[place.feature]]
+  id = "hives"
+  name = "蜂箱"
+    [[place.feature.view]]
+    text = "蜂箱里的蜡又厚又黄。蜜娘说今年的蜡多得用不完，她都不知道该拿来做什么。"
+
+[[place]]
+id = "steps"
+name = "茶坊石阶"
+desc = "岛中央的石阶广场，茶婆的茶坊就在台阶顶上。岛上的人都在这里喝茶、说话、吵架。"
+x = 52
+y = 50
+roads = ["orchard", "apiary", "harbour", "school"]
+
+  [[place.feature]]
+  id = "wind_chime"
+  name = "茶坊的风铃"
+    [[place.feature.view]]
+    text = "屋檐下的风铃中间吊着一块翅膀形的透明玻璃，风一吹，满茶桌都是虹。茶婆说这是“老潮音送的”。"
+
+  [[place.feature]]
+  id = "old_lanterns"
+  name = "阁楼上的旧灯笼"
+    [[place.feature.view]]
+    when = [["festival", ">=", 0.5]]
+    text = "旧灯笼都被搬了下来，糊上了新纸。写着“小澜”和“阿桐”的那两盏，被人单独放在一边，擦得干干净净。"
+    [[place.feature.view]]
+    text = "茶坊阁楼上堆着落满灰的竹骨灯笼，十九年没点过了。有一盏上写着“小澜”，另一盏写着“阿桐”。"
+
+  [[place.feature]]
+  id = "notice_post"
+  name = "台阶下的告示柱"
+    [[place.feature.view]]
+    text = "告示柱上贴着学堂的课表、蜜娘卖蜜的价钱，还有一张发黄的旧告示：“灯会照常举行”，日期是十九年前。"
+
+[[place]]
+id = "harbour"
+name = "潮港"
+desc = "岛西南的小港：石头码头、晒网架、几条渔船。老墨的修船工坊就在码头尽头。"
+x = 32
+y = 70
+roads = ["steps", "school", "caves"]
+
+  [[place.feature]]
+  id = "haishen_boat"
+  name = "海婶的船"
+    [[place.feature.view]]
+    text = "海婶的船头系着一个“玻璃浮子”，翅膀的形状。太阳一照，就在甲板上投下一道小小的彩虹。海婶说那是她男人的护身符。"
+
+  [[place.feature]]
+  id = "workshop"
+  name = "老墨的工坊"
+    [[place.feature.view]]
+    when = [["clockwork", ">=", 1]]
+    text = "工作台上空了一块，那张画着缺齿叉子的旧纸不见了。老墨难得地哼着歌。"
+    [[place.feature.view]]
+    text = "满墙挂着齿轮、铜管和没修完的钟。工作台上压着一张泛黄的纸，画着一个缺了齿的叉子，旁边写着：“图在学堂那本书里。”"
+
+  [[place.feature]]
+  id = "pier_board"
+  name = "码头的告示板"
+    [[place.feature.view]]
+    text = "告示板上贴着补给船的船期：每月初一、十五。旁边有人用炭笔写了一行：“灯塔不亮，船长说迟早不来了。”"
+
+[[place]]
+id = "school"
+name = "学堂"
+desc = "岛南边的小学堂，只有一间教室和一口钟。柳先生在这里教书，也替全岛写信、读信。"
+x = 66
+y = 66
+roads = ["steps", "harbour"]
+
+  [[place.feature]]
+  id = "desk"
+  name = "柳先生的书桌"
+    [[place.feature.view]]
+    text = "书桌上压着一块翅膀形的玻璃镇纸，压着一摞孩子们的作文。最上面那篇的题目是《我见过的光》。"
+
+  [[place.feature]]
+  id = "lighthouse_book"
+  name = "《灯塔机芯图说》"
+    [[place.feature.view]]
+    text = "书架最高处有一本泛黄的《灯塔机芯图说》，里面夹着一张擒纵叉的图样，齿数、尺寸写得清清楚楚。扉页上写着：“赠学堂。潮音。”"
+    grants = "escapement"
+
+  [[place.feature]]
+  id = "bell"
+  name = "学堂的钟"
+    [[place.feature.view]]
+    text = "钟绳磨得发亮。孩子们说，灯塔亮着的时候，学堂的钟一响，灯塔那边会闪一下回答。"
+
+[[place]]
+id = "caves"
+name = "潮洞"
+desc = "岛西边礁石下的海蚀洞，潮水进进出出，洞里的回声能传得很远。"
+x = 14
+y = 44
+roads = ["apiary", "harbour"]
+
+  [[place.feature]]
+  id = "cave_mouth"
+  name = "潮洞口"
+    [[place.feature.view]]
+    text = "潮水灌进洞口又退出来。洞壁上有一道道潮痕，最高的一道比人还高。"
+
+  [[place.feature]]
+  id = "echo_chamber"
+  name = "回声室"
+    [[place.feature.view]]
+    when = [["ebb", "==", 1]]
+    text = "大退潮把洞底的水抽干了。最深处露出一间小小的石室，石架上放着一块包在油布里的翅膀形玻璃，旁边的石头上刻着：“还给海的那一片。”"
+    grants = "cave_prism"
+    [[place.feature.view]]
+    text = "洞的深处被海水灌满，只听得见回声。老人说，只有大潮退到最远的那几天，才进得去。"
+
+# ---------------------------------------------------------------------------
+# 征兆：条件成立时在黎明显现（`every` 天一次）。
+# ---------------------------------------------------------------------------
+
+[[omen]]
+id = "lens_flash"
+place = "cape"
+when = [["lens", ">=", 4], ["lit", "==", 0]]
+every = 3
+strength = 2.2
+text = "夜里有人看见灯塔顶上闪了一下，像有人在那里擦亮了一块玻璃。"
+
+[[omen]]
+id = "cold_teahouse"
+place = "steps"
+when = [["harmony", "<", 0.2]]
+every = 4
+strength = 1.8
+text = "茶坊里，海家的人和坡家的人隔着三张桌子坐，谁也不看谁。"
+
+[[omen]]
+id = "new_lanterns"
+place = "steps"
+when = [["festival", ">=", 0.5]]
+every = 3
+strength = 2.0
+text = "石阶两旁挂起了新扎的灯笼，孩子们一盏一盏地数。"
+
+[[omen]]
+id = "glass_sea"
+place = "harbour"
+when = [["sea", "<", 0.22]]
+every = 4
+strength = 1.6
+text = "海平得像一面镜子，渔船都出了海，连老人都说难得。"
+
+# ---------------------------------------------------------------------------
+# 日历。
+# ---------------------------------------------------------------------------
+
+[[calendar]]
+day = 1
+place = "harbour"
+strength = 2.6
+text = "补给船今早靠了岸。下来一个背着行李的年轻姑娘，说她是灯婆潮音的孙女。"
+
+[[calendar]]
+day = 12
+place = "caves"
+strength = 2.4
+text = "今天是大潮。老人说，潮水会退得很远很远。"
+
+[[calendar]]
+day = 15
+place = "harbour"
+strength = 2.2
+text = "半个月一趟的补给船来了，带来了大陆的信和货。船长站在码头上看了灯塔很久。"
+
+[[calendar]]
+day = 25
+place = "steps"
+strength = 2.2
+text = "离灯会还有五天。茶婆在石阶上挂出了第一盏灯笼。"
+
+[[calendar]]
+day = 26
+place = "caves"
+strength = 2.4
+text = "又是大潮。潮水退得比上一回还远。"
+
+[[calendar]]
+day = 30
+place = "*"
+strength = 2.8
+text = "今夜是灯会。十九年来，这是第一次有人记得。"
+
+# ---------------------------------------------------------------------------
+# 偶然的事：每个黎明有一定机会翻开一张。
+# ---------------------------------------------------------------------------
+
+[[deck]]
+place = "harbour"
+min_day = 2
+strength = 1.8
+text = "一群海豚追着阿七的船游了一整个上午。"
+
+[[deck]]
+place = "orchard"
+min_day = 3
+strength = 1.8
+text = "一只风筝挂在了果坡最高的那棵树上，线断了，风筝上画着一座亮着的灯塔。"
+
+[[deck]]
+place = "steps"
+min_day = 4
+strength = 2.0
+text = "一个大陆来的货郎在茶坊歇脚，说灯塔亮着的那些年，从大陆的港口就能看见萤屿。"
+
+[[deck]]
+place = "harbour"
+min_day = 5
+strength = 2.4
+text = "退潮的沙滩上冲来一个封着蜡的玻璃瓶，里面卷着一张纸，字被水泡糊了，只看得清一个“娘”字。"
+
+[[deck]]
+place = "apiary"
+min_day = 6
+strength = 1.6
+text = "一窝新蜂分了出来，在蜂园上空盘旋了很久，最后落在了通往灯塔的路边。"
+
+[[deck]]
+place = "school"
+min_day = 7
+strength = 1.6
+text = "学堂的孩子们在黑板上画了一座亮着的灯塔，谁也不肯擦掉。"
+
+[[deck]]
+place = "cape"
+min_day = 8
+strength = 1.8
+text = "海鸟成群地落在灯塔的栏杆上，像在等什么。"
+
+[[deck]]
+place = "harbour"
+min_day = 10
+strength = 2.0
+text = "远处有一条大陆的船经过，在海面上停了一会儿，像在找什么，又开走了。"
+
+[[deck]]
+place = "steps"
+min_day = 12
+strength = 2.0
+text = "茶婆说她梦见潮音坐在茶坊里，问她要一杯茶，喝完了说：“快了。”"

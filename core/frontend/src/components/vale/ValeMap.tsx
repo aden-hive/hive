@@ -1,13 +1,6 @@
-import type { ValeFeedItem, ValePlace, ValeTruth, ValeVillager } from "@/api/vale";
+import type { ValeArt, ValeFeedItem, ValePlace, ValeScene, ValeVillager } from "@/api/vale";
 import { PortraitArt, type PersonArt } from "./Portrait";
 import type { ValeStrings } from "./strings";
-
-/** The Hollowbrook's course on the map, and which place's water colours each stretch. */
-const RIVER: [string, [number, number]][] = [
-  ["mine", [16, 25]], ["", [20, 36]], ["mill", [25, 44]], ["", [36, 52]],
-  ["ashmere", [44, 58]], ["", [38, 70]], ["fenford", [32, 80]],
-];
-const FLOOD: [number, number][] = [[36, 52], [50, 66], [60, 74]];
 
 function mix(a: string, b: string, t: number): string {
   const pa = a.match(/\w\w/g)!.map((h) => parseInt(h, 16));
@@ -15,39 +8,58 @@ function mix(a: string, b: string, t: number): string {
   return "#" + pa.map((x, i) => Math.round(x + (pb[i] - x) * t).toString(16).padStart(2, "0")).join("");
 }
 
-const water = (blight: number) => mix("4a7d97", "a8352c", Math.min(1, blight / 0.7));
+const waterColor = (troubled: number) => mix("4a7d97", "a8352c", Math.min(1, troubled / 0.7));
 
-function Glyph({ p }: { p: ValePlace }) {
+/** A place's mark on the map, by its kind (art.toml [places.<id>] kind). */
+function Glyph({ p, kind, scene }: { p: ValePlace; kind: string; scene: ValeScene }) {
   const x = p.x, y = p.y * 0.92;
   const tri = (dx: number) => `M${x + dx - 2} ${y + 1.4} L${x + dx} ${y - 1.8} L${x + dx + 2} ${y + 1.4}`;
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 0.35, strokeLinejoin: "round" as const };
-  switch (p.id) {
+  const glow = scene.glow?.[p.id] ?? 0;
+  switch (kind) {
     case "mine":
       return <g><path d={tri(-1.8)} {...common} /><path d={tri(1.2)} {...common} /></g>;
-    case "thornkeep":
+    case "keep":
       return <path d={`M${x - 2.4} ${y + 1.6} V${y - 1} h1 v-0.8 h0.9 v0.8 h1 v-0.8 h0.9 v0.8 h1 V${y + 1.6} Z`} {...common} />;
     case "mill":
       return <g><circle cx={x} cy={y} r={1.7} {...common} /><path d={`M${x - 1.7} ${y} H${x + 1.7} M${x} ${y - 1.7} V${y + 1.7}`} {...common} /></g>;
-    case "ashmere":
+    case "village":
       return <g>{[-2.2, 0, 2.2].map((dx) => <path key={dx} d={`M${x + dx - 0.9} ${y + 1.2} V${y} L${x + dx} ${y - 1} L${x + dx + 0.9} ${y} V${y + 1.2} Z`} {...common} />)}</g>;
     case "chapel":
       return <path d={`M${x - 1.2} ${y + 1.6} V${y - 0.2} L${x} ${y - 1.4} L${x + 1.2} ${y - 0.2} V${y + 1.6} Z M${x} ${y - 1.4} V${y - 3} M${x - 0.6} ${y - 2.4} H${x + 0.6}`} {...common} />;
-    case "barrow_hill":
+    case "stones":
       return <path d={`M${x - 3.4} ${y + 1.6} Q${x} ${y - 2.6} ${x + 3.4} ${y + 1.6}`} {...common} />;
-    case "fold":
+    case "pasture":
       return <path d={`M${x - 2.4} ${y + 1.2} h4.8 M${x - 2.4} ${y + 1.2} v-1.6 M${x} ${y + 1.2} v-1.6 M${x + 2.4} ${y + 1.2} v-1.6 M${x - 2.4} ${y - 0.2} h4.8`} {...common} />;
-    case "mirewood":
+    case "forest":
       return <g>{[[-2.2, 0.4], [0, -0.6], [2.2, 0.5]].map(([dx, dy]) => <path key={dx} d={`M${x + dx} ${y + dy - 1.3} L${x + dx - 0.9} ${y + dy + 0.6} H${x + dx + 0.9} Z`} {...common} />)}</g>;
-    case "fenford":
+    case "ford":
       return <path d={`M${x - 2.5} ${y + 1} h5 M${x - 1.8} ${y + 1} v-1.6 h3.6 v1.6 M${x - 2.6} ${y - 0.6} L${x} ${y - 1.9} L${x + 2.6} ${y - 0.6}`} {...common} />;
+    case "lighthouse":
+      return (
+        <g>
+          {glow > 0.5 && <circle cx={x} cy={y - 2.4} r={4.5} fill="#ffe28a" opacity={0.35}><animate attributeName="opacity" values="0.2;0.5;0.2" dur="3s" repeatCount="indefinite" /></circle>}
+          <path d={`M${x - 1} ${y + 1.6} L${x - 0.6} ${y - 1.8} H${x + 0.6} L${x + 1} ${y + 1.6} Z M${x - 0.9} ${y - 1.8} h1.8 v-1 h-1.8 Z`} {...common} />
+          <circle cx={x} cy={y - 2.3} r={0.45} fill={glow > 0.5 ? "#f2b632" : "currentColor"} />
+        </g>
+      );
+    case "harbor":
+      return <path d={`M${x - 2.6} ${y + 0.6} h5.2 l-1 1.2 h-3.2 Z M${x} ${y + 0.6} V${y - 2.2} L${x + 1.8} ${y + 0.2}`} {...common} />;
+    case "orchard":
+      return <g>{[-1.8, 1.8].map((dx) => <g key={dx}><circle cx={x + dx} cy={y - 0.6} r={1.2} {...common} /><path d={`M${x + dx} ${y + 0.6} V${y + 1.6}`} {...common} /></g>)}</g>;
+    case "garden":
+      return <g><rect x={x - 2.2} y={y - 0.6} width={1.8} height={2} {...common} /><rect x={x + 0.4} y={y - 0.6} width={1.8} height={2} {...common} /><path d={`M${x - 2.4} ${y - 0.6} h2.2 M${x + 0.2} ${y - 0.6} h2.2`} {...common} /></g>;
+    case "cave":
+      return <path d={`M${x - 2.6} ${y + 1.4} Q${x - 2.6} ${y - 2} ${x} ${y - 2} Q${x + 2.6} ${y - 2} ${x + 2.6} ${y + 1.4} M${x - 1.2} ${y + 1.4} Q${x - 1.2} ${y - 0.4} ${x} ${y - 0.4} Q${x + 1.2} ${y - 0.4} ${x + 1.2} ${y + 1.4}`} {...common} />;
     default:
       return <circle cx={x} cy={y} r={1.5} {...common} />;
   }
 }
 
-/** The seven stones on Barrow Hill: the fourth lies down until it is raised. */
-function Stones({ p, raised, hum, awake }: { p: ValePlace; raised: boolean; hum: boolean; awake: boolean }) {
+/** A place of standing stones: the fourth lies down until the world marks it raised. */
+function Stones({ p, scene }: { p: ValePlace; scene: ValeScene }) {
   const x = p.x, y = p.y * 0.92;
+  const raised = Boolean(scene.marks?.stone_raised), awake = Boolean(scene.marks?.awake), hum = Boolean(scene.marks?.hum);
   return (
     <g>
       {Array.from({ length: 7 }, (_, i) => {
@@ -65,17 +77,20 @@ function Stones({ p, raised, hum, awake }: { p: ValePlace; raised: boolean; hum:
 export interface ValeMapProps {
   places: ValePlace[];
   villagers: ValeVillager[];
-  truth: ValeTruth;
+  scene: ValeScene;
+  art: ValeArt;
   stirred: Set<string>;
   marks: ValeFeedItem[];
   onPick: (vid: string) => void;
   title: string;
   ui: ValeStrings;
-  art: Record<string, PersonArt>;
 }
 
-export default function ValeMap({ places, villagers, truth, stirred, marks, onPick, title, ui, art }: ValeMapProps) {
+export default function ValeMap({ places, villagers, scene, art, stirred, marks, onPick, title, ui }: ValeMapProps) {
   const byId = Object.fromEntries(places.map((p) => [p.id, p]));
+  const kinds: Record<string, string> = Object.fromEntries(places.map((p) => [p.id, art.places?.[p.id]?.kind ?? ""]));
+  const people: Record<string, PersonArt> = art.people ?? {};
+  const map = art.map ?? {};
   const xy = (id: string | null | undefined): [number, number] => {
     const p = id ? byId[id] : undefined;
     return p ? [p.x, p.y * 0.92] : [50, 46];
@@ -85,33 +100,44 @@ export default function ValeMap({ places, villagers, truth, stirred, marks, onPi
     const key = v.loc ?? `road:${v.travel?.to ?? ""}`;
     (groups[key] = groups[key] || []).push(v);
   }
-  let lastPlace = "mine";
+  const water = (owner: string) => waterColor(Number(scene.water?.[owner] ?? 0));
   return (
     <svg viewBox="0 0 100 92" className="w-full h-auto rounded-lg border border-border/60 bg-muted/20 text-foreground/80" role="img"
       aria-label={ui.mapLabel(title)}>
+      {map.coast && (
+        <g>
+          <rect width={100} height={92} fill="#4a7d97" opacity={0.22} />
+          <path d={`M${map.coast.map(([x, y]) => `${x} ${y * 0.92}`).join(" L")} Z`} fill="#9db87a" opacity={0.35} stroke="#4a7d97" strokeOpacity={0.5} strokeWidth={0.4} strokeLinejoin="round" />
+        </g>
+      )}
       {places.flatMap((p) => p.roads.filter((r) => p.id < r).map((r) => {
         const [x1, y1] = xy(p.id), [x2, y2] = xy(r);
         return <line key={`${p.id}-${r}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeOpacity={0.35} strokeWidth={0.25} strokeDasharray="0.8 0.9" />;
       }))}
-      {RIVER.slice(0, -1).map(([name, [x1, y1]], i) => {
-        const owner = RIVER[i + 1][0] || lastPlace;
-        if (name) lastPlace = name;
-        const [x2, y2] = RIVER[i + 1][1];
-        return <path key={i} d={`M${x1} ${y1} Q${(x1 + x2) / 2 + 2} ${(y1 + y2) / 2} ${x2} ${y2}`} stroke={water(truth.blight[owner] ?? 0)}
-          strokeWidth={1.1} fill="none" strokeLinecap="round" opacity={0.85} />;
+      {(map.streams ?? []).map((stream, si) => {
+        let last = stream.points[0]?.[0] ?? "";
+        return stream.points.slice(0, -1).map(([name, x1, y1], i) => {
+          const [nextName, x2, y2] = stream.points[i + 1];
+          const owner = nextName || last;
+          if (name) last = name;
+          return <path key={`${si}-${i}`} d={`M${x1} ${y1} Q${(x1 + x2) / 2 + 2} ${(y1 + y2) / 2} ${x2} ${y2}`} stroke={water(owner)}
+            strokeWidth={1.1} fill="none" strokeLinecap="round" opacity={0.85} />;
+        });
       })}
-      <path d={`M${FLOOD[0][0]} ${FLOOD[0][1]} Q${FLOOD[1][0]} ${FLOOD[1][1]} ${FLOOD[2][0]} ${FLOOD[2][1]}`} stroke={water(truth.blight.mirewood ?? 0)}
-        strokeWidth={0.6} fill="none" strokeDasharray="1.2 0.8" opacity={0.7} />
+      {(map.floods ?? []).map((f, i) => f.points.length >= 3 && (
+        <path key={`f${i}`} d={`M${f.points[0][0]} ${f.points[0][1]} Q${f.points[1][0]} ${f.points[1][1]} ${f.points[2][0]} ${f.points[2][1]}`} stroke={water(f.owner)}
+          strokeWidth={0.6} fill="none" strokeDasharray="1.2 0.8" opacity={0.7} />
+      ))}
       {places.map((p) => {
         const [x, y] = xy(p.id);
         return (
           <g key={p.id}>
-            {p.id === "barrow_hill"
-              ? <g><Glyph p={p} /><Stones p={p} raised={!!truth.stone_raised} hum={truth.stone_hum > 0} awake={truth.ullr_awake > 0} /></g>
-              : <Glyph p={p} />}
-            {p.id === "mine" && <circle cx={x} cy={y + 0.4} r={0.7} fill={truth.shaft_open ? "#a8352c" : "#5a7254"}>
-              <title>{truth.shaft_open ? ui.doorOpenTitle : ui.doorShutTitle}</title></circle>}
-            <text x={x} y={y + 5} textAnchor="middle" fontSize={2.8} fill="currentColor" style={{ fontFamily: "serif" }}>{p.name}</text>
+            <Glyph p={p} kind={kinds[p.id]} scene={scene} />
+            {kinds[p.id] === "stones" && <Stones p={p} scene={scene} />}
+            {kinds[p.id] === "mine" && "deep_door" in (scene.marks ?? {}) && (
+              <circle cx={x} cy={y + 0.4} r={0.7} fill={scene.marks.deep_door ? "#a8352c" : "#5a7254"} />
+            )}
+            <text x={x} y={y + 5} textAnchor="middle" fontSize={2.8} fill="currentColor" style={{ fontFamily: "serif" }}>{p.name.charAt(0).toUpperCase() + p.name.slice(1)}</text>
           </g>
         );
       })}
@@ -144,7 +170,7 @@ export default function ValeMap({ places, villagers, truth, stirred, marks, onPi
               <svg x={-1.7} y={-1.7} width={3.4} height={3.4} viewBox="0 0 64 64" style={{ overflow: "visible" }}>
                 <defs><clipPath id={`mt-${v.id}`}><circle cx={32} cy={32} r={31} /></clipPath></defs>
                 <g clipPath={`url(#mt-${v.id})`}>
-                  {art[v.id] ? <PortraitArt art={art[v.id]} health={v.health} bg={v.color + "55"} /> : <rect width={64} height={64} fill={v.color} />}
+                  {people[v.id] ? <PortraitArt art={people[v.id]} health={v.health} bg={v.color + "55"} /> : <rect width={64} height={64} fill={v.color} />}
                 </g>
                 <circle cx={32} cy={32} r={31} fill="none" stroke={v.health >= 2 ? "#a8352c" : v.health === 1 ? "#c98b2b" : v.color} strokeWidth={v.health ? 7 : 5} />
               </svg>

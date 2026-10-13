@@ -1,0 +1,42 @@
+name = "柳先生"
+short = "柳先生"
+role = "学堂的先生"
+public = "学堂的先生，四十一岁，教书，也替全岛写信、读信；斯文，有点腼腆"
+home = "school"
+start = "school"
+profession = "teacher"
+knows = ["literate"]
+theta = 2.1
+aliases = ["柳先生", "先生", "柳老师", "liu"]
+
+[items]
+prism = 1
+paper = 4
+coin = 2
+
+[skills]  # out of 100
+strength = 25
+craft = 45
+lore = 80
+song = 35
+healing = 25
+hunting = 5
+arms = 5
+magic = 0
+persuade = 50
+stealth = 20
+trade = 25
+notice = 60
+
+[interests]
+school = 1.3
+keeper = 1.1
+light = 1.0
+children = 1.0
+bees = 0.7
+craft = 0.7
+
+[ties]
+miniang = 0.6
+xiaoman = 0.5
+pobo = 0.3

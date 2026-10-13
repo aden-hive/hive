@@ -23,6 +23,7 @@ from framework.agent_loop.types import AgentContext, AgentSpec
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
 
 from . import act, mind, physics
+from .rules import rules_for
 from .world import Agent, World
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def tools_for(world: World, a: Agent) -> list[Tool]:
             ["to", "item"],
         ),
         tool("work", {}, [], work=hint),
-        tool("tend", {}, []),
+        *([tool("tend", {}, [])] if "tend" in rules_for(world).actions else []),  # only in worlds that declare it
         tool("attempt", {"what": "attempt_what", "with": "attempt_with"}, ["what"]),
         tool(
             "propose",
@@ -87,13 +88,19 @@ def tools_for(world: World, a: Agent) -> list[Tool]:
         tool("oppose", {"project": "join_project", "why": "oppose_why"}, ["project"]),
         tool("travel", {"to": "travel_to"}, ["to"]),
     ]
-    gods = [t("villager.pray_god")]
-    if world.params.get("ullr_agent", 0) > 0:
-        gods.append(t("villager.pray_ullr"))
-    if a.id == world.story.get("gods", {}).get("follower") and world.params.get("outer_god", 0) > 0:
-        gods.append(t("villager.pray_master"))
+    # Whom a villager can pray to, in the story's words (story.toml [gods.pray]): the world's gods
+    # they know of (a patron only for its follower), and the One Above once they have heard it.
+    words = world.story.get("gods", {}).get("pray", {})
+    by_kind = {kind: [g for g in rules_for(world).gods if g.get("kind") == kind] for kind in ("ledger", "sleeper", "patron")}
+    gods = [words.get(g["id"], g["id"]) for g in by_kind["ledger"]]
+    gods += [words.get(g["id"], g["id"]) for g in by_kind["sleeper"] if not g.get("switch") or world.params.get(g["switch"], 0) > 0]
+    gods += [
+        words.get(g["id"], g["id"])
+        for g in by_kind["patron"]
+        if a.id == g.get("follower") and (not g.get("switch") or world.params.get(g["switch"], 0) > 0)
+    ]
     if a.id in world.hidden.get("overgod", {}).get("known_by", []):
-        gods.append(t("villager.pray_above"))
+        gods.append(words.get("above", "above"))
     out.append(
         tool(
             "pray",

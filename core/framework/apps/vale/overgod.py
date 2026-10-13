@@ -1,13 +1,15 @@
 """The god beyond gods: the person playing.
 
-Above the True God, the Star God and old Ullr there is one more power, and it is the
-player. It spends Awe on whispers, omens, wrath and dominion. Awe returns a little each
-dawn, and more when the vale prays to the voice above every voice or when the dice turn a
-story. Chapters set what the vale should come to next; finishing one pays Awe and opens
-the next tier of power.
+Above the world's own gods there is one more power, and it is the player. It spends Awe on
+powers in four tiers. Awe returns a little each dawn, and more when the world prays to the
+voice above every voice or when the dice turn a story. Chapters set what the world should
+come to next; finishing one pays Awe and opens the next tier of power.
 
-What each power does is the engine's; what it is called, and what the vale sees when it
-lands, is the story's (``story.toml``: ``[overgod]``), in the story's language.
+Which powers and chapters a world has, what they cost, and what they do are the world's
+own data (``rules.toml``: ``[[power]]``, ``[[chapter]]``, ``[awe]``). A power either uses one
+of the standard blocks here (``whisper``, ``inscribe``, ``sign``, ``prophecy``, ``reveal``,
+``decree``) or runs the world's own steps. What they are called, and what the world sees when
+they land, is the story's (``story.toml``: ``[overgod]``), in the story's language.
 
 Every act lands at a safe point between parts of the day (see ``game.py``), never while
 villagers are mid-turn. Everything here is plain state in ``world.hidden["overgod"]``.
@@ -15,49 +17,25 @@ villagers are mid-turn. Everything here is plain state in ``world.hidden["overgo
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
-from .lang import fill
+from .rules import AWE, Chapter, Param, Power, rules_for
 from .world import World
 
-START_AWE = 3.0
-AWE_CAP = 12.0
-GODS = ("god", "outer", "ullr")
+START_AWE = AWE["start"]
+AWE_CAP = AWE["cap"]
+
+__all__ = ["AWE_CAP", "START_AWE", "Chapter", "OvergodError", "Param", "Power"]
 
 
 class OvergodError(ValueError):
     """An act the One Above cannot do now: unknown, locked, unaffordable or malformed."""
 
 
-@dataclass(frozen=True)
-class Param:
-    name: str
-    kind: str  # person | place | text | god | days
-
-
-@dataclass(frozen=True)
-class Power:
-    id: str
-    tier: int
-    cost: float
-    params: tuple[Param, ...]
-    apply: Callable[[World, dict], str]
-
-
-@dataclass(frozen=True)
-class Chapter:
-    id: str
-    check: Callable[[World], bool]
-    reward: float
-    unlocks: int | None
-
-
 def state(world: World) -> dict[str, Any]:
     """The One Above's own state, created on first use."""
     o = world.hidden.setdefault("overgod", {})
-    o.setdefault("awe", START_AWE)
+    o.setdefault("awe", float(rules_for(world).awe["start"]))
     o.setdefault("tier", 1)
     o.setdefault("chapter", 0)
     o.setdefault("known_by", [])
@@ -73,29 +51,16 @@ def _words(world: World) -> dict[str, Any]:
     return world.story.get("overgod", {})
 
 
-def _say(world: World, key: str, **slots: Any) -> str:
-    """One of the story's lines for the One Above's acts."""
-    return fill(_words(world)[key], **slots)
+def _cap(world: World) -> float:
+    return float(rules_for(world).awe["cap"])
 
 
-def _names(world: World, people: list[str]) -> str:
-    return world.t("names.list_sep").join(people)
+def gods(world: World) -> tuple[str, ...]:
+    """The world's gods a decree can bind."""
+    return tuple(g["id"] for g in rules_for(world).gods)
 
 
-# ---------------------------------------------------------------------------- what each power does
-
-
-def _omen(world: World, text: str, loc: str | None, strength: float = 2.6, audience: list[str] | None = None, kind: str = "omen") -> str:
-    return world.add_signal(kind, text, loc, "overgod", strength=strength, audience=audience).id
-
-
-def _hurt(world: World, place: str, chance: float) -> list[str]:
-    hurt = []
-    for a in world.present(place):
-        if world.rng.random() < chance:
-            a.health = min(2, a.health + 1)
-            hurt.append(a.short)
-    return hurt
+# ---------------------------------------------------------------------------- the standard blocks
 
 
 def _whisper(world: World, x: dict) -> str:
@@ -113,7 +78,7 @@ def _inscribe(world: World, x: dict) -> str:
 
 
 def _sign(world: World, x: dict) -> str:
-    _omen(world, x["text"], x["at"], kind="sign")
+    world.add_signal("sign", x["text"], x["at"], "overgod", strength=2.6)
     return world.t("overgod.signed", place=world.place_name(x["at"]))
 
 
@@ -127,93 +92,12 @@ def _prophecy(world: World, x: dict) -> str:
 def _reveal(world: World, x: dict) -> str:
     a = world.agents[x["who"]]
     where = a.loc or (a.travel or {}).get("to") or a.home
-    _omen(world, _words(world).get("secrets", {})[a.id], where, strength=2.8)
+    world.add_signal("omen", _words(world).get("secrets", {})[a.id], where, "overgod", strength=2.8)
     state(world)["revealed"].append(a.id)
     witnesses = [p.short for p in world.present(where) if p.id != a.id]
     t = world.t
     return t("overgod.revealed", name=a.name, place=world.place_name(where)) + (
-        t("overgod.revealed_before", who=_names(world, witnesses)) if witnesses else t("overgod.revealed_alone")
-    )
-
-
-def _collector(world: World, x: dict) -> str:
-    world.hidden.setdefault("events", []).append(("thornkeep", 2.8, _say(world, "collector_keep")))
-    _omen(world, _say(world, "collector_word"), None, strength=2.2, audience=list(world.agents))
-    return _say(world, "collector_done")
-
-
-def _flood(world: World, x: dict) -> str:
-    h = world.hidden
-    b, sick = h["blight"], h["sickness"]
-    b["mirewood"] = round(max(b["mirewood"], 0.9 * b["mill"]), 4)
-    b["fenford"] = round(min(1.0, b["fenford"] + 0.2 * b["mill"] + 0.05), 4)
-    for place in ("ashmere", "fenford", "mirewood"):
-        sick[place] = round(min(1.0, sick.get(place, 0.0) + 0.1), 4)
-        h["relief"].pop(place, None)
-    _omen(world, _say(world, "flood"), None, strength=2.6, audience=list(world.agents))
-    return _say(world, "flood_done")
-
-
-def _earthquake(world: World, x: dict) -> str:
-    h = world.hidden
-    what = []
-    if not h["shaft_open"] and world.rng.random() < 0.5:
-        h["shaft_open"] = 1
-        what.append(_say(world, "quake_seal"))
-    else:
-        h["blight"]["mine"] = round(min(1.0, h["blight"]["mine"] + 0.2), 4)
-    if h["stone_raised"] and world.rng.random() < 0.4:
-        h["stone_raised"] = 0
-        what.append(_say(world, "quake_stone"))
-    hurt = [n for place in ("mine", "chapel", "barrow_hill") for n in _hurt(world, place, 0.5)]
-    _omen(world, _say(world, "quake"), None, strength=2.8, audience=list(world.agents))
-    t = world.t
-    return (
-        _say(world, "quake_done")
-        + (t("names.colon") + t("names.clause_sep").join(what) if what else "")
-        + (_say(world, "hurt", who=_names(world, hurt)) if hurt else t("names.stop"))
-    )
-
-
-def _wildfire(world: World, x: dict) -> str:
-    w = world.hidden["wolves"]
-    w["hunger"] = round(min(1.0, w["hunger"] + 0.4), 4)
-    hurt = _hurt(world, "mirewood", 0.5)
-    _omen(world, _say(world, "fire"), None, strength=2.6, audience=list(world.agents))
-    return _say(world, "fire_done") + (_say(world, "hurt", who=_names(world, hurt)) if hurt else ".")
-
-
-def _plague(world: World, x: dict) -> str:
-    sick = world.hidden["sickness"]
-    if x["at"] in sick:
-        sick[x["at"]] = round(min(1.0, sick[x["at"]] + 0.35), 4)
-    hurt = _hurt(world, x["at"], 0.5)
-    place = world.place_name(x["at"])
-    _omen(world, _say(world, "plague", place=place), x["at"], strength=2.8)
-    return _say(world, "plague_done", place=place) + (_say(world, "fevered", who=_names(world, hurt)) if hurt else ".")
-
-
-def _winter(world: World, x: dict) -> str:
-    world.hidden["winter_until"] = world.day + 3
-    _omen(world, _say(world, "winter"), None, strength=2.4, audience=list(world.agents))
-    return _say(world, "winter_done")
-
-
-def _raiders(world: World, x: dict) -> str:
-    taken = []
-    for a in world.present(x["at"]):
-        for item in ("coin", "goods", "ore", "flour", "game", "ale", "wool"):
-            n = a.items.get(item, 0)
-            if n > 0:
-                a.items[item] = n // 2
-                taken.append(a.short)
-    hurt = _hurt(world, x["at"], 0.3)
-    place = world.place_name(x["at"])
-    _omen(world, _say(world, "raiders", place=place), x["at"], strength=2.8)
-    return (
-        _say(world, "raiders_done", place=place)
-        + (_say(world, "robbed", who=_names(world, sorted(set(taken)))) if taken else "")
-        + (_say(world, "hurt_semi", who=_names(world, hurt)) if hurt else ".")
+        t("overgod.revealed_before", who=t("names.list_sep").join(witnesses)) if witnesses else t("overgod.revealed_alone")
     )
 
 
@@ -223,77 +107,24 @@ def _decree(world: World, x: dict) -> str:
     return world.t("overgod.decreed", god=title, days=x["days"])
 
 
-def _wake_ullr(world: World, x: dict) -> str:
-    world.hidden["ullr_awake"] = max(int(world.hidden.get("ullr_awake", 0)), 3)
-    _omen(world, _say(world, "wake"), "barrow_hill", strength=2.8)
-    return _say(world, "wake_done")
+BLOCKS = {"whisper": _whisper, "inscribe": _inscribe, "sign": _sign, "prophecy": _prophecy, "reveal": _reveal, "decree": _decree}
 
 
-def _bind_star(world: World, x: dict) -> str:
-    state(world)["star_bound_until"] = world.day + int(x["days"])
-    return world.t("overgod.star_bound", days=x["days"])
+def powers(world: World) -> dict[str, Power]:
+    """This world's powers, in the order its rules list them."""
+    made = getattr(world, "_powers", None)
+    if made is None:
+        made = rules_for(world).powers(BLOCKS)
+        world._powers = made
+    return made
 
 
-def _heal(world: World, x: dict) -> str:
-    if x["at"] in world.hidden["sickness"]:
-        world.hidden["sickness"][x["at"]] = 0.0
-    for a in world.present(x["at"]):
-        a.health = 0
-    place = world.place_name(x["at"])
-    _omen(world, _say(world, "healed", place=place), x["at"], strength=3.0)
-    return _say(world, "healed_done", place=place)
-
-
-def _cleanse(world: World, x: dict) -> str:
-    if x["at"] in world.hidden["blight"]:
-        world.hidden["blight"][x["at"]] = 0.0
-    place = world.place_name(x["at"])
-    _omen(world, _say(world, "cleansed", place=place), x["at"], strength=3.0)
-    return _say(world, "cleansed_done", place=place)
-
-
-def _raise_stone(world: World, x: dict) -> str:
-    world.hidden["stone_raised"] = 1
-    _omen(world, _say(world, "stone"), "barrow_hill", strength=3.0)
-    return _say(world, "stone_done")
-
-
-P_TO, P_AT, P_TEXT = Param("to", "person"), Param("at", "place"), Param("text", "text")
-POWERS: dict[str, Power] = {
-    p.id: p
-    for p in (
-        Power("whisper", 1, 1, (P_TO, P_TEXT), _whisper),
-        Power("inscribe", 1, 1, (P_TEXT,), _inscribe),
-        Power("sign", 2, 2, (P_AT, P_TEXT), _sign),
-        Power("prophecy", 2, 3, (P_TEXT,), _prophecy),
-        Power("reveal", 2, 3, (Param("who", "person"),), _reveal),
-        Power("collector", 2, 3, (), _collector),
-        Power("flood", 3, 5, (), _flood),
-        Power("plague", 3, 4, (P_AT,), _plague),
-        Power("wildfire", 3, 4, (), _wildfire),
-        Power("raiders", 3, 4, (P_AT,), _raiders),
-        Power("winter", 3, 4, (), _winter),
-        Power("earthquake", 3, 6, (), _earthquake),
-        Power("decree", 4, 6, (Param("god", "god"), P_TEXT, Param("days", "days")), _decree),
-        Power("wake_ullr", 4, 8, (), _wake_ullr),
-        Power("bind_star", 4, 5, (Param("days", "days"),), _bind_star),
-        Power("heal", 4, 7, (P_AT,), _heal),
-        Power("cleanse", 4, 7, (P_AT,), _cleanse),
-        Power("raise_stone", 4, 10, (), _raise_stone),
-    )
-}
-
-
-def _prayed_to_you(world: World) -> bool:
-    return bool(state(world)["ever"].get("prayed"))
-
-
-CHAPTERS = (
-    Chapter("voice", _prayed_to_you, 3, 2),
-    Chapter("wound", lambda w: not w.hidden["shaft_open"], 5, 3),
-    Chapter("song", lambda w: bool(w.hidden.get("stones_sung") or state(w)["ever"].get("hummed")), 5, 4),
-    Chapter("waking", lambda w: int(w.hidden.get("ullr_awake", 0)) > 0, 5, None),
-)
+def chapters(world: World) -> tuple[Chapter, ...]:
+    made = getattr(world, "_chapters", None)
+    if made is None:
+        made = rules_for(world).chapters()
+        world._chapters = made
+    return made
 
 
 def power_name(world: World, power_id: str) -> str:
@@ -310,7 +141,7 @@ def _tier_name(world: World, tier: int) -> str:
 def clean(world: World, power_id: str, args: dict | None) -> tuple[Power, dict]:
     """Check an act against the rules: known, unlocked, affordable, and with sensible arguments."""
     t = world.t
-    power = POWERS.get(power_id)
+    power = powers(world).get(power_id)
     if power is None:
         raise OvergodError(t("overgod.err_unknown", power=power_id))
     o = state(world)
@@ -336,8 +167,8 @@ def clean(world: World, power_id: str, args: dict | None) -> tuple[Power, dict]:
                 raise OvergodError(t("overgod.err_place", label=label, raw=raw))
             out[prm.name] = place
         elif prm.kind == "god":
-            if raw not in GODS:
-                raise OvergodError(t("overgod.err_god", label=label, gods=", ".join(GODS)))
+            if raw not in gods(world):
+                raise OvergodError(t("overgod.err_god", label=label, gods=", ".join(gods(world))))
             out[prm.name] = raw
         elif prm.kind == "days":
             try:
@@ -349,7 +180,9 @@ def clean(world: World, power_id: str, args: dict | None) -> tuple[Power, dict]:
             if not text:
                 raise OvergodError(t("overgod.err_text", label=label))
             out[prm.name] = text
-    if power.id == "reveal" and out["who"] in o["revealed"]:
+    if power.apply is _reveal and out.get("who") in o["revealed"]:
+        raise OvergodError(t("overgod.err_revealed", name=world.name(out["who"])))
+    if power.apply is _reveal and out.get("who") not in _words(world).get("secrets", {}):
         raise OvergodError(t("overgod.err_revealed", name=world.name(out["who"])))
     return power, out
 
@@ -373,8 +206,11 @@ def decree_for(world: World, god: str) -> str:
     return world.t("overgod.decree", until=d["until"] + 1, text=d["text"])
 
 
-def star_bound(world: World) -> bool:
-    return state(world).get("star_bound_until", 0) >= world.day
+def bound(world: World, god: str) -> bool:
+    """Whether the One Above has bound a god for now (the god's ``bound`` rule, if it has one)."""
+    cfg = rules_for(world).god(god)
+    rules = rules_for(world)
+    return bool(cfg.get("bound")) and bool(rules.scope(world).eval(cfg["bound"]))
 
 
 # ---------------------------------------------------------------------------- the turn of days
@@ -382,14 +218,20 @@ def star_bound(world: World) -> bool:
 
 def dawn(world: World, yesterday: list[dict]) -> dict:
     """Awe returns each dawn: a little by itself, more for prayers to the voice and for dice that turned a story."""
+    awe = rules_for(world).awe
     o = state(world)
     prayers = world.hidden.pop("prayers_overgod", [])
     if prayers:
         o["ever"]["prayed"] = True
     drama = sum(1 for e in yesterday if e.get("ev") == "check" and e.get("band") in ("critical", "fumble"))
-    income = {"day": world.day, "base": 1.0, "prayers": float(min(3, len(prayers))), "drama": min(2.0, 0.5 * drama)}
+    income = {
+        "day": world.day,
+        "base": float(awe["dawn"]),
+        "prayers": float(min(awe["prayers_max"], len(prayers)) * awe["prayer"]),
+        "drama": min(float(awe["drama_max"]), awe["drama"] * drama),
+    }
     gain = income["base"] + income["prayers"] + income["drama"]
-    o["awe"] = round(min(AWE_CAP, o["awe"] + gain), 3)
+    o["awe"] = round(min(_cap(world), o["awe"] + gain), 3)
     income["total"] = gain
     o["income"] = (o["income"] + [income])[-30:]
     world.log("awe", **income, awe=o["awe"], prayers_heard=[{"agent": q["agent"], "text": q["text"]} for q in prayers])
@@ -399,16 +241,16 @@ def dawn(world: World, yesterday: list[dict]) -> dict:
 def advance_chapters(world: World) -> list[dict]:
     """Close every chapter whose goal now holds, in order: pay its Awe and open the next tier."""
     o = state(world)
-    if world.hidden.get("stone_hum"):
-        o["ever"]["hummed"] = True
+    rules_for(world).run(world, "watch")
     if world.hidden.get("prayers_overgod"):
         o["ever"]["prayed"] = True
     done = []
     titles = _words(world).get("chapters", {})
-    while o["chapter"] < len(CHAPTERS) and CHAPTERS[o["chapter"]].check(world):
-        ch = CHAPTERS[o["chapter"]]
+    plan = chapters(world)
+    while o["chapter"] < len(plan) and plan[o["chapter"]].check(world):
+        ch = plan[o["chapter"]]
         o["chapter"] += 1
-        o["awe"] = round(min(AWE_CAP, o["awe"] + ch.reward), 3)
+        o["awe"] = round(min(_cap(world), o["awe"] + ch.reward), 3)
         if ch.unlocks:
             o["tier"] = max(o["tier"], ch.unlocks)
         record = {"chapter": ch.id, "title": titles.get(ch.id, [ch.id])[0], "reward": ch.reward, "tier": o["tier"], "awe": o["awe"]}
@@ -425,7 +267,7 @@ def view(world: World) -> dict[str, Any]:
     labels = world.t.get("overgod.param")
     return {
         "awe": o["awe"],
-        "cap": AWE_CAP,
+        "cap": _cap(world),
         "tier": o["tier"],
         "tier_name": _tier_name(world, o["tier"]),
         "chapters": [
@@ -437,7 +279,7 @@ def view(world: World) -> dict[str, Any]:
                 "unlocks": c.unlocks and _tier_name(world, c.unlocks),
                 "status": "done" if i < o["chapter"] else "current" if i == o["chapter"] else "later",
             }
-            for i, c in enumerate(CHAPTERS)
+            for i, c in enumerate(chapters(world))
         ],
         "powers": [
             {
@@ -451,8 +293,9 @@ def view(world: World) -> dict[str, Any]:
                 "locked": p.tier > o["tier"],
                 "affordable": o["awe"] + 1e-9 >= p.cost,
             }
-            for p in POWERS.values()
+            for p in powers(world).values()
         ],
+        "gods": [{"id": g, "title": world.story.get("gods", {}).get("titles", {}).get(g, g)} for g in gods(world)],
         "known_by": o["known_by"],
         "revealed": o["revealed"],
         "written": o["written"][-5:],

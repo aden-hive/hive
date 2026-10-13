@@ -1,0 +1,3 @@
+- I was the one who repaired the lighthouse’s clockwork that turns the lens forty years ago. The escapement fork… how many teeth was it again?
+- That book at the Schoolhouse. Ought to go have a look. Legs don’t feel like it.
+- A-Qi came by again to ask if I needed a hand. That boy.

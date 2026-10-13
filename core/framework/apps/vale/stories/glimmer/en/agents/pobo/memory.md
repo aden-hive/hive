@@ -1,0 +1,3 @@
+- The fruit has come in well this year. When A-Tong was little, there was nothing he loved more than climbing that old tree.
+- I hear Granny Lamp's granddaughter has arrived. When Granny Lamp gave me that piece of glass all those years ago, she said something strange: “When the island is one again.”
+- The moss on the stone wall has grown thick again.

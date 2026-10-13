@@ -1,0 +1,42 @@
+name = "Mr. Lu"
+short = "Mr. Lu"
+role = "A merchant from the mainland"
+public = "A businessman from the mainland, forty-five years old, well dressed and generous with his money, who says he wants to buy the lighthouse and turn it into an inn"
+home = "steps"
+start = "steps"
+profession = "merchant"
+knows = ["letter", "elopement", "mainland", "literate"]
+theta = 1.8
+aliases = ["a merchant from the mainland", "lu", "mr", "mr. lu", "商人", "陆先生", "陆老板"]
+
+[items]
+coin = 30
+letter = 1
+cloth = 2
+resin = 2
+
+[skills]  # out of 100
+strength = 30
+craft = 30
+lore = 50
+song = 20
+healing = 15
+hunting = 10
+arms = 15
+magic = 0
+persuade = 75
+stealth = 40
+trade = 85
+notice = 60
+
+[interests]
+money = 1.3
+light = 1.0
+home = 1.1
+family = 0.9
+sea = 0.6
+feud = 0.6
+
+[ties]
+chapo = 0.3
+haishen = -0.2

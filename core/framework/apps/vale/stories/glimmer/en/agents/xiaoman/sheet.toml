@@ -1,0 +1,41 @@
+name = "Xiaoman"
+short = "Xiaoman"
+role = "Mi-niang's daughter"
+public = "Mi-niang's daughter, ten years old, the wildest child at the Schoolhouse—she'll dare to climb anything."
+home = "apiary"
+start = "apiary"
+profession = "child"
+knows = ["climber"]
+theta = 1.6
+aliases = ["mi-niang's daughter", "xiaoman", "小满", "满满"]
+
+[items]
+prism = 1
+
+[skills]  # out of 100
+strength = 25
+craft = 35
+lore = 25
+song = 50
+healing = 10
+hunting = 20
+arms = 5
+magic = 0
+persuade = 45
+stealth = 65
+trade = 10
+notice = 75
+
+[interests]
+light = 1.3
+glass = 1.2
+children = 1.0
+festival = 1.2
+sea = 0.8
+keeper = 0.9
+
+[ties]
+miniang = 0.9
+aheng = 0.3
+liu = 0.4
+chapo = 0.4

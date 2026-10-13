@@ -1,0 +1,43 @@
+name = "Mi-niang"
+short = "Mi-niang"
+role = "The beekeeper at the Apiary"
+public = "The beekeeper at the Apiary on the northern slope, thirty-four years old, cheerful and capable, raising her daughter Xiaoman."
+home = "apiary"
+start = "apiary"
+profession = "beekeeper"
+knows = ["lamp_oil"]
+theta = 1.9
+aliases = ["mi-niang", "miniang", "the beekeeper at the apiary", "蜂园", "蜜娘", "蜜家"]
+
+[items]
+prism = 1
+honey = 4
+wax = 5
+coin = 2
+
+[skills]  # out of 100
+strength = 40
+craft = 60
+lore = 40
+song = 45
+healing = 45
+hunting = 10
+arms = 10
+magic = 0
+persuade = 55
+stealth = 20
+trade = 55
+notice = 55
+
+[interests]
+bees = 1.4
+children = 1.3
+festival = 0.9
+light = 0.8
+money = 0.6
+school = 0.5
+
+[ties]
+xiaoman = 0.9
+liu = 0.3
+chapo = 0.4

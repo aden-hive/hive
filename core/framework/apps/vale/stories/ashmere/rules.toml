@@ -1,0 +1,468 @@
+# The Vale of Ashmere: its mechanics, as data. Language-free: every word the vale shows is
+# looked up in <lang>/story.toml (say('nature.wolves_in_fold')) or in the engine's phrases (t(...)).
+# The schema is described in framework/apps/vale/WORLDS.md.
+
+refill = "0.5 if winter_until >= day else 1.0"   # a hard winter from the One Above halves what the dawn gives
+travel = "2 if winter_until >= day else 1"        # ...and makes every road take two parts of the day
+summary = ["blight", "sickness", "wolves", "shaft_open", "stone_raised", "stones_sung", "ullr_awake", "stone_hum"]
+
+# ---------------------------------------------------------------------------- the hidden world in words
+
+describe = [
+  "say('state.door_open') if shaft_open else say('state.door_shut')",
+  "(say('state.stone_raised') if stone_raised else say('state.stone_fallen')) + (fill(say('state.ullr_awake'), n=int(ullr_awake)) if int(ullr_awake) else say('state.ullr_asleep') + (say('state.ullr_hum') if stone_hum else '')) + t('names.stop')",
+  "fill(say('state.water'), levels=join(t('names.list_sep'), [fill(say('state.water_level'), place=place_name(k), level=say('state.levels')[bucket(blight[k], 0.12, 0.3, 0.55)]) for k in blight]))",
+  "fill(say('state.sickness'), levels=join(t('names.list_sep'), [fill(say('state.sick_level'), place=place_name(k), n=round(sickness[k], 2)) for k in sickness]))",
+  "fill(say('state.wolves'), hunger=round(wolves.hunger, 2), attacks=wolves.attacks)",
+]
+
+# ---------------------------------------------------------------------------- the hidden world at the start
+
+[state]
+shaft_open = 1        # the deep door under Greyfang: open, the wyrm-blood seeps
+stone_raised = 0      # the seventh stone on Barrow Hill
+stones_sung = 0
+stone_hum = 0         # a half-sung song: the stones hum for a night or two
+ullr_awake = 0        # nights old Ullr's authority stays awake after the song
+sick_bracket = {}
+flags = {}
+
+[state.blight]
+mine = 0.40
+mill = 0.20
+ashmere = 0.08
+fenford = 0.03
+mirewood = 0.08
+
+[state.sickness]
+mine = 0.30
+mill = 0.0
+ashmere = 0.05
+fenford = 0.0
+mirewood = 0.0
+
+[state.relief]
+
+[state.wolves]
+hunger = 0.10
+attacks = 0
+driven = 0
+
+# ---------------------------------------------------------------------------- tables the rules read
+
+[constants]
+# The Hollowbrook downstream: [from, to, how much of the blight carries over, how much of its own it keeps].
+river = [["mine", "mill", 0.9, 0.5], ["mill", "ashmere", 0.8, 0.55], ["ashmere", "fenford", 0.75, 0.6], ["mill", "mirewood", 0.7, 0.6]]
+# Deaths a heavy sickness brings, once each: [place, sickness above which it comes].
+deaths = [["ashmere", 0.55], ["mine", 0.75], ["mill", 0.55], ["fenford", 0.55]]
+# What a long blight brings later: [flag, place, from day, sickness above].
+griefs = [["grief_ashmere", "ashmere", 16, 0.7], ["grief_pip", "mill", 18, 0.7], ["grief_mine", "mine", 20, 0.8]]
+chosen = "wynn"        # old Ullr's chosen: her singing holds him longest
+jail = "thornkeep"     # where the confined are held
+
+# ---------------------------------------------------------------------------- each night
+
+# The blight at its source: the open door feeds it; Ullr awake, or a hum, holds it back.
+[[night]]
+let = { awake = "int(ullr_awake) or (1 if stones_sung and not has('ullr_awake') else 0)" }
+set = { "blight.mine" = "clamp(prev.blight.mine + ((0.09 if shaft_open else -0.06) - (0.12 if awake else 0.03 * stone_hum if stone_hum else 0)))" }
+
+# Down the Hollowbrook.
+[[night]]
+for = "src, dst, carry, keep in river"
+set = { "blight[dst]" = "clamp(keep * prev.blight[dst] + (1 - keep) * carry * prev.blight[src])" }
+
+# While Ullr is awake and the door shut, the blood sleeps and the water clears fast.
+[[night]]
+when = "awake and not shaft_open"
+do = [{ for = "k in blight", set = { "blight[k]" = "clamp(blight[k] * 0.7)" } }]
+
+# Relief (clean water carried, a well purified) fades.
+[[night]]
+for = "k in list(relief)"
+set = { "relief[k]" = "round(relief[k] - 0.08, 3)" }
+do = [{ when = "relief[k] <= 0", delete = ["relief[k]"] }]
+
+# Sickness follows the water people drink.
+[[night]]
+for = "k in blight"
+let = { eff = "max(0.0, blight[k] - get(relief, k, 0.0))" }
+set = { "sickness[k]" = "clamp(get(sickness, k, 0.0) * 0.85 + 0.35 * max(0.0, eff - 0.15))" }
+
+# The wolves grow hungry while the Mirewood's water is foul, and come to the fold.
+[[night]]
+when = "blight.mirewood > 0.12"
+set = { "wolves.hunger" = "clamp(wolves.hunger + (0.04 if wolves.killed else 0.12))" }
+else = { set = { "wolves.hunger" = "clamp(wolves.hunger - 0.05)" } }
+
+[[night]]
+when = "wolves.hunger > 0.65"
+set = { "wolves.attacks" = "wolves.attacks + 1", "wolves.hunger" = "clamp(wolves.hunger - 0.25)" }
+event = { place = "'fold'", strength = 2.8, text = "say('nature.wolves_in_fold')" }
+
+# Villagers drink where they sleep.
+[[night]]
+for = "who in villagers"
+let = { eff = "max(0.0, get(blight, here(who), 0.0) - get(relief, here(who), 0.0))" }
+when = "eff > 0.3 and chance(0.25 * eff)"
+set = { "health[who]" = "min(2, health[who] + 1)" }
+else = { when = "eff < 0.2 and health[who] > 0 and chance(0.25)", set = { "health[who]" = "health[who] - 1" } }
+
+# The deaths a heavy sickness brings, once each.
+[[night]]
+for = "place, threshold in deaths"
+when = "get(sickness, place, 0.0) > threshold and not get(flags, 'death_' + place, 0)"
+set = { "flags['death_' + place]" = "day" }
+event = { place = "place", strength = 3.0, text = "say('nature.deaths.' + place)" }
+
+[[night]]
+for = "flag, place, since, threshold in griefs"
+when = "day >= since and get(sickness, place, 0.0) > threshold and not get(flags, flag, 0)"
+set = { "flags[flag]" = "day" }
+event = { place = "place", strength = 3.0, text = "say('nature.griefs.' + flag)" }
+
+# ---------------------------------------------------------------------------- each dawn, after the omens
+
+# Sickness shows: when it worsens, and every other day while it lasts.
+[[dawn]]
+for = "place in sickness"
+let = { bracket = "bucket(sickness[place], 0.15, 0.35, 0.6)" }
+do = [
+  { when = "bracket and (bracket != get(sick_bracket, place, 0) or day % 2 == 0)", emit = { text = "fill(say('nature.sick_mine' if place == 'mine' else 'nature.sick_other')[bracket - 1], place=place_name(place))", place = "place", strength = "1.0 + 0.6 * bracket" } },
+  { set = { "sick_bracket[place]" = "bracket" } },
+]
+
+# Each sick villager feels it on waking.
+[[dawn]]
+for = "who in villagers"
+when = "health[who] == 1"
+emit = { text = "say('nature.woke_coughing')", strength = 1.6, audience = "[who]" }
+else = { when = "health[who] >= 2", emit = { text = "say('nature.woke_fevered')", strength = 2.0, audience = "[who]" } }
+
+# ---------------------------------------------------------------------------- after the gods' dawn turns
+
+# Old Ullr's waking runs down a night, and a half-sung song fades.
+[[after_gods]]
+when = "has('ullr_awake')"
+set = { ullr_awake = "max(0, int(ullr_awake) - 1)" }
+do = [{ when = "stone_hum", set = { stone_hum = "max(0, int(stone_hum) - 1)" } }]
+
+# ---------------------------------------------------------------------------- what fate may change
+
+[effects.seal_shaft]
+set = { shaft_open = "0" }
+
+[effects.reopen_shaft]
+set = { shaft_open = "1" }
+
+[effects.raise_stone]
+set = { stone_raised = "1" }
+
+# The shepherd's song among the stones. Both verses with the stone raised wake Ullr for three
+# nights, seven if his chosen sings among them; anything less makes the stones hum.
+[effects.sing]
+when = "int(get(arg, 'verses', 1)) >= 2 and stone_raised"
+do = [{ when = "has('ullr_awake')", set = { ullr_awake = "max(int(ullr_awake), 7 if chosen in present and loc[chosen] == site else 3)", stones_sung = "int(stones_sung) + 1" }, else = { set = { stones_sung = "1" } } }]
+else = { set = { stone_hum = "min(2, int(stone_hum) + 1)" } }
+
+[effects.purify]
+need = ["place"]
+let = { place = "resolve_place(str(arg.place))", amount = "max(0.05, min(0.3, float(get(arg, 'amount', 0.1))))" }
+requires = "place in blight"
+set = { "relief[place]" = "max(get(relief, place, 0.0), amount)" }
+
+[effects.heal]
+need = ["place"]
+let = { place = "resolve_place(str(arg.place))", amount = "max(0.05, min(0.4, float(get(arg, 'amount', 0.1))))" }
+do = [
+  { when = "place in sickness", set = { "sickness[place]" = "round(max(0.0, sickness[place] - amount), 4)" } },
+  { for = "who in present(place)", set = { "health[who]" = "max(0, health[who] - 1)" } },
+]
+
+[effects.wolves]
+let = { result = "str(get(arg, 'result', None))" }
+when = "result in ['driven_off', 'killed']"
+set = { "wolves.hunger" = "0.0", "wolves.driven" = "int(get(wolves, 'driven', 0)) + 1" }
+do = [{ when = "result == 'killed'", set = { "wolves.killed" = "1" } }]
+
+# ---------------------------------------------------------------------------- the One Above
+
+[[power]]
+id = "whisper"
+tier = 1
+cost = 1
+params = ["to", "text"]
+use = "whisper"
+
+[[power]]
+id = "inscribe"
+tier = 1
+cost = 1
+params = ["text"]
+use = "inscribe"
+
+[[power]]
+id = "sign"
+tier = 2
+cost = 2
+params = ["at", "text"]
+use = "sign"
+
+[[power]]
+id = "prophecy"
+tier = 2
+cost = 3
+params = ["text"]
+use = "prophecy"
+
+[[power]]
+id = "reveal"
+tier = 2
+cost = 3
+params = ["who"]
+use = "reveal"
+
+[[power]]
+id = "collector"
+tier = 2
+cost = 3
+steps = [{ event = { place = "'thornkeep'", strength = 2.8, text = "say('overgod.collector_keep')" }, emit = { text = "say('overgod.collector_word')", strength = 2.2, audience = "villagers" } }]
+done = "say('overgod.collector_done')"
+
+[[power]]
+id = "flood"
+tier = 3
+cost = 5
+steps = [
+  { set = { "blight.mirewood" = "round(max(blight.mirewood, 0.9 * blight.mill), 4)", "blight.fenford" = "round(min(1.0, blight.fenford + 0.2 * blight.mill + 0.05), 4)" } },
+  { for = "place in ['ashmere', 'fenford', 'mirewood']", set = { "sickness[place]" = "round(min(1.0, get(sickness, place, 0.0) + 0.1), 4)" }, delete = ["relief[place]"] },
+  { emit = { text = "say('overgod.flood')", strength = 2.6, audience = "villagers" } },
+]
+done = "say('overgod.flood_done')"
+
+[[power]]
+id = "plague"
+tier = 3
+cost = 4
+params = ["at"]
+steps = [
+  { let = { hurt = "[]" } },
+  { when = "at in sickness", set = { "sickness[at]" = "round(min(1.0, sickness[at] + 0.35), 4)" } },
+  { for = "who in present(at)", when = "chance(0.5)", set = { "health[who]" = "min(2, health[who] + 1)" }, push = { hurt = "short(who)" } },
+  { emit = { text = "say('overgod.plague', place=place_name(at))", place = "at", strength = 2.8 } },
+]
+done = "say('overgod.plague_done', place=place_name(at)) + (say('overgod.fevered', who=join(t('names.list_sep'), hurt)) if hurt else '.')"
+
+[[power]]
+id = "wildfire"
+tier = 3
+cost = 4
+steps = [
+  { let = { hurt = "[]" }, set = { "wolves.hunger" = "round(min(1.0, wolves.hunger + 0.4), 4)" } },
+  { for = "who in present('mirewood')", when = "chance(0.5)", set = { "health[who]" = "min(2, health[who] + 1)" }, push = { hurt = "short(who)" } },
+  { emit = { text = "say('overgod.fire')", strength = 2.6, audience = "villagers" } },
+]
+done = "say('overgod.fire_done') + (say('overgod.hurt', who=join(t('names.list_sep'), hurt)) if hurt else '.')"
+
+[[power]]
+id = "raiders"
+tier = 3
+cost = 4
+params = ["at"]
+steps = [
+  { let = { taken = "[]", hurt = "[]" } },
+  { for = "who in present(at)", do = [{ for = "item in ['coin', 'goods', 'ore', 'flour', 'game', 'ale', 'wool']", when = "get(items[who], item, 0) > 0", set = { "items[who][item]" = "items[who][item] // 2" }, push = { taken = "short(who)" } }] },
+  { for = "who in present(at)", when = "chance(0.3)", set = { "health[who]" = "min(2, health[who] + 1)" }, push = { hurt = "short(who)" } },
+  { emit = { text = "say('overgod.raiders', place=place_name(at))", place = "at", strength = 2.8 } },
+]
+done = "say('overgod.raiders_done', place=place_name(at)) + (say('overgod.robbed', who=join(t('names.list_sep'), sorted(set(taken)))) if taken else '') + (say('overgod.hurt_semi', who=join(t('names.list_sep'), hurt)) if hurt else '.')"
+
+[[power]]
+id = "winter"
+tier = 3
+cost = 4
+steps = [{ set = { winter_until = "day + 3" }, emit = { text = "say('overgod.winter')", strength = 2.4, audience = "villagers" } }]
+done = "say('overgod.winter_done')"
+
+[[power]]
+id = "earthquake"
+tier = 3
+cost = 6
+steps = [
+  { let = { what = "[]", hurt = "[]" } },
+  { when = "not shaft_open and chance(0.5)", set = { shaft_open = "1" }, push = { what = "say('overgod.quake_seal')" }, else = { set = { "blight.mine" = "round(min(1.0, blight.mine + 0.2), 4)" } } },
+  { when = "stone_raised and chance(0.4)", set = { stone_raised = "0" }, push = { what = "say('overgod.quake_stone')" } },
+  { for = "place in ['mine', 'chapel', 'barrow_hill']", do = [{ for = "who in present(place)", when = "chance(0.5)", set = { "health[who]" = "min(2, health[who] + 1)" }, push = { hurt = "short(who)" } }] },
+  { emit = { text = "say('overgod.quake')", strength = 2.8, audience = "villagers" } },
+]
+done = "say('overgod.quake_done') + (t('names.colon') + join(t('names.clause_sep'), what) if what else '') + (say('overgod.hurt', who=join(t('names.list_sep'), hurt)) if hurt else t('names.stop'))"
+
+[[power]]
+id = "decree"
+tier = 4
+cost = 6
+params = ["god", "text", "days"]
+use = "decree"
+
+[[power]]
+id = "wake_ullr"
+tier = 4
+cost = 8
+steps = [{ set = { ullr_awake = "max(int(ullr_awake), 3)" }, emit = { text = "say('overgod.wake')", place = "'barrow_hill'", strength = 2.8 } }]
+done = "say('overgod.wake_done')"
+
+[[power]]
+id = "bind_star"
+tier = 4
+cost = 5
+params = ["days"]
+steps = [{ set = { "overgod.star_bound_until" = "day + int(days)" } }]
+done = "say('overgod.star_bound', days=days)"
+
+[[power]]
+id = "heal"
+tier = 4
+cost = 7
+params = ["at"]
+steps = [
+  { when = "at in sickness", set = { "sickness[at]" = "0.0" } },
+  { for = "who in present(at)", set = { "health[who]" = "0" } },
+  { emit = { text = "say('overgod.healed', place=place_name(at))", place = "at", strength = 3.0 } },
+]
+done = "say('overgod.healed_done', place=place_name(at))"
+
+[[power]]
+id = "cleanse"
+tier = 4
+cost = 7
+params = ["at"]
+steps = [
+  { when = "at in blight", set = { "blight[at]" = "0.0" } },
+  { emit = { text = "say('overgod.cleansed', place=place_name(at))", place = "at", strength = 3.0 } },
+]
+done = "say('overgod.cleansed_done', place=place_name(at))"
+
+[[power]]
+id = "raise_stone"
+tier = 4
+cost = 10
+steps = [{ set = { stone_raised = "1" }, emit = { text = "say('overgod.stone')", place = "'barrow_hill'", strength = 3.0 } }]
+done = "say('overgod.stone_done')"
+
+# Chapters: what the vale should come to next. Titles and goals are in story.toml [overgod.chapters].
+[[chapter]]
+id = "voice"
+when = "overgod.ever.prayed"
+reward = 3
+unlocks = 2
+
+[[chapter]]
+id = "wound"
+when = "not shaft_open"
+reward = 5
+unlocks = 3
+
+[[chapter]]
+id = "song"
+when = "stones_sung or overgod.ever.hummed"
+reward = 5
+unlocks = 4
+
+[[chapter]]
+id = "waking"
+when = "int(ullr_awake) > 0"
+reward = 5
+
+# Before the chapters are checked: a hum heard once counts for the song.
+[[watch]]
+when = "stone_hum"
+set = { "overgod.ever.hummed" = "True" }
+
+# ---------------------------------------------------------------------------- the gods
+
+# The True God: keeps the Ledger, sends dreams and signs with grace.
+[[god]]
+id = "god"
+kind = "ledger"
+
+# The Star God: answers his follower's prayers with boons, paid for with her paintings.
+[[god]]
+id = "outer"
+kind = "patron"
+switch = "outer_god"
+follower = "bagel"
+words = "master_words"      # story.toml [gods]: the words that address it
+to = "master"
+prayers = "prayers_master"
+offering = "painting"
+bound = "overgod.star_bound_until >= day"
+gifts = ["jars", "rope", "timber", "tools", "lamps", "remedy"]
+boons = { heal = "{'type': 'heal', 'place': here, 'amount': 0.3}", cleanse = "{'type': 'purify', 'place': here, 'amount': 0.3}", mend = "{'type': 'health', 'who': who, 'change': -1}", wolves = "{'type': 'wolves', 'result': 'driven_off'}" }
+
+# Old Ullr: acts only while his song holds him awake, or stirring after a half-sung one.
+[[god]]
+id = "ullr"
+kind = "sleeper"
+switch = "ullr_agent"
+awake = "int(ullr_awake)"
+stirring = "int(stone_hum)"
+words = "ullr_words"
+to = "ullr"
+prayers = "prayers_ullr"
+song = "sing"
+high_places = ["barrow_hill", "fold", "mirewood"]
+hunt = { once = "ullr_hunted", at = "fold", strength = 2.6, steps = [{ set = { "wolves.hunger" = "0.0", "wolves.driven" = "int(get(wolves, 'driven', 0)) + 1" } }] }
+
+# ---------------------------------------------------------------------------- villager actions of this world
+
+# Tend the sick with a remedy: the dice decide how many are eased and how much the place's sickness falls.
+[actions.tend]
+item = "remedy"
+skill = "healing"
+by_band = { critical = [3, 0.18], success = [2, 0.12], partial = [1, 0.06], failure = [0, 0.0], fumble = [0, 0.0] }
+steps = [{ when = "here in sickness and amount", set = { "sickness[here]" = "round(max(0.0, sickness[here] - amount), 4)" } }]
+
+# ---------------------------------------------------------------------------- games of this world
+
+[physics]
+refill = 1.5
+god_grace = 1.0
+outer_god = 1.0
+ullr_agent = 1.0
+
+# ---------------------------------------------------------------------------- what the player sees
+
+[[panel.fact]]
+label = "say('panel.door')"
+text = "say('panel.open') if shaft_open else say('panel.shut')"
+tone = "'bad' if shaft_open else 'good'"
+
+[[panel.fact]]
+label = "say('panel.stone')"
+text = "say('panel.standing') if stone_raised else say('panel.fallen')"
+
+[[panel.fact]]
+label = "say('panel.ullr')"
+text = "fill(say('panel.awake'), n=int(ullr_awake)) if int(ullr_awake) else say('panel.stirring') if stone_hum else say('panel.asleep')"
+tone = "'good' if int(ullr_awake) else ''"
+
+[[panel.fact]]
+label = "say('panel.wolves')"
+text = "fill(say('panel.wolves_text'), hunger=pct(wolves.hunger), attacks=wolves.attacks)"
+
+[[panel.fact]]
+label = "say('panel.winter')"
+text = "''"
+when = "winter_until >= day"
+tone = "'good'"
+
+[[panel.bar]]
+for = "k in blight"
+label = "place_name(k)"
+value = "blight[k]"
+text = "fill(say('panel.blight_sick'), blight=pct(blight[k]), sick=pct(get(sickness, k, 0.0)))"
+tone = "'bad'"
+
+[scene]
+water = "{k: blight[k] for k in blight}"
+marks = "{'deep_door': bool(shaft_open), 'stone_raised': bool(stone_raised), 'awake': int(ullr_awake) > 0, 'hum': bool(stone_hum), 'winter': winter_until >= day}"

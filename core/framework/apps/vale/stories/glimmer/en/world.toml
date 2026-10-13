@@ -1,0 +1,415 @@
+# Glimmer Isle: places, clues, omens, calendar and physics.
+# A condition is a list of [name, operator, value], all of which must hold; names read the hidden state
+# (see ../rules.toml [state]): lens, lamp, clockwork, lit, harmony, festival, boats, sea, ebb, day.
+
+[vale]
+name = "Glimmer Isle"
+season = "Early summer"
+weathers = [
+  "The sea breeze is warm and gentle, and the sunshine has made the Teahouse Steps hot to the touch.",
+  "Fog rolled in early this morning, and the lighthouse's silhouette comes and goes in the mist.",
+  "An afternoon sunshower left a rainbow hanging over the Orchard Slope.",
+  "The sky is overcast, the sea is lead-grey, and none of the fishing boats have gone out.",
+  "The wind comes in from the sea, making the fishing nets flap and rustle on their drying racks.",
+  "Fine rain has fallen all day, and the flowers in the Apiary are all bowing their heads.",
+]
+
+# What each weather looks like, in the same order, for the pictures.
+weather_kinds = ["clear", "fog", "showers", "overcast", "wind", "rain"]
+
+# ---------------------------------------------------------------------------
+# Physics: the cheap rules that decide who is moved. No language model is called.
+# ---------------------------------------------------------------------------
+[physics]
+refill = 0.6
+reserve_cap = 2.0
+start_reserve = 1.0
+activation_cost = 1.0
+max_acts_per_agent = 2
+max_activations_per_day = 30
+pace = 0.0                 # 0: spend energy on whatever stirs first; above 0: spread the day's acts over the day
+habituation = 0.25
+learn_rate = 0.08
+unlearn_rate = 0.03
+diffusion_min = 1.8
+diffusion_factor = 0.45
+diffusion_hops = 2
+theta_scale = 1.25
+god_grace = 0.0
+god_grace_cap = 3.0
+ledger_lines = 10
+outer_god = 0.0
+ullr_agent = 0.0
+
+[physics.kinds]
+speech = [1.5, 0.35]
+directed = [1.9, 0.35]
+notice = [1.2, 4.0]
+painting = [1.8, 8.0]
+deed = [0.8, 0.4]
+clue = [2.0, 1.0]
+omen = [2.0, 1.0]
+self = [1.6, 1.0]
+rumor = [1.0, 1.0]
+project = [2.0, 3.0]
+outcome = [3.0, 1.5]
+arrival = [0.7, 0.3]
+dream = [2.6, 1.0]
+sign = [2.4, 1.0]
+ledger = [1.2, 1.0]
+boon = [2.6, 1.0]
+prophecy = [2.8, 1.0]
+
+# ---------------------------------------------------------------------------
+# Places. x/y is where each sits on the map (0-100). Things in a place can be looked at closely; the first
+# view whose conditions hold is the one seen. `grants` lets whoever looks learn something.
+# ---------------------------------------------------------------------------
+
+[[place]]
+id = "cape"
+name = "Lighthouse Cape"
+desc = "A high cape at the island's northeastern corner. A white lighthouse with red stripes stands on the rocks, beside the keeper's little stone cottage, with seaweed growing on its roof."
+x = 82
+y = 16
+roads = ["orchard"]
+
+  [[place.feature]]
+  id = "lens_frame"
+  name = "The lens frame in the lantern room"
+    [[place.feature.view]]
+    when = [["lens", ">=", 7]]
+    text = "All seven slots are filled. Sunlight passes through the prisms, casting circling rainbows on the walls of the lantern room, as though someone had set a swarm of fireflies loose inside."
+    [[place.feature.view]]
+    when = [["lens", ">=", 1]]
+    text = "A few wing-shaped prisms have been fitted back into the copper lens frame. The empty slots look like gaps in a toothless mouth. The prisms already in place gleam softly in the sunlight."
+    [[place.feature.view]]
+    text = "A copper lens frame taller than a person stands in the middle of the lantern room. Its seven slots, arranged in a circle, are all empty. Each slot is shaped like a firefly's wing."
+
+  [[place.feature]]
+  id = "cottage"
+  name = "The keeper's cottage"
+    [[place.feature.view]]
+    text = "The keeper's logbook lies held down on the table. The handwriting on the last page is steady: “Tonight the two families brought their quarrel beneath the lamp again. I took the great lens apart into seven pieces of light and shared them among seven households: the Hai family's boat, the Po family's shed, the wind at the teahouse, the paper at the Schoolhouse, the Mi family's fire, the sleeping child; and one piece I gave back to the sea. When the island is one again, put me back together. —Chaoyin”"
+    grants = "promise"
+
+  [[place.feature]]
+  id = "clockwork"
+  name = "The clockwork that turns the lens"
+    [[place.feature.view]]
+    when = [["clockwork", ">=", 1]]
+    text = "The copper clockwork has been oiled. A gentle push sets it turning with a steady tick, tick, tick."
+    [[place.feature.view]]
+    when = [["clockwork", ">", 0]]
+    text = "The clockwork has been taken apart and cleaned. Several gears shine brightly, but the place for the escapement fork is still empty."
+    [[place.feature.view]]
+    text = "The copper clockwork that turns the lens has rusted solid, and one tooth on the escapement fork has snapped off. A line of small lettering is engraved on the base: “Repaired by Master Mo, forty years ago.”"
+
+  [[place.feature]]
+  id = "great_lamp"
+  name = "The great lamp"
+    [[place.feature.view]]
+    when = [["lamp", ">=", 1]]
+    text = "The lamp's bowl is full of amber lamp oil, and the new wick is snow-white. All it needs now is someone to light it."
+    [[place.feature.view]]
+    when = [["lamp", ">", 0]]
+    text = "There is a shallow layer of lamp oil in the bowl, but it is still far from enough. The wick is freshly twisted, but only half as long as it needs to be."
+    [[place.feature.view]]
+    text = "The great lamp's bowl is dry, and its wick crumbled to a pinch of ash long ago. The keeper's recipe is engraved on the lamp's base: “Three parts wax, seven parts fish oil, a pinch of pine resin.”"
+
+[[place]]
+id = "orchard"
+name = "the Orchard Slope"
+desc = "On the sunny slopes on the east side of the island, rows of fruit trees climb all the way to the hilltop. The Po family's watch-hut stands at the highest point, with a view of the lighthouse."
+x = 68
+y = 38
+roads = ["cape", "steps", "apiary"]
+
+  [[place.feature]]
+  id = "hut_window"
+  name = "The watch-hut's window"
+    [[place.feature.view]]
+    text = "The watch-hut has just one small window. Instead of a pane of glass, it is fitted with a thick, wing-shaped lens. Look at the lighthouse through it, and the lighthouse is upside down."
+
+  [[place.feature]]
+  id = "stone_wall"
+  name = "The stone wall at the foot of the slope"
+    [[place.feature.view]]
+    when = [["harmony", ">=", 0.6]]
+    text = "Someone has taken apart a section of the stone wall to make an opening. On the stones to either side sit a basket of fruit and a string of dried fish."
+    [[place.feature.view]]
+    text = "On the path between the Orchard Slope and the fishing harbour, someone built a low stone wall, now covered in moss. For nineteen years, neither the fruit on this side nor the fish on the other has crossed it."
+
+  [[place.feature]]
+  id = "trees"
+  name = "Fruit trees"
+    [[place.feature.view]]
+    text = "Two names are carved into the oldest fruit tree: “Lan” and “Tong.” The bark has stretched the cuts wide over the years."
+
+[[place]]
+id = "apiary"
+name = "the Apiary"
+desc = "A flower-covered slope on the north side of the island. Mi-niang's beehives stand in rows among the wildflowers. She and her daughter Xiaoman live in a little cottage at the foot of the slope."
+x = 42
+y = 22
+roads = ["orchard", "steps", "caves"]
+
+  [[place.feature]]
+  id = "smoker"
+  name = "Mi-niang's smoker"
+    [[place.feature.view]]
+    text = "A thick, wing-shaped piece of glass is set into the lid of the smoker. Mi-niang uses it to focus sunlight and light tinder. “Works better than flint,” she says."
+
+  [[place.feature]]
+  id = "rainbow_stone"
+  name = "The rainbow stone by Xiaoman's bed"
+    [[place.feature.view]]
+    text = "A wing-shaped “rainbow stone” hangs from a red cord by Xiaoman's bed. When the morning sun shines in, rainbows cover the walls. Xiaoman says her grandmother left it the year she was born."
+
+  [[place.feature]]
+  id = "hives"
+  name = "Beehives"
+    [[place.feature.view]]
+    text = "The wax in the beehives is thick and yellow. Mi-niang says there is more wax this year than she can possibly use, and she has no idea what to do with it all."
+
+[[place]]
+id = "steps"
+name = "the Teahouse Steps"
+desc = "A plaza of stone steps in the centre of the island, with Granny Cha's teahouse at the top. Everyone on the island comes here to drink tea, talk, and argue."
+x = 52
+y = 50
+roads = ["orchard", "apiary", "harbour", "school"]
+
+  [[place.feature]]
+  id = "wind_chime"
+  name = "The teahouse's wind chimes"
+    [[place.feature.view]]
+    text = "A wing-shaped piece of clear glass hangs in the middle of the wind chimes beneath the eaves. When the wind blows, rainbows scatter across all the tea tables. Granny Cha says it was “a gift from old Chaoyin.”"
+
+  [[place.feature]]
+  id = "old_lanterns"
+  name = "Old lanterns in the attic"
+    [[place.feature.view]]
+    when = [["festival", ">=", 0.5]]
+    text = "The old lanterns have all been brought down and covered with fresh paper. The two bearing the names “Xiaolan” and “A-Tong” have been set aside and wiped spotlessly clean."
+    [[place.feature.view]]
+    text = "Dust-covered bamboo-framed lanterns are piled in the teahouse attic. They have not been lit for nineteen years. One bears the name “Xiaolan,” and another “A-Tong.”"
+
+  [[place.feature]]
+  id = "notice_post"
+  name = "The notice post at the foot of the steps"
+    [[place.feature.view]]
+    text = "Pinned to the notice post are the Schoolhouse timetable, Mi-niang's honey prices, and an old, yellowed notice: “Lantern Night will go ahead as usual.” It is dated nineteen years ago."
+
+[[place]]
+id = "harbour"
+name = "Tide Harbour"
+desc = "A little harbour on the southwest side of the island: a stone pier, racks for drying nets, and a few fishing boats. Old Mo's boat repair workshop stands at the end of the pier."
+x = 32
+y = 70
+roads = ["steps", "school", "caves"]
+
+  [[place.feature]]
+  id = "haishen_boat"
+  name = "Aunt Hai's Boat"
+    [[place.feature.view]]
+    text = "A wing-shaped “glass float” is tied to the bow of Aunt Hai's boat. When the sun shines on it, it casts a tiny rainbow on the deck. Aunt Hai says it is her husband's good-luck charm."
+
+  [[place.feature]]
+  id = "workshop"
+  name = "Old Mo's Workshop"
+    [[place.feature.view]]
+    when = [["clockwork", ">=", 1]]
+    text = "There is an empty spot on the workbench. The old sheet of paper with the drawing of a fork with a missing tooth is gone. Old Mo is humming a song, which he rarely does."
+    [[place.feature.view]]
+    text = "Gears, copper pipes, and clocks still waiting to be fully repaired hang all over the wall. A yellowed sheet of paper is held down on the workbench. It shows a fork with a missing tooth, with a note beside it: “The diagram is in that book at the Schoolhouse.”"
+
+  [[place.feature]]
+  id = "pier_board"
+  name = "The Pier Noticeboard"
+    [[place.feature.view]]
+    text = "The supply boat's schedule is posted on the noticeboard: the first and fifteenth of every month. Beside it, someone has written a line in charcoal: “The lighthouse is dark. The captain says sooner or later he'll stop coming.”"
+
+[[place]]
+id = "school"
+name = "the Schoolhouse"
+desc = "The little schoolhouse on the south side of the island has just one classroom and one bell. Teacher Liu teaches here and also writes and reads letters for everyone on the island."
+x = 66
+y = 66
+roads = ["steps", "harbour"]
+
+  [[place.feature]]
+  id = "desk"
+  name = "Teacher Liu's Desk"
+    [[place.feature.view]]
+    text = "A wing-shaped glass paperweight holds down a stack of children's essays on the desk. The one on top is titled “The Light I Have Seen.”"
+
+  [[place.feature]]
+  id = "lighthouse_book"
+  name = "\"The Lighthouse Clockwork, Illustrated\""
+    [[place.feature.view]]
+    text = "On the highest shelf sits a yellowed copy of \"The Lighthouse Clockwork, Illustrated\". Tucked inside is a drawing of an escapement fork, with its tooth count and dimensions clearly marked. On the title page is written: “A gift to the Schoolhouse. Chaoyin.”"
+    grants = "escapement"
+
+  [[place.feature]]
+  id = "bell"
+  name = "The Schoolhouse Bell"
+    [[place.feature.view]]
+    text = "The bell rope is worn shiny. The children say that when the lighthouse was lit, every time the Schoolhouse bell rang, the lighthouse would flash once in reply."
+
+[[place]]
+id = "caves"
+name = "the Tide Caves"
+desc = "Sea caves beneath the reefs on the west side of the island. The tide flows in and out, and the echoes inside carry a long way."
+x = 14
+y = 44
+roads = ["apiary", "harbour"]
+
+  [[place.feature]]
+  id = "cave_mouth"
+  name = "The Entrance to the Tide Caves"
+    [[place.feature.view]]
+    text = "The tide pours into the cave mouth, then ebbs out again. Tide marks stripe the cave walls; the highest is above a person's head."
+
+  [[place.feature]]
+  id = "echo_chamber"
+  name = "the Echo Chamber"
+    [[place.feature.view]]
+    when = [["ebb", "==", 1]]
+    text = "The great ebb has drained the water from the cave floor. A tiny stone chamber lies exposed in its deepest reaches. On a stone shelf rests a wing-shaped piece of glass wrapped in oilcloth. The stone beside it is carved with the words: “The piece returned to the sea.”"
+    grants = "cave_prism"
+    [[place.feature.view]]
+    text = "The depths of the cave are flooded with seawater, and all that can be heard are echoes. The elders say you can only get in during the few days when the spring tide ebbs to its farthest point."
+
+# ---------------------------------------------------------------------------
+# Omens: shown at dawn while their conditions hold (once every `every` days).
+# ---------------------------------------------------------------------------
+
+[[omen]]
+id = "lens_flash"
+place = "cape"
+when = [["lens", ">=", 4], ["lit", "==", 0]]
+every = 3
+strength = 2.2
+text = "Someone saw a flash at the top of the lighthouse during the night, as though someone up there had polished a piece of glass until it shone."
+
+[[omen]]
+id = "cold_teahouse"
+place = "steps"
+when = [["harmony", "<", 0.2]]
+every = 4
+strength = 1.8
+text = "In the teahouse, members of the Hai family and the Po family sit three tables apart, neither side looking at the other."
+
+[[omen]]
+id = "new_lanterns"
+place = "steps"
+when = [["festival", ">=", 0.5]]
+every = 3
+strength = 2.0
+text = "Newly made lanterns have been hung along both sides of the stone steps, and the children count them one by one."
+
+[[omen]]
+id = "glass_sea"
+place = "harbour"
+when = [["sea", "<", 0.22]]
+every = 4
+strength = 1.6
+text = "The sea is as smooth as a mirror, and all the fishing boats are out. Even the elders say it is a rare sight."
+
+# ---------------------------------------------------------------------------
+# The calendar.
+# ---------------------------------------------------------------------------
+
+[[calendar]]
+day = 1
+place = "harbour"
+strength = 2.6
+text = "The supply boat docked this morning. A young woman stepped ashore with her luggage on her back and said she was the granddaughter of Granny Lamp, Chaoyin."
+
+[[calendar]]
+day = 12
+place = "caves"
+strength = 2.4
+text = "Today is a spring tide. The elders say the water will recede a very, very long way."
+
+[[calendar]]
+day = 15
+place = "harbour"
+strength = 2.2
+text = "The supply boat has arrived on its twice-monthly run, bringing letters and goods from the mainland. The captain stood on the pier gazing at the lighthouse for a long time."
+
+[[calendar]]
+day = 25
+place = "steps"
+strength = 2.2
+text = "There are five days left until Lantern Night. Granny Cha has hung the first lantern on the stone steps."
+
+[[calendar]]
+day = 26
+place = "caves"
+strength = 2.4
+text = "Another spring tide. The water has receded even farther than last time."
+
+[[calendar]]
+day = 30
+place = "*"
+strength = 2.8
+text = "Tonight is Lantern Night. For the first time in nineteen years, someone has remembered."
+
+# ---------------------------------------------------------------------------
+# Chance: each dawn there is some chance one of these is turned over.
+# ---------------------------------------------------------------------------
+
+[[deck]]
+place = "harbour"
+min_day = 2
+strength = 1.8
+text = "A pod of dolphins swam after A-Qi's boat all morning."
+
+[[deck]]
+place = "orchard"
+min_day = 3
+strength = 1.8
+text = "A kite is caught in the tallest tree on the Orchard Slope, its string broken. Painted on it is a lighthouse with its light shining."
+
+[[deck]]
+place = "steps"
+min_day = 4
+strength = 2.0
+text = "A travelling peddler from the mainland stopped to rest at the teahouse. He said that in the years when the lighthouse shone, Glimmer Isle could be seen from the mainland's harbour."
+
+[[deck]]
+place = "harbour"
+min_day = 5
+strength = 2.4
+text = "A wax-sealed glass bottle washed up on the beach at low tide. Inside was a rolled-up piece of paper, its writing blurred by the water. Only one character was still legible: “mother.”"
+
+[[deck]]
+place = "apiary"
+min_day = 6
+strength = 1.6
+text = "A new swarm of bees split off from a colony and circled above the Apiary for a long time before finally settling beside the road to the lighthouse."
+
+[[deck]]
+place = "school"
+min_day = 7
+strength = 1.6
+text = "The children at the Schoolhouse have drawn a lighthouse with its light shining on the blackboard, and none of them will erase it."
+
+[[deck]]
+place = "cape"
+min_day = 8
+strength = 1.8
+text = "Seabirds flock to the lighthouse railing, as though they are waiting for something."
+
+[[deck]]
+place = "harbour"
+min_day = 10
+strength = 2.0
+text = "A boat from the mainland passed in the distance. It paused out on the water for a while, as though searching for something, then sailed away again."
+
+[[deck]]
+place = "steps"
+min_day = 12
+strength = 2.0
+text = "Granny Cha says she had a dream that Chaoyin was sitting in the teahouse and asked her for a cup of tea. After drinking it, Chaoyin said, “Soon.”"

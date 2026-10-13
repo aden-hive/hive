@@ -1,0 +1,39 @@
+name = "A-Heng"
+short = "A-Heng"
+role = "The lighthouse keeper's granddaughter"
+public = "The granddaughter of Granny Lamp, Chaoyin. Nineteen years old and raised on the mainland, she came to the island on the supply boat, saying she intended to move into the little cottage at the lighthouse."
+home = "cape"
+start = "harbour"
+profession = "keeper"
+knows = ["keeper_heir", "literate"]
+theta = 1.6
+aliases = ["a-heng", "aheng", "the lighthouse keeper's granddaughter", "守灯人的孙女", "灯婆的孙女", "蘅", "阿蘅"]
+
+[items]
+key = 1
+letter = 1
+coin = 3
+
+[skills]  # out of 100
+strength = 35
+craft = 45
+lore = 60
+song = 55
+healing = 25
+hunting = 10
+arms = 10
+magic = 0
+persuade = 45
+stealth = 30
+trade = 25
+notice = 70
+
+[interests]
+light = 1.4
+keeper = 1.4
+glass = 1.2
+family = 1.0
+home = 0.9
+feud = 0.7
+
+[ties]

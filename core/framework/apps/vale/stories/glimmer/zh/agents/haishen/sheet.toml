@@ -1,0 +1,45 @@
+name = "海婶"
+short = "海婶"
+role = "渔港的渔家主妇"
+public = "渔港最响亮的嗓门，五十八岁，丈夫老蒲腿瘸了，船上的事她一个人说了算"
+home = "harbour"
+start = "harbour"
+profession = "fisher"
+knows = []
+theta = 2.0
+aliases = ["海婶", "海家", "海大婶", "haishen"]
+
+[items]
+prism = 1
+fish = 4
+oil = 2
+coin = 3
+rope = 2
+
+[skills]  # out of 100
+strength = 55
+craft = 50
+lore = 20
+song = 40
+healing = 30
+hunting = 60
+arms = 20
+magic = 0
+persuade = 55
+stealth = 10
+trade = 50
+notice = 55
+
+[interests]
+sea = 1.4
+family = 1.3
+feud = 1.2
+home = 1.1
+festival = 0.6
+money = 0.6
+
+[ties]
+pobo = -0.6
+aqi = 0.6
+chapo = 0.4
+laomo = 0.3

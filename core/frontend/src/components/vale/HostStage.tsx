@@ -136,17 +136,16 @@ export default function HostStage({ game, parts, startAt, ui, speed, paused, run
   const figures = (ids: string[] | string | undefined): SceneFigure[] =>
     (Array.isArray(ids) ? ids : ids ? [ids] : []).map(villager).filter((v): v is NonNullable<typeof v> => !!v)
       .map((v) => ({ id: v.id, name: v.short, color: v.color, art: game.art?.people?.[v.id], health: v.health }));
-  const t = game.truth;
+  const hints = game.truth.scene;
   const place = backdrop?.kind === "scene" ? backdrop.place ?? null : null;
+  const most = (values: Record<string, number> | undefined) => Math.max(0, ...Object.values(values ?? {}).map(Number));
   const scene: SceneState = {
     hour: shownPart?.wave ?? game.last.wave,
-    weather: t.weather_kind,
-    winter: t.winter,
-    blight: place ? t.blight[place] ?? 0 : Math.max(0, ...Object.values(t.blight)),
-    shaftOpen: !!t.shaft_open,
-    stoneRaised: !!t.stone_raised,
-    ullrAwake: t.ullr_awake > 0,
-    hum: t.stone_hum > 0,
+    weather: game.truth.weather_kind,
+    winter: Boolean(hints.marks?.winter),
+    water: place ? Number(hints.water?.[place] ?? 0) : most(hints.water),
+    glow: place ? Number(hints.glow?.[place] ?? 0) : most(hints.glow),
+    marks: hints.marks,
   };
   const placeName = place ? game.places.find((p) => p.id === place)?.name : game.story.title;
   const when = shownPart ? capital(ui.dayWave(shownPart.day, game.waves[shownPart.wave] ?? "")) : "";
@@ -154,7 +153,7 @@ export default function HostStage({ game, parts, startAt, ui, speed, paused, run
   return (
     <div className="space-y-2">
       <div data-vale="stage" className="relative rounded-lg overflow-hidden border border-border/60 bg-muted/30 aspect-[16/9]">
-        <SceneArt className="absolute inset-0 w-full h-full" place={place ? game.art?.places?.[place] : { kind: "vale" }}
+        <SceneArt className="absolute inset-0 w-full h-full" place={place ? game.art?.places?.[place] : { kind: (game.art?.panorama ?? "vale") as "vale" }}
           s={scene} people={backdrop?.kind === "scene" ? figures(backdrop.who) : []} label={placeName} imageBase={artBase(game.story.id)} />
         <div className="absolute top-2 left-2 flex items-center gap-1.5">
           {when && <span className="rounded-full bg-black/55 text-white text-[11px] px-2 py-0.5">{when}</span>}

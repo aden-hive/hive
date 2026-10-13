@@ -1,0 +1,40 @@
+name = "老墨"
+short = "老墨"
+role = "渔港的修船匠"
+public = "码头尽头修船修钟的老匠人，七十二岁，耳朵背，手艺好，脾气倔"
+home = "harbour"
+start = "harbour"
+profession = "tinker"
+knows = ["clockwork"]
+theta = 2.5
+aliases = ["老墨", "墨师傅", "墨老头", "laomo"]
+
+[items]
+gears = 3
+rope = 1
+coin = 2
+
+[skills]  # out of 100
+strength = 35
+craft = 85
+lore = 50
+song = 10
+healing = 15
+hunting = 10
+arms = 10
+magic = 0
+persuade = 25
+stealth = 10
+trade = 35
+notice = 45
+
+[interests]
+craft = 1.5
+light = 1.0
+sea = 0.8
+keeper = 0.8
+money = 0.4
+
+[ties]
+aqi = 0.4
+haishen = 0.3

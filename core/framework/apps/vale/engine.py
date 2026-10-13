@@ -21,7 +21,8 @@ from typing import Any
 
 from . import dice, fate as fates, god as gods, nature, outer as outer_gods, physics, ullr as old_gods
 from .fate import apply_effects
-from .world import WAVES, Project, World
+from .rules import rules_for
+from .world import WAVE_LEN, WAVES, Project, World
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,20 @@ def _say(line: str) -> None:
 
 @dataclass
 class Powers:
-    """Who answers for the world beyond the villagers: fate, and the vale's three gods."""
+    """Who answers for the world beyond the villagers: fate, and a model for each standard kind of god.
+
+    ``god`` speaks for a ledger god, ``outer`` for a patron, ``ullr`` for a sleeper; which gods a
+    world has, and how each is set up, is the world's own (``rules.toml``: ``[[god]]``).
+    """
 
     fate: Any
     god: Any = None
     outer: Any = None
     ullr: Any = None
+
+
+# The standard kinds of god: the module that runs each, and which of the Powers speaks for it.
+GOD_KINDS = {"ledger": (gods, "god"), "patron": (outer_gods, "outer"), "sleeper": (old_gods, "ullr")}
 
 
 def _arrive(world: World) -> None:
@@ -51,8 +60,8 @@ def _arrive(world: World) -> None:
 def dawn(world: World, powers: Powers, *, workers: int = 6) -> None:
     """The dawn's whole work, before anyone stirs. ``world.day`` is already the new day."""
     p = world.params
-    # A hard winter from the One Above halves what the dawn gives.
-    refill = p["refill"] * (0.5 if world.hidden.get("winter_until", 0) >= world.day else 1.0)
+    rules = rules_for(world)
+    refill = p["refill"] * rules.refill(world)  # the world's own rule: Ashmere's hard winter halves it
     for a in world.agents.values():
         a.acts_today = 0
         a.last_wave = -9
@@ -64,15 +73,42 @@ def dawn(world: World, powers: Powers, *, workers: int = 6) -> None:
         nature.advance(world)
     _resolve_due(world, powers.fate, False, workers)
     nature.dawn(world)
-    gods.dawn(world, powers.god, False)
-    outer_gods.dawn(world, powers.outer, False)
-    old_gods.dawn(world, powers.ullr, False)
-    nature.lapse(world)  # after Ullr's turn, so the night that woke or stirred him still counts
+    for cfg in rules.gods:  # in the order the world lists them
+        module, speaker = GOD_KINDS[cfg["kind"]]
+        module.dawn(world, getattr(powers, speaker), False, cfg)
+    nature.lapse(world)  # after the gods' turns, so the night that woke or stirred one still counts
+
+
+def _keep_appointments(world: World) -> None:
+    """Whoever joined an undertaking set for later today walks toward its site, one road a part, so they are there in time.
+
+    At the hour, anyone one road away is gathered in anyway; this brings the rest that close. It spends
+    no energy and no model turn: they said they would come. The fevered stay where they are.
+    """
+    waves = max(1, int(rules_for(world).travel(world)))
+    for proj in world.projects.values():
+        if proj.status != "due" or proj.due_day != world.day or proj.when <= world.wave:
+            continue
+        site = proj.site or proj.place
+        for aid in proj.supporters:
+            a = world.agents.get(aid)
+            if a is None or a.loc is None or a.loc == site or a.confined or a.health >= 2:
+                continue
+            way = world.way(a.loc, site)
+            if way is None or way[1] <= 1:
+                continue
+            step = way[0]
+            text = world.t("engine.keeps_appointment", name=a.name, place=world.place_name(step), site=world.place_name(site), title=proj.title)
+            world.add_signal("deed", text, a.loc, a.id, strength=0.6)
+            world.log("appointment", agent=aid, project=proj.id, to=step, site=site)
+            a.travel = {"to": step, "from": a.loc, "arrive": world.now + waves * WAVE_LEN}
+            a.loc = None
 
 
 def wave_start(world: World, powers: Powers, *, workers: int = 6) -> None:
-    """The start of a part of the day: travellers arrive, and undertakings whose hour has come are attempted."""
+    """The start of a part of the day: travellers arrive, those with an appointment set off, and undertakings whose hour has come are attempted."""
     _arrive(world)
+    _keep_appointments(world)
     if world.wave:
         _resolve_due(world, powers.fate, False, workers)  # dawn's were settled with the rest of the dawn
 
@@ -96,10 +132,7 @@ def night(world: World, fired: list[physics.Firing]) -> dict:
         "faded": faded,
         "alive_signals": len(world.signals),
         "reserves": {k: a.reserve for k, a in world.agents.items()},
-        "hidden": {
-            k: world.hidden.get(k, 0)
-            for k in ("blight", "sickness", "wolves", "shaft_open", "stone_raised", "stones_sung", "ullr_awake", "stone_hum")
-        },
+        "hidden": rules_for(world).summary(world),
         "positions": {k: a.loc or (a.travel or {}).get("to") for k, a in world.agents.items()},
         "health": {k: a.health for k, a in world.agents.items()},
         "interests": {k: a.interests for k, a in world.agents.items()},

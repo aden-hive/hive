@@ -1,0 +1,3 @@
+- Spent two days on the supply boat and arrived on Glimmer Isle this morning. Grandmother’s key hangs around my neck.
+- Grandmother’s letter had just one sentence: “Put me back together.” Put what back together?
+- The captain pointed to the lighthouse on the cape and said, “It hasn’t shone for nineteen years.”

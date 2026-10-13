@@ -1,0 +1,129 @@
+# Glimmer Isle, drawn: the same in every language. See stories/ashmere/art.toml for the fields.
+
+panorama = "isle"
+
+[people.aheng]
+color = "#4a7d97"
+skin = "#f3d2b4"
+hair = "#2a2220"
+style = "long"
+coat = "#4a6f8a"
+trim = "#f0e6d0"
+age = "young"
+
+[people.haishen]
+color = "#2f6f8f"
+skin = "#c99a74"
+hair = "#6b6b6b"
+style = "bun"
+hat = "scarf"
+coat = "#2f6f8f"
+trim = "#e8dcc0"
+age = "old"
+
+[people.pobo]
+color = "#6f8e4e"
+skin = "#c8946c"
+hair = "#d8d8d8"
+style = "receding"
+beard = "stubble"
+hat = "hat"
+coat = "#6f8e4e"
+trim = "#d8c27a"
+age = "old"
+
+[people.chapo]
+color = "#9a5a7a"
+skin = "#e8c4a4"
+hair = "#f0f0f0"
+style = "bun"
+coat = "#9a5a7a"
+trim = "#f2e8d8"
+age = "old"
+extras = ["apron"]
+
+[people.liu]
+color = "#5e6f8a"
+skin = "#ecc8a8"
+hair = "#2b2b2b"
+style = "short"
+coat = "#5e6f8a"
+trim = "#f0ece0"
+age = "adult"
+extras = ["quill"]
+
+[people.miniang]
+color = "#d9962a"
+skin = "#edc39a"
+hair = "#6b3f1f"
+style = "bun"
+hat = "scarf"
+coat = "#e2a93a"
+trim = "#fff4d6"
+age = "adult"
+extras = ["herbs"]
+
+[people.laomo]
+color = "#7a5a3a"
+skin = "#d0a07c"
+hair = "#b0b0b0"
+style = "wild"
+beard = "full"
+coat = "#5a4a3a"
+trim = "#a8763e"
+age = "old"
+extras = ["apron"]
+
+[people.xiaoman]
+color = "#e86a5a"
+skin = "#f6d6ba"
+hair = "#3a2414"
+style = "braids"
+coat = "#e86a5a"
+trim = "#fff2e0"
+age = "young"
+
+[people.aqi]
+color = "#3f8fa0"
+skin = "#c9925f"
+hair = "#1f1a17"
+style = "short"
+coat = "#3f8fa0"
+trim = "#f2f2f2"
+age = "young"
+
+[people.lu]
+color = "#8f6a2e"
+skin = "#e6c19d"
+hair = "#3a3a3a"
+style = "slick"
+beard = "goatee"
+hat = "merchant"
+coat = "#2f2f3f"
+trim = "#b8963e"
+age = "adult"
+
+[places.cape]
+kind = "lighthouse"
+
+[places.harbour]
+kind = "harbor"
+
+[places.steps]
+kind = "village"
+
+[places.orchard]
+kind = "orchard"
+
+[places.apiary]
+kind = "garden"
+
+[places.school]
+kind = "chapel"
+
+[places.caves]
+kind = "cave"
+
+# The island's outline: the rest of the map is sea.
+[map]
+coast = [[8, 40], [14, 24], [30, 12], [50, 8], [72, 6], [92, 8], [95, 20], [86, 32], [82, 50], [78, 70], [62, 84], [40, 86], [20, 80], [8, 62]]

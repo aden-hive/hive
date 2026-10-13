@@ -46,11 +46,18 @@ def fill(template: str, **slots: Any) -> str:
 
 
 class Phrases:
-    """``t("act.looked", name=..., thing=...)``; ``t.get("time.waves")`` for lists and tables."""
+    """``t("act.looked", name=..., thing=...)``; ``t.get("time.waves")`` for lists and tables.
 
-    def __init__(self, lang: str = "en") -> None:
+    A story can override any phrase in its own language (``story.toml``: ``[phrases]``, by the
+    same dotted keys), and every phrase may name the world as ``{world}`` (``{World}`` at the
+    start of a sentence, ``{WORLD}`` in a heading): the story's word for itself (``[story] world``).
+    """
+
+    def __init__(self, lang: str = "en", *, overrides: dict | None = None, world: str | None = None) -> None:
         self.lang = lang
-        self._table = table(lang)
+        self._table = _merge(table(lang), overrides) if overrides else table(lang)
+        word = world if world is not None else self._table.get("names", {}).get("the_vale", "")
+        self.world_slots = {"world": word, "World": word[:1].upper() + word[1:], "WORLD": word.upper()}
 
     def get(self, key: str) -> Any:
         node: Any = self._table
@@ -59,4 +66,4 @@ class Phrases:
         return node
 
     def __call__(self, key: str, **slots: Any) -> str:
-        return fill(self.get(key), **slots)
+        return fill(self.get(key), **{**self.world_slots, **slots})

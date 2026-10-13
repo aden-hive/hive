@@ -1,0 +1,3 @@
+- A new girl has arrived, older than me. She says she’s Granny Lamp’s granddaughter. I’m going to ask her what’s inside the lighthouse.
+- The rainbow stone shone with seven colours today. I counted them.
+- There’s a circle in the lighthouse window, like a flower that hasn’t opened yet.

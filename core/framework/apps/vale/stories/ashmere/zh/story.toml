@@ -3,6 +3,8 @@
 # 键名、地点 id、人物 id 和物品 id 与英文版相同，引擎只认这些。
 
 [story]
+world = "山谷"
+premise = "看着村民们在龙锈之害中熬过一个月"
 id = "ashmere"
 lang = "zh"
 title = "灰湖谷"
@@ -20,6 +22,13 @@ master_words = ["主人", "星神", "master", "pleiades"]
 ullr_words = ["乌勒尔", "古神", "ullr", "old god"]
 above_words = ["至上", "上天", "天上", "苍天", "声音", "above", "voice", "sky"]
 high_places = ["barrow_hill", "fold", "mirewood"]
+
+# Whom a villager may pray to, as the pray tool names them.
+[gods.pray]
+god = "“神”（礼拜堂里的正神）"
+ullr = "“乌勒尔”（山岭的古神）"
+outer = "“主人”（只属于你一个人）"
+above = "“至上者”（那个高于一切声音的声音，你听见过）"
 
 [persona]
 want = "你想要什么"
@@ -277,6 +286,8 @@ cleansed_done = "{place}的水变干净了。"
 stone = "黎明时分，倒下的第七块石头立在了古冢丘上它原来的位置，仿佛从未倒下，没有一点撬杠或绳索的痕迹。"
 stone_done = "第七块石头重新立起。"
 
+star_bound = "星神被禁止接近{world}{days}天。"
+
 [overgod.secrets]
 aldric = "奥德里克爵士以为四下无人，展开一张磨旧的纸：多年来以他的名义为一个弃婴付的学费，底下是一个女人的笔迹写的一个名字：“伊索尔德”。"
 bagel = "贝果跪下时，她最新那幅画上的颜料从里面亮了起来，仿佛天外极远处有谁正透过它往这边看，满天星辰似乎都转向她面朝的方向。"
@@ -293,3 +304,24 @@ maud = "莫德一慌，说漏了嘴：三十二年前她是圣文娜礼拜堂接
 osric = "一封信从奥斯里克的账本里掉出来：是他临终的母亲写的，说荆堡的老领主是他的父亲；信后面别着多年来以奥德里克名义为托拜厄斯·奎尔付的学费。"
 tobias = "一枚戒指连着绳子从托拜厄斯的衣领里滑了出来：闭门之上的一枝荆棘，正是荆堡大门上方刻着的家纹。"
 wynn = "温不经意地哼起她祖父的调子，大地应和了：山底下传来低沉的嗡鸣，在场每个人的脚底都感觉得到。"
+
+# 玩家的真相面板（rules.toml [panel]）。
+[panel]
+door = "深门"
+open = "开着"
+shut = "关着"
+stone = "第七块石头"
+standing = "立着"
+fallen = "倒着"
+ullr = "乌勒尔"
+awake = "醒着（还有{n}夜）"
+stirring = "微醒"
+asleep = "沉睡"
+wolves = "狼群"
+wolves_text = "饥饿 {hunger}，袭击 {attacks} 次"
+winter = "严冬"
+blight_sick = "龙锈 {blight} · 患病 {sick}"
+
+# Engine phrases this story says its own way.
+[phrases.mind]
+dream_overgod = "夜里，一个高于一切声音的声音对你说话，你知道那既不是礼拜堂里的神，也不是山岭的任何一位神：{text}"

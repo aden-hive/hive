@@ -40,32 +40,35 @@ from .lang import Phrases
 from .llm import HiveChat, build_provider
 from .novel import LLMNovelist
 from .outer import LLMOuter
+from .rules import load_rules, rules_for
 from .ullr import LLMUllr
 from .world import WAVES, World, story_art, story_dir
 
 DAYS = 30
-# The physics of the later experiments: enough energy, and all three of the vale's gods.
-PHYSICS = {"refill": 1.5, "god_grace": 1.0, "outer_god": 1.0, "ullr_agent": 1.0}
+# The physics of the later experiments: enough energy, and all three of the vale's gods; and
+# the day's energy paced over the day, so the afternoon and evening are not silent.
+PHYSICS = {"refill": 1.5, "god_grace": 1.0, "outer_god": 1.0, "ullr_agent": 1.0, "pace": 1.5}
 CONCURRENT_VILLAGERS = 6
 FEED_TAIL = 300
 
-COLORS = {
-    "hal": "#c98b2b",
-    "maud": "#3f7d6e",
-    "aldric": "#7a4b9c",
-    "osric": "#9a3b3b",
-    "brannoc": "#b4542b",
-    "isolde": "#5a6fb0",
-    "gytha": "#4f8a3a",
-    "bram": "#8a7a52",
-    "wynn": "#d16a8f",
-    "tobias": "#5e7f9e",
-    "marta": "#b07a3c",
-    "cedric": "#8f8a2e",
-    "elspeth": "#3f8fa0",
-    "kell": "#55703a",
-    "bagel": "#e89ab8",
-}
+# Villagers a world's art.toml gives no colour take one of these, in order.
+PALETTE = (
+    "#c98b2b",
+    "#3f7d6e",
+    "#7a4b9c",
+    "#9a3b3b",
+    "#b4542b",
+    "#5a6fb0",
+    "#4f8a3a",
+    "#8a7a52",
+    "#d16a8f",
+    "#5e7f9e",
+    "#b07a3c",
+    "#8f8a2e",
+    "#3f8fa0",
+    "#55703a",
+    "#e89ab8",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -473,8 +476,9 @@ class Game:
         """The player's act: now if the vale is still, else at the turn of the next part of the day."""
         overgod.clean(self.world, power, args)  # fail fast on anything unknown, locked or malformed
         o = overgod.state(self.world)
-        queued = sum(overgod.POWERS[x["power"]].cost for x in o.get("queue", []))
-        if o["awe"] + 1e-9 < queued + overgod.POWERS[power].cost:
+        table = overgod.powers(self.world)
+        queued = sum(table[x["power"]].cost for x in o.get("queue", []))
+        if o["awe"] + 1e-9 < queued + table[power].cost:
             raise overgod.OvergodError(self.world.t("overgod.err_queue", queued=f"{queued:g}"))
         if self.lock.locked() or (self.task and not self.task.done()):
             o.setdefault("queue", []).append({"power": power, "args": args or {}})
@@ -492,12 +496,23 @@ class Game:
 
     # ------------------------------------------------------------------ what the page reads
 
+    def art(self) -> dict[str, Any]:
+        """How this game's world is drawn: the run's own copy of the story's art.toml (older runs: the story's)."""
+        path = self.dir / "world" / "art.toml"
+        return tomllib.loads(path.read_text("utf-8")) if path.exists() else story_art(self.meta.get("story", "ashmere"))
+
     def _refresh(self) -> None:
         """Rebuild the snapshot the page reads. Only at safe points: never while the world is mid-change."""
         w = self.world
         h = w.hidden
+        rules = rules_for(w)
+        art = self.art()
+
+        def colour(aid: str, i: int) -> str:
+            return str(art.get("people", {}).get(aid, {}).get("color") or PALETTE[i % len(PALETTE)])
+
         villagers = []
-        for a in w.agents.values():
+        for i, a in enumerate(w.agents.values()):
             villagers.append(
                 {
                     "id": a.id,
@@ -505,7 +520,7 @@ class Game:
                     "short": a.short,
                     "role": a.role,
                     "public": a.public,
-                    "color": COLORS.get(a.id, "#888"),
+                    "color": colour(a.id, i),
                     "loc": a.loc,
                     "travel": a.travel,
                     "health": a.health,
@@ -534,23 +549,18 @@ class Game:
             "gods": {g: w.story.get("gods", {}).get("titles", {}).get(g) or w.name(g) for g in ("god", "outer", "ullr", "overgod")},
             "skills": dict(w.t.get("names.skills")),
             "goods": {gid: spec.get("name", gid) for gid, spec in w.story.get("items", {}).items()},
-            "art": story_art(self.meta.get("story", "ashmere")),
+            "art": art,
             "days": int(self.meta.get("days", DAYS)),
             "clock": dict(self.clock),
             "last": {"day": w.day, "wave": w.wave},
             "places": [{k: p[k] for k in ("id", "name", "desc", "x", "y", "roads")} for p in w.places.values()],
             "villagers": villagers,
+            # What only the player sees, as the world's rules describe it (rules.toml [panel], [scene]).
             "truth": {
-                "blight": h["blight"],
-                "sickness": h["sickness"],
-                "wolves": h["wolves"],
-                "shaft_open": h["shaft_open"],
-                "stone_raised": h["stone_raised"],
-                "ullr_awake": h.get("ullr_awake", 0),
-                "stone_hum": h.get("stone_hum", 0),
                 "weather": h.get("weather", ""),
                 "weather_kind": h.get("weather_kind", ""),
-                "winter": h.get("winter_until", 0) >= w.day,
+                "panel": rules.panel(w),
+                "scene": rules.scene(w),
             },
             "ledger": ledger_text(w),
             "undertakings": due,
@@ -581,6 +591,7 @@ class Game:
         }
 
     def _save_meta(self) -> None:
+        self.meta["clock"] = dict(self.clock)  # so the list of games shows where an unloaded game stands
         tmp = self.dir / "meta.json.tmp"
         tmp.write_text(json.dumps(self.meta, ensure_ascii=False, indent=1), "utf-8")
         tmp.replace(self.dir / "meta.json")
@@ -639,7 +650,8 @@ class GameManager:
         path = self.root / gid
         template = story_dir(story, lang)  # fails before anything is written if the story has no such language
         self.root.mkdir(parents=True, exist_ok=True)
-        World.create(path, template=template, seed=seed if seed is not None else int(time.time()) % 100000, overrides=PHYSICS).close()
+        physics = {**PHYSICS, **load_rules(template.parent / "rules.toml").get("physics", {})}  # the world's own physics win
+        World.create(path, template=template, seed=seed if seed is not None else int(time.time()) % 100000, overrides=physics).close()
         meta = {
             "story": story,
             "lang": lang,

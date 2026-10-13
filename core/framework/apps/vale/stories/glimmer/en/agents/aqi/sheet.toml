@@ -1,0 +1,43 @@
+name = "A-Qi"
+short = "A-Qi"
+role = "A young fisherman from the fishing harbour"
+public = "Aunt Hai's nephew, twenty-four years old and the strongest young man in the fishing harbour. He dares to head out to sea no matter how fierce the wind and waves."
+home = "harbour"
+start = "harbour"
+profession = "fisher"
+knows = ["boatman"]
+theta = 2.0
+aliases = ["a young fisherman from the fishing harbour", "a-qi", "aqi", "七仔", "阿七"]
+
+[items]
+fish = 3
+oil = 3
+rope = 3
+coin = 1
+
+[skills]  # out of 100
+strength = 75
+craft = 45
+lore = 15
+song = 35
+healing = 20
+hunting = 65
+arms = 30
+magic = 0
+persuade = 30
+stealth = 25
+trade = 30
+notice = 55
+
+[interests]
+sea = 1.4
+light = 0.9
+festival = 0.8
+family = 0.8
+help = 1.0
+storm = 0.8
+
+[ties]
+haishen = 0.6
+laomo = 0.4
+aheng = 0.2

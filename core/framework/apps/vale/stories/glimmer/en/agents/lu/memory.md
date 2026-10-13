@@ -1,0 +1,3 @@
+- Moved into the room above the teahouse. The lighthouse is just at the northeast corner, looking even older than I remember.
+- Granny Lamp's granddaughter has arrived. I'll have to talk to her about buying the lighthouse. The asking price is thirty taels.
+- The letter is still in my inside pocket. Nineteen years now.

@@ -11,11 +11,12 @@ the dawns pay for.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 
 from .lexicon import mentions
-from .world import WAVE_LEN, Agent, Signal, World
+from .world import WAVE_LEN, WAVES, Agent, Signal, World
 
 
 @dataclass
@@ -77,16 +78,34 @@ def _cap(world: World, agent: Agent) -> int:
     return 1 if agent.health >= 2 else int(world.params["max_acts_per_agent"])
 
 
+def _pace(world: World, cost: float) -> int | None:
+    """How many may stir in this part of the day, so the day's energy lasts the day (``pace``; None: no limit).
+
+    Left alone, everyone spends their day on the first thing that stirs them at dawn, and the
+    afternoon and evening fall silent while people are still being stirred. With ``pace``, the
+    acts still left in the village are spread over the parts of the day still to come, times
+    ``pace`` so a busy morning can still be busy.
+    """
+    pace = float(world.params.get("pace", 0.0))
+    if pace <= 0:
+        return None
+    left = sum(
+        max(0, min(_cap(world, a) - a.acts_today, int(a.reserve // cost))) for a in world.agents.values() if a.loc is not None and not a.confined
+    )
+    return math.ceil(pace * left / (len(WAVES) - world.wave))
+
+
 def select(world: World) -> list[Firing]:
     """Who stirs this wave. Mutates reserves, counters and habituation of the stirred."""
     p = world.params
     cost = p["activation_cost"]
     room = int(p["max_activations_per_day"]) - world.today["activations"]
+    limit = _pace(world, cost)
     ids = sorted(world.agents)
     world.rng.shuffle(ids)
-    firings: list[Firing] = []
+    stirred: list[tuple[Agent, float, float, list[tuple[str, float]]]] = []
     for aid in ids:
-        if len(firings) >= room:
+        if len(stirred) >= room:
             break
         a = world.agents[aid]
         if a.loc is None or a.confined > 0 or a.acts_today >= _cap(world, a) or world.wave - a.last_wave < 1:
@@ -105,20 +124,28 @@ def select(world: World) -> list[Firing]:
             world.today["tired"] += 1
             world.log("tired", agent=aid, stimulus=round(s, 2), reserve=round(a.reserve, 2))
             continue
-        a.reserve -= cost
-        a.acts_today += 1
-        a.last_wave = world.wave
-        a.total_acts += 1
-        for sid, _ in contribs:
-            a.attended[sid] = a.attended.get(sid, 0) + 1
-        top_c = contribs[0][1]
-        caused = next((world.signals[sid] for sid, c in contribs if world.signals[sid].cause and c >= 0.5 * top_c), None)
-        parent = caused.cause if caused else None
-        tags = Counter(t for sid, _ in contribs[:3] for t in world.signals[sid].tags)
-        firings.append(
-            Firing(aid, round(s, 3), round(prob, 3), [(sid, round(c, 3)) for sid, c in contribs[:8]], parent, [t for t, _ in tags.most_common(4)])
-        )
-    return firings
+        stirred.append((a, s, prob, contribs))
+    if limit is not None and len(stirred) > limit:
+        stirred.sort(key=lambda x: -x[1])  # the loudest call is answered first; the rest keep their energy for later
+        for a, s, _, _ in stirred[limit:]:
+            world.today["waiting"] = world.today.get("waiting", 0) + 1
+            world.log("waiting", agent=a.id, stimulus=round(s, 2))
+        stirred = stirred[:limit]
+    return [_fire(world, a, s, prob, contribs, cost) for a, s, prob, contribs in stirred]
+
+
+def _fire(world: World, a: Agent, s: float, prob: float, contribs: list[tuple[str, float]], cost: float) -> Firing:
+    a.reserve -= cost
+    a.acts_today += 1
+    a.last_wave = world.wave
+    a.total_acts += 1
+    for sid, _ in contribs:
+        a.attended[sid] = a.attended.get(sid, 0) + 1
+    top_c = contribs[0][1]
+    caused = next((world.signals[sid] for sid, c in contribs if world.signals[sid].cause and c >= 0.5 * top_c), None)
+    parent = caused.cause if caused else None
+    tags = Counter(t for sid, _ in contribs[:3] for t in world.signals[sid].tags)
+    return Firing(a.id, round(s, 3), round(prob, 3), [(sid, round(c, 3)) for sid, c in contribs[:8]], parent, [t for t, _ in tags.most_common(4)])
 
 
 # ---------------------------------------------------------------------------- word travels

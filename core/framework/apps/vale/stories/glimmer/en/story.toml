@@ -1,0 +1,225 @@
+# Glimmer Isle, in English: every word this story says that the engine does not.
+# The mechanics are in ../rules.toml, the pictures in ../art.toml; places, omens and the calendar in
+# world.toml; the people in agents/; the truth in truth.md.
+
+[story]
+id = "glimmer"
+lang = "en"
+title = "Glimmer Isle"
+vale = "Glimmer Isle"
+world = "the isle"
+premise = "watching the islanders race to relight a lighthouse that has been dark for nineteen years before Lantern Night, so the island's scattered children can follow its light home"
+blurb = "A small island in a warm sea. Its lighthouse has been dark for nineteen years: the keeper took the great lens apart into seven prisms and gave them to seven households, saying that when the island was one again, they should put her back together. Ten islanders, each a Hive agent, have a month to light it before Lantern Night, so the children who left can follow its beam home."
+river = "The sea is all around; paths climb the slopes between the seven places."
+
+[gods]
+names = { world = "the isle", god = "the Sea Mother", overgod = "the Sky Lamp" }
+titles = { god = "the Sea Mother" }
+above_words = ["sky lamp", "lamp in the sky", "above", "sky", "天灯"]
+
+[gods.pray]
+god = "'the Sea Mother' (the sea the island has honoured for generations)"
+above = "'the Sky Lamp' (the voice brighter than any lighthouse, which you have heard)"
+
+[persona]
+want = "What you want"
+rules = "Rules you live by"
+deeper = "Deeper still"
+
+[place_aliases]
+lighthouse = "cape"
+cape = "cape"
+cottage = "cape"
+orchard = "orchard"
+slope = "orchard"
+hut = "orchard"
+hives = "apiary"
+apiary = "apiary"
+teahouse = "steps"
+steps = "steps"
+square = "steps"
+pier = "harbour"
+harbour = "harbour"
+harbor = "harbour"
+workshop = "harbour"
+school = "school"
+schoolhouse = "school"
+cave = "caves"
+caves = "caves"
+echo = "caves"
+
+[professions.fisher]
+hint = "go out fishing"
+makes = { fish = 2 }
+deed = "came back from the sea with a basket of fish"
+[professions.orchardist]
+hint = "tend the fruit trees and pick fruit"
+makes = { fruit = 2 }
+deed = "tended the trees and picked a basket of fruit"
+[professions.beekeeper]
+hint = "tend the hives, take honey and wax"
+makes = { honey = 1, wax = 1 }
+deed = "tended the hives and took honey and wax"
+[professions.tinker]
+hint = "mend things in the workshop"
+makes = { gears = 1 }
+deed = "tinkered in the workshop and mended something"
+[professions.teacher]
+hint = "teach the children, write letters for people"
+deed = "taught the children a lesson"
+[professions.teahouse]
+hint = "brew tea and look after guests"
+makes = { tea = 2 }
+deed = "brewed tea and looked after guests"
+[professions.merchant]
+hint = "trade"
+makes = { coin = 2 }
+deed = "made a small deal"
+[professions.keeper]
+hint = "sweep the lighthouse"
+deed = "swept the lantern room and the cottage"
+[professions.child]
+hint = "play, and run errands for the grown-ups"
+deed = "ran an errand for the grown-ups"
+
+# Goods: the name a villager reads, other names they may use, and words that mean it inside a longer name.
+[items]
+prism = { name = "prism", aliases = ["prisms", "rainbow stone", "glass float", "float", "paperweight", "lens", "wing-shaped glass", "wing glass"], match = ["\\b(prisms?|rainbow stones?|floats?|paperweights?|lens|wing-shaped)\\b", "棱镜|彩虹石|浮子|镇纸"] }
+oil = { name = "fish oil", aliases = ["oil", "lamp oil"], match = ["\\boil\\b"] }
+wax = { name = "beeswax", aliases = ["wax"], match = ["\\b(bees)?wax\\b"] }
+honey = { name = "honey", match = ["\\bhoney\\b"] }
+fish = { name = "fish", match = ["\\bfish\\b(?! oil)"] }
+fruit = { name = "fruit", aliases = ["apples", "apple", "fruits"], match = ["\\b(fruits?|apples?)\\b"] }
+tea = { name = "tea", match = ["\\btea\\b(?!house)"] }
+coin = { name = "coin", aliases = ["coins", "money", "silver"], match = ["\\b(coins?|money|silver)\\b"] }
+rope = { name = "rope", aliases = ["ropes"], match = ["\\bropes?\\b"] }
+lantern = { name = "lantern", aliases = ["lanterns", "paper lantern"], match = ["\\blanterns?\\b"] }
+paper = { name = "paper", aliases = ["coloured paper", "lantern paper"], match = ["\\bpaper\\b"] }
+gears = { name = "brass parts", aliases = ["gears", "gear", "parts", "escapement fork"], match = ["\\b(gears?|brass parts?|escapement)\\b"] }
+resin = { name = "pine resin", aliases = ["resin"], match = ["\\bresin\\b"] }
+letter = { name = "letter", aliases = ["letters", "old letter"], match = ["\\bletters?\\b"] }
+key = { name = "key", aliases = ["keys"], match = ["\\bkeys?\\b"] }
+cloth = { name = "cloth", match = ["\\bcloth\\b"] }
+
+# Topics, and the words that raise them. An islander's interests are weights on these topics.
+[lexicon]
+light = ["lighthouse", "light", "lamp", "beam", "lantern room", "wick", "shine", "灯塔"]
+glass = ["prism", "rainbow", "glass", "float", "paperweight", "lens", "wing-shaped"]
+sea = ["sea", "boat", "tide", "wave", "pier", "harbour", "dolphin", "whale", "sail"]
+festival = ["lantern night", "lanterns", "festival", "feast", "midsummer", "celebration"]
+family = ["daughter", "son", "granddaughter", "grandmother", "mother", "father", "family"]
+feud = ["quarrel", "grudge", "feud", "stone wall", "both families", "forgive", "sorry", "blame"]
+home = ["come home", "coming home", "return", "mainland", "left the island", "letter", "home"]
+bees = ["bee", "bees", "honey", "wax", "hive", "flowers"]
+orchard = ["orchard", "fruit", "tree", "watch-hut", "apple"]
+craft = ["mend", "repair", "clockwork", "gear", "workshop", "escapement", "drawing", "brass"]
+school = ["school", "book", "read", "teacher", "lesson", "letters"]
+money = ["money", "coin", "buy", "sell", "price", "deal", "hotel"]
+storm = ["storm", "gale", "fog", "rain", "ebb", "spring tide"]
+children = ["child", "children", "xiaoman", "kid", "pupils"]
+song = ["song", "sing", "lamplighting", "tune"]
+keeper = ["granny lamp", "chaoyin", "keeper", "logbook", "promise", "put me back together"]
+help = ["help", "please", "need", "come quick", "can you", "will you"]
+gathering = ["everyone", "together", "all of us", "gather"]
+
+# What fate is told about each thing an islander knows (sheet.toml `knows`, or found by looking).
+[knows]
+keeper_heir = "is the keeper Chaoyin's granddaughter, carrying the note her grandmother left (one line: 'Put me back together') and the lighthouse key"
+promise = "has read Chaoyin's promise in the keeper's logbook: seven households, seven pieces of light (the Hais' boat, the Pos' hut, the teahouse's wind, the school's paper, the Mi family's fire, the sleeping child, and one given back to the sea); when the island is one again, put her back together"
+escapement = "has seen the drawing of the escapement fork in 'The Lighthouse Clockwork, Illustrated', with its teeth and measurements"
+clockwork = "mended the lighthouse clockwork forty years ago and remembers every tooth; with the drawing of the escapement fork he can make it turn again"
+lamp_oil = "knows the keeper's lamp oil: three parts beeswax, seven parts fish oil, a pinch of pine resin, and a wick twisted from hemp"
+lantern_song = "can sing the old Lantern Night song, 'The Lamplighting Song', and can make bamboo-ribbed lanterns"
+climber = "can climb anything, even the outside of the lighthouse"
+boatman = "can row in any sea and knows every hidden rock around the island"
+cave_prism = "has seen the wing-shaped glass wrapped in oilcloth on the stone shelf of the Echo Chamber in the Tide Caves (reachable only at the great ebb)"
+letter = "carries a letter Xiaolan gave him nineteen years ago for her mother, Aunt Hai, which he never delivered"
+elopement = "nineteen years ago, on Lantern Night, he rowed Xiaolan and A-Tong out to the night boat to the mainland"
+literate = "can read"
+mainland = "lived many years in the mainland port city and knows where the island's leavers went"
+
+# What fate may change. The types are the engine's and the world's; write them exactly. The words are the story's.
+[fate]
+effects = '''  {"type": "set_prism", "who": "<id of the person giving up a prism>"}  -- a prism is carried up to the lantern room and fitted into the lens frame (that person must carry a prism)
+  {"type": "lamp", "amount": 0.1 to 0.5}  -- the great lamp gets more oil and wick (beeswax, fish oil, pine resin)
+  {"type": "clock", "amount": 0.1 to 0.5}  -- the clockwork that turns the lens is mended further (needs the escapement drawing and skilled hands)
+  {"type": "light"}  -- the lighthouse is lit again (only possible with all seven prisms set, the lamp full and the clockwork turning)
+  {"type": "festival", "amount": 0.03 to 0.3}  -- Lantern Night is readied: lanterns, food, songs
+  {"type": "harmony", "amount": -0.2 to 0.25}  -- a record of deeds, not of feelings: use it whenever something is done that bridges the old divides (a way opened in the stone wall, an old letter delivered or read out, a meal shared across the feud, help given to the other family, a truth told in public) or widens them (a quarrel, a betrayal); about 0.05 for a small deed, 0.1 to 0.25 for a great one
+  {"type": "item", "who": "<person id>", "item": "<goods id: prism, oil, wax, honey, fish, fruit, tea, coin, rope, lantern, paper, gears, resin or cloth>", "qty": <positive gains, negative loses>}
+  {"type": "health", "who": "<person id>", "change": 1 (hurt or worn out) or -1 (better)}
+  {"type": "tie", "a": "<person id>", "b": "<person id>", "change": -0.5 to 0.5}  -- how a now feels about b
+  {"type": "reveal", "text": "<something now plain to everyone at the place>"}'''
+
+# The hidden island, as fate, the goddess, the host and the novelist are told it (../rules.toml describe).
+[state]
+lens = "{n} of the 7 prisms are back in the lighthouse's lens frame; "
+lit = "the light is burning."
+dark = "the lighthouse is still dark."
+parts = "The great lamp's oil: {lamp}; the clockwork that turns the lens: {clock}."
+levels = ["nothing yet", "some", "nearly there", "ready"]
+harmony = "How much the island is one: {level} ({n})."
+moods = ["cold", "thawing", "friendly", "like one family"]
+festival = "Lantern Night readied: {n}."
+sea = "The sea: {level}."
+seas = ["calm", "choppy", "rough", "a storm"]
+ebb = " It is the great ebb today: the depths of the Tide Caves can be reached."
+boats = "Boats coming home by the light: {n}."
+
+# What the island shows by night and at dawn (../rules.toml night and dawn).
+[nature]
+storm = "A gale blew up in the night: several lanterns already hung on the steps were torn, and the boats banged against the pier."
+ebb = "The spring tide drew far back: the depths of the Tide Caves stand open, and the echoes there are long and hollow."
+sails_1 = "At first light someone on the pier saw a single sail where sea meets sky, heading for the lighthouse."
+sails_2 = "Three sails on the sea now, one behind the other, all bound for Glimmer Isle. More and more people gather on the pier."
+sails_3 = "Far off, a whole line of boat lights, like a string of lanterns floating on the sea. Someone recognises the flag on one of the boats: it belongs to the family who left the island nineteen years ago."
+sails_4 = "The boats are in. The first to jump onto the pier is a woman in her thirties, leading a little girl by the hand; the man behind her carries the bags and stands looking past the stone wall toward the Orchard Slope. Xiaolan and A-Tong have come home."
+warning = "Before he cast off, the captain of the supply boat said: if the lighthouse is still dark on Lantern Night, he won't be coming back."
+fireflies = "In the night the fireflies gathered over the Teahouse Steps into a river of light that flowed toward the lighthouse."
+beam = "The lighthouse's beam sweeps the sea, round and round, and the whole island can see it."
+
+# The Sky Lamp (the One Above): what its powers are called, and what the island sees when they land.
+[overgod]
+powers = { whisper = ["Whisper", "A dream to one islander, in the voice above every voice. Those who hear it can pray to you."], inscribe = ["Inscribe", "Words of light above the Ledger, read by everyone whenever they act."], fireflies = ["Fireflies", "Fireflies rise at one place, and the island grows a little closer."], fair_wind = ["Fair wind", "Calm the sea."], sign = ["Sign", "A wonder at one place, seen by everyone there."], prophecy = ["Prophecy", "A voice from the sky, heard by the whole island."], reveal = ["Bring to light", "An islander's hidden secret shows itself before whoever is with them."], storm = ["Storm", "Raise a storm: the sea heaves and the lanterns already hung are torn."], great_ebb = ["Great ebb", "Draw the sea back for a day: the depths of the Tide Caves stand open."], meteors = ["Meteor shower", "A night of falling stars: the whole island looks up at the same sky, and hearts draw close."], decree = ["Decree", "Lay your will on the Sea Mother for some days; she cannot refuse it."], whale_song = ["Whale song", "Call the whales of the deep sea to sing: if the light burns, the boats come home faster; if not, hearts grow warmer."], kindle = ["Kindle", "Fill the lamp and set the clockwork turning: only the prisms are left."] }
+chapters = { voice = ["The Lamp in the Sky", "Make someone on the island pray to you, the Sky Lamp."], first_prism = ["The First Light", "A prism is set back in the lighthouse's lens frame."], relit = ["The Light Rekindled", "The lighthouse is lit again."], homecoming = ["Homecoming", "On Lantern Night, the island's scattered children follow the light home."] }
+fireflies = "A great cloud of fireflies rose at {place} and circled everyone there once before it drifted away."
+fireflies_done = "Fireflies rose at {place}."
+fair_wind = "All at once the wind turned gentle, and the sea lay flat as fresh-pressed linen."
+fair_wind_done = "The sea grew calm."
+storm = "Black cloud came in over the horizon; a gale drove the waves over the pier, and the lanterns on the steps tore one after another."
+storm_done = "A storm swept over Glimmer Isle."
+great_ebb = "As if someone had pulled it, the sea drew far, far back, and the stone chamber deep in the Tide Caves stood open."
+great_ebb_done = "The great ebb: the depths of the Tide Caves can be reached."
+meteors = "A shower of falling stars filled the night; the whole island came out of doors and looked up at the same sky."
+meteors_done = "A night of falling stars."
+whale_song = "Whale song came in from the deep sea, low and long, all night."
+whale_song_done = "The whales sang in the deep sea."
+kindle = "At the top of the lighthouse, the lamp that had stood dry for nineteen years was suddenly full of oil, and the rusted clockwork turned once by itself."
+kindle_done = "The great lamp is full, and the clockwork turns."
+
+[overgod.secrets]
+aheng = "A bundle of letters falls from A-Heng's luggage, all written to her by her grandmother Chaoyin and never sent. Every one begins: 'A-Heng, when you are grown, come back to the island and light the lamp for me.'"
+haishen = "Thinking no one can see, Aunt Hai kneels at the prow and whispers to the glass float: 'Lan, your mother doesn't blame you any more. Come home.'"
+pobo = "Alone in the watch-hut, Uncle Po holds a note his son left nineteen years ago: 'Father, Lan and I mean it. When the light is lit, we'll come home.'"
+chapo = "Granny Cha murmurs to the wind chime: 'Old Chaoyin, the night you took the lens apart, I was the one who handed you the screwdriver. You said the island would mend itself.'"
+liu = "In Teacher Liu's drawer is a stack of letters to Mi-niang, none of them sent. The top one says: 'On Lantern Night, I'd like to ask you to watch the lights with me.'"
+miniang = "Mi-niang talks to her hives: 'When Xiaoman's grandmother gave me that glass, she said it was for the sleeping child. I always thought she meant Xiaoman.'"
+laomo = "Old Mo hides a wooden model of an escapement fork at the bottom of his toolbox, carved from the drawing forty years ago. He has never admitted he no longer remembers how many teeth it has."
+xiaoman = "In Xiaoman's notebook is a drawing: seven wings fitted together into a flower with a lamp at its heart. Beside it, in a wobbly hand: 'Grandma said when they're all together it will shine.'"
+aqi = "On the pier, A-Qi folds a sketch of A-Heng's face and tucks it into a crack in the boat's hull."
+lu = "A yellowed letter slips from Mr. Lu's inner pocket. The envelope says: 'To Mother. From Lan.' The postmark is nineteen years old."
+
+# The player's truth panel (../rules.toml [panel]).
+[panel]
+light = "Lighthouse"
+lit = "lit"
+dark = "dark"
+lens = "Prisms"
+lens_text = "{n} / 7"
+sea = "Sea"
+ebb = "Great ebb"
+lamp = "Lamp oil and wick"
+clock = "Clockwork"
+harmony = "The island as one"
+festival = "Lantern Night readied"
+boats = "Homecoming"

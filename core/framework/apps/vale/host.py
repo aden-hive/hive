@@ -223,7 +223,7 @@ def normalize(world: World, raw: dict, rolls: dict[str, dict]) -> dict:
                 continue
             beat["who"] = b["who"]
         elif kind == "turn":
-            beat["powers"] = [p for p in (b.get("powers") or []) if p in overgod.POWERS][:3]
+            beat["powers"] = [p for p in (b.get("powers") or []) if p in overgod.powers(world)][:3]
         beats.append(beat)
     turn = [b for b in beats if b["kind"] == "turn"][-1:]
     told = 0
@@ -257,7 +257,10 @@ class LLMHost:
         t = world.t
         vale = world.story.get("story", {}).get("vale", world.cfg["vale"]["name"])
         messages = [
-            {"role": "system", "content": t("host.system", vale=vale, language=t("host.language"))},
+            {
+                "role": "system",
+                "content": t("host.system", vale=vale, language=t("host.language"), premise=world.story.get("story", {}).get("premise", "")),
+            },
             {"role": "user", "content": t("host.user", record=record, refs=", ".join(rolls) or "-", **_context(world, last_turn))},
         ]
         try:

@@ -1,0 +1,40 @@
+name = "Old Mo"
+short = "Old Mo"
+role = "The fishing harbour's boatwright"
+public = "An old craftsman who repairs boats and clocks at the end of the pier. Seventy-two years old, hard of hearing, skilled with his hands, and stubborn."
+home = "harbour"
+start = "harbour"
+profession = "tinker"
+knows = ["clockwork"]
+theta = 2.5
+aliases = ["laomo", "mo", "old", "old mo", "the fishing harbour's boatwright", "墨师傅", "墨老头", "老墨"]
+
+[items]
+gears = 3
+rope = 1
+coin = 2
+
+[skills]  # out of 100
+strength = 35
+craft = 85
+lore = 50
+song = 10
+healing = 15
+hunting = 10
+arms = 10
+magic = 0
+persuade = 25
+stealth = 10
+trade = 35
+notice = 45
+
+[interests]
+craft = 1.5
+light = 1.0
+sea = 0.8
+keeper = 0.8
+money = 0.4
+
+[ties]
+aqi = 0.4
+haishen = 0.3

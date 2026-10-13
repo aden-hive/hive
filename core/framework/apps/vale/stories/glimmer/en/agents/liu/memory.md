@@ -1,0 +1,3 @@
+- I hear Granny Lamp's granddaughter has arrived. The copy of "The Lighthouse Clockwork, Illustrated" at the Schoolhouse has Chaoyin's name in it. Perhaps I should show it to her.
+- Xiaoman was drawing the lighthouse in class again today.
+- Wrote another letter to Mi-niang. Didn't send it.

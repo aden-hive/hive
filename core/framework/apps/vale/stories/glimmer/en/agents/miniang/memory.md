@@ -1,0 +1,3 @@
+- This year's wax has filled the cottage to the brim. I don't know what to do with it all.
+- Xiaoman climbed onto the roof again, saying she wanted to see the lighthouse.
+- I hear Granny Lamp's granddaughter has arrived. Mother once said Granny Lamp's lamp oil needs to be mixed with beeswax.

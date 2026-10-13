@@ -87,17 +87,27 @@ export interface ValeOvergod {
   income: { day: number; base: number; prayers: number; drama: number; total: number }[];
 }
 
+/** What only the player sees, as the world's rules declare it (rules.toml [panel]). */
+export interface ValePanel {
+  facts: { label: string; text?: string; tone?: string }[];
+  bars: { label: string; value: number; text?: string; tone?: string }[];
+}
+
+/** What the pictures need, as the world's rules declare it (rules.toml [scene]). */
+export interface ValeScene {
+  /** How troubled each place's water is, 0 to 1. */
+  water: Record<string, number>;
+  /** How brightly each place glows (a lit lighthouse, lanterns strung), 0 to 1. */
+  glow: Record<string, number>;
+  /** The world's own marks the pictures know (a deep door open, a stone standing, a hard winter). */
+  marks: Record<string, unknown>;
+}
+
 export interface ValeTruth {
-  blight: Record<string, number>;
-  sickness: Record<string, number>;
-  wolves: { hunger: number; attacks: number; driven?: number };
-  shaft_open: number;
-  stone_raised: number;
-  ullr_awake: number;
-  stone_hum: number;
   weather: string;
   weather_kind: string;
-  winter: boolean;
+  panel: ValePanel;
+  scene: ValeScene;
 }
 
 export interface ValeGame {
@@ -114,7 +124,7 @@ export interface ValeGame {
   skills: Record<string, string>;
   goods: Record<string, string>;
   /** How the story draws its people and places. */
-  art: { people?: Record<string, PersonArt>; places?: Record<string, PlaceArt> };
+  art: ValeArt;
   days: number;
   status: "idle" | "running" | "finished";
   phase: string;
@@ -204,6 +214,22 @@ export interface ValeChapter {
   title: string;
   text: string;
   scenes: { place: string; pov: string; when: string }[];
+}
+
+/** How a world is drawn: its people, its places, its map (art.toml). */
+export interface ValeArt {
+  people?: Record<string, PersonArt>;
+  places?: Record<string, PlaceArt>;
+  map?: {
+    /** The land's outline, for an island; the rest of the map is sea. */
+    coast?: [number, number][];
+    /** Streams: points [owner place, x, y]; each stretch is coloured by its owner's water. */
+    streams?: { points: [string, number, number][] }[];
+    /** Where a stream spills in flood, coloured by its owner's water. */
+    floods?: { owner: string; points: [number, number][] }[];
+  };
+  /** The picture for openings: "vale" (hills and a river) or "isle" (sea and an island). */
+  panorama?: string;
 }
 
 export interface ValeStory {

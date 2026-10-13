@@ -14,6 +14,7 @@ from . import dice
 from .act import carried, goods
 from .llm import LLM, parse_json_object
 from .nature import describe_state
+from .rules import rules_for
 from .world import Agent, Project, World
 
 # If the game master left a band out, the nearest one stands in for it.
@@ -171,54 +172,19 @@ def settle(world: World, plan: dict, people: list[str]) -> dict:
 
 
 def apply_effects(world: World, effects: list[Any], *, ref: str, present: list[str], site: str) -> list[dict]:
-    """Apply the effects of the outcome the dice chose; anything malformed is dropped (and logged)."""
-    h = world.hidden
+    """Apply the effects of the outcome the dice chose; anything malformed is dropped (and logged).
+
+    The standard effects every world has are here: goods, health, confinement, ties and
+    reveals. Every other effect type is the world's own, declared in its rules.toml.
+    """
+    rules = rules_for(world)
     applied: list[dict] = []
     for e in effects if isinstance(effects, list) else []:
         if not isinstance(e, dict):
             continue
         t = str(e.get("type", ""))
         try:
-            if t == "seal_shaft":
-                h["shaft_open"] = 0
-            elif t == "reopen_shaft":
-                h["shaft_open"] = 1
-            elif t == "raise_stone":
-                h["stone_raised"] = 1
-            elif t == "sing":
-                if int(e.get("verses", 1)) >= 2 and h["stone_raised"]:
-                    if "ullr_awake" in h:
-                        # Old Ullr wakes for a while: three nights, seven if his chosen sings among them.
-                        wynn = world.agents.get("wynn")
-                        chosen = "wynn" in present and wynn is not None and wynn.loc == site
-                        h["ullr_awake"] = max(int(h["ullr_awake"]), 7 if chosen else 3)
-                        h["stones_sung"] = int(h.get("stones_sung", 0)) + 1
-                    else:
-                        h["stones_sung"] = 1  # runs from before Ullr: a permanent binding
-                else:
-                    h["stone_hum"] = min(2, int(h.get("stone_hum", 0)) + 1)
-            elif t == "purify":
-                place = world.resolve_place(str(e["place"]))
-                amount = max(0.05, min(0.3, float(e.get("amount", 0.1))))
-                if place in h["blight"]:
-                    h["relief"][place] = max(h["relief"].get(place, 0.0), amount)
-                else:
-                    continue
-            elif t == "heal":
-                place = world.resolve_place(str(e["place"]))
-                amount = max(0.05, min(0.4, float(e.get("amount", 0.1))))
-                if place in h["sickness"]:
-                    h["sickness"][place] = round(max(0.0, h["sickness"][place] - amount), 4)
-                for a in world.present(place):
-                    a.health = max(0, a.health - 1)
-            elif t == "wolves":
-                result = str(e.get("result"))
-                if result in ("driven_off", "killed"):
-                    h["wolves"]["hunger"] = 0.0
-                    h["wolves"]["driven"] = int(h["wolves"].get("driven", 0)) + 1
-                    if result == "killed":
-                        h["wolves"]["killed"] = 1
-            elif t == "item":
+            if t == "item":
                 a = world.agents[str(e["who"])]
                 item, qty = goods(world, e["item"]), int(e["qty"])
                 e["item"] = item
@@ -229,7 +195,9 @@ def apply_effects(world: World, effects: list[Any], *, ref: str, present: list[s
             elif t == "confine":
                 a = world.agents[str(e["who"])]
                 a.confined = max(1, min(3, int(e.get("days", 1))))
-                a.loc, a.travel = "thornkeep", None
+                jail = rules.constants.get("jail")
+                if jail:
+                    a.loc, a.travel = jail, None
             elif t == "tie":
                 a, b = world.agents[str(e["a"])], str(e["b"])
                 if b in world.agents:
@@ -237,10 +205,10 @@ def apply_effects(world: World, effects: list[Any], *, ref: str, present: list[s
                     a.ties[b] = round(max(-1.0, min(1.0, a.ties.get(b, 0.0) + change)), 3)
             elif t == "reveal":
                 pass  # rendered as its own signal by the engine
-            else:
-                continue
-        except (KeyError, TypeError, ValueError):
-            world.log("bad_effect", ref=ref, effect=e)
+            elif not rules.effect(world, e, present=present, site=site):
+                continue  # not one of this world's effects, or its condition refused it
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            world.log("bad_effect", ref=ref, effect=e, error=str(exc)[:200])
             continue
         applied.append(e)
     return applied

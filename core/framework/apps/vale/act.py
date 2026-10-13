@@ -12,7 +12,8 @@ from functools import cache
 from typing import Any
 
 from . import dice
-from .world import WAVE_LEN, Agent, Project, World
+from .rules import rules_for
+from .world import WAVE_LEN, WAVES, Agent, Project, World
 
 
 class ActionError(Exception):
@@ -153,17 +154,19 @@ def pray(world: World, a: Agent, x: dict, act: str) -> list[str]:
     if not text:
         raise ActionError(world.t("act.pray_empty"))
     world.counters.setdefault("q", 0)
-    gods = world.story.get("gods", {})
+    words = world.story.get("gods", {})
     to = _text(x.get("to"), 30).lower()
-    # Only the Star God's follower has someone else to pray to; the vale's god hears every prayer either way.
-    to_master = a.id == gods.get("follower") and any(w in to for w in gods.get("master_words", []))
-    to_ullr = not to_master and any(w in to for w in gods.get("ullr_words", []))
-    # The One Above is prayed to only by those who have heard the voice.
-    to_above = (
-        not (to_master or to_ullr)
-        and a.id in world.hidden.get("overgod", {}).get("known_by", [])
-        and any(w in to for w in gods.get("above_words", []))
+    # A prayer goes to the first of the world's gods whose words it uses (a patron hears only its
+    # follower); to the One Above only from those who have heard the voice; else to the world's god.
+    target = next(
+        (
+            cfg
+            for cfg in rules_for(world).gods
+            if cfg.get("words") and cfg.get("follower", a.id) == a.id and any(w in to for w in words.get(cfg["words"], []))
+        ),
+        None,
     )
+    to_above = target is None and a.id in world.hidden.get("overgod", {}).get("known_by", []) and any(w in to for w in words.get("above_words", []))
     prayer = {
         "id": world.new_id("q"),
         "day": world.day,
@@ -172,13 +175,11 @@ def pray(world: World, a: Agent, x: dict, act: str) -> list[str]:
         "place": a.loc,
         "text": text,
         "act": act,
-        "to": "master" if to_master else "ullr" if to_ullr else "overgod" if to_above else "god",
+        "to": target.get("to", target["id"]) if target else "overgod" if to_above else "god",
     }
     world.hidden.setdefault("prayers", []).append(prayer)
-    if to_master:
-        world.hidden.setdefault("prayers_master", []).append(prayer)
-    if to_ullr:
-        world.hidden.setdefault("prayers_ullr", []).append(prayer)
+    if target:
+        world.hidden.setdefault(target.get("prayers", f"prayers_{target['id']}"), []).append(prayer)
     if to_above:
         world.hidden.setdefault("prayers_overgod", []).append(prayer)
     world.log("prayer", **prayer)
@@ -240,22 +241,28 @@ def work(world: World, a: Agent, x: dict, act: str) -> list[str]:
     return [sig.id]
 
 
-# How far a remedy goes in the tender's hands: (people eased, sickness lifted from the place).
-TENDING = {"critical": (3, 0.18), "success": (2, 0.12), "partial": (1, 0.06), "failure": (0, 0.0), "fumble": (0, 0.0)}
-
-
 def tend(world: World, a: Agent, x: dict, act: str) -> list[str]:
+    """Care for the sick where you are, using up one of the world's remedies (rules.toml ``[actions.tend]``).
+
+    The dice decide how many people are eased (``by_band``: band -> [people, amount]); the
+    world's own steps decide what else the care changes, with ``here`` and ``amount`` in scope.
+    """
     t = world.t
-    if a.items.get("remedy", 0) < 1:
+    rules = rules_for(world)
+    cfg = rules.actions.get("tend")
+    if not cfg:
+        raise ActionError(t("act.unknown", act="tend"))
+    item = cfg.get("item", "remedy")
+    if a.items.get(item, 0) < 1:
         raise ActionError(t("act.tend_none"))
-    a.items["remedy"] -= 1
+    a.items[item] -= 1
     where = world.place_name(a.loc)
-    check = dice.roll(world, a, "healing", [])
+    check = dice.roll(world, a, cfg.get("skill", "healing"), [])
     dice.record(world, check, kind="tend", ref=act, place=a.loc, what=t("act.tend_what", place=where))
-    n, amount = TENDING[check["band"]]
-    sick = world.hidden["sickness"]
-    if a.loc in sick and amount:
-        sick[a.loc] = round(max(0.0, sick[a.loc] - amount), 4)
+    n, amount = cfg["by_band"][check["band"]]
+    scope = rules.scope(world, {"here": a.loc, "amount": amount, "who": a.id, "band": check["band"]})
+    for step in cfg.get("steps", []):
+        rules.step(world, scope, step)
     eased = [p for p in world.present(a.loc) if p.health > 0][:n]
     for p in eased:
         p.health -= 1
@@ -324,6 +331,16 @@ def propose(world: World, a: Agent, x: dict, act: str) -> list[str]:
     site = site or a.loc
     when = hour(world, x.get("when"))
     due_day = world.day if when > world.wave else world.day + 1
+    # Never sooner than the proposer can be there: they set off next part, and one road away is close enough.
+    way = world.way(a.loc, site) if site != a.loc else None
+    if way and way[1] > 1:
+        need = (way[1] - 1) * max(1, int(rules_for(world).travel(world)))
+        if due_day == world.day and when < world.wave + 1 + need:
+            when = world.wave + 1 + need
+            if when >= len(WAVES):
+                due_day, when = world.day + 1, min(need, len(WAVES) - 1)
+        elif due_day > world.day and when < need:
+            when = min(need, len(WAVES) - 1)
     at = t("time.wave_on", wave=world.wave_name(when), day=t("time.today") if due_day == world.day else t("time.tomorrow"))
     if goal and goal[-1] not in ".!?。！？":
         goal += t("names.stop")
@@ -411,7 +428,7 @@ def travel(world: World, a: Agent, x: dict, act: str) -> list[str]:
         names = t("names.list_sep").join(world.places[r]["name"] for r in roads)
         raise ActionError(t("act.travel_no_road", here=world.place_name(a.loc), there=world.place_name(dest), roads=names))
     # Snow sent by the One Above makes every road take twice as long.
-    waves = 2 if world.hidden.get("winter_until", 0) >= world.day else 1
+    waves = max(1, int(rules_for(world).travel(world)))  # the world's rule: Ashmere's hard winter slows the roads
     text = t("act.set_off", name=a.name, place=world.place_name(dest))
     if a.health >= 2:
         check = dice.roll(world, a, "strength", [])

@@ -1,0 +1,42 @@
+name = "坡伯"
+short = "坡伯"
+role = "果坡的果农"
+public = "果坡的老果农，六十一岁，倔得像他种的老树，话少，手上全是茧"
+home = "orchard"
+start = "orchard"
+profession = "orchardist"
+knows = []
+theta = 2.3
+aliases = ["坡伯", "坡家", "坡大伯", "pobo"]
+
+[items]
+fruit = 6
+coin = 4
+rope = 1
+
+[skills]  # out of 100
+strength = 60
+craft = 65
+lore = 30
+song = 25
+healing = 30
+hunting = 20
+arms = 15
+magic = 0
+persuade = 30
+stealth = 15
+trade = 40
+notice = 50
+
+[interests]
+orchard = 1.4
+feud = 1.2
+family = 1.2
+home = 1.0
+light = 0.7
+craft = 0.6
+
+[ties]
+haishen = -0.6
+liu = 0.3
+chapo = 0.3

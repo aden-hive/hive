@@ -1,0 +1,313 @@
+# Glimmer Isle: its mechanics, as data. Nothing here is code, and nothing here is Ashmere.
+# A dark lighthouse to relight from seven scattered prisms, a feud to mend, a festival to ready,
+# and, once the light is lit, the island's scattered children sailing home by its beam.
+# Words live in <lang>/story.toml; the schema is in framework/apps/vale/WORLDS.md.
+
+refill = 1.0
+summary = ["lens", "lamp", "clockwork", "lit", "harmony", "festival", "boats", "sea", "ebb"]
+
+describe = [
+  "fill(say('state.lens'), n=int(lens)) + (say('state.lit') if lit else say('state.dark'))",
+  "fill(say('state.parts'), lamp=say('state.levels')[bucket(lamp, 0.01, 0.5, 1.0)], clock=say('state.levels')[bucket(clockwork, 0.01, 0.5, 1.0)])",
+  "fill(say('state.harmony'), level=say('state.moods')[bucket(harmony, 0.3, 0.5, 0.75)], n=pct(harmony))",
+  "fill(say('state.festival'), n=pct(festival))",
+  "fill(say('state.sea'), level=say('state.seas')[bucket(sea, 0.45, 0.65, 0.8)]) + (say('state.ebb') if ebb else '')",
+  "fill(say('state.boats'), n=pct(boats)) if lit else ''",
+]
+
+# ---------------------------------------------------------------------------- the island at the start
+
+[state]
+lens = 0          # prisms set back in the lighthouse's frame, of seven
+lamp = 0.0        # oil and wick for the great lamp, 0..1
+clockwork = 0.0   # the clockwork that turns the lens, 0..1
+lit = 0           # the light burns again
+harmony = 0.25    # how much the island is one again, 0..1
+festival = 0.1    # Lantern Night readied: lanterns, food, music, 0..1
+boats = 0.0       # the scattered children sailing home by the light, 0..1
+sea = 0.35        # the sea's mood: calm at 0, storm above 0.8
+ebb = 0           # a great ebb tide: the deep cave stands open
+ebb_until = 0
+marks = {}        # once-only signs already shown
+
+[constants]
+spring_tides = [12, 26]                                       # the days the sea draws furthest back
+sails = [[0.15, "sails_1"], [0.45, "sails_2"], [0.75, "sails_3"], [1.0, "sails_4"]]
+
+# ---------------------------------------------------------------------------- each night
+
+# The sea's mood wanders back toward calm.
+[[night]]
+set = { sea = "clamp(sea + (0.35 - sea) * 0.3 + (rand() - 0.5) * 0.36)" }
+
+# A storm tears at the lanterns already hung, and slows the boats.
+[[night]]
+when = "sea > 0.8"
+set = { festival = "clamp(festival - 0.04)" }
+event = { place = "'harbour'", strength = 2.6, text = "say('nature.storm')" }
+
+# The great ebb: on the spring tides, or when the One Above draws the sea back.
+[[night]]
+set = { ebb = "1 if day in spring_tides or ebb_until >= day else 0" }
+
+[[night]]
+when = "ebb"
+event = { place = "'caves'", strength = 2.4, text = "say('nature.ebb')" }
+
+# Goodwill fades a little if nobody tends it, but never below what the island started with.
+[[night]]
+when = "harmony > 0.25"
+set = { harmony = "clamp(harmony - 0.01)" }
+
+# Once the light burns, the island's children see it from far off and come home, faster when the island is one.
+[[night]]
+when = "lit"
+set = { boats = "clamp(boats + 0.05 + 0.15 * harmony - (0.05 if sea > 0.8 else 0))" }
+
+[[night]]
+for = "threshold, key in sails"
+when = "lit and boats >= threshold and not get(marks, key, 0)"
+set = { "marks[key]" = "day" }
+event = { place = "'harbour'", strength = 3.0, text = "say('nature.' + key)" }
+
+# Ten days before Lantern Night with the lamp still dark, the supply boat's captain warns them.
+[[night]]
+when = "day >= 20 and not lit and not get(marks, 'warning', 0)"
+set = { "marks.warning" = "day" }
+event = { place = "'harbour'", strength = 2.8, text = "say('nature.warning')" }
+
+# ---------------------------------------------------------------------------- each dawn
+
+# When the island is more one than not, fireflies gather over the steps every few nights.
+[[dawn]]
+when = "harmony >= 0.6 and day % 3 == 0"
+emit = { text = "say('nature.fireflies')", place = "'steps'", strength = 2.0 }
+
+# The light, once lit, is seen by everyone.
+[[dawn]]
+when = "lit and day % 2 == 0"
+emit = { text = "say('nature.beam')", strength = 1.6, audience = "villagers" }
+
+# ---------------------------------------------------------------------------- what fate may change
+
+# A prism carried up to the lantern room and fitted into its slot in the frame.
+[effects.set_prism]
+need = ["who"]
+let = { who = "resolve_person(arg.who)" }
+requires = "who and get(items[who], 'prism', 0) >= 1 and lens < 7"
+set = { "items[who].prism" = "items[who].prism - 1", lens = "lens + 1" }
+
+[effects.lamp]
+let = { amount = "max(0.05, min(0.5, float(get(arg, 'amount', 0.2))))" }
+set = { lamp = "clamp(lamp + amount)" }
+
+[effects.clock]
+let = { amount = "max(0.05, min(0.5, float(get(arg, 'amount', 0.2))))" }
+set = { clockwork = "clamp(clockwork + amount)" }
+
+# The light can only be lit with every prism set, the lamp filled and the clockwork turning.
+[effects.light]
+requires = "lens >= 7 and lamp >= 1 and clockwork >= 1"
+set = { lit = "1" }
+
+[effects.festival]
+let = { amount = "max(0.03, min(0.3, float(get(arg, 'amount', 0.1))))" }
+set = { festival = "clamp(festival + amount)" }
+
+# The island coming together, or apart: a feud mended, a feast shared, a quarrel reopened.
+[effects.harmony]
+let = { amount = "max(-0.2, min(0.25, float(get(arg, 'amount', 0.05))))" }
+set = { harmony = "clamp(harmony + amount)" }
+
+# ---------------------------------------------------------------------------- the One Above (the Sky Lamp)
+
+[[power]]
+id = "whisper"
+tier = 1
+cost = 1
+params = ["to", "text"]
+use = "whisper"
+
+[[power]]
+id = "inscribe"
+tier = 1
+cost = 1
+params = ["text"]
+use = "inscribe"
+
+[[power]]
+id = "fireflies"
+tier = 2
+cost = 2
+params = ["at"]
+steps = [{ set = { harmony = "clamp(harmony + 0.04)" }, emit = { kind = "'sign'", text = "say('overgod.fireflies', place=place_name(at))", place = "at", strength = 2.6 } }]
+done = "say('overgod.fireflies_done', place=place_name(at))"
+
+[[power]]
+id = "fair_wind"
+tier = 2
+cost = 2
+steps = [{ set = { sea = "clamp(sea - 0.4)" }, emit = { text = "say('overgod.fair_wind')", strength = 2.2, audience = "villagers" } }]
+done = "say('overgod.fair_wind_done')"
+
+[[power]]
+id = "sign"
+tier = 2
+cost = 2
+params = ["at", "text"]
+use = "sign"
+
+[[power]]
+id = "prophecy"
+tier = 2
+cost = 3
+params = ["text"]
+use = "prophecy"
+
+[[power]]
+id = "reveal"
+tier = 2
+cost = 3
+params = ["who"]
+use = "reveal"
+
+[[power]]
+id = "storm"
+tier = 3
+cost = 3
+steps = [{ set = { sea = "0.95", festival = "clamp(festival - 0.08)" }, emit = { text = "say('overgod.storm')", strength = 2.8, audience = "villagers" } }]
+done = "say('overgod.storm_done')"
+
+[[power]]
+id = "great_ebb"
+tier = 3
+cost = 4
+steps = [{ set = { ebb = "1", ebb_until = "day + 1" }, emit = { text = "say('overgod.great_ebb')", place = "'caves'", strength = 2.8 } }]
+done = "say('overgod.great_ebb_done')"
+
+[[power]]
+id = "meteors"
+tier = 3
+cost = 4
+steps = [{ set = { harmony = "clamp(harmony + 0.12)" }, emit = { text = "say('overgod.meteors')", strength = 2.8, audience = "villagers" } }]
+done = "say('overgod.meteors_done')"
+
+[[power]]
+id = "decree"
+tier = 4
+cost = 6
+params = ["god", "text", "days"]
+use = "decree"
+
+[[power]]
+id = "whale_song"
+tier = 4
+cost = 6
+steps = [
+  { when = "lit", set = { boats = "clamp(boats + 0.25)" }, else = { set = { harmony = "clamp(harmony + 0.1)" } } },
+  { emit = { text = "say('overgod.whale_song')", strength = 2.8, audience = "villagers" } },
+]
+done = "say('overgod.whale_song_done')"
+
+[[power]]
+id = "kindle"
+tier = 4
+cost = 7
+steps = [{ set = { lamp = "1.0", clockwork = "1.0" }, emit = { text = "say('overgod.kindle')", place = "'cape'", strength = 3.0 } }]
+done = "say('overgod.kindle_done')"
+
+[[chapter]]
+id = "voice"
+when = "overgod.ever.prayed"
+reward = 3
+unlocks = 2
+
+[[chapter]]
+id = "first_prism"
+when = "lens >= 1"
+reward = 4
+unlocks = 3
+
+[[chapter]]
+id = "relit"
+when = "lit"
+reward = 5
+unlocks = 4
+
+[[chapter]]
+id = "homecoming"
+when = "boats >= 1 and festival >= 0.8"
+reward = 5
+
+# ---------------------------------------------------------------------------- the gods
+
+# The Sea Mother keeps the island's Ledger, and sends dreams and signs with her grace.
+[[god]]
+id = "god"
+kind = "ledger"
+
+# ---------------------------------------------------------------------------- games of this world
+
+[physics]
+refill = 1.4
+god_grace = 1.0
+outer_god = 0.0
+ullr_agent = 0.0
+
+# ---------------------------------------------------------------------------- what the player sees
+
+[[panel.fact]]
+label = "say('panel.light')"
+text = "say('panel.lit') if lit else say('panel.dark')"
+tone = "'good' if lit else ''"
+
+[[panel.fact]]
+label = "say('panel.lens')"
+text = "fill(say('panel.lens_text'), n=int(lens))"
+tone = "'good' if lens >= 7 else ''"
+
+[[panel.fact]]
+label = "say('panel.sea')"
+text = "say('state.seas')[bucket(sea, 0.45, 0.65, 0.8)]"
+tone = "'bad' if sea > 0.8 else ''"
+
+[[panel.fact]]
+label = "say('panel.ebb')"
+text = "''"
+when = "ebb"
+tone = "'good'"
+
+[[panel.bar]]
+label = "say('panel.lamp')"
+value = "lamp"
+text = "pct(lamp)"
+tone = "'good'"
+
+[[panel.bar]]
+label = "say('panel.clock')"
+value = "clockwork"
+text = "pct(clockwork)"
+tone = "'good'"
+
+[[panel.bar]]
+label = "say('panel.harmony')"
+value = "harmony"
+text = "say('state.moods')[bucket(harmony, 0.3, 0.5, 0.75)]"
+tone = "'good'"
+
+[[panel.bar]]
+label = "say('panel.festival')"
+value = "festival"
+text = "pct(festival)"
+tone = "'good'"
+
+[[panel.bar]]
+label = "say('panel.boats')"
+value = "boats"
+text = "pct(boats)"
+tone = "'good'"
+when = "lit"
+
+[scene]
+glow = "{'cape': float(lit), 'harbour': festival, 'steps': festival, 'orchard': festival * 0.7, 'apiary': festival * 0.5}"
+marks = "{'ebb': bool(ebb)}"

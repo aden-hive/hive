@@ -172,9 +172,13 @@ class World:
         story_file = wdir / "story.toml"
         self.story: dict[str, Any] = tomllib.loads((story_file if story_file.exists() else TEMPLATE / "story.toml").read_text("utf-8"))
         self.lang: str = self.story.get("story", {}).get("lang", "en")
-        self.t = Phrases(self.lang)
+        head = self.story.get("story", {})
+        self.t = Phrases(self.lang, overrides=self.story.get("phrases"), world=head.get("world"))
         self.lexicon = compile_lexicon(self.story.get("lexicon", {}))
         self.places: dict[str, dict] = {p["id"]: p for p in self.cfg["place"]}
+        # The world's mechanics, as data (rules/__init__.py). Runs made before rules were data were all Ashmere.
+        rules_file = wdir / "rules.toml"
+        self.rules_spec: dict[str, Any] = tomllib.loads((rules_file if rules_file.exists() else TEMPLATE.parent / "rules.toml").read_text("utf-8"))
 
         state = json.loads((run_dir / "state.json").read_text("utf-8"))
         self.day: int = state["day"]
@@ -201,6 +205,9 @@ class World:
         if run_dir.exists():
             raise FileExistsError(f"run {run_dir.name!r} already exists; pick another name or delete {run_dir}")
         shutil.copytree(template, run_dir / "world")
+        for shared in ("rules.toml", "art.toml"):  # the story's mechanics and pictures, the same in every language
+            if (template.parent / shared).exists():
+                shutil.copy(template.parent / shared, run_dir / "world" / shared)
         cfg = tomllib.loads((run_dir / "world" / "world.toml").read_text("utf-8"))
         params = {**cfg["physics"], **(overrides or {})}
         if overrides:
@@ -238,11 +245,11 @@ class World:
             shutil.copy(adir / "memory.md", mem_dir / "memory.md")
             shutil.copy(adir / "memory.md", mem_dir / "history" / "day_00.md")
 
-        hidden = copy.deepcopy(cfg["state"])
-        hidden.setdefault("relief", {})
-        hidden["sick_bracket"] = {}
+        hidden = copy.deepcopy(cfg.get("state", {}))
+        rules_file = run_dir / "world" / "rules.toml"
+        for key, value in (tomllib.loads(rules_file.read_text("utf-8")) if rules_file.exists() else {}).get("state", {}).items():
+            hidden.setdefault(key, copy.deepcopy(value))
         hidden["events"] = []
-        hidden["flags"] = {}
         hidden["weather"] = ""
         state = {
             "day": 0,
@@ -353,6 +360,22 @@ class World:
 
     def wave_name(self, wave: int) -> str:
         return self.t.get("time.waves")[wave]
+
+    def way(self, here: str, there: str) -> tuple[str, int] | None:
+        """The first road on the shortest way from ``here`` to ``there``, and how many roads it is in all."""
+        first: dict[str, str] = {r: r for r in self.places[here]["roads"]}
+        frontier, dist = list(first), 1
+        while frontier:
+            if there in frontier:
+                return first[there], dist
+            nxt = []
+            for p in frontier:
+                for r in self.places[p]["roads"]:
+                    if r not in first and r != here:
+                        first[r] = first[p]
+                        nxt.append(r)
+            frontier, dist = nxt, dist + 1
+        return None
 
     def present(self, loc: str | None) -> list[Agent]:
         return [a for a in self.agents.values() if loc is not None and a.loc == loc]

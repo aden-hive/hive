@@ -15,38 +15,48 @@ import re
 from typing import Any
 
 from .analysis import load
-from .god import ledger_text
+from .god import _title, ledger_text
 from .llm import LLM, parse_json_object
 from .nature import describe_state
 from .overgod import decree_for
+from .rules import rules_for
 from .world import World
 
 
-def high_places(world: World) -> list[str]:
-    """Old Ullr's own places in this story: only there can his signs appear."""
-    return list(world.story.get("gods", {}).get("high_places", ["barrow_hill", "fold", "mirewood"]))
+def _cfg(world: World, cfg: dict | None = None) -> dict:
+    """This world's sleeper: when it is awake or stirring, its high places and its hunt (rules.toml ``[[god]]`` of kind ``sleeper``)."""
+    return cfg or next((g for g in rules_for(world).gods if g.get("kind") == "sleeper"), {})
 
 
-def enabled(world: World) -> bool:
-    return world.params.get("ullr_agent", 0) > 0
+def high_places(world: World, cfg: dict | None = None) -> list[str]:
+    """The sleeper's own places: only there can its signs appear."""
+    return list(_cfg(world, cfg).get("high_places") or world.story.get("gods", {}).get("high_places", []))
 
 
-def dawn(world: World, ullr: Any, verbose: bool = True) -> None:
-    """Ullr's turn, after the other gods: only while his song holds him awake or stirring."""
+def enabled(world: World, cfg: dict | None = None) -> bool:
+    switch = _cfg(world, cfg).get("switch")
+    return bool(_cfg(world, cfg)) and (not switch or world.params.get(switch, 0) > 0)
+
+
+def dawn(world: World, ullr: Any, verbose: bool = True, cfg: dict | None = None) -> None:
+    """The sleeper's turn, after the other gods: only while it is awake or stirring, as the world's rules say."""
+    cfg = _cfg(world, cfg)
     h = world.hidden
-    awake, stirring = int(h.get("ullr_awake", 0)), int(h.get("stone_hum", 0))
-    prayers = h.get("prayers_ullr") or []
-    h["prayers_ullr"] = []
-    if not enabled(world) or ullr is None or not (awake or stirring):
+    scope = rules_for(world).scope(world)
+    awake, stirring = int(scope.eval(cfg.get("awake", 0))), int(scope.eval(cfg.get("stirring", 0)))
+    key = cfg.get("prayers", f"prayers_{cfg.get('id', 'ullr')}")
+    prayers = h.get(key) or []
+    h[key] = []
+    if not enabled(world, cfg) or ullr is None or not (awake or stirring):
         return
     limit = 2 if awake else 1
     world.flush()
     events = load(world.dir)
-    reply = ullr.act(world, _view(world, events, prayers, awake, limit), limit)
+    reply = ullr.act(world, _view(world, events, prayers, awake, limit, cfg), limit)
     done: list[dict] = []
     for x in (reply.get("acts") or [])[:limit]:
         if isinstance(x, dict) and (awake or str(x.get("do")) == "dream"):
-            if act := _act(world, x):
+            if act := _act(world, x, cfg):
                 done.append(act)
     notes = reply.get("notes")
     if isinstance(notes, str) and notes.strip():
@@ -60,7 +70,8 @@ def dawn(world: World, ullr: Any, verbose: bool = True) -> None:
             print(f"  ❄ Ullr: {x['do']} → {target}: {x.get('text', '')}"[:300], flush=True)
 
 
-def _act(world: World, x: dict) -> dict | None:
+def _act(world: World, x: dict, cfg: dict | None = None) -> dict | None:
+    cfg = _cfg(world, cfg)
     do = str(x.get("do") or "").lower()
     text = re.sub(r"\s+", " ", str(x.get("text") or "")).strip()[:420]
     if not text:
@@ -73,20 +84,24 @@ def _act(world: World, x: dict) -> dict | None:
         return {"do": "dream", "to": target.id, "text": text, "signal": sig.id}
     if do == "sign":
         place = world.resolve_place(str(x.get("at") or ""))
-        if place not in high_places(world):
+        if place not in high_places(world, cfg):
             return None
         sig = world.add_signal("sign", text, place, "ullr")
         return {"do": "sign", "at": place, "text": text, "signal": sig.id, "seen_by": [a.id for a in world.present(place)]}
-    if do == "hunt" and not world.hidden.get("ullr_hunted"):
-        w = world.hidden["wolves"]
-        w["hunger"], w["driven"] = 0.0, int(w.get("driven", 0)) + 1
-        world.hidden["ullr_hunted"] = world.day
-        sig = world.add_signal("sign", text, "fold", "ullr", strength=2.6)
-        return {"do": "hunt", "at": "fold", "text": text, "signal": sig.id}
+    hunt = cfg.get("hunt")
+    if do == "hunt" and hunt and not world.hidden.get(hunt["once"]):
+        rules = rules_for(world)
+        scope = rules.scope(world)
+        for step in hunt.get("steps", []):
+            rules.step(world, scope, step)
+        world.hidden[hunt["once"]] = world.day
+        sig = world.add_signal("sign", text, hunt["at"], cfg.get("id", "ullr"), strength=float(hunt.get("strength", 2.6)))
+        return {"do": "hunt", "at": hunt["at"], "text": text, "signal": sig.id}
     return None
 
 
-def _view(world: World, events: list[dict], prayers: list[dict], awake: int, limit: int) -> str:
+def _view(world: World, events: list[dict], prayers: list[dict], awake: int, limit: int, cfg: dict | None = None) -> str:
+    cfg = _cfg(world, cfg)
     t = world.t
     sep = t("names.list_sep")
     h, day = world.hidden, world.day
@@ -95,7 +110,8 @@ def _view(world: World, events: list[dict], prayers: list[dict], awake: int, lim
     if h.get("ullr_notes"):
         out += ["", t("ullr.notes"), h["ullr_notes"]]
     out += ["", t("ullr.ledger"), ledger_text(world)]
-    sang = [e for e in events if e["ev"] in ("outcome", "attempt") and any(x.get("type") == "sing" for x in e.get("applied") or [])]
+    song = cfg.get("song")
+    sang = [e for e in events if e["ev"] in ("outcome", "attempt") and song and any(x.get("type") == song for x in e.get("applied") or [])]
     if sang:
         s = sang[-1]  # an undertaking's singers, or one who sang alone
         who = sep.join(world.name(a) for a in s.get("present") or s.get("supporters") or [s.get("agent")])
@@ -105,7 +121,7 @@ def _view(world: World, events: list[dict], prayers: list[dict], awake: int, lim
         or [t("ullr.none")]
     )
     out += ["", t("ullr.high")]
-    highs = high_places(world)
+    highs = high_places(world, cfg)
     seen = [e for e in events if e["ev"] == "activation" and e.get("day") == day - 1 and e.get("place") in highs]
     out += [
         t(
@@ -135,13 +151,18 @@ def _view(world: World, events: list[dict], prayers: list[dict], awake: int, lim
         for e in others:
             if e["ev"] == "god":
                 out += [
-                    t("ullr.other_god", what=x["do"], place=world.place_name(x.get("at")), text=x["text"])
+                    t("ullr.other_god", god=_title(world, "god"), what=x["do"], place=world.place_name(x.get("at")), text=x["text"])
                     for x in e.get("acts") or []
                     if x.get("do") == "sign"
                 ]
             elif e.get("boon"):
-                out.append(t("ullr.other_star", place=world.place_name(e["boon"].get("place")), text=e.get("public", "")))
-    return "\n".join(out) + "\n\n" + t("ullr.instructions", limit=limit, people=", ".join(world.agents), high_places=" | ".join(highs))
+                out.append(t("ullr.other_star", god=_title(world, "outer"), place=world.place_name(e["boon"].get("place")), text=e.get("public", "")))
+    hunt_place = world.place_name((cfg.get("hunt") or {}).get("at"))
+    return (
+        "\n".join(out)
+        + "\n\n"
+        + t("ullr.instructions", limit=limit, people=", ".join(world.agents), high_places=" | ".join(highs), hunt_place=hunt_place)
+    )
 
 
 class LLMUllr:

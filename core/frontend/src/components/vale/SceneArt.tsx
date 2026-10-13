@@ -3,7 +3,10 @@ import { PortraitArt, type PersonArt } from "./Portrait";
 
 /** How a place is drawn: stories/<story>/art.toml, [places.<id>]. */
 export interface PlaceArt {
-  kind?: "mine" | "keep" | "mill" | "village" | "chapel" | "stones" | "pasture" | "forest" | "ford" | "vale";
+  kind?:
+    | "mine" | "keep" | "mill" | "village" | "chapel" | "stones" | "pasture" | "forest" | "ford"
+    | "lighthouse" | "harbor" | "orchard" | "garden" | "cave"
+    | "vale" | "isle";
   water?: boolean;
   image?: string;
 }
@@ -16,16 +19,17 @@ export interface SceneFigure {
   health?: number;
 }
 
+/** What the picture shows of the world now; the world's rules decide the numbers (rules.toml [scene]). */
 export interface SceneState {
   hour: number; // 0 dawn … 5 night
   weather?: string; // rain, fog, clear, overcast, showers, wind
   winter?: boolean;
-  blight?: number; // of this place's water, 0..1
-  shaftOpen?: boolean;
-  stoneRaised?: boolean;
-  ullrAwake?: boolean;
-  hum?: boolean;
+  water?: number; // how troubled this place's water is, 0..1
+  glow?: number; // how brightly this place glows (a lit lamp, lanterns strung), 0..1
+  marks?: Record<string, unknown>; // the world's own marks: deep_door, stone_raised, awake, hum, ebb …
 }
+
+const mark = (s: SceneState, name: string) => Boolean(s.marks?.[name]);
 
 const SKY: [string, string][] = [
   ["#f0b99c", "#fbe6cc"], // dawn
@@ -57,11 +61,44 @@ function Window({ x, y, w = 3, h = 3.4, lit }: { x: number; y: number; w?: numbe
   );
 }
 
+/** Little waves on open water. */
+function Waves({ y }: { y: number }) {
+  return (
+    <g stroke="#ffffff" strokeWidth={0.45} fill="none" opacity={0.55}>
+      <animateTransform attributeName="transform" type="translate" values="0 0; 3 0; 0 0" dur="5s" repeatCount="indefinite" />
+      {Array.from({ length: 9 }, (_, i) => <path key={i} d={`M${(i * 19) % 160} ${y + (i % 3) * 3} q2 -1.2 4 0 q2 -1.2 4 0`} />)}
+    </g>
+  );
+}
+
+/** A string of festival lanterns, more of them the brighter the place glows. */
+function Lanterns({ from, to, n }: { from: [number, number]; to: [number, number]; n: number }) {
+  const [x1, y1] = from;
+  const [x2, y2] = to;
+  const sag = 6;
+  return (
+    <g style={{ visibility: "visible" }}>
+      <path d={`M${x1} ${y1} Q${(x1 + x2) / 2} ${(y1 + y2) / 2 + sag} ${x2} ${y2}`} stroke="#4a3a2a" strokeWidth={0.4} fill="none" />
+      {Array.from({ length: n }, (_, i) => {
+        const t = (i + 0.5) / n;
+        const x = x1 + (x2 - x1) * t;
+        const y = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * ((y1 + y2) / 2 + sag) + t * t * y2;
+        return (
+          <g key={i}>
+            <circle cx={x} cy={y + 2.2} r={2.6} fill="#ffcf6a" opacity={0.25} />
+            <ellipse cx={x} cy={y + 2.2} rx={1.3} ry={1.7} fill={["#e8553e", "#f2a13a", "#f6d04a"][i % 3]} />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 /** The middle of the picture: what makes this place itself. */
 function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) {
   const stone = "#cfc6b8";
   const roof = "#8a5a3a";
-  const water = waterColor(s.blight ?? 0);
+  const water = waterColor(s.water ?? 0);
   switch (kind) {
     case "mine":
       return (
@@ -69,7 +106,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
           <path d="M70 70 L104 22 L124 34 L160 18 L160 70 Z" fill="#8d8374" />
           <path d="M104 22 L114 36 L124 34 Z" fill="#a39a8a" />
           <path d="M98 70 C98 56 104 50 112 50 C120 50 126 56 126 70 Z" fill="#241e1b" />
-          {s.shaftOpen && <ellipse cx={112} cy={64} rx={9} ry={6} fill="#c0392b" opacity={0.55}><animate attributeName="opacity" values="0.35;0.7;0.35" dur="3s" repeatCount="indefinite" /></ellipse>}
+          {mark(s, "deep_door") && <ellipse cx={112} cy={64} rx={9} ry={6} fill="#c0392b" opacity={0.55}><animate attributeName="opacity" values="0.35;0.7;0.35" dur="3s" repeatCount="indefinite" /></ellipse>}
           <path d="M96 70 L96 52 L128 52 L128 70" stroke="#6b4a2b" strokeWidth={2.4} fill="none" />
           <path d="M94 51.4 L130 51.4" stroke="#6b4a2b" strokeWidth={3} />
           <path d="M30 70 C40 58 52 58 62 70 Z" fill="#9b958c" />
@@ -132,6 +169,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
             <ellipse cx={0} cy={-2} rx={6} ry={1.8} fill={water} />
             <path d="M-6 -2 L-6 -10 M6 -2 L6 -10 M-8 -10 L8 -10" stroke="#6b4a2b" strokeWidth={1.2} />
           </g>
+          {(s.glow ?? 0) > 0.05 && <Lanterns from={[10, 40]} to={[150, 36]} n={Math.round(4 + 14 * (s.glow ?? 0))} />}
           <g transform="translate(104 38)">
             <path d="M0 0 L0 6" stroke="#4a3a2a" strokeWidth={0.6} />
             <rect x={-2.2} y={6} width={4.4} height={5} rx={1} fill={lit ? "#ffd27a" : "#c8a24a"} />
@@ -155,7 +193,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
         </g>
       );
     case "stones": {
-      const glow = s.ullrAwake ? "#1d7a74" : s.hum ? "#6d9f9b" : null;
+      const glow = mark(s, "awake") ? "#1d7a74" : mark(s, "hum") ? "#6d9f9b" : null;
       return (
         <g>
           <path d="M10 72 C40 30 120 30 150 72 Z" fill="#8fa07a" />
@@ -165,12 +203,12 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
             const a = Math.PI * (0.12 + (0.76 * i) / 6);
             const x = 80 - Math.cos(a) * 42;
             const y = 56 - Math.sin(a) * 12;
-            const down = i === 3 && !s.stoneRaised;
+            const down = i === 3 && !mark(s, "stone_raised");
             return down
               ? <rect key={i} x={x - 6} y={y + 1} width={12} height={4} rx={1.2} fill="#7d7a72" transform={`rotate(8 ${x} ${y})`} />
               : <rect key={i} x={x - 2.6} y={y - 11} width={5.2} height={13} rx={1.4} fill={glow ? mix("8d8a82", glow.slice(1), 0.25) : "#8d8a82"} />;
           })}
-          {s.ullrAwake && <g fill="#ffffff" opacity={0.7}>{[30, 50, 70, 90, 110, 130].map((x) => <circle key={x} cx={x} cy={58 + (x % 3)} r={0.8} />)}</g>}
+          {mark(s, "awake") && <g fill="#ffffff" opacity={0.7}>{[30, 50, 70, 90, 110, 130].map((x) => <circle key={x} cx={x} cy={58 + (x % 3)} r={0.8} />)}</g>}
         </g>
       );
     }
@@ -189,7 +227,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
               <ellipse cx={x + 4.2} cy={y - 0.8} rx={1.6} ry={1.4} fill="#3b3430" />
             </g>
           ))}
-          <ellipse cx={146} cy={66} rx={7} ry={2.2} fill={waterColor(s.blight ?? 0)} />
+          <ellipse cx={146} cy={66} rx={7} ry={2.2} fill={waterColor(s.water ?? 0)} />
         </g>
       );
     case "forest":
@@ -206,7 +244,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
               </g>
             );
           })}
-          <path d="M0 80 C30 74 60 78 90 75 C120 72 140 77 160 75 L160 84 C120 86 90 82 60 85 C30 87 10 84 0 86 Z" fill={waterColor(s.blight ?? 0)} opacity={0.85} />
+          <path d="M0 80 C30 74 60 78 90 75 C120 72 140 77 160 75 L160 84 C120 86 90 82 60 85 C30 87 10 84 0 86 Z" fill={waterColor(s.water ?? 0)} opacity={0.85} />
           <rect x={24} y={58} width={14} height={10} fill="#a0805a" />
           <path d="M22 59 L31 51 L40 59 Z" fill="#6b4a2b" />
           <Window x={28} y={61} w={2.6} h={2.8} lit={lit} />
@@ -215,7 +253,7 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
     case "ford":
       return (
         <g>
-          <path d="M0 70 C40 66 80 68 120 66 C140 65 150 66 160 65 L160 80 C120 82 80 80 40 82 C20 83 10 82 0 82 Z" fill={waterColor(s.blight ?? 0)} />
+          <path d="M0 70 C40 66 80 68 120 66 C140 65 150 66 160 65 L160 80 C120 82 80 80 40 82 C20 83 10 82 0 82 Z" fill={waterColor(s.water ?? 0)} />
           {[[16, "#a8352c"], [44, "#3f7d6e"], [72, "#c8a24a"]].map(([x, c], i) => (
             <g key={i}>
               <rect x={Number(x)} y={52} width={22} height={12} fill="#cdb894" />
@@ -228,16 +266,145 @@ function Place({ kind, s, lit }: { kind: string; s: SceneState; lit: boolean }) 
           <path d="M126 61 L138 69 L126 69 Z" fill="#e8e0cc" />
         </g>
       );
+    case "lighthouse": {
+      const lit = (s.glow ?? 0) > 0.5;
+      return (
+        <g>
+          <path d="M0 74 C30 70 60 74 90 72 L90 90 L0 90 Z" fill="#5f8fae" />
+          <path d="M70 74 C80 52 100 46 160 44 L160 90 L64 90 Z" fill="#8f8a7a" />
+          <path d="M84 70 C92 60 110 56 160 54 L160 60 C120 62 100 64 90 72 Z" fill="#7d9a6a" opacity={0.8} />
+          <g transform="translate(118 18)">
+            <path d="M-6 40 L-4 6 L4 6 L6 40 Z" fill="#f2efe6" />
+            {[12, 22, 32].map((y) => <path key={y} d={`M${-4.6 + (y - 6) * 0.06} ${y} L${4.6 - (y - 6) * 0.06} ${y} L${4.9 - (y - 6) * 0.06} ${y + 4} L${-4.9 + (y - 6) * 0.06} ${y + 4} Z`} fill="#c0453a" />)}
+            <rect x={-5} y={2} width={10} height={4} fill="#3b3a3f" />
+            <rect x={-3.6} y={-3} width={7.2} height={5} rx={0.6} fill={lit ? "#ffe9a8" : "#5d6b78"} />
+            <path d="M-4.6 -3 L0 -7.5 L4.6 -3 Z" fill="#2f3a44" />
+            {lit && <circle r={9} cy={-0.5} fill="#ffe28a" opacity={0.35} style={{ visibility: "visible" }} />}
+            {lit && (
+              <g style={{ visibility: "visible" }} opacity={0.55}>
+                <path d="M-2 -1 L-120 -16 L-120 12 Z" fill="url(#beam)">
+                  <animateTransform attributeName="transform" type="rotate" values="-8 0 -1; 6 0 -1; -8 0 -1" dur="7s" repeatCount="indefinite" />
+                </path>
+              </g>
+            )}
+          </g>
+          <Waves y={80} />
+        </g>
+      );
+    }
+    case "harbor":
+      return (
+        <g>
+          <path d="M0 62 C40 60 80 64 160 60 L160 90 L0 90 Z" fill={waterColor(s.water ?? 0)} opacity={0.95} />
+          <Waves y={70} />
+          {[[14, 44, 30], [48, 46, 26], [124, 44, 30]].map(([x, y, w], i) => (
+            <g key={i}>
+              <rect x={x} y={y} width={w} height={60 - y} fill={i === 1 ? "#e6d9bf" : "#dccdb0"} />
+              <path d={`M${x - 2} ${y + 1} L${x + w / 2} ${y - 9} L${x + w + 2} ${y + 1} Z`} fill={i % 2 ? "#4e7a8c" : "#8a5a3a"} />
+              <Window x={x + 4} y={y + 5} lit={lit} /><Window x={x + w - 7} y={y + 5} lit={lit} />
+            </g>
+          ))}
+          <path d="M84 60 L84 66 M84 62 L118 62 M118 60 L118 66 M96 62 L96 66 M108 62 L108 66" stroke="#6b4a2b" strokeWidth={1.4} />
+          <rect x={82} y={59} width={38} height={2.2} fill="#8a6a46" />
+          {[[60, 70, 1], [96, 72, -1], [134, 69, 1]].map(([x, y, dir], i) => (
+            <g key={i} transform={`translate(${x} ${y})`}>
+              <path d="M-8 0 L8 0 L5 3.4 L-5 3.4 Z" fill={["#8a5a3a", "#3f6f7e", "#b06a3a"][i]} />
+              <rect x={-0.3} y={-9} width={0.6} height={9} fill="#4a3424" />
+              <path d={`M0.6 -8.6 L${6 * dir} -1.4 L0.6 -1.4 Z`} fill="#f2ead8" />
+            </g>
+          ))}
+          {(s.glow ?? 0) > 0.05 && <Lanterns from={[10, 40]} to={[150, 38]} n={Math.round(4 + 14 * (s.glow ?? 0))} />}
+          <g stroke="#ffffff" strokeWidth={0.5} fill="none" opacity={0.8}>
+            <path d="M30 22 q2 -1.6 4 0 q2 -1.6 4 0" /><path d="M100 16 q1.6 -1.2 3.2 0 q1.6 -1.2 3.2 0" />
+          </g>
+        </g>
+      );
+    case "orchard":
+      return (
+        <g>
+          <path d="M0 70 C30 46 90 34 160 40 L160 90 L0 90 Z" fill="#8fae6a" />
+          {[56, 62, 68].map((y) => <path key={y} d={`M0 ${y + 12} C40 ${y} 100 ${y - 10} 160 ${y - 8}`} stroke="#6f8e4e" strokeWidth={0.8} fill="none" opacity={0.6} />)}
+          {Array.from({ length: 12 }, (_, i) => {
+            const x = 12 + (i % 6) * 26 + (Math.floor(i / 6) ? 12 : 0);
+            const y = Math.floor(i / 6) ? 62 : 50 + (i % 6) * -1.6;
+            return (
+              <g key={i}>
+                <rect x={x - 0.8} y={y} width={1.6} height={6} fill="#5a3f2a" />
+                <circle cx={x} cy={y - 2} r={5} fill={i % 3 ? "#5f8a3e" : "#6e9a48"} />
+                {[[-2, -3], [2, -1], [0, 1], [3, -4]].map(([dx, dy], j) => <circle key={j} cx={x + dx} cy={y - 2 + dy} r={0.9} fill="#d8423a" />)}
+              </g>
+            );
+          })}
+          <rect x={128} y={30} width={18} height={12} fill="#e2cfa8" />
+          <path d="M125 31 L137 23 L149 31 Z" fill="#8a5a3a" />
+          <Window x={132} y={34} lit={lit} />
+          {(s.glow ?? 0) > 0.05 && <Lanterns from={[8, 46]} to={[120, 34]} n={Math.round(3 + 10 * (s.glow ?? 0))} />}
+        </g>
+      );
+    case "garden":
+      return (
+        <g>
+          <path d="M0 62 C40 56 100 58 160 54 L160 90 L0 90 Z" fill="#9ab86e" />
+          {Array.from({ length: 40 }, (_, i) => (
+            <circle key={i} cx={(i * 37) % 160} cy={62 + ((i * 13) % 22)} r={0.9} fill={["#f2c14e", "#e8829a", "#ffffff", "#b07ad8"][i % 4]} />
+          ))}
+          {[[24, 56], [40, 58], [56, 55], [72, 57]].map(([x, y], i) => (
+            <g key={i}>
+              <rect x={x} y={y} width={8} height={9} fill="#e8d6a0" stroke="#b8a070" strokeWidth={0.4} />
+              <rect x={x - 0.6} y={y - 1.4} width={9.2} height={1.6} fill="#c8a24a" />
+              <rect x={x + 3} y={y + 7} width={2} height={1} fill="#5a3f2a" />
+            </g>
+          ))}
+          <g fill="#3b3430">{[[30, 50], [46, 47], [62, 52], [80, 49], [52, 44]].map(([x, y], i) => <circle key={i} cx={x} cy={y} r={0.5}><animate attributeName="cy" values={`${y};${y - 2};${y}`} dur={`${1.4 + i * 0.3}s`} repeatCount="indefinite" /></circle>)}</g>
+          <rect x={112} y={44} width={22} height={16} fill="#e6d4b0" />
+          <path d="M108 45 L123 34 L138 45 Z" fill="#b08a4a" />
+          <Window x={118} y={49} lit={lit} />
+        </g>
+      );
+    case "cave": {
+      const ebb = mark(s, "ebb");
+      return (
+        <g>
+          <path d="M0 24 C30 14 70 20 90 12 C120 4 150 14 160 10 L160 90 L0 90 Z" fill="#7d7468" />
+          <path d="M44 74 C44 46 60 34 80 34 C100 34 116 46 116 74 Z" fill="#1f1d1b" />
+          {ebb && <ellipse cx={80} cy={58} rx={8} ry={5} fill="#bfe8f0" opacity={0.6}><animate attributeName="opacity" values="0.35;0.75;0.35" dur="3s" repeatCount="indefinite" /></ellipse>}
+          <path d={`M0 ${ebb ? 82 : 72} C40 ${ebb ? 80 : 70} 120 ${ebb ? 84 : 74} 160 ${ebb ? 81 : 71} L160 90 L0 90 Z`} fill="#4f86a2" opacity={0.9} />
+          <Waves y={ebb ? 85 : 76} />
+          {[[20, 70], [136, 66], [30, 60]].map(([x, y], i) => <ellipse key={i} cx={x} cy={y} rx={5} ry={2.4} fill="#6b6358" />)}
+        </g>
+      );
+    }
+    case "isle":
+      return (
+        <g>
+          <rect y={52} width={160} height={38} fill="#5f8fae" />
+          <path d="M18 60 C34 40 70 34 96 38 C120 42 140 50 146 60 C120 64 60 66 18 60 Z" fill="#8fae6a" />
+          <path d="M40 58 C52 48 70 44 86 46" stroke="#6f8e4e" strokeWidth={0.8} fill="none" />
+          <g transform="translate(128 34)">
+            <rect x={-1.4} y={0} width={2.8} height={14} fill="#f2efe6" />
+            <rect x={-1.4} y={4} width={2.8} height={2} fill="#c0453a" />
+            <rect x={-1.8} y={-2} width={3.6} height={2.4} fill={(s.glow ?? 0) > 0.5 ? "#ffe9a8" : "#5d6b78"} />
+            {(s.glow ?? 0) > 0.5 && <path d="M0 -1 L-70 -10 L-70 8 Z" fill="url(#beam)" opacity={0.5} style={{ visibility: "visible" }} />}
+          </g>
+          {[[60, 50], [68, 52], [76, 49]].map(([x, y], i) => (
+            <g key={i}><rect x={x} y={y} width={5} height={4} fill="#e6d9bf" /><path d={`M${x - 1} ${y} L${x + 2.5} ${y - 3} L${x + 6} ${y} Z`} fill="#8a5a3a" /></g>
+          ))}
+          <Waves y={72} />
+          {[[30, 76], [110, 80]].map(([x, y], i) => (
+            <g key={i} transform={`translate(${x} ${y})`}><path d="M-5 0 L5 0 L3 2 L-3 2 Z" fill="#8a5a3a" /><path d="M0.4 -6 L4 -1 L0.4 -1 Z" fill="#f2ead8" /><rect x={-0.2} y={-6} width={0.4} height={6} fill="#4a3424" /></g>
+          ))}
+        </g>
+      );
     default: // the whole vale, for openings
       return (
         <g>
           <path d="M0 60 C30 44 60 50 90 44 C120 38 140 46 160 42 L160 90 L0 90 Z" fill="#93a675" />
-          <path d="M0 74 C40 68 70 74 100 70 C130 66 150 70 160 68" stroke={waterColor(s.blight ?? 0)} strokeWidth={2.6} fill="none" />
+          <path d="M0 74 C40 68 70 74 100 70 C130 66 150 70 160 68" stroke={waterColor(s.water ?? 0)} strokeWidth={2.6} fill="none" />
           {[[60, 54], [70, 56], [78, 53]].map(([x, y], i) => (
             <g key={i}><rect x={x} y={y} width={6} height={5} fill="#ddc9a6" /><path d={`M${x - 1} ${y} L${x + 3} ${y - 4} L${x + 7} ${y} Z`} fill="#a58a46" /></g>
           ))}
           <g transform="translate(120 34)"><rect x={0} y={0} width={10} height={7} fill={stone} /><rect x={-2} y={-3} width={3} height={10} fill={stone} /><rect x={9} y={-3} width={3} height={10} fill={stone} /></g>
-          <g transform="translate(30 42)">{[0, 3, 6, 9, 12].map((x) => <rect key={x} x={x} y={x === 6 && !s.stoneRaised ? 3 : 0} width={1.6} height={x === 6 && !s.stoneRaised ? 1.4 : 4} fill="#7d7a72" />)}</g>
+          <g transform="translate(30 42)">{[0, 3, 6, 9, 12].map((x) => <rect key={x} x={x} y={x === 6 && !mark(s, "stone_raised") ? 3 : 0} width={1.6} height={x === 6 && !mark(s, "stone_raised") ? 1.4 : 4} fill="#7d7a72" />)}</g>
         </g>
       );
   }
@@ -309,7 +476,7 @@ export default function SceneArt({
   const grey = s.weather === "overcast" || s.weather === "rain" || s.weather === "fog" ? 0.45 : s.weather === "showers" ? 0.2 : 0;
   const [top, bottom] = SKY[hour].map((c) => mix(c.slice(1), "9aa3a8", hour === 5 ? grey * 0.3 : grey));
   const night = hour === 5;
-  const lit = hour >= 4;
+  const lit = hour >= 4 || (s.glow ?? 0) > 0.6;
   const [sx, sy] = SUN[hour];
   const kind = place?.kind ?? "vale";
   const shown = people.slice(0, 7);
@@ -318,6 +485,7 @@ export default function SceneArt({
     <svg viewBox="0 0 160 90" className={className} role="img" aria-label={label} preserveAspectRatio="xMidYMid slice">
       <defs>
         <linearGradient id={`sky${id}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={top} /><stop offset="1" stopColor={bottom} /></linearGradient>
+        <linearGradient id="beam" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stopColor="#fff2b0" stopOpacity={0.9} /><stop offset="1" stopColor="#fff2b0" stopOpacity={0} /></linearGradient>
         <radialGradient id={`sun${id}`}><stop offset="0" stopColor={night ? "#f6f0d8" : "#fff4c8"} /><stop offset="1" stopColor={night ? "#f6f0d8" : "#ffd27a"} stopOpacity={0} /></radialGradient>
       </defs>
       {place?.image && imageBase ? (

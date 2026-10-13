@@ -10,6 +10,7 @@
 # `water` when the blight shows in its stream.
 
 [people.hal]
+color = "#c98b2b"
 skin = "#e8b88f"
 hair = "#7a5230"
 style = "short"
@@ -21,6 +22,7 @@ age = "adult"
 extras = ["flour"]
 
 [people.maud]
+color = "#3f7d6e"
 skin = "#f0c9a5"
 hair = "#5b3a24"
 style = "bun"
@@ -30,6 +32,7 @@ trim = "#d9cfb8"
 age = "adult"
 
 [people.aldric]
+color = "#7a4b9c"
 skin = "#e9c2a0"
 hair = "#bdbdbd"
 style = "short"
@@ -40,6 +43,7 @@ trim = "#d8b24a"
 age = "old"
 
 [people.osric]
+color = "#9a3b3b"
 skin = "#e6bf9d"
 hair = "#1f1a17"
 style = "slick"
@@ -48,6 +52,7 @@ trim = "#9a3b3b"
 age = "adult"
 
 [people.brannoc]
+color = "#b4542b"
 skin = "#d9a57f"
 hair = "#b4542b"
 style = "short"
@@ -58,6 +63,7 @@ trim = "#b4542b"
 age = "adult"
 
 [people.isolde]
+color = "#5a6fb0"
 skin = "#f2d3b8"
 hair = "#8a8a8a"
 style = "none"
@@ -67,6 +73,7 @@ trim = "#f4f1ea"
 age = "old"
 
 [people.gytha]
+color = "#4f8a3a"
 skin = "#d8b08c"
 hair = "#a3a3a3"
 style = "wild"
@@ -76,6 +83,7 @@ age = "old"
 extras = ["herbs"]
 
 [people.bram]
+color = "#8a7a52"
 skin = "#d2a27a"
 hair = "#ececec"
 style = "receding"
@@ -86,6 +94,7 @@ trim = "#5c4e33"
 age = "old"
 
 [people.wynn]
+color = "#d16a8f"
 skin = "#f5d0b0"
 hair = "#a0522d"
 style = "braids"
@@ -94,6 +103,7 @@ trim = "#f6e7c8"
 age = "young"
 
 [people.tobias]
+color = "#5e7f9e"
 skin = "#f0cba8"
 hair = "#3a2a1a"
 style = "short"
@@ -103,6 +113,7 @@ age = "young"
 extras = ["quill"]
 
 [people.marta]
+color = "#b07a3c"
 skin = "#ecc09a"
 hair = "#8a3324"
 style = "bun"
@@ -112,6 +123,7 @@ age = "adult"
 extras = ["apron"]
 
 [people.cedric]
+color = "#8f8a2e"
 skin = "#e2b590"
 hair = "#6b4a2b"
 style = "short"
@@ -123,6 +135,7 @@ age = "adult"
 extras = ["fur"]
 
 [people.elspeth]
+color = "#3f8fa0"
 skin = "#f3d4b6"
 hair = "#c8a060"
 style = "long"
@@ -131,6 +144,7 @@ trim = "#e9f1ee"
 age = "adult"
 
 [people.kell]
+color = "#55703a"
 skin = "#cf9f78"
 hair = "#3b2f22"
 style = "short"
@@ -141,6 +155,7 @@ age = "young"
 extras = ["bow"]
 
 [people.bagel]
+color = "#e89ab8"
 skin = "#fbe6da"
 hair = "#e4e4ee"
 style = "long"
@@ -180,3 +195,9 @@ water = true
 [places.fenford]
 kind = "ford"
 water = true
+
+# The map: the Hollowbrook's course (points [owner place, x, y]; each stretch is coloured by its
+# owner's water, from rules.toml [scene]) and where it spills into the Mirewood in flood.
+[map]
+streams = [{ points = [["mine", 16, 25], ["", 20, 36], ["mill", 25, 44], ["", 36, 52], ["ashmere", 44, 58], ["", 38, 70], ["fenford", 32, 80]] }]
+floods = [{ owner = "mirewood", points = [[36, 52], [50, 66], [60, 74]] }]

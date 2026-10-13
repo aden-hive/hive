@@ -27,6 +27,7 @@ from .fate import knows_text
 from .llm import LLM, parse_json_object
 from .nature import describe_state
 from .overgod import decree_for
+from .rules import rules_for
 from .world import World
 
 # What the Ledger may rest on: what someone said, posted, did or found, or what the world showed.
@@ -37,6 +38,11 @@ def _hidden(world: World) -> tuple[set[str], set[str]]:
     """What the god who displaced old Ullr cannot see: his mark on his chosen, and his dreams to her."""
     gods = world.story.get("gods", {})
     return set(gods.get("hidden_from_god", [])), {gods["chosen"]} if gods.get("chosen") else set()
+
+
+def _title(world: World, gid: str) -> str:
+    """What the story calls one of its gods."""
+    return str(world.story.get("gods", {}).get("titles", {}).get(gid) or world.name(gid))
 
 
 def has_god(world: World) -> bool:
@@ -50,7 +56,7 @@ def ledger_text(world: World) -> str:
     return "\n".join(lines) or world.t("god.ledger_blank")
 
 
-def dawn(world: World, god: Any, verbose: bool = True) -> None:
+def dawn(world: World, god: Any, verbose: bool = True, cfg: dict | None = None) -> None:
     """The god's turn, after the world's own dawn: a human's queued acts, then the god's."""
     if not has_god(world):
         return
@@ -214,13 +220,26 @@ def digest(world: World, events: list[dict], index: dict[str, dict]) -> str:
                 t("god.world_event", when=when, id=e["id"], kind=e["kind"].upper(), place=world.place_name(e.get("loc")), seen=seen, text=e["text"])
             )
         elif e["ev"] == "outer" and d == day - 1 and e.get("boon"):
-            out.append(t("god.star_eased", when=when, place=world.place_name(e["boon"].get("place")), text=e.get("public", "")))
+            patron = next((g for g in rules_for(world).gods if g.get("kind") == "patron"), {})
+            out.append(
+                t(
+                    "god.star_eased",
+                    when=when,
+                    GOD=_title(world, patron.get("id", "outer")).upper(),
+                    god=_title(world, patron.get("id", "outer")),
+                    follower=world.name(patron.get("follower", "")),
+                    place=world.place_name(e["boon"].get("place")),
+                    text=e.get("public", ""),
+                )
+            )
         elif e["ev"] == "ullr" and d == day - 1:
             for x in e.get("acts") or []:
                 if x["do"] == "dream" and x.get("to") in hidden_dreamers:
                     continue  # the old god's voice in his chosen's sleep is beyond you
                 target = world.name(x.get("to")) if x["do"] == "dream" else world.place_name(x.get("at"))
-                out.append(t("god.ullr_act", when=when, what=x["do"], target=target, text=x.get("text", "")))
+                sleeper = next((g for g in rules_for(world).gods if g.get("kind") == "sleeper"), {})
+                title = _title(world, sleeper.get("id", "ullr"))
+                out.append(t("god.ullr_act", when=when, GOD=title.upper(), god=title, what=x["do"], target=target, text=x.get("text", "")))
         elif e["ev"] == "overgod" and d >= day - 1:
             words = e.get("args", {}).get("text")
             out.append(t("god.above", when=when, what=e.get("what", "")) + (f' "{words}"' if words else ""))

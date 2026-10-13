@@ -1,0 +1,3 @@
+- A young woman arrived on the supply boat, saying she was Granny Lamp's granddaughter. I helped carry her luggage.
+- Out at sea last night, I nearly hit Ghost Reef again. If only the lighthouse were lit.
+- Auntie sat at the bow until midnight again.

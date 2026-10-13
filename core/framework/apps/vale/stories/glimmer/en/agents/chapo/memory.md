@@ -1,0 +1,3 @@
+- Chaoyin's granddaughter has arrived. Her eyes are just like Chaoyin's.
+- The lanterns in the attic have gathered another layer of dust. I've never thrown away the two with Lan's and Tong's names on them.
+- The wind chimes have been ringing so often this morning.
