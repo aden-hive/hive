@@ -1108,8 +1108,10 @@ async def handle_update_rate_limits(request: web.Request) -> web.Response:
             val = 1
         if ceiling is not None and val > ceiling:
             warnings.append(
-                f"{platform}.{action}.{window}={val} exceeds recommended max of {ceiling}. High values increase the risk of account bans."
+                f"{platform}.{action}.{window}={val} exceeds recommended max of {ceiling}; "
+                f"clamped to {ceiling}. High values increase the risk of account bans."
             )
+            val = ceiling
         cleaned[key] = val
 
     config = get_hive_config()

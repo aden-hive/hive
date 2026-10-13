@@ -223,6 +223,36 @@ def test_env_var_weekly_clamped(limiter):
     assert result == 500  # weekly_max ceiling
 
 
+# ── configuration.json overrides ─────────────────────────────────────
+
+
+def test_config_override_raises_limit(limiter):
+    with mock.patch(
+        "framework.rate_limiter._get_config_overrides",
+        return_value={"linkedin.invite.daily": 20},
+    ):
+        result = _resolve_limit("linkedin", "invite", "daily")
+    assert result == 20
+
+
+def test_config_override_clamped_to_ceiling(limiter):
+    with mock.patch(
+        "framework.rate_limiter._get_config_overrides",
+        return_value={"linkedin.invite.daily": 999},
+    ):
+        result = _resolve_limit("linkedin", "invite", "daily")
+    assert result == 125  # daily_max ceiling
+
+
+def test_config_override_weekly_clamped(limiter):
+    with mock.patch(
+        "framework.rate_limiter._get_config_overrides",
+        return_value={"linkedin.invite.weekly": 999},
+    ):
+        result = _resolve_limit("linkedin", "invite", "weekly")
+    assert result == 500  # weekly_max ceiling
+
+
 # ── get_daily_counts / get_weekly_counts ─────────────────────────────
 
 

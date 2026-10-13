@@ -158,7 +158,7 @@ def _resolve_limit(platform: str, action: str, window: str) -> int | None:
     cfg_key = f"{platform.lower()}.{action.lower()}.{window}"
     if cfg_key in cfg:
         try:
-            return max(1, int(cfg[cfg_key]))
+            return _clamp(max(1, int(cfg[cfg_key])), ceiling)
         except (ValueError, TypeError):
             pass
 
