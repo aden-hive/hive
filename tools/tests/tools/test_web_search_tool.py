@@ -1,5 +1,6 @@
 """Tests for web_search tool with multi-provider support (FastMCP)."""
 
+import httpx
 import pytest
 from fastmcp import FastMCP
 
@@ -131,6 +132,51 @@ class TestAutoProvider:
 
 class TestParameters:
     """Tests for tool parameters."""
+
+    @pytest.mark.parametrize(
+        ("num_results", "message"),
+        [
+            (-1, "num_results must be at least 1"),
+            (0, "num_results must be at least 1"),
+            (21, "num_results cannot exceed 20"),
+        ],
+    )
+    @pytest.mark.parametrize("provider", ["brave", "google", "auto"])
+    def test_invalid_num_results_skips_request(
+        self, web_search_fn, monkeypatch, num_results, message, provider
+    ):
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse")
+
+        def unexpected_request(*args, **kwargs):
+            pytest.fail("Invalid result counts must not reach a search provider")
+
+        monkeypatch.setattr(httpx, "get", unexpected_request)
+        assert web_search_fn("test", num_results=num_results, provider=provider) == {
+            "error": message
+        }
+
+    @pytest.mark.parametrize("num_results", [1, 20])
+    @pytest.mark.parametrize("provider", ["brave", "google"])
+    def test_num_results_boundaries(self, web_search_fn, monkeypatch, num_results, provider):
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse")
+        requests = []
+
+        def search_response(url, **kwargs):
+            requests.append((url, kwargs["params"]))
+            return httpx.Response(200, json={"items": [], "web": {"results": []}})
+
+        monkeypatch.setattr(httpx, "get", search_response)
+        result = web_search_fn("test", num_results=num_results, provider=provider)
+        assert result == {"query": "test", "results": [], "total": 0, "provider": provider}
+        assert len(requests) == 1
+        if provider == "brave":
+            assert requests[0][1]["count"] == num_results
+        else:
+            assert requests[0][1]["num"] == min(num_results, 10)
 
     def test_custom_language_and_country(self, web_search_fn, monkeypatch):
         """Custom language and country parameters are accepted."""
