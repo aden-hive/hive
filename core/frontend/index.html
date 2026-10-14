@@ -11,3 +11,95 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aden Hive | Experimental Comp Pipeline</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+    <header>
+        <div class="logo-section">
+            <h1 style="font-size: 1.5rem; letter-spacing: -0.5px;">ADEN <span style="color: var(--primary-accent);">HIVE</span></h1>
+            <p style="font-size: 0.75rem; color: var(--text-muted);">AI Agent Harness v3.0 | Ephemeral Compute Active</p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div style="text-align: right;">
+                <p style="font-size: 0.75rem; font-weight: 600;">2FA STATUS</p>
+                <p style="font-size: 0.65rem; color: var(--gpt-green);">SECURE HANDSHAKE ACTIVE</p>
+            </div>
+            <div class="auth-indicator"></div>
+        </div>
+    </header>
+
+    <main class="app-container">
+        
+        <section class="kanban-column">
+            <h2 style="margin-bottom: 1.5rem; font-size: 0.9rem; text-transform: uppercase; color: var(--text-muted);">Sensory Ingestion</h2>
+            
+            <div class="card">
+                <h3>CVE Security Release</h3>
+                <p>NIST-2026-v4 detected. Automated security test cases generated from CVE Stack.</p>
+                <span class="badge badge-testing">Processing</span>
+            </div>
+
+            <div class="card" style="margin-top: 1rem;">
+                <h3>Web of Science RAG</h3>
+                <p>Retrieved 4 papers on "Subsurface Imaging 3D" for GeotechMaEur logic validation.</p>
+                <span class="badge badge-passed">Synced</span>
+            </div>
+        </section>
+
+        <section class="kanban-column">
+            <h2 style="margin-bottom: 1.5rem; font-size: 0.9rem; text-transform: uppercase; color: var(--text-muted);">Test Execution</h2>
+            
+            <div class="card" style="border-left: 3px solid var(--primary-accent);">
+                <h3>PR #128: Seismic Logic</h3>
+                <p>Running `pytest` on 1DMASW integration. Node: lambda-us-east-1.</p>
+                <div style="height: 4px; background: #1e293b; margin-top: 1rem; border-radius: 2px;">
+                    <div style="width: 65%; height: 100%; background: var(--primary-accent); border-radius: 2px;"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 1rem;">
+                <h3>Android Studio Build</h3>
+                <p>Compiling 2FA App Interface for mobile approval gate.</p>
+                <span class="badge badge-testing">Compiling</span>
+            </div>
+        </section>
+
+        <section class="kanban-column">
+            <h2 style="margin-bottom: 1.5rem; font-size: 0.9rem; text-transform: uppercase; color: var(--text-muted);">Evolution Gate</h2>
+            
+            <div class="card">
+                <h3>Resolved: Issue #442</h3>
+                <p>Agent refactored graph logic using community standards. Verified via Double Authenticator.</p>
+                <span class="badge badge-passed">Appealed</span>
+            </div>
+
+            <div class="card" style="margin-top: 1rem; opacity: 0.6;">
+                <h3>Knowledge Indexing</h3>
+                <p>Pushing successful seismic imaging refactor to Agent Knowledge Base.</p>
+                <span class="badge" style="background: rgba(148, 163, 184, 0.2);">Pending</span>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+        
+        // Simple UI Interaction for demonstration
+        document.querySelectorAll('.card').forEach(card => {
+            card.addEventListener('click', () => {
+                console.log('Gemini Calculus: Precision detail triggered for node...');
+            });
+        });
+    </script>
+</body>
+</html>
