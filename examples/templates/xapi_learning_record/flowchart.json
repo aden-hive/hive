@@ -1,0 +1,151 @@
+{
+  "original_draft": {
+    "agent_name": "xapi_learning_record",
+    "goal": "Capture a learning event, build a valid xAPI 1.0.3 statement, validate structure, dispatch to an LRS via HTTP Basic auth, and return a confirmation with statement_id and timestamp.",
+    "description": "Deterministic 5-node pipeline. No LLM required for statement building, validation, or dispatch.",
+    "success_criteria": [
+      "xAPI 1.0.3 statement passes all structural validation checks",
+      "LRS returns HTTP 200 or 204 accepting the statement",
+      "statement_id and timestamp returned in confirmation"
+    ],
+    "constraints": [
+      "All statements must conform to xAPI 1.0.3 specification",
+      "Never invent or infer actor, verb, or object fields",
+      "4xx LRS errors reported immediately without retry"
+    ],
+    "nodes": [
+      {
+        "id": "event-capture",
+        "name": "Event Capture",
+        "description": "Receive and normalize learning event input from the user.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [],
+        "output_keys": ["learning_event"],
+        "success_criteria": "Learning event collected with required actor, verb, object fields.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "statement-builder",
+        "name": "Statement Builder",
+        "description": "Build valid xAPI 1.0.3 JSON statement. Deterministic, no LLM.",
+        "node_type": "event_loop",
+        "tools": ["build_xapi_statement"],
+        "input_keys": ["learning_event"],
+        "output_keys": ["xapi_statement"],
+        "success_criteria": "xAPI statement built with UUID id and ISO 8601 timestamp.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "validator",
+        "name": "Validator",
+        "description": "Validate statement: required fields, IRI format, mbox format, score range.",
+        "node_type": "event_loop",
+        "tools": ["validate_statement"],
+        "input_keys": ["xapi_statement"],
+        "output_keys": ["validated_statement", "validation_result"],
+        "success_criteria": "Statement validated. Errors reported if invalid.",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "lrs-dispatch",
+        "name": "LRS Dispatch",
+        "description": "POST statement to LRS via HTTP Basic auth. Retry once on 5xx.",
+        "node_type": "event_loop",
+        "tools": ["post_to_lrs"],
+        "input_keys": ["validated_statement"],
+        "output_keys": ["dispatch_result"],
+        "success_criteria": "Statement dispatched. HTTP 200/204 = success.",
+        "sub_agents": [],
+        "flowchart_type": "io",
+        "flowchart_shape": "parallelogram",
+        "flowchart_color": "#d06818"
+      },
+      {
+        "id": "confirmation",
+        "name": "Confirmation",
+        "description": "Return statement_id, timestamp, success/error to user.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": ["dispatch_result", "validation_result", "xapi_statement"],
+        "output_keys": ["confirmation"],
+        "success_criteria": "Confirmation presented with statement_id and status.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "event-capture",
+        "target": "statement-builder",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "statement-builder",
+        "target": "validator",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "validator",
+        "target": "lrs-dispatch",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "lrs-dispatch",
+        "target": "confirmation",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "confirmation",
+        "target": "event-capture",
+        "condition": "on_success",
+        "description": "loop for next event",
+        "label": "next event"
+      }
+    ],
+    "entry_node": "event-capture",
+    "terminal_nodes": [],
+    "flowchart_legend": {
+      "start": {"shape": "stadium", "color": "#8aad3f"},
+      "terminal": {"shape": "stadium", "color": "#b5453a"},
+      "process": {"shape": "rectangle", "color": "#b5a575"},
+      "decision": {"shape": "diamond", "color": "#d89d26"},
+      "io": {"shape": "parallelogram", "color": "#d06818"},
+      "document": {"shape": "document", "color": "#c4b830"},
+      "database": {"shape": "cylinder", "color": "#508878"},
+      "subprocess": {"shape": "subroutine", "color": "#887a48"},
+      "browser": {"shape": "hexagon", "color": "#cc8850"}
+    }
+  },
+  "flowchart_map": {
+    "event-capture": ["event-capture"],
+    "statement-builder": ["statement-builder"],
+    "validator": ["validator"],
+    "lrs-dispatch": ["lrs-dispatch"],
+    "confirmation": ["confirmation"]
+  }
+}
