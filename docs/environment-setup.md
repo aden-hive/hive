@@ -101,21 +101,27 @@ This sets up the MCP tools and workflows for building agents.
 
 MCP tools are also available in Cursor. To enable:
 
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Open Agent chat and verify MCP tools are available
+1. Open Cursor Settings (`Cmd+,` / `Ctrl+,`) and navigate to **Customize > MCPs** (or open the Command Palette and run `Open MCP Settings`).
+2. Add the `hive_tools` server configuration:
+   ```json
+   {
+     "mcpServers": {
+       "hive_tools": {
+         "type": "stdio",
+         "command": "uv",
+         "args": ["run", "python", "mcp_server.py", "--stdio"],
+         "cwd": "tools"
+       }
+     }
+   }
+   ```
+3. Open Agent chat and verify MCP tools are available.
 
 ### 2. Build an Agent
 
 **Claude Code:**
 ```
 Use the files-tools initialize_and_build_agent tool to scaffold a new agent
-```
-
-**Codex CLI:**
-```
-Start Codex in the repo root and use the configured MCP tools
 ```
 
 Follow the prompts to:
