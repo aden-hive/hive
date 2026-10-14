@@ -98,6 +98,26 @@ Notes:
 - `api_base` should be `https://openrouter.ai/api/v1`
 - If you paste a model that already starts with `openrouter/`, Hive tolerates and normalizes it
 
+Cheaper Inference:
+
+```json
+{
+  "llm": {
+    "provider": "cheaperinference",
+    "model": "gpt-5.4-mini",
+    "max_tokens": 8192,
+    "api_key_env_var": "CHEAPER_INFERENCE_API_KEY",
+    "api_base": "https://api.cheaperinference.com/v1"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `cheaperinference`
+- Use the model ID from the Cheaper Inference model list in `model`, for example `gpt-5.4-mini`
+- `api_base` is optional; Hive uses `https://api.cheaperinference.com/v1` when it is not set
+
 Hive LLM:
 
 ```json

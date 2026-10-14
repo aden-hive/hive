@@ -28,3 +28,8 @@ def test_minimax_model_name_prefix_maps_to_minimax_api_key():
 def test_openrouter_provider_prefix_maps_to_openrouter_api_key():
     loader = _loader_for_unit_test()
     assert loader._get_api_key_env_var("openrouter/x-ai/grok-4.20-beta") == "OPENROUTER_API_KEY"
+
+
+def test_cheaperinference_provider_prefix_maps_to_cheaper_inference_api_key():
+    loader = _loader_for_unit_test()
+    assert loader._get_api_key_env_var("cheaperinference/gpt-5.4-mini") == "CHEAPER_INFERENCE_API_KEY"

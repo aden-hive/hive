@@ -250,6 +250,7 @@ _PROVIDER_CRED_MAP: dict[str, str] = {
     "deepseek": "deepseek",
     "kimi": "kimi",
     "hive": "hive",
+    "cheaperinference": "cheaperinference",
 }
 
 

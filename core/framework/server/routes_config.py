@@ -55,6 +55,7 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "deepseek": "DEEPSEEK_API_KEY",
     "kimi": "KIMI_API_KEY",
     "hive": "HIVE_API_KEY",
+    "cheaperinference": "CHEAPER_INFERENCE_API_KEY",
 }
 
 _SUBSCRIPTION_DEFINITIONS: list[dict[str, str]] = [

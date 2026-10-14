@@ -342,6 +342,10 @@ def rewrite_proxy_model(model: str, api_key: str | None, api_base: str | None) -
         # only sends x-api-key without this nudge.
         if api_key:
             extra_headers["Authorization"] = f"Bearer {api_key}"
+    elif model.lower().startswith("cheaperinference/"):
+        # Cheaper Inference is OpenAI-compatible; litellm has no native prefix.
+        model = "openai/" + model[len("cheaperinference/") :]
+        api_base = api_base or CHEAPER_INFERENCE_API_BASE
     return model, api_base, extra_headers
 
 
@@ -358,6 +362,7 @@ RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 EMPTY_RESPONSE_MAX_RETRIES = 3
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+CHEAPER_INFERENCE_API_BASE = "https://api.cheaperinference.com/v1"
 
 # Providers that accept cache_control on message content blocks.
 # Anthropic: native ephemeral caching. MiniMax & Z-AI/GLM: pass-through to their APIs.

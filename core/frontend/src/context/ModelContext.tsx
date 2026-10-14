@@ -29,6 +29,7 @@ export const LLM_PROVIDERS: ProviderInfo[] = [
   { id: "mistral", name: "Mistral", description: "Mistral Large, Medium, Small, Codestral", envVar: "MISTRAL_API_KEY", initial: "M" },
   { id: "together", name: "Together AI", description: "DeepSeek, Qwen3, GPT-OSS, Llama", envVar: "TOGETHER_API_KEY", initial: "T" },
   { id: "deepseek", name: "DeepSeek", description: "DeepSeek Chat and Reasoner", envVar: "DEEPSEEK_API_KEY", initial: "D" },
+  { id: "cheaperinference", name: "Cheaper Inference", description: "OpenAI-compatible gateway, GPT, Claude, Gemini, DeepSeek", envVar: "CHEAPER_INFERENCE_API_KEY", initial: "C" },
 ];
 
 interface ModelContextValue {

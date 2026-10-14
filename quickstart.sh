@@ -525,6 +525,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="Mistral"
         ["TOGETHER_API_KEY"]="Together AI"
         ["DEEPSEEK_API_KEY"]="DeepSeek"
+        ["CHEAPER_INFERENCE_API_KEY"]="Cheaper Inference"
     )
 
     declare -A PROVIDER_IDS=(
@@ -539,6 +540,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="mistral"
         ["TOGETHER_API_KEY"]="together"
         ["DEEPSEEK_API_KEY"]="deepseek"
+        ["CHEAPER_INFERENCE_API_KEY"]="cheaperinference"
     )
 
     # Helper functions for Bash 4+
@@ -551,9 +553,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY CHEAPER_INFERENCE_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek" "Cheaper Inference")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek cheaperinference)
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -1402,8 +1404,8 @@ echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 # 8-N) API key providers — show (credential detected) if key already set.
 # Order is reflected directly in the menu numbering; the case dispatcher
 # below resolves choice numbers via $((8 + index_in_arrays)).
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family")
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY CHEAPER_INFERENCE_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "DeepSeek - V4 family" "Cheaper Inference - OpenAI-compatible gateway")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
@@ -1634,6 +1636,13 @@ case $choice in
         SELECTED_API_BASE="https://api.deepseek.com"
         PROVIDER_NAME="DeepSeek"
         SIGNUP_URL="https://platform.deepseek.com/api_keys"
+        ;;
+    15)
+        SELECTED_ENV_VAR="CHEAPER_INFERENCE_API_KEY"
+        SELECTED_PROVIDER_ID="cheaperinference"
+        SELECTED_API_BASE="https://api.cheaperinference.com/v1"
+        PROVIDER_NAME="Cheaper Inference"
+        SIGNUP_URL="https://cheaperinference.com/signup"
         ;;
     "$OLLAMA_CHOICE")
         # Local (Ollama) — no API key; pick model from ollama list
@@ -1940,6 +1949,7 @@ PROVIDER_KEY_ENV = {
     "mistral":    "MISTRAL_API_KEY",
     "together":   "TOGETHER_API_KEY",
     "deepseek":   "DEEPSEEK_API_KEY",
+    "cheaperinference": "CHEAPER_INFERENCE_API_KEY",
     "kimi":       "KIMI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
 }

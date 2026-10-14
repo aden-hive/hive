@@ -1630,6 +1630,8 @@ class AgentLoader:
             return "KIMI_API_KEY"
         elif model_lower.startswith("hive/"):
             return "HIVE_API_KEY"
+        elif model_lower.startswith("cheaperinference/"):
+            return "CHEAPER_INFERENCE_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1670,6 +1672,8 @@ class AgentLoader:
             cred_id = "kimi"
         elif model_lower.startswith("hive/"):
             cred_id = "hive"
+        elif model_lower.startswith("cheaperinference/"):
+            cred_id = "cheaperinference"
 
         if cred_id is None:
             return None

@@ -100,6 +100,22 @@ class TestLiteLLMProviderInit:
         )
         assert provider.api_base == "https://proxy.example/v1"
 
+    def test_init_cheaperinference_defaults_api_base(self):
+        """Cheaper Inference should route through litellm's OpenAI handler."""
+        provider = LiteLLMProvider(model="cheaperinference/gpt-5.4-mini", api_key="my-key")
+        assert provider.model == "openai/gpt-5.4-mini"
+        assert provider.api_base == "https://api.cheaperinference.com/v1"
+
+    def test_init_cheaperinference_keeps_custom_api_base(self):
+        """Explicit api_base should win over Cheaper Inference defaults."""
+        provider = LiteLLMProvider(
+            model="cheaperinference/gpt-5.4-mini",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.model == "openai/gpt-5.4-mini"
+        assert provider.api_base == "https://proxy.example/v1"
+
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
         with patch.dict(os.environ, {}, clear=True):

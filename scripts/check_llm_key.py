@@ -312,6 +312,9 @@ PROVIDERS = {
     "cerebras": lambda key, **kw: check_openai_compatible(key, "https://api.cerebras.ai/v1/models", "Cerebras"),
     "openrouter": lambda key, **kw: check_openrouter(key, **kw),
     "deepseek": lambda key, **_: check_openai_compatible(key, "https://api.deepseek.com/v1/models", "DeepSeek"),
+    "cheaperinference": lambda key, **_: check_openai_compatible(
+        key, "https://api.cheaperinference.com/v1/models", "Cheaper Inference"
+    ),
     "together": lambda key, **_: check_openai_compatible(key, "https://api.together.xyz/v1/models", "Together AI"),
     "mistral": lambda key, **_: check_openai_compatible(key, "https://api.mistral.ai/v1/models", "Mistral"),
     "xai": lambda key, **_: check_openai_compatible(key, "https://api.x.ai/v1/models", "xAI"),

@@ -859,6 +859,7 @@ $ProviderMap = [ordered]@{
     MISTRAL_API_KEY   = @{ Name = "Mistral";             Id = "mistral" }
     TOGETHER_API_KEY  = @{ Name = "Together AI";         Id = "together" }
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
+    CHEAPER_INFERENCE_API_KEY = @{ Name = "Cheaper Inference"; Id = "cheaperinference" }
 }
 
 $ModelCatalogPath = Join-Path $ScriptDir "core\framework\llm\model_catalog.json"

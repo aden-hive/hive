@@ -566,6 +566,27 @@
           "supports_vision": true
         }
       ]
+    },
+    "cheaperinference": {
+      "default_model": "gpt-5.4-mini",
+      "models": [
+        {
+          "id": "gpt-5.4-mini",
+          "label": "GPT-5.4 Mini - Fast default",
+          "recommended": true,
+          "max_tokens": 128000,
+          "max_context_tokens": 400000,
+          "supports_vision": true
+        },
+        {
+          "id": "gpt-5.4",
+          "label": "GPT-5.4 - Best overall",
+          "recommended": false,
+          "max_tokens": 128000,
+          "max_context_tokens": 960000,
+          "supports_vision": true
+        }
+      ]
     }
   },
   "presets": {
