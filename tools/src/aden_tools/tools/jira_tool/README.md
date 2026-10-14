@@ -28,6 +28,11 @@ export JIRA_API_TOKEN="your_api_token"
 
 > Create an API token at https://id.atlassian.com/manage/api-tokens
 
+Alternatively, configure credentials in the Aden credential store:
+- `jira_domain`
+- `jira_email`
+- `jira_token`
+
 ## Usage Examples
 
 ### Search issues with JQL
