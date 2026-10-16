@@ -492,7 +492,7 @@ def test_deepseek_complete(mock_completion):
     assert mock_completion.call_args.kwargs["model"] == "deepseek/deepseek-chat"
 ```
 
-Tests that call a real API go in `core/tests/live/` and are marked `@pytest.mark.live`. Use the `live_llm_config` fixture for the model and key: it reads `~/.hive/configuration.json` (`HIVE_LIVE_MODEL` overrides the model) and skips the test when no provider is configured. Normal test runs leave live tests out; run them with `cd core && uv run pytest tests/live -m live`.
+Tests that call a real API go in `core/tests/live/` and are marked `@pytest.mark.live`. Use the `live_llm_config` fixture for the model and key. The test suite sandboxes `~/.hive`, so the fixture doesn't read your configuration: it takes the model from `HIVE_LIVE_MODEL` (an Anthropic model by default) and the key from `ANTHROPIC_API_KEY`, or from `HIVE_API_KEY` for `hive/` models. Without the matching key the test is skipped, so models from other providers always skip. Normal test runs leave live tests out; run them with `cd core && uv run pytest tests/live -m live`.
 
 ### Priority Areas for LLM Contributions
 
