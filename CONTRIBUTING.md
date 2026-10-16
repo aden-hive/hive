@@ -419,10 +419,18 @@ Hive supports **100+ LLM providers** via LiteLLM, giving users maximum flexibili
 
 ### Default Configuration
 
-```python
-# core/framework/llm/provider.py
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+Hive reads the provider and model from the `llm` section of `~/.hive/configuration.json`. `./quickstart.sh` writes it during setup, and the dashboard's model settings update it (see [docs/configuration.md](docs/configuration.md)):
+
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20251001"
+  }
+}
 ```
+
+The default model for each provider, and the models listed for it, are in `core/framework/llm/model_catalog.json`.
 
 ### Model Selection Guidelines
 
@@ -444,33 +452,43 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 ### How to Add a New LLM Provider
 
 1. **Check if LiteLLM supports it** (most providers already work out of the box)
-2. **Add credential handling** in `core/framework/credentials/`
-3. **Add provider-specific configuration** in `core/framework/llm/`
-4. **Write tests** in `core/tests/test_llm_provider.py`
-5. **Update documentation** in `README.md`, `docs/configuration.md`, and any setup guides that mention provider configuration
+2. **Add it to the model catalog** in `core/framework/llm/model_catalog.json`: a provider entry with a `default_model` and its models
+3. **Map its API key**: the env var in `PROVIDER_ENV_VARS` (`core/framework/server/routes_config.py`), the credential ID in `_PROVIDER_CRED_MAP` (`core/framework/config.py`), and the model prefix in `_get_api_key_env_var()` (`core/framework/loader/agent_loader.py`)
+4. **Add provider-specific handling** in `core/framework/llm/litellm.py`, only if it needs a custom API base, a model-prefix rewrite, or other special cases
+5. **Add it to setup and the dashboard**: the provider lists in `quickstart.sh` and `quickstart.ps1`, the key check in `scripts/check_llm_key.py`, and `LLM_PROVIDERS` in `core/frontend/src/context/ModelContext.tsx`
+6. **Write tests** in `core/tests/test_litellm_provider.py`, and in `core/tests/test_runner_api_key_env_var.py` for the API key mapping
+7. **Update documentation** in `README.md`, `docs/configuration.md`, and any setup guides that mention provider configuration
 
 **Example: Testing LLM Integration**
 
+Unit tests mock LiteLLM, so they don't need an API key:
+
 ```python
-# core/tests/test_llm_provider.py
-import pytest
-from framework.llm.anthropic import AnthropicProvider
+# core/tests/test_litellm_provider.py
+from unittest.mock import MagicMock, patch
 
-@pytest.mark.asyncio
-async def test_anthropic_provider_basic():
-    provider = AnthropicProvider(api_key="test_key", model="claude-3-5-sonnet-20241022")
-    response = await provider.generate([{"role": "user", "content": "Hello"}])
-    assert response.content
-    assert response.model == "claude-3-5-sonnet-20241022"
+from framework.llm.litellm import LiteLLMProvider
 
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_anthropic_provider_real(anthropic_api_key):
-    """Live test with real API (requires credentials)"""
-    provider = AnthropicProvider(api_key=anthropic_api_key)
-    response = await provider.generate([{"role": "user", "content": "What is 2+2?"}])
-    assert "4" in response.content
+
+@patch("litellm.completion")
+def test_deepseek_complete(mock_completion):
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "Hello!"
+    mock_response.choices[0].finish_reason = "stop"
+    mock_response.model = "deepseek/deepseek-chat"
+    mock_response.usage.prompt_tokens = 10
+    mock_response.usage.completion_tokens = 5
+    mock_completion.return_value = mock_response
+
+    provider = LiteLLMProvider(model="deepseek/deepseek-chat", api_key="test-key")
+    result = provider.complete(messages=[{"role": "user", "content": "Hello"}])
+
+    assert result.content == "Hello!"
+    assert mock_completion.call_args.kwargs["model"] == "deepseek/deepseek-chat"
 ```
+
+Tests that call a real API go in `core/tests/live/` and are marked `@pytest.mark.live`. Use the `live_llm_config` fixture for the model and key: it reads `~/.hive/configuration.json` (`HIVE_LIVE_MODEL` overrides the model) and skips the test when no provider is configured. Normal test runs leave live tests out; run them with `cd core && uv run pytest tests/live -m live`.
 
 ### Priority Areas for LLM Contributions
 
