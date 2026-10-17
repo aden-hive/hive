@@ -456,8 +456,9 @@ The default model for each provider, and the models listed for it, are in `core/
 3. **Map its API key**: the env var in `PROVIDER_ENV_VARS` (`core/framework/server/routes_config.py`), the credential ID in `_PROVIDER_CRED_MAP` (`core/framework/config.py`), and the model prefix in `_get_api_key_env_var()` (`core/framework/loader/agent_loader.py`)
 4. **Add provider-specific handling** in `core/framework/llm/litellm.py`, only if it needs a custom API base, a model-prefix rewrite, or other special cases
 5. **Add it to setup and the dashboard**. Each setup script keeps more than one provider list, so update all of these:
-   - `quickstart.sh`: `PROVIDER_NAMES` and `PROVIDER_IDS` plus the Bash 3.2 arrays after them, the menu arrays `PROVIDER_MENU_ENVS` and `PROVIDER_MENU_NAMES`, and a `case` branch for its menu number
-   - `quickstart.ps1`: `$ProviderMap`, the `$ProviderMenu*` arrays, and the range of API-key choices in the menu `switch`
+   - `quickstart.sh`: `PROVIDER_NAMES` and `PROVIDER_IDS` plus the Bash 3.2 arrays after them, the menu arrays `PROVIDER_MENU_ENVS` and `PROVIDER_MENU_NAMES`, a `case` branch for its menu number, and a `DEFAULT_CHOICE` entry
+   - `quickstart.ps1`: `$ProviderMap`, the `$ProviderMenu*` arrays, the range of API-key choices in the menu `switch`, and a `$DefaultChoice` entry
+   - Ollama's menu number comes after the API-key providers, so it changes too. It's hard-coded in `DEFAULT_CHOICE` in `quickstart.sh`, and in the menu, the `switch` and `$DefaultChoice` in `quickstart.ps1`
    - `scripts/check_llm_key.py`: `PROVIDERS` (a provider missing here skips the key check and reports success)
    - `core/frontend/src/context/ModelContext.tsx`: `LLM_PROVIDERS`
 6. **Write tests** in `core/tests/test_litellm_provider.py`, and in `core/tests/test_runner_api_key_env_var.py` for the API key mapping
