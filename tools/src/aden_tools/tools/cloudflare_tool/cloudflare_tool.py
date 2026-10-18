@@ -10,6 +10,7 @@ Requires CLOUDFLARE_API_TOKEN environment variable.
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -147,6 +148,69 @@ def _make_request(
             return data
 
         return data.get("result", {})
+
+    except httpx.TimeoutException:
+        return {"error": "Request timed out"}
+    except httpx.RequestError as e:
+        return {"error": f"Request failed: {str(e)}"}
+    except Exception as e:
+        return {"error": f"Unexpected error: {str(e)}"}
+
+
+DNS_ANALYTICS_QUERY = """
+query DnsAnalytics($zoneTag: string!, $since: Date!, $until: Date!, $limit: uint64!) {
+  viewer {
+    zones(filter: { zoneTag: $zoneTag }) {
+      dnsAnalyticsAdaptiveGroups(
+        limit: $limit
+        filter: { date_geq: $since, date_leq: $until }
+        orderBy: [count_DESC]
+      ) {
+        count
+        dimensions {
+          queryName
+          queryType
+          responseCode
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _graphql_request(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
+    """POST a query to the Cloudflare GraphQL Analytics API.
+
+    GraphQL responses carry ``data`` and ``errors`` instead of the REST ``success``
+    envelope, so they can't go through ``_make_request``.
+    """
+    try:
+        response = httpx.request(
+            "POST",
+            f"{CLOUDFLARE_API_BASE_URL}/graphql",
+            headers=_headers(token),
+            json={"query": query, "variables": variables},
+            timeout=HEALTH_CHECK_TIMEOUT,
+        )
+        if response.status_code == 401:
+            return {"error": "Unauthorized - invalid or missing CLOUDFLARE_API_TOKEN", "status_code": 401}
+        if response.status_code == 403:
+            return {"error": "Forbidden - token lacks Analytics read permission", "status_code": 403}
+        if response.status_code == 429:
+            return {
+                "error": "Too many requests - rate limited",
+                "status_code": 429,
+                "retry_after": response.headers.get("Retry-After"),
+            }
+        if response.status_code >= 400:
+            return {"error": f"HTTP {response.status_code}: {response.text[:500]}", "status_code": response.status_code}
+
+        body = response.json()
+        errors = body.get("errors") or []
+        if errors:
+            return {"error": errors[0].get("message", "GraphQL error")}
+        return body.get("data") or {}
 
     except httpx.TimeoutException:
         return {"error": "Request timed out"}
@@ -594,15 +658,25 @@ def register_tools(mcp, credentials=None):
         return {"dns_settings": result}
 
     @mcp.tool("cloudflare_list_dns_analytics_report")
-    def cloudflare_list_dns_analytics_report(zone_id: str, limit: int = 10) -> dict[str, Any]:
-        """Get DNS query analytics and statistics (which types of queries are being made).
+    def cloudflare_list_dns_analytics_report(
+        zone_id: str,
+        limit: int = 10,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, Any]:
+        """Get DNS query analytics (which names, types and response codes are being queried).
+
+        Uses the GraphQL Analytics API. Cloudflare removes the legacy REST endpoint
+        ``/zones/{zone_id}/dns_analytics/report`` on December 1, 2026.
 
         Args:
             zone_id: Zone ID
-            limit: Limit for results
+            limit: Maximum number of grouped rows to return (1-10000)
+            since: Start date, YYYY-MM-DD (default: 7 days ago)
+            until: End date, YYYY-MM-DD (default: today)
 
         Returns:
-            DNS analytics metrics
+            DNS analytics rows: query count per query name, type and response code
         """
         token = _get_token(credentials)
         if isinstance(token, dict):
@@ -612,12 +686,27 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        # Note: This endpoint often requires a specific analytics plan
-        result = _make_request("GET", f"/zones/{zone_id}/dns_analytics/report", token)
+        today = date.today()
+        variables = {
+            "zoneTag": zone_id,
+            "since": since or (today - timedelta(days=7)).isoformat(),
+            "until": until or today.isoformat(),
+            "limit": max(1, min(int(limit), 10000)),
+        }
+        result = _graphql_request(DNS_ANALYTICS_QUERY, variables, token)
         if "error" in result:
             return result
 
-        return {"dns_analytics": result}
+        zones = (result.get("viewer") or {}).get("zones") or []
+        groups = zones[0].get("dnsAnalyticsAdaptiveGroups", []) if zones else []
+        return {
+            "dns_analytics": {
+                "since": variables["since"],
+                "until": variables["until"],
+                "total_queries": sum(g.get("count", 0) for g in groups),
+                "rows": groups,
+            }
+        }
 
     @mcp.tool("cloudflare_check_domain_dns_health")
     def cloudflare_check_domain_dns_health(domain: str) -> dict[str, Any]:

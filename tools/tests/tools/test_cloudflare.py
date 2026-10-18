@@ -291,20 +291,57 @@ class TestCloudflareTools:
 
     def test_cloudflare_list_dns_analytics_report(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
-        with (
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
-                return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
-                return_value=None,
-            ),
+        mock_request.return_value = _mock_response(
+            200,
+            {
+                "data": {
+                    "viewer": {
+                        "zones": [
+                            {
+                                "dnsAnalyticsAdaptiveGroups": [
+                                    {"count": 7, "dimensions": {"queryName": "a.example.com", "queryType": "A", "responseCode": "NOERROR"}},
+                                    {"count": 3, "dimensions": {"queryName": "b.example.com", "queryType": "AAAA", "responseCode": "NXDOMAIN"}},
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "errors": None,
+            },
+        )
+        with patch(
+            "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
+            return_value=None,
+        ):
+            fn = tools_registry["cloudflare_list_dns_analytics_report"].fn
+            result = fn(zone_id="z_test", limit=5, since="2026-10-01", until="2026-10-07")
+
+        args, kwargs = mock_request.call_args
+        assert args[0] == "POST"
+        assert args[1].endswith("/graphql")
+        assert "dns_analytics/report" not in args[1]
+        assert "dnsAnalyticsAdaptiveGroups" in kwargs["json"]["query"]
+        assert kwargs["json"]["variables"] == {
+            "zoneTag": "z_test",
+            "since": "2026-10-01",
+            "until": "2026-10-07",
+            "limit": 5,
+        }
+        assert result["dns_analytics"]["total_queries"] == 10
+        assert len(result["dns_analytics"]["rows"]) == 2
+
+    def test_cloudflare_list_dns_analytics_report_graphql_error(self, tools_registry, monkeypatch, mock_request):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        mock_request.return_value = _mock_response(
+            200, {"data": None, "errors": [{"message": "zone not authorized"}]}
+        )
+        with patch(
+            "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
+            return_value=None,
         ):
             fn = tools_registry["cloudflare_list_dns_analytics_report"].fn
             result = fn(zone_id="z_test")
-            assert isinstance(result, dict)
-            assert "error" not in result
+        assert result == {"error": "zone not authorized"}
 
     def test_cloudflare_check_domain_dns_health(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
