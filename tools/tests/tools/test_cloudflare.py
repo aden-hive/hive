@@ -298,6 +298,7 @@ class TestCloudflareTools:
                     "viewer": {
                         "zones": [
                             {
+                                "totals": [{"count": 42}],
                                 "dnsAnalyticsAdaptiveGroups": [
                                     {"count": 7, "dimensions": {"queryName": "a.example.com", "queryType": "A", "responseCode": "NOERROR"}},
                                     {"count": 3, "dimensions": {"queryName": "b.example.com", "queryType": "AAAA", "responseCode": "NXDOMAIN"}},
@@ -327,8 +328,51 @@ class TestCloudflareTools:
             "until": "2026-10-07",
             "limit": 5,
         }
-        assert result["dns_analytics"]["total_queries"] == 10
+        # total_queries comes from the ungrouped `totals` row, not the sum of the returned rows.
+        assert result["dns_analytics"]["total_queries"] == 42
         assert len(result["dns_analytics"]["rows"]) == 2
+
+    def test_cloudflare_list_dns_analytics_report_unknown_zone(self, tools_registry, monkeypatch, mock_request):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        mock_request.return_value = _mock_response(200, {"data": {"viewer": {"zones": []}}, "errors": None})
+        with patch(
+            "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
+            return_value=None,
+        ):
+            fn = tools_registry["cloudflare_list_dns_analytics_report"].fn
+            result = fn(zone_id="z_missing")
+        assert result["status_code"] == 404
+        assert "z_missing" in result["error"]
+
+    def test_cloudflare_list_dns_analytics_report_zone_without_queries(self, tools_registry, monkeypatch, mock_request):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        mock_request.return_value = _mock_response(
+            200,
+            {"data": {"viewer": {"zones": [{"totals": [], "dnsAnalyticsAdaptiveGroups": []}]}}, "errors": None},
+        )
+        with patch(
+            "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
+            return_value=None,
+        ):
+            fn = tools_registry["cloudflare_list_dns_analytics_report"].fn
+            result = fn(zone_id="z_quiet")
+        assert result["dns_analytics"]["total_queries"] == 0
+        assert result["dns_analytics"]["rows"] == []
+
+    @pytest.mark.parametrize(
+        ("since", "until"),
+        [("2026-10-07", "2026-10-01"), ("10/01/2026", None), ("20261001", None), (None, "2026-13-01")],
+    )
+    def test_cloudflare_list_dns_analytics_report_rejects_bad_dates(self, tools_registry, monkeypatch, mock_request, since, until):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        with patch(
+            "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
+            return_value=None,
+        ):
+            fn = tools_registry["cloudflare_list_dns_analytics_report"].fn
+            result = fn(zone_id="z_test", since=since, until=until)
+        assert "error" in result
+        mock_request.assert_not_called()
 
     def test_cloudflare_list_dns_analytics_report_graphql_error(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")

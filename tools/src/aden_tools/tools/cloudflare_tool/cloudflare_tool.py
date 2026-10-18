@@ -10,7 +10,7 @@ Requires CLOUDFLARE_API_TOKEN environment variable.
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -157,10 +157,21 @@ def _make_request(
         return {"error": f"Unexpected error: {str(e)}"}
 
 
+def _parse_date(value: str) -> date:
+    """Parse a YYYY-MM-DD date, rejecting other ISO forms."""
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
 DNS_ANALYTICS_QUERY = """
 query DnsAnalytics($zoneTag: string!, $since: Date!, $until: Date!, $limit: uint64!) {
   viewer {
     zones(filter: { zoneTag: $zoneTag }) {
+      totals: dnsAnalyticsAdaptiveGroups(
+        limit: 1
+        filter: { date_geq: $since, date_leq: $until }
+      ) {
+        count
+      }
       dnsAnalyticsAdaptiveGroups(
         limit: $limit
         filter: { date_geq: $since, date_leq: $until }
@@ -687,10 +698,18 @@ def register_tools(mcp, credentials=None):
             return validation_error
 
         today = date.today()
+        try:
+            since_date = _parse_date(since) if since else today - timedelta(days=7)
+            until_date = _parse_date(until) if until else today
+        except ValueError:
+            return {"error": "since and until must be dates in YYYY-MM-DD format"}
+        if since_date > until_date:
+            return {"error": f"since ({since_date.isoformat()}) is after until ({until_date.isoformat()})"}
+
         variables = {
             "zoneTag": zone_id,
-            "since": since or (today - timedelta(days=7)).isoformat(),
-            "until": until or today.isoformat(),
+            "since": since_date.isoformat(),
+            "until": until_date.isoformat(),
             "limit": max(1, min(int(limit), 10000)),
         }
         result = _graphql_request(DNS_ANALYTICS_QUERY, variables, token)
@@ -698,12 +717,19 @@ def register_tools(mcp, credentials=None):
             return result
 
         zones = (result.get("viewer") or {}).get("zones") or []
-        groups = zones[0].get("dnsAnalyticsAdaptiveGroups", []) if zones else []
+        if not zones:
+            return {"error": f"Zone not found or not accessible: {zone_id}", "status_code": 404}
+
+        zone = zones[0]
+        groups = zone.get("dnsAnalyticsAdaptiveGroups") or []
+        # `totals` requests no dimensions, so Cloudflare returns one row counting every query
+        # in the range; summing `groups` would only cover the top `limit` rows.
+        totals = zone.get("totals") or []
         return {
             "dns_analytics": {
                 "since": variables["since"],
                 "until": variables["until"],
-                "total_queries": sum(g.get("count", 0) for g in groups),
+                "total_queries": totals[0].get("count", 0) if totals else 0,
                 "rows": groups,
             }
         }
