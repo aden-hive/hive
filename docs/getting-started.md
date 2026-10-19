@@ -43,6 +43,25 @@ uv run python -c "import framework; import aden_tools; print('Setup complete')"
 
 > **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
 
+**Windows (Git Bash):**
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/aden-hive/hive.git
+cd hive
+
+# 2. Set UTF-8 encoding
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+# 3. Run automated setup
+./quickstart.sh
+
+# 4. Verify installation (optional, quickstart.sh already verifies)
+uv run python -c "import framework; import aden_tools; print('Setup complete')"
+```
+
+
 ## Building Your First Agent
 
 Agents are not included by default in a fresh clone.
