@@ -21,19 +21,6 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-# Verify user is running from the hive project directory
-USER_CWD="$(pwd)"
-if [ "$USER_CWD" != "$SCRIPT_DIR" ]; then
-    echo "Error: hive must be run from the project directory." >&2
-    echo "" >&2
-    echo "  Current directory: $USER_CWD" >&2
-    echo "  Expected directory: $SCRIPT_DIR" >&2
-    echo "" >&2
-    echo "Run: cd $SCRIPT_DIR" >&2
-    exit 1
-fi
-
-cd "$SCRIPT_DIR"
 
 # Verify this is a valid Hive project directory
 if [ ! -f "$SCRIPT_DIR/pyproject.toml" ] || [ ! -d "$SCRIPT_DIR/core" ]; then
