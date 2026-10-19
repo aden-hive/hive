@@ -111,17 +111,12 @@ This demonstrates the core runtime loop using pure Python functions, skipping th
 hive/
 ├── core/                   # Core Framework
 │   ├── framework/          # Agent runtime, graph executor
-│   │   ├── builder/        # Agent builder utilities
 │   │   ├── credentials/    # Credential management
-│   │   ├── graph/          # GraphExecutor - executes node graphs
 │   │   ├── llm/            # LLM provider integrations
-│   │   ├── mcp/            # MCP server integration
-│   │   ├── runner/         # AgentRunner - loads and runs agents
 │   │   ├── runtime/        # Runtime environment
 │   │   ├── schemas/        # Data schemas
 │   │   ├── storage/        # File-based persistence
-│   │   ├── testing/        # Testing utilities
-│   │   └── tui/            # Terminal UI dashboard
+│   │   └── testing/        # Testing utilities
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
