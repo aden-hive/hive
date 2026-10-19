@@ -16,7 +16,7 @@ Usage:
 
     # Configure client (API key loaded from ADEN_API_KEY env var)
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
+        base_url=os.getenv("ADEN_API_URL"),
     ))
 
     # Create provider
@@ -80,7 +80,7 @@ class AdenSyncProvider(CredentialProvider):
     Usage:
         client = AdenCredentialClient(AdenClientConfig(
             base_url="https://api.adenhq.com",
-            api_key=os.environ["ADEN_API_KEY"],
+            api_key=os.getenv("ADEN_API_KEY"),
         ))
 
         provider = AdenSyncProvider(client=client)
