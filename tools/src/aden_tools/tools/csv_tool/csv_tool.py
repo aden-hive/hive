@@ -1,5 +1,7 @@
 """CSV Tool - Read and manipulate CSV files using absolute paths."""
 
+from __future__ import annotations
+
 import csv
 import os
 import re
