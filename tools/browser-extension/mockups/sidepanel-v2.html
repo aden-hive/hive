@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<!--
+  Side panel v2 mockup — static, no JS. Two states side-by-side:
+    1) Healthy. Tab controlled by an agent. One demo tooltip pinned open on
+       the right line so the reviewer can see what hover reveals.
+    2) Uncontrolled tab with the hand-over popover open.
+  Open this file directly in a browser.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hive Bridge — side panel v2 mockup</title>
+<style>
+  :root{
+    --bg:hsl(40 30% 96%); --card:hsl(0 0% 100%); --fg:hsl(40 8% 13%);
+    --muted:hsl(40 6% 47%); --faint:hsl(40 6% 62%);
+    --hair:hsl(40 14% 89%); --hair-strong:hsl(40 12% 84%);
+    --amber:hsl(45 88% 49%);
+    --ok:hsl(150 34% 41%); --warn:hsl(38 78% 46%); --bad:hsl(2 60% 53%);
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --radius:11px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    background:hsl(40 8% 18%); padding:32px; min-height:100vh;
+    display:flex; gap:32px; justify-content:center; align-items:flex-start;
+    color:var(--fg); font-size:12.5px; line-height:1.45; letter-spacing:-.1px;
+  }
+  .stage{display:flex;flex-direction:column;gap:10px;align-items:center}
+  .stage .caption{color:hsl(40 8% 75%); font-size:11px; font-family:var(--mono)}
+
+  .panel{
+    width:360px; height:720px; background:var(--bg); border-radius:14px;
+    display:flex; flex-direction:column; overflow:hidden;
+    box-shadow:0 12px 36px hsl(0 0% 0% / .35);
+  }
+
+  /* ── Scrollable content ─────────────────────────────── */
+  .content{flex:1 1 auto; overflow-y:auto; padding:18px 16px 16px}
+  .lbl{
+    font-family:inherit; font-size:11px; font-weight:600;
+    color:var(--muted); letter-spacing:-.1px;
+    text-transform:capitalize; margin-bottom:10px;
+  }
+
+  /* ── Connection rail — three nodes, hover-driven detail ── */
+  .conn{--accent:var(--ok)}
+  .substatus{
+    font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:3px;
+  }
+  /* Substatus only renders when the rail can't tell the whole story
+     itself — i.e., something is wrong. Healthy state = empty = hidden. */
+  .substatus:empty{display:none}
+
+  .rail{display:flex; align-items:center; gap:6px; margin:12px 2px 4px}
+  .end{
+    display:flex; flex-direction:column; align-items:center; gap:7px;
+    width:54px; position:relative; cursor:default;
+  }
+  .glyph{width:30px; height:30px; display:grid; place-items:center; position:relative}
+  /* Hive honeycomb mark — provided SVG (7-cell cluster). Sized to fit
+     the 30px glyph; non-scaling-stroke keeps the strokes crisp at any
+     display size. */
+  .hex{width:28px; height:28px; display:block; flex:none}
+  .bridge-icon{
+    width:24px; height:14px; border:1.5px solid var(--fg); border-radius:3px;
+    position:relative; background:var(--card);
+  }
+  .bridge-icon::before, .bridge-icon::after{
+    content:""; position:absolute; top:50%; width:5px; height:1.5px;
+    background:var(--fg); transform:translateY(-50%);
+  }
+  .bridge-icon::before{left:-6px}
+  .bridge-icon::after{right:-6px}
+  .brz{
+    width:22px; height:17px; border:1.5px solid var(--fg); border-radius:4px;
+    position:relative;
+  }
+  .brz::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:5px;
+    background:var(--fg); border-radius:2.5px 2.5px 0 0;
+  }
+  .cap{font-size:9.5px; color:var(--faint); font-weight:500; white-space:nowrap}
+
+  /* Unhealthy marker — a small dot pinned to the glyph. Hidden by default;
+     applied per-element when its subsystem is degraded/failed. */
+  .warn-mark{
+    position:absolute; top:-2px; right:-2px; width:8px; height:8px; border-radius:50%;
+    background:var(--bad); border:1.5px solid var(--bg); display:none;
+  }
+  .end.warn .warn-mark{display:block; background:var(--warn)}
+  .end.fail .warn-mark{display:block; background:var(--bad)}
+  .end.warn .hex, .end.fail .hex{filter:grayscale(.6) opacity(.7)}
+  .end.warn .bridge-icon, .end.warn .brz,
+  .end.fail .bridge-icon, .end.fail .brz{opacity:.55}
+
+  .line{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:5px;
+    position:relative; cursor:default; min-width:64px;
+    /* Pin to the glyph row's height + anchor to the top of the rail row so
+       the dots/check line up with the icon centers, not the icon+cap centers
+       (otherwise the line content sits ~9px below the glyphs). */
+    height:30px; align-self:flex-start;
+  }
+  .line .dot{
+    width:3px; height:3px; border-radius:50%; background:var(--faint);
+    flex:none;
+  }
+  /* The check is the centerpiece. A static shadow seats it on the line;
+     the expanding ripple is the "I'm alive" cue and doubles as a hover
+     attractor — users instinctively reach for things that move. */
+  .line .check{
+    width:14px; height:14px; border-radius:50%; background:var(--ok);
+    display:flex; align-items:center; justify-content:center;
+    color:white; font-size:10px; font-weight:900; flex:none; line-height:1;
+    position:relative; box-shadow:0 1px 4px hsl(150 34% 41% / .3);
+  }
+  .line .check::after{
+    content:""; position:absolute; inset:-1px; border-radius:50%;
+    border:1.5px solid var(--ok); opacity:0;
+    animation:check-wave 2.6s ease-out infinite;
+  }
+  @keyframes check-wave{
+    0%{transform:scale(.85); opacity:.55}
+    100%{transform:scale(2.4); opacity:0}
+  }
+  /* Warn / fail variants — same structure, different icon + color, no ripple. */
+  .line.warn .check{background:var(--warn)}
+  .line.warn .check::after{border-color:var(--warn)}
+  .line.fail .check{background:var(--bad)}
+  .line.fail .check::after{display:none}
+  .line.fail .dot{opacity:.25}
+
+  /* Hover tooltip — used for nodes and lines. .show forces it visible
+     in the mockup so reviewers can see what hover reveals. */
+  .tip{
+    position:absolute; bottom:calc(100% + 10px); left:50%;
+    transform:translate(-50%, 4px); opacity:0; pointer-events:none;
+    background:hsl(40 8% 13%); color:var(--card);
+    font-family:var(--mono); font-size:10px; line-height:1.45;
+    padding:7px 9px; border-radius:6px; white-space:nowrap;
+    transition:opacity .12s ease, transform .12s ease; z-index:20;
+    text-align:left;
+  }
+  .tip::after{
+    content:""; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+    border:5px solid transparent; border-top-color:hsl(40 8% 13%);
+  }
+  .tip .head{
+    font-weight:700; letter-spacing:.5px; text-transform:lowercase; opacity:.8;
+    margin-bottom:2px;
+  }
+  .tip .v{color:var(--faint)}
+  .end:hover .tip, .line:hover .tip, .show-tip .tip{
+    opacity:1; transform:translate(-50%, 0);
+  }
+
+  /* ── Section frame ──────────────────────────────────── */
+  .section{margin-top:24px}
+
+  /* Collapsible sections — Action History + Agents default closed so
+     a first-time user isn't drowned in data. Native <details>/<summary>
+     gives keyboard + a11y for free; only the visuals are restyled. */
+  details.section summary{
+    list-style:none; cursor:pointer; outline:none;
+    display:flex; align-items:center; gap:6px;
+    padding:4px 6px; margin:0 -6px;
+    border-radius:6px; transition:background-color .12s ease;
+  }
+  details.section summary::-webkit-details-marker{display:none}
+  details.section summary:hover{background:hsl(40 22% 95%)}
+  details.section[open] summary{margin-bottom:6px}
+  details.section summary .count{
+    font-weight:400; color:var(--faint); font-size:11px;
+    letter-spacing:0; text-transform:none;
+  }
+  /* Disclosure chevron: right when closed (▸), down when open (▾). */
+  details.section summary::after{
+    content:""; width:5px; height:5px; flex:none;
+    border-right:1.5px solid var(--muted);
+    border-bottom:1.5px solid var(--muted);
+    transform:rotate(-45deg);
+    transition:transform .15s ease;
+    margin-left:auto;
+  }
+  details.section[open] summary::after{transform:rotate(45deg)}
+
+  /* ── Current tab card ───────────────────────────────── */
+  .tab-card{
+    border:1px solid var(--hair); border-radius:var(--radius); padding:11px 12px;
+    background:var(--card);
+  }
+  .tab-row{display:flex; align-items:flex-start; gap:9px}
+  .favicon{
+    width:16px; height:16px; flex:none; border-radius:3px; margin-top:1px;
+    background:linear-gradient(135deg,#0a66c2,#004182); position:relative;
+  }
+  .favicon::after{
+    content:"in"; position:absolute; inset:0; display:grid; place-items:center;
+    color:white; font-size:8px; font-weight:800; letter-spacing:-.5px;
+  }
+  .favicon.hn{background:#ff6600}
+  .favicon.hn::after{content:"Y"; color:white}
+  .tab-col{min-width:0; flex:1; display:flex; flex-direction:column; gap:2px}
+  .tab-title{
+    font-weight:600; font-size:12.5px; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .tab-url{
+    font-family:var(--mono); font-size:10.5px; color:var(--faint);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .tab-control{
+    margin-top:10px; padding-top:9px; border-top:1px solid var(--hair);
+    display:flex; align-items:center; gap:8px;
+  }
+  .tab-control .ctrl-dot{width:7px; height:7px; border-radius:2px; flex:none}
+  .tab-control .ctrl-text{font-size:11.5px; flex:1; min-width:0}
+  .tab-control .ctrl-text .label{color:var(--faint); font-size:10.5px}
+  .tab-control .ctrl-text .agent{font-weight:600}
+  .tab-control .uncontrolled{color:var(--muted); font-style:italic}
+  .btn-sm{
+    font-family:inherit; font-size:11px; font-weight:600; padding:5px 10px;
+    border-radius:7px; border:1px solid var(--hair); background:var(--card);
+    color:var(--fg); cursor:pointer; white-space:nowrap;
+  }
+  .btn-sm.primary{background:var(--fg); color:var(--card); border-color:var(--fg)}
+  .btn-sm:disabled{cursor:default; opacity:.45; pointer-events:none}
+
+  /* Inline warning under the controlled-by row — a transient reason the
+     controller can't act right now (e.g. debugger held by another ext). */
+  .ctrl-text .warning{
+    font-size:10.5px; color:var(--bad); margin-top:3px; font-weight:500;
+  }
+
+  /* Fix-hint — actionable callout under the connection block, shown only
+     when there's a known issue. Red-tinted because these are blockers. */
+  .fix-hint{
+    margin-top:9px; padding:9px 11px; line-height:1.45;
+    font-size:11.5px; color:var(--fg);
+    background:hsl(2 60% 97%); border:1px solid hsl(2 50% 88%);
+    border-radius:7px;
+  }
+  .fix-hint .head{
+    display:block; font-size:9.5px; font-weight:700; color:var(--bad);
+    text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;
+  }
+  /* Inline recovery action — shown only inside fix-hint, so the panel
+     has no permanent Reconnect button cluttering the healthy state. */
+  .fix-hint .actions{margin-top:9px; display:flex; gap:6px}
+
+  /* Action history is a sub-section of the current tab card — actions
+     belong to a specific tab, so they nest under the tab they describe.
+     Collapsed by default. Summary mirrors the controlled-by row above. */
+  .tab-card details.tab-history{
+    margin-top:10px; padding-top:9px; border-top:1px solid var(--hair);
+  }
+  .tab-card details.tab-history summary{
+    list-style:none; cursor:pointer; outline:none;
+    display:flex; align-items:center; gap:6px;
+    font-size:11.5px; font-weight:600; color:var(--fg);
+    padding:2px 4px; margin:0 -4px; border-radius:5px;
+    transition:background-color .12s ease;
+  }
+  .tab-card details.tab-history summary::-webkit-details-marker{display:none}
+  .tab-card details.tab-history summary:hover{background:hsl(40 22% 96%)}
+  .tab-card details.tab-history summary .count{
+    font-weight:400; color:var(--faint); font-size:11px;
+  }
+  .tab-card details.tab-history summary::after{
+    content:""; width:5px; height:5px; flex:none;
+    border-right:1.5px solid var(--muted);
+    border-bottom:1.5px solid var(--muted);
+    transform:rotate(-45deg);
+    transition:transform .15s ease; margin-left:auto;
+  }
+  .tab-card details.tab-history[open] summary::after{transform:rotate(45deg)}
+  /* hist-list inside a tab card — drop its own border/bg since the tab
+     card already provides a container. */
+  .tab-card .hist-list{
+    border:none; border-radius:0; background:transparent; margin-top:8px;
+  }
+  .tab-card .hist-list .hist-row{padding-left:0; padding-right:0}
+  .tab-card .hist-list .hist-foot{
+    background:transparent; padding-left:0; padding-right:0;
+  }
+
+  .popover{
+    margin-top:8px; border:1px solid var(--hair-strong); border-radius:9px;
+    background:var(--card); box-shadow:0 6px 20px hsl(0 0% 0% / .08);
+    overflow:hidden;
+  }
+  .pop-head{
+    padding:8px 11px; font-family:var(--mono); font-size:10px; color:var(--faint);
+    text-transform:lowercase; letter-spacing:.5px; border-bottom:1px solid var(--hair);
+  }
+  .pop-item{
+    display:flex; align-items:center; gap:9px; padding:8px 11px; cursor:pointer;
+  }
+  .pop-item+.pop-item{border-top:1px solid var(--hair)}
+  .pop-item .pdot{width:7px; height:7px; border-radius:2px; flex:none}
+  .pop-item .nm{font-size:11.5px; font-weight:600; flex:1; min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .pop-item .role{font-size:10px; color:var(--faint); font-family:var(--mono)}
+
+  /* ── Action history ─────────────────────────────────── */
+  .hist-list{
+    border:1px solid var(--hair); border-radius:var(--radius); overflow:hidden;
+    background:var(--card);
+  }
+  .hist-row{
+    display:grid; grid-template-columns:50px 64px 1fr; gap:8px;
+    padding:7px 12px; align-items:baseline; font-size:11px;
+  }
+  .hist-row+.hist-row{border-top:1px solid var(--hair)}
+  .hist-row .t{font-family:var(--mono); font-size:10px; color:var(--faint)}
+  .hist-row .verb{
+    font-family:var(--mono); font-size:10px; font-weight:600;
+    text-transform:lowercase;
+  }
+  .hist-row .verb.nav{color:hsl(210 60% 42%)}
+  .hist-row .verb.click{color:hsl(150 40% 36%)}
+  .hist-row .verb.type{color:hsl(38 70% 38%)}
+  .hist-row .verb.scroll, .hist-row .verb.wait{color:var(--muted)}
+  .hist-row .body{
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:var(--fg);
+  }
+  .hist-foot{
+    padding:8px 12px; display:flex; justify-content:flex-end;
+    border-top:1px solid var(--hair); background:hsl(40 22% 98%);
+  }
+  .hist-foot .more{
+    font-size:11px; font-weight:600; color:var(--fg); cursor:pointer;
+    background:none; border:none; padding:0;
+  }
+  .hist-foot .more .n{color:var(--faint); font-family:var(--mono); font-weight:400; margin-right:6px}
+  .hist-empty{padding:18px 12px; text-align:center; color:var(--faint); font-style:italic}
+
+  /* ── Agents list ────────────────────────────────────── */
+  .ag-card{
+    border:1px solid var(--hair); border-radius:var(--radius); overflow:hidden;
+    background:var(--card);
+  }
+  .ag{
+    display:grid; grid-template-columns:8px 1fr auto;
+    gap:10px; padding:10px 12px; align-items:center;
+  }
+  .ag+.ag{border-top:1px solid var(--hair)}
+  .ag .dot{width:7px; height:7px; border-radius:2px; align-self:start; margin-top:4px}
+  .ag .col{display:flex; flex-direction:column; min-width:0}
+  .ag .nm{
+    font-weight:600; font-size:12px; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .ag .sub{
+    font-size:10.5px; color:var(--faint); margin-top:1px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  .ag .right{display:flex; flex-direction:column; align-items:flex-end; gap:3px}
+  .badge{
+    font-family:var(--mono); font-size:9.5px; letter-spacing:.4px;
+    text-transform:lowercase; padding:2px 7px; border-radius:999px;
+    border:1px solid var(--hair); color:var(--muted); white-space:nowrap;
+  }
+  .badge.working{
+    color:var(--ok); border-color:hsl(150 30% 80%); background:hsl(150 40% 96%);
+  }
+  .badge.working::before{
+    content:""; display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:var(--ok); margin-right:5px; vertical-align:middle;
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  .badge.waiting{color:var(--warn); border-color:hsl(38 60% 80%); background:hsl(38 70% 97%)}
+  .badge.idle{color:var(--faint)}
+  .badge.blocked{color:var(--bad); border-color:hsl(2 40% 84%); background:hsl(2 60% 97%)}
+  .ag .when{font-family:var(--mono); font-size:10px; color:var(--faint)}
+
+  /* ── Footer — single line ───────────────────────────── */
+  footer{
+    flex-shrink:0; padding:10px 16px; border-top:1px solid var(--hair);
+    display:flex; justify-content:center; align-items:center; gap:8px;
+    font-family:var(--mono); font-size:10px; color:var(--muted);
+  }
+  footer .sep{color:var(--faint); opacity:.6}
+  footer .v.disconnected{color:var(--faint); opacity:.7}
+  footer a{color:var(--muted); text-decoration:none; border-bottom:1px solid var(--hair-strong)}
+  footer a:hover{color:var(--fg)}
+
+  @keyframes pulse{50%{opacity:.35}}
+</style>
+</head>
+<body>
+
+<!-- ───────────────────────────────────────────────────────────────────
+     STATE 1 — Healthy. Tab controlled. One demo tooltip pinned visible.
+─────────────────────────────────────────────────────────────────── -->
+<div class="stage">
+  <div class="caption">state 1 · controlled · line tooltip pinned for demo</div>
+  <div class="panel">
+    <main class="content">
+      <section class="conn">
+        <div class="lbl">connection</div>
+        <div class="substatus"></div>
+
+        <div class="rail">
+          <div class="end">
+            <div class="glyph">
+              <svg class="hex" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M64 26.25L73.875 32V43.5L64 49.25L54.125 43.5V32L64 26.25ZM64 52.75L73.875 58.5V70L64 75.75L54.125 70V58.5L64 52.75ZM64 79.25L73.875 85V96.5L64 102.25L54.125 96.5V85L64 79.25ZM41.125 39.75L51 45.5V57L41.125 62.75L31.25 57V45.5L41.125 39.75ZM86.875 39.75L96.75 45.5V57L86.875 62.75L77 57V45.5L86.875 39.75ZM41.125 66.25L51 72V83.5L41.125 89.25L31.25 83.5V72L41.125 66.25ZM86.875 66.25L96.75 72V83.5L86.875 89.25L77 83.5V72L86.875 66.25Z" stroke="#D19A35" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Hive</div>
+            <div class="tip">
+              <div class="head">hive</div>
+              <div>Desktop app responding.</div>
+            </div>
+          </div>
+          <div class="line">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✓</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">hive ↔ bridge</div>
+              <div>In-process link.</div>
+            </div>
+          </div>
+          <div class="end">
+            <div class="glyph">
+              <div class="bridge-icon"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Bridge</div>
+            <div class="tip">
+              <div class="head">bridge</div>
+              <div>Running on :14829.</div>
+            </div>
+          </div>
+          <!-- Right line: tooltip pinned visible so the reviewer sees
+               where the latency reading + link detail live on hover. -->
+          <div class="line show-tip">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✓</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">bridge ↔ browser</div>
+              <div>Round-trip <span class="v">· 3 ms</span></div>
+            </div>
+          </div>
+          <div class="end">
+            <div class="glyph">
+              <div class="brz"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Browser</div>
+            <div class="tip">
+              <div class="head">browser</div>
+              <div>Debugger available.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Current browser tab -->
+      <section class="section">
+        <div class="lbl">current browser tab</div>
+        <div class="tab-card">
+          <div class="tab-row">
+            <div class="favicon"></div>
+            <div class="tab-col">
+              <div class="tab-title">Sales Navigator — Series A founders in NYC</div>
+              <div class="tab-url">linkedin.com/sales/search/people/list/14620…</div>
+            </div>
+          </div>
+          <div class="tab-control">
+            <div class="ctrl-dot" style="background:#9334e6"></div>
+            <div class="ctrl-text">
+              <div class="label">controlled by</div>
+              <div class="agent">Brian Balfour · Head of Growth</div>
+            </div>
+            <button class="btn-sm">Release</button>
+          </div>
+
+          <!-- Action history belongs to this tab — nested inside the
+               tab card, collapsed by default to keep the panel quiet. -->
+          <details class="tab-history">
+            <summary>Action history <span class="count">· 47</span></summary>
+            <div class="hist-list">
+              <div class="hist-row">
+                <div class="t">14:32:01</div>
+                <div class="verb nav">navigate</div>
+                <div class="body">linkedin.com/sales/search/people/list/146…</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:58</div>
+                <div class="verb click">click</div>
+                <div class="body">"Show all filters"</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:55</div>
+                <div class="verb type">type</div>
+                <div class="body">"Series A funding"</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:50</div>
+                <div class="verb scroll">scroll</div>
+                <div class="body">to bottom</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:42</div>
+                <div class="verb nav">navigate</div>
+                <div class="body">linkedin.com/sales/search</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:30</div>
+                <div class="verb click">click</div>
+                <div class="body">"Saved searches"</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:25</div>
+                <div class="verb wait">wait</div>
+                <div class="body">for results to load</div>
+              </div>
+              <div class="hist-row">
+                <div class="t">14:31:20</div>
+                <div class="verb click">click</div>
+                <div class="body">"Lead filters"</div>
+              </div>
+              <!-- Show-more only renders when there are more rows beyond
+                   what's currently displayed. Omitted at the end. -->
+              <div class="hist-foot">
+                <button class="more"><span class="n">8 of 47</span>Show more ▾</button>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- Agents — top-level section, expanded by default. -->
+      <details class="section" open>
+        <summary class="lbl">agents <span class="count">· 4</span></summary>
+        <div class="ag-card">
+          <div class="ag">
+            <div class="dot" style="background:#9334e6"></div>
+            <div class="col">
+              <div class="nm">Brian Balfour · Head of Growth</div>
+              <div class="sub">3 tabs · linkedin.com/sales</div>
+            </div>
+            <div class="right">
+              <span class="badge working">working</span>
+              <span class="when">now</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1a73e8"></div>
+            <div class="col">
+              <div class="nm">Patty McCord · Head of Talent</div>
+              <div class="sub">2 tabs · linkedin.com/in/jdoe</div>
+            </div>
+            <div class="right">
+              <span class="badge waiting">waiting</span>
+              <span class="when">12s ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#d93025"></div>
+            <div class="col">
+              <div class="nm">Brian Balfour · Growth (linkedin_premium)</div>
+              <div class="sub">2 tabs · linkedin.com</div>
+            </div>
+            <div class="right">
+              <span class="badge blocked">blocked</span>
+              <span class="when">22s ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1e8e3e"></div>
+            <div class="col">
+              <div class="nm">Mark Roberge · Head of Sales</div>
+              <div class="sub">1 tab · gmail.com</div>
+            </div>
+            <div class="right">
+              <span class="badge idle">idle</span>
+              <span class="when">5m ago</span>
+            </div>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <footer>
+      <span class="v">Bridge v0.4.2</span>
+      <span class="sep">·</span>
+      <span class="v">Runtime v0.7.1</span>
+      <span class="sep">·</span>
+      <a href="https://open-hive.com">open-hive.com</a>
+    </footer>
+  </div>
+</div>
+
+
+<!-- ───────────────────────────────────────────────────────────────────
+     STATE 2 — Uncontrolled tab, hand-over popover open.
+─────────────────────────────────────────────────────────────────── -->
+<div class="stage">
+  <div class="caption">state 2 · uncontrolled · hand-over open</div>
+  <div class="panel">
+    <main class="content">
+      <section class="conn">
+        <div class="lbl">connection</div>
+        <div class="substatus"></div>
+
+        <div class="rail">
+          <div class="end">
+            <div class="glyph">
+              <svg class="hex" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M64 26.25L73.875 32V43.5L64 49.25L54.125 43.5V32L64 26.25ZM64 52.75L73.875 58.5V70L64 75.75L54.125 70V58.5L64 52.75ZM64 79.25L73.875 85V96.5L64 102.25L54.125 96.5V85L64 79.25ZM41.125 39.75L51 45.5V57L41.125 62.75L31.25 57V45.5L41.125 39.75ZM86.875 39.75L96.75 45.5V57L86.875 62.75L77 57V45.5L86.875 39.75ZM41.125 66.25L51 72V83.5L41.125 89.25L31.25 83.5V72L41.125 66.25ZM86.875 66.25L96.75 72V83.5L86.875 89.25L77 83.5V72L86.875 66.25Z" stroke="#D19A35" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Hive</div>
+            <div class="tip">
+              <div class="head">hive</div>
+              <div>Desktop app responding.</div>
+            </div>
+          </div>
+          <div class="line">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✓</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">hive ↔ bridge</div>
+              <div>In-process link.</div>
+            </div>
+          </div>
+          <div class="end">
+            <div class="glyph">
+              <div class="bridge-icon"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Bridge</div>
+            <div class="tip">
+              <div class="head">bridge</div>
+              <div>Running on :14829.</div>
+            </div>
+          </div>
+          <div class="line">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✓</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">bridge ↔ browser</div>
+              <div>Round-trip <span class="v">· 4 ms</span></div>
+            </div>
+          </div>
+          <div class="end">
+            <div class="glyph">
+              <div class="brz"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Browser</div>
+            <div class="tip">
+              <div class="head">browser</div>
+              <div>Debugger available.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="lbl">current browser tab</div>
+        <div class="tab-card">
+          <div class="tab-row">
+            <div class="favicon hn"></div>
+            <div class="tab-col">
+              <div class="tab-title">Hacker News</div>
+              <div class="tab-url">news.ycombinator.com</div>
+            </div>
+          </div>
+          <div class="tab-control">
+            <div class="ctrl-dot" style="background:hsl(40 8% 78%)"></div>
+            <div class="ctrl-text">
+              <div class="uncontrolled">Not controlled by any agent</div>
+            </div>
+            <button class="btn-sm primary">Hand over ▾</button>
+          </div>
+
+          <div class="popover">
+            <div class="pop-head">hand over to…</div>
+            <div class="pop-item">
+              <div class="pdot" style="background:#9334e6"></div>
+              <div class="nm">Brian Balfour</div>
+              <div class="role">Head of Growth</div>
+            </div>
+            <div class="pop-item">
+              <div class="pdot" style="background:#1a73e8"></div>
+              <div class="nm">Patty McCord</div>
+              <div class="role">Head of Talent</div>
+            </div>
+            <div class="pop-item">
+              <div class="pdot" style="background:#1e8e3e"></div>
+              <div class="nm">Mark Roberge</div>
+              <div class="role">Head of Sales</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Uncontrolled tab — no agent has acted, so no history section
+           is shown. Action history only renders when there's a controller. -->
+
+      <!-- Agents — expanded in state 2 to show what the user sees after
+           clicking the section header. -->
+      <details class="section" open>
+        <summary class="lbl">agents <span class="count">· 3</span></summary>
+        <div class="ag-card">
+          <div class="ag">
+            <div class="dot" style="background:#9334e6"></div>
+            <div class="col">
+              <div class="nm">Brian Balfour · Head of Growth</div>
+              <div class="sub">3 tabs · linkedin.com/sales</div>
+            </div>
+            <div class="right">
+              <span class="badge working">working</span>
+              <span class="when">now</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1a73e8"></div>
+            <div class="col">
+              <div class="nm">Patty McCord · Head of Talent</div>
+              <div class="sub">2 tabs · linkedin.com/in/jdoe</div>
+            </div>
+            <div class="right">
+              <span class="badge waiting">waiting</span>
+              <span class="when">12s ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1e8e3e"></div>
+            <div class="col">
+              <div class="nm">Mark Roberge · Head of Sales</div>
+              <div class="sub">1 tab · gmail.com</div>
+            </div>
+            <div class="right">
+              <span class="badge idle">idle</span>
+              <span class="when">5m ago</span>
+            </div>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <footer>
+      <span class="v">Bridge v0.4.2</span>
+      <span class="sep">·</span>
+      <span class="v disconnected">Runtime —</span>
+      <span class="sep">·</span>
+      <a href="https://open-hive.com">open-hive.com</a>
+    </footer>
+  </div>
+</div>
+
+
+<!-- ───────────────────────────────────────────────────────────────────
+     STATE 3 — CDP debugger taken over by another AI agent.
+     The Hive ↔ Bridge link is still healthy (the desktop app and bridge
+     process are fine), but the Browser end is unreachable — another
+     extension is holding the Chrome debugger and won't let go. Agents
+     keep their tab-group ownership but can't actually act.
+─────────────────────────────────────────────────────────────────── -->
+<div class="stage">
+  <div class="caption">state 3 · CDP debugger taken by another extension</div>
+  <div class="panel">
+    <main class="content">
+      <section class="conn">
+        <div class="lbl">connection</div>
+        <div class="substatus">Chrome debugger held by another extension</div>
+        <div class="fix-hint">
+          <span class="head">Hive can't drive the browser</span>
+          Disable the conflicting extension or close DevTools. Agents will
+          resume automatically once the debugger is free.
+          <div class="actions">
+            <button class="btn-sm primary">Reconnect</button>
+          </div>
+        </div>
+
+        <div class="rail">
+          <div class="end">
+            <div class="glyph">
+              <svg class="hex" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M64 26.25L73.875 32V43.5L64 49.25L54.125 43.5V32L64 26.25ZM64 52.75L73.875 58.5V70L64 75.75L54.125 70V58.5L64 52.75ZM64 79.25L73.875 85V96.5L64 102.25L54.125 96.5V85L64 79.25ZM41.125 39.75L51 45.5V57L41.125 62.75L31.25 57V45.5L41.125 39.75ZM86.875 39.75L96.75 45.5V57L86.875 62.75L77 57V45.5L86.875 39.75ZM41.125 66.25L51 72V83.5L41.125 89.25L31.25 83.5V72L41.125 66.25ZM86.875 66.25L96.75 72V83.5L86.875 89.25L77 83.5V72L86.875 66.25Z" stroke="#D19A35" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Hive</div>
+            <div class="tip">
+              <div class="head">hive</div>
+              <div>Desktop app responding.</div>
+            </div>
+          </div>
+          <div class="line">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✓</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">hive ↔ bridge</div>
+              <div>In-process link.</div>
+            </div>
+          </div>
+          <div class="end">
+            <div class="glyph">
+              <div class="bridge-icon"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Bridge</div>
+            <div class="tip">
+              <div class="head">bridge</div>
+              <div>Running on :14829.</div>
+            </div>
+          </div>
+          <!-- Failed line + failed check ✕ — Bridge ↔ Browser is broken
+               because the browser end can't accept commands. -->
+          <div class="line fail">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="check">✕</div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="tip">
+              <div class="head">bridge ↔ browser</div>
+              <div>Browser refusing commands — debugger held externally.</div>
+            </div>
+          </div>
+          <div class="end fail">
+            <div class="glyph">
+              <div class="brz"></div>
+              <div class="warn-mark"></div>
+            </div>
+            <div class="cap">Browser</div>
+            <div class="tip">
+              <div class="head">browser</div>
+              <div>Chrome debugger attached to another extension.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="lbl">current browser tab</div>
+        <div class="tab-card">
+          <div class="tab-row">
+            <div class="favicon"></div>
+            <div class="tab-col">
+              <div class="tab-title">Sales Navigator — Series A founders in NYC</div>
+              <div class="tab-url">linkedin.com/sales/search/people/list/14620…</div>
+            </div>
+          </div>
+          <!-- Tab ownership persists — the agent still owns this tab group,
+               but acts are blocked. The Release button is disabled because
+               there's no live debugger to send commands through. -->
+          <div class="tab-control">
+            <div class="ctrl-dot" style="background:#9334e6"></div>
+            <div class="ctrl-text">
+              <div class="label">controlled by</div>
+              <div class="agent">Brian Balfour · Head of Growth</div>
+              <div class="warning">Control suspended — debugger unavailable</div>
+            </div>
+            <button class="btn-sm" disabled>Release</button>
+          </div>
+
+          <details class="tab-history">
+            <summary>Action history <span class="count">· 47</span></summary>
+            <div class="hist-list">
+              <div class="hist-empty">Last action 4m 12s ago — paused.</div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- Agents — still listed, but all in blocked state. -->
+      <details class="section" open>
+        <summary class="lbl">agents <span class="count">· 4</span></summary>
+        <div class="ag-card">
+          <div class="ag">
+            <div class="dot" style="background:#9334e6"></div>
+            <div class="col">
+              <div class="nm">Brian Balfour · Head of Growth</div>
+              <div class="sub">3 tabs · linkedin.com/sales</div>
+            </div>
+            <div class="right">
+              <span class="badge blocked">blocked</span>
+              <span class="when">4m ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1a73e8"></div>
+            <div class="col">
+              <div class="nm">Patty McCord · Head of Talent</div>
+              <div class="sub">2 tabs · linkedin.com/in/jdoe</div>
+            </div>
+            <div class="right">
+              <span class="badge blocked">blocked</span>
+              <span class="when">4m ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#d93025"></div>
+            <div class="col">
+              <div class="nm">Brian Balfour · Growth (linkedin_premium)</div>
+              <div class="sub">2 tabs · linkedin.com</div>
+            </div>
+            <div class="right">
+              <span class="badge blocked">blocked</span>
+              <span class="when">4m ago</span>
+            </div>
+          </div>
+          <div class="ag">
+            <div class="dot" style="background:#1e8e3e"></div>
+            <div class="col">
+              <div class="nm">Mark Roberge · Head of Sales</div>
+              <div class="sub">1 tab · gmail.com</div>
+            </div>
+            <div class="right">
+              <span class="badge blocked">blocked</span>
+              <span class="when">8m ago</span>
+            </div>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <footer>
+      <span class="v">Bridge v0.4.2</span>
+      <span class="sep">·</span>
+      <span class="v">Runtime v0.7.1</span>
+      <span class="sep">·</span>
+      <a href="https://open-hive.com">open-hive.com</a>
+    </footer>
+  </div>
+</div>
+
+</body>
+</html>

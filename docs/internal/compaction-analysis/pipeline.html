@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pipeline &mdash; Compaction Pipeline Analysis</title>
+  <link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumbs">
+    <a href="./index.html">Compaction Analysis</a> &nbsp;/&nbsp; <span>Pipeline</span>
+  </div>
+  <nav>
+    <a href="./index.html">Overview</a>
+    <a href="./triggers.html">Triggers</a>
+    <a class="active" href="./pipeline.html">Pipeline</a>
+    <a href="./transformations.html">Transformations</a>
+    <a href="./configuration.html">Configuration</a>
+    <a href="./audit.html">Audit</a>
+  </nav>
+</header>
+
+<h1>The four-stage pipeline</h1>
+<p class="lede">
+  Once a trigger fires, <code class="inline">compact()</code> runs four stages in cost order. Each stage
+  rechecks <code class="inline">needs_compaction()</code> and exits early as soon as the budget is restored.
+  Circuit breakers and recompaction detection bracket the whole thing.
+</p>
+
+<div class="callout warn">
+  <div class="label">Removed 2026-05-12 &mdash; structure-preserving stage</div>
+  An earlier &ldquo;structure-preserving compaction&rdquo; stage sat between prune and LLM summary.
+  It was removed after the <a href="./audit.html">audit</a> showed it was doing net harm: a 200-char
+  tool-call argument cap destroyed content-bearing calls, the wrapper was not idempotent (double-
+  wrapped on repeat passes), and the linked chain of <code class="inline">conversation_N.md</code>
+  spillover files made history recovery cost more tokens than the LLM call it was meant to avoid.
+</div>
+
+<h2>Pipeline overview</h2>
+<div class="diagram">
+<svg viewBox="0 0 860 580" role="img" aria-label="Four-stage compaction pipeline">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrwarn" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <style>
+    .stage { stroke: #1f2937; stroke-width: 1.5; }
+    .free { fill: #dcfce7; }
+    .async { fill: #dbeafe; }
+    .llm { fill: #ffedd5; }
+    .emergency { fill: #fee2e2; }
+    .check { fill: #fffbeb; stroke: #d97706; stroke-width: 1.4; }
+    .done { fill: #ecfdf5; stroke: #16a34a; stroke-width: 1.5; }
+    .label { font: 13px ui-sans-serif, system-ui, sans-serif; fill: #111827; }
+    .title { font: 14px ui-sans-serif, system-ui, sans-serif; fill: #111827; font-weight: 600; }
+    .small { font: 11px ui-monospace, monospace; fill: #475569; }
+    .edge { fill: none; stroke: #475569; stroke-width: 1.4; }
+    .edgewarn { fill: none; stroke: #dc2626; stroke-width: 1.4; stroke-dasharray: 5,4; }
+  </style>
+
+  <rect class="check" x="290" y="14" width="280" height="40" rx="6"/>
+  <text class="label" x="430" y="40" text-anchor="middle">compact() invoked (trigger fired)</text>
+
+  <line class="edge" x1="430" y1="54" x2="430" y2="80" marker-end="url(#arr)"/>
+
+  <rect class="stage free" x="40" y="80" width="780" height="80" rx="8"/>
+  <text class="title" x="60" y="105">Stage 0 &mdash; Microcompaction (free, synchronous, no LLM)</text>
+  <text class="small" x="60" y="125">microcompact(conversation) &mdash; replaces old compactable tool results with placeholders by count</text>
+  <text class="small" x="60" y="142">MICROCOMPACT_KEEP_RECENT = 2 &middot; allowlist via COMPACTABLE_TOOLS</text>
+  <text class="small" x="780" y="125" text-anchor="end">compaction.py:91-161, 254</text>
+
+  <line class="edge" x1="430" y1="160" x2="430" y2="190" marker-end="url(#arr)"/>
+  <polygon class="check" points="430,190 520,215 430,240 340,215"/>
+  <text class="label" x="430" y="218" text-anchor="middle">still needs?</text>
+  <line class="edge" x1="520" y1="215" x2="740" y2="215" marker-end="url(#arr)"/>
+  <rect class="done" x="740" y="196" width="100" height="40" rx="6"/>
+  <text class="label" x="790" y="221" text-anchor="middle">done</text>
+  <text class="small" x="630" y="208" text-anchor="middle">no</text>
+
+  <line class="edge" x1="430" y1="240" x2="430" y2="265" marker-end="url(#arr)"/>
+  <text class="small" x="438" y="258">yes</text>
+
+  <rect class="stage async" x="40" y="265" width="780" height="80" rx="8"/>
+  <text class="title" x="60" y="290">Stage 1 &mdash; Prune old tool results (free, token-budget)</text>
+  <text class="small" x="60" y="310">conversation.prune_old_tool_results() &mdash; replaces tool result content with ~100-char placeholder</text>
+  <text class="small" x="60" y="327">protects current phase, errors, skill content, transition markers, &lt;100-char results</text>
+  <text class="small" x="780" y="310" text-anchor="end">compaction.py:273-295 &middot; conversation.py:1044-1145</text>
+
+  <line class="edge" x1="430" y1="345" x2="430" y2="370" marker-end="url(#arr)"/>
+  <polygon class="check" points="430,370 520,395 430,420 340,395"/>
+  <text class="label" x="430" y="398" text-anchor="middle">still needs?</text>
+  <line class="edge" x1="520" y1="395" x2="740" y2="395" marker-end="url(#arr)"/>
+  <rect class="done" x="740" y="376" width="100" height="40" rx="6"/>
+  <text class="label" x="790" y="401" text-anchor="middle">done</text>
+  <text class="small" x="630" y="388" text-anchor="middle">no</text>
+
+  <line class="edge" x1="430" y1="420" x2="430" y2="445" marker-end="url(#arr)"/>
+
+  <rect class="stage llm" x="40" y="445" width="380" height="80" rx="8"/>
+  <text class="title" x="60" y="470">Stage 2 &mdash; LLM summary (paid, recursive)</text>
+  <text class="small" x="60" y="490">llm_compact() &middot; binary split on 240k chars &middot; depth &le; 10</text>
+  <text class="small" x="60" y="507">compaction.py:296-329 &middot; 412-518</text>
+
+  <rect class="stage emergency" x="440" y="445" width="380" height="80" rx="8"/>
+  <text class="title" x="460" y="470">Stage 3 &mdash; Emergency deterministic</text>
+  <text class="small" x="460" y="490">build_emergency_summary() &mdash; no LLM call</text>
+  <text class="small" x="460" y="507">compaction.py:331-349 &middot; 831-921</text>
+
+  <line class="edgewarn" x1="100" y1="160" x2="20" y2="160" />
+  <line class="edgewarn" x1="20" y1="160" x2="20" y2="485"/>
+  <line class="edgewarn" x1="20" y1="485" x2="440" y2="485" marker-end="url(#arrwarn)"/>
+  <text class="small" x="30" y="155" style="fill:#dc2626">circuit breaker: 3 failures &rarr; skip to emergency</text>
+</svg>
+</div>
+
+<h2>The orchestrator (full source)</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L204-L370">core/framework/agent_loop/internals/compaction.py:204-370</a>
+<pre class="code"><code><span class="k">async def</span> <span class="f">compact</span>(
+    ctx: NodeContext,
+    conversation: NodeConversation,
+    accumulator: OutputAccumulator | None,
+    *,
+    config: LoopConfig,
+    event_bus: EventBus | None,
+    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    max_depth: int = LLM_COMPACT_MAX_DEPTH,
+) -&gt; <span class="k">None</span>:
+    <span class="s">"""Run the full compaction pipeline if conversation needs compaction.
+
+    Pipeline stages (in order, short-circuits when budget is restored):
+    0. Microcompaction (count-based tool result clearing &mdash; cheapest)
+    1. Prune old tool results (token-budget based)
+    2. LLM summary compaction (recursive split if too large)
+    3. Emergency deterministic summary (fallback)
+    """</span>
+    conv_id = <span class="f">id</span>(conversation)
+
+    <span class="c"># Circuit breaker: stop LLM-based compaction after repeated failures,
+    # but still fall through to the emergency deterministic summary so
+    # the conversation doesn't silently grow past the context window.</span>
+    _llm_compaction_skipped = _failure_counts.<span class="f">get</span>(conv_id, <span class="n">0</span>) &gt;= MAX_CONSECUTIVE_FAILURES
+    <span class="k">if</span> _llm_compaction_skipped:
+        logger.<span class="f">warning</span>(
+            <span class="s">"Circuit breaker: LLM compaction disabled after %d failures &mdash; skipping straight to emergency summary"</span>,
+            _failure_counts[conv_id],
+        )
+
+    <span class="c"># Recompaction detection</span>
+    now = time.<span class="f">monotonic</span>()
+    last_time = _last_compact_times.<span class="f">get</span>(conv_id)
+    <span class="k">if</span> last_time <span class="k">is not None and</span> (now - last_time) &lt; <span class="n">30</span>:
+        logger.<span class="f">warning</span>(
+            <span class="s">"Recompaction chain detected: only %.1fs since last compaction"</span>,
+            now - last_time,
+        )
+
+    ratio_before = conversation.<span class="f">usage_ratio</span>()
+    phase_grad = <span class="f">getattr</span>(ctx, <span class="s">"continuous_mode"</span>, <span class="k">False</span>)
+    pre_inventory: list[dict[str, Any]] | <span class="k">None</span> = <span class="k">None</span>
+
+    <span class="k">if</span> ratio_before &gt;= <span class="n">1.0</span>:
+        pre_inventory = <span class="f">build_message_inventory</span>(conversation)
+
+    <span class="c"># --- Step 0: Microcompaction (count-based, cheapest) ---</span>
+    mc_cleared = <span class="f">microcompact</span>(conversation)
+    <span class="k">if</span> mc_cleared &gt; <span class="n">0</span>:
+        logger.<span class="f">info</span>(<span class="s">"Microcompact cleared %d old tool results: %.0f%% -&gt; %.0f%%"</span>, ...)
+    <span class="k">if not</span> conversation.<span class="f">needs_compaction</span>():
+        <span class="f">_record_success</span>(conv_id, now)
+        <span class="k">await</span> <span class="f">log_compaction</span>(ctx, conversation, ratio_before, event_bus, pre_inventory=pre_inventory)
+        <span class="k">return</span>
+
+    <span class="c"># --- Step 1: Prune old tool results (free, fast) ---</span>
+    protect = <span class="f">max</span>(<span class="n">2000</span>, config.max_context_tokens // <span class="n">12</span>)
+    pruned = <span class="k">await</span> conversation.<span class="f">prune_old_tool_results</span>(
+        protect_tokens=protect,
+        min_prune_tokens=<span class="f">max</span>(<span class="n">1000</span>, protect // <span class="n">3</span>),
+    )
+    <span class="k">if</span> pruned &gt; <span class="n">0</span>:
+        logger.<span class="f">info</span>(<span class="s">"Pruned %d old tool results: %.0f%% -&gt; %.0f%%"</span>, ...)
+    <span class="k">if not</span> conversation.<span class="f">needs_compaction</span>():
+        <span class="f">_record_success</span>(conv_id, now); <span class="k">return</span>
+
+    <span class="c"># --- Step 2: LLM summary compaction ---</span>
+    <span class="k">if</span> ctx.llm <span class="k">is not None and not</span> _llm_compaction_skipped:
+        <span class="k">try</span>:
+            summary = <span class="k">await</span> <span class="f">llm_compact</span>(
+                ctx, <span class="f">list</span>(conversation.messages), accumulator,
+                char_limit=char_limit, max_depth=max_depth,
+                max_context_tokens=config.max_context_tokens,
+            )
+            <span class="k">await</span> conversation.<span class="f">compact</span>(summary, keep_recent=<span class="n">2</span>, phase_graduated=phase_grad)
+        <span class="k">except</span> Exception <span class="k">as</span> e:
+            logger.<span class="f">warning</span>(<span class="s">"LLM compaction failed: %s"</span>, e)
+            _failure_counts[conv_id] = _failure_counts.<span class="f">get</span>(conv_id, <span class="n">0</span>) + <span class="n">1</span>
+
+    <span class="k">if not</span> conversation.<span class="f">needs_compaction</span>():
+        <span class="f">_record_success</span>(conv_id, now); <span class="k">return</span>
+
+    <span class="c"># --- Step 3: Emergency deterministic summary (LLM failed/unavailable) ---</span>
+    logger.<span class="f">warning</span>(<span class="s">"Emergency compaction (%.0f%% usage)"</span>, conversation.<span class="f">usage_ratio</span>() * <span class="n">100</span>)
+    summary = <span class="f">build_emergency_summary</span>(ctx, accumulator, conversation, config)
+    <span class="k">await</span> conversation.<span class="f">compact</span>(summary, keep_recent=<span class="n">1</span>, phase_graduated=phase_grad)
+    <span class="f">_record_success</span>(conv_id, now)
+    <span class="k">await</span> <span class="f">log_compaction</span>(ctx, conversation, ratio_before, event_bus, pre_inventory=pre_inventory)</code></pre>
+<p>
+  <em>Note:</em> stage-success bookkeeping (the <code class="inline">log_compaction()</code> awaits and
+  early returns) is collapsed for readability above; the full source has the call in each successful branch.
+</p>
+
+<h2><span class="stage-tag free">Stage 0</span> Microcompaction</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L91-L161">core/framework/agent_loop/internals/compaction.py:91-161</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">microcompact</span>(
+    conversation: NodeConversation,
+    *,
+    keep_recent: int = MICROCOMPACT_KEEP_RECENT,
+) -&gt; <span class="k">int</span>:
+    <span class="s">"""Clear old compactable tool results by count, keeping only the most recent.
+
+    This is the cheapest possible compaction &mdash; no LLM call, no structural
+    changes, just replaces old tool result content with a short placeholder.
+    Inspired by Claude Code's cached-microcompact strategy.
+
+    Returns the number of tool results cleared.
+    """</span>
+    <span class="c"># Collect indices of compactable tool results (newest first)</span>
+    compactable_indices: list[int] = []
+    messages = conversation.messages
+    <span class="k">for</span> i <span class="k">in</span> <span class="f">range</span>(<span class="f">len</span>(messages) - <span class="n">1</span>, -<span class="n">1</span>, -<span class="n">1</span>):
+        msg = messages[i]
+        <span class="k">if</span> msg.role != <span class="s">"tool"</span> <span class="k">or</span> msg.is_error <span class="k">or</span> msg.is_skill_content:
+            <span class="k">continue</span>
+        <span class="k">if</span> msg.content.<span class="f">startswith</span>((<span class="s">"Pruned tool result"</span>, <span class="s">"[Pruned tool result"</span>, <span class="s">"[Old tool result"</span>)):
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="f">len</span>(msg.content) &lt; <span class="n">100</span>:
+            <span class="k">continue</span>
+
+        <span class="c"># Check if the tool that produced this result is compactable</span>
+        tool_name = <span class="f">_find_tool_name_for_result</span>(messages, msg)
+        <span class="k">if</span> tool_name <span class="k">and</span> tool_name <span class="k">in</span> COMPACTABLE_TOOLS:
+            compactable_indices.<span class="f">append</span>(i)
+
+    <span class="c"># Keep the most recent N, clear the rest</span>
+    to_clear = compactable_indices[keep_recent:]
+    <span class="k">if not</span> to_clear:
+        <span class="k">return</span> <span class="n">0</span>
+
+    cleared = <span class="n">0</span>
+    <span class="k">for</span> i <span class="k">in</span> to_clear:
+        msg = messages[i]
+        spillover = <span class="f">_extract_spillover_filename_inline</span>(msg.content)
+        orig_len = <span class="f">len</span>(msg.content)
+        <span class="k">if</span> spillover:
+            placeholder = (
+                <span class="s">f"Old tool result ({orig_len:,} chars) at {spillover}. "</span>
+                <span class="s">f"Use terminal_rg with a pattern against this path to recover specifics."</span>
+            )
+        <span class="k">else</span>:
+            placeholder = <span class="s">f"Old tool result ({orig_len:,} chars) cleared from context."</span>
+
+        <span class="c"># Mutate in-place (microcompact is synchronous, no store writes)</span>
+        conversation._messages[i] = <span class="f">Message</span>(
+            seq=msg.seq, role=msg.role, content=placeholder,
+            tool_use_id=msg.tool_use_id, tool_calls=msg.tool_calls,
+            is_error=msg.is_error, phase_id=msg.phase_id,
+            is_transition_marker=msg.is_transition_marker,
+        )
+        cleared += <span class="n">1</span>
+
+    <span class="k">if</span> cleared &gt; <span class="n">0</span>:
+        conversation._last_api_input_tokens = <span class="k">None</span>
+    <span class="k">return</span> cleared</code></pre>
+
+<h3>The <code>COMPACTABLE_TOOLS</code> allowlist</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L39-L66">core/framework/agent_loop/internals/compaction.py:39-66</a>
+<pre class="code"><code><span class="c"># Microcompaction: tools whose results can be safely cleared from context
+# because the agent can re-derive them on demand. The bar for inclusion is
+# "old result has no irreversible value": file content can be re-read, a
+# search can be re-run, a screenshot can be re-captured, terminal output can
+# be re-fetched, etc.</span>
+COMPACTABLE_TOOLS: frozenset[str] = <span class="f">frozenset</span>(
+    {
+        <span class="c"># File ops &mdash; content lives on disk, re-readable.</span>
+        <span class="s">"read_file"</span>, <span class="s">"search_files"</span>, <span class="s">"write_file"</span>, <span class="s">"edit_file"</span>, <span class="s">"pdf_read"</span>,
+        <span class="c"># Terminal &mdash; re-runnable.</span>
+        <span class="s">"terminal_exec"</span>, <span class="s">"terminal_rg"</span>, <span class="s">"terminal_find"</span>,
+        <span class="s">"terminal_output_get"</span>, <span class="s">"terminal_job_logs"</span>,
+        <span class="c"># Web / research &mdash; pages and queries can be re-fetched.</span>
+        <span class="s">"web_scrape"</span>, <span class="s">"search_papers"</span>, <span class="s">"download_paper"</span>, <span class="s">"search_wikipedia"</span>,
+        <span class="c"># Browser read-only inspection.</span>
+        <span class="s">"browser_screenshot"</span>, <span class="s">"browser_snapshot"</span>, <span class="s">"browser_html"</span>, <span class="s">"browser_get_text"</span>,
+    }
+)</code></pre>
+<div class="callout">
+  <div class="label">Tuning history (recorded in the source)</div>
+  <code class="inline">MICROCOMPACT_KEEP_RECENT</code> was tuned <strong>8 &rarr; 4 &rarr; 2</strong> over two rounds.
+  Production sessions carried many large compactable results before any iteration-level trigger fired; cutting
+  the keep-count by 2 reclaims ~20&nbsp;KB per turn without losing recoverability because the placeholder still
+  cites the spillover path and the agent can <code class="inline">read_file()</code> or
+  <code class="inline">terminal_rg</code> on demand.
+  <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L68-L79">compaction.py:68-79</a>
+</div>
+
+<h2><span class="stage-tag async">Stage 1</span> Prune old tool results</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1044-L1145">core/framework/agent_loop/conversation.py:1044-1145</a>
+<pre class="code"><code><span class="k">async def</span> <span class="f">prune_old_tool_results</span>(
+    self,
+    protect_tokens: int = <span class="n">5000</span>,
+    min_prune_tokens: int = <span class="n">2000</span>,
+) -&gt; <span class="k">int</span>:
+    <span class="s">"""Replace old tool result content with compact placeholders.
+
+    Walks backward through messages. Recent tool results (within
+    *protect_tokens*) are kept intact. Older tool results have their
+    content replaced with a ~100-char placeholder that preserves the
+    spillover filename reference (if any). Message structure (role,
+    seq, tool_use_id) stays valid for the LLM API.
+
+    Phase-aware behavior (continuous mode): when messages have ``phase_id``
+    metadata, all messages in the current phase are protected regardless of
+    token budget. Transition markers are never pruned. Older phases' tool
+    results are pruned more aggressively.
+
+    Error tool results are never pruned &mdash; they prevent re-calling
+    failing tools.
+
+    Returns the number of messages pruned (0 if nothing was pruned).
+    """</span></code></pre>
+<p>The orchestrator sizes the prune budget relative to the window:</p>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L273-L278">core/framework/agent_loop/internals/compaction.py:273-278</a>
+<pre class="code"><code><span class="c"># --- Step 1: Prune old tool results (free, fast) ---</span>
+protect = <span class="f">max</span>(<span class="n">2000</span>, config.max_context_tokens // <span class="n">12</span>)
+pruned = <span class="k">await</span> conversation.<span class="f">prune_old_tool_results</span>(
+    protect_tokens=protect,
+    min_prune_tokens=<span class="f">max</span>(<span class="n">1000</span>, protect // <span class="n">3</span>),
+)</code></pre>
+<p>Protected categories (walked backward, never pruned):</p>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L1075-L1098">core/framework/agent_loop/conversation.py:1075-1098</a>
+<pre class="code"><code><span class="k">for</span> i <span class="k">in</span> <span class="f">range</span>(<span class="f">len</span>(self._messages) - <span class="n">1</span>, -<span class="n">1</span>, -<span class="n">1</span>):
+    msg = self._messages[i]
+    <span class="c"># Transition markers are never pruned (any role)</span>
+    <span class="k">if</span> msg.is_transition_marker: <span class="k">continue</span>
+    <span class="k">if</span> msg.role != <span class="s">"tool"</span>: <span class="k">continue</span>
+    <span class="k">if</span> msg.is_error: <span class="k">continue</span>          <span class="c"># never prune errors</span>
+    <span class="k">if</span> msg.is_skill_content: <span class="k">continue</span>  <span class="c"># AS-10: never prune activated skills</span>
+    <span class="k">if</span> msg.content.<span class="f">startswith</span>((<span class="s">"Pruned tool result"</span>, <span class="s">"[Pruned tool result"</span>)):
+        <span class="k">continue</span>                          <span class="c"># already pruned</span>
+    <span class="c"># Tiny results (set_output acks, confirmations) &mdash; pruning
+    # saves negligible space but makes the LLM think the call
+    # failed, causing costly retries.</span>
+    <span class="k">if</span> <span class="f">len</span>(msg.content) &lt; <span class="n">100</span>: <span class="k">continue</span>
+    <span class="c"># Phase-aware: protect current phase messages</span>
+    <span class="k">if</span> self._current_phase <span class="k">and</span> msg.phase_id == self._current_phase: <span class="k">continue</span></code></pre>
+
+<h2><span class="stage-tag llm">Stage 2</span> LLM summary compaction</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L412-L518">core/framework/agent_loop/internals/compaction.py:412-518</a>
+<pre class="code"><code><span class="k">async def</span> <span class="f">llm_compact</span>(
+    ctx: NodeContext,
+    messages: list,
+    accumulator: OutputAccumulator | None = <span class="k">None</span>,
+    _depth: int = <span class="n">0</span>,
+    *,
+    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    max_depth: int = LLM_COMPACT_MAX_DEPTH,
+    max_context_tokens: int = <span class="n">128_000</span>,
+    preserve_user_messages: bool = <span class="k">False</span>,
+) -&gt; <span class="k">str</span>:
+    <span class="s">"""Summarise *messages* with LLM, splitting recursively if too large.
+
+    If the formatted text exceeds ``LLM_COMPACT_CHAR_LIMIT`` or the LLM
+    rejects the call with a context-length error, the messages are split
+    in half and each half is summarised independently.  Tool history is
+    appended once at the top-level call (``_depth == 0``).
+
+    When ``preserve_user_messages`` is True, the prompt and system message
+    are amplified to instruct the LLM to keep every user message verbatim
+    and in full &mdash; used by the manual /compact-and-fork endpoint where the
+    user wants their voice carried into the new session intact.
+    """</span>
+
+    <span class="k">if</span> _depth &gt; max_depth:
+        <span class="k">raise</span> <span class="f">RuntimeError</span>(<span class="s">f"LLM compaction recursion limit ({max_depth})"</span>)
+
+    <span class="c"># Strip images before summarisation to avoid wasting tokens</span>
+    <span class="k">if</span> _depth == <span class="n">0</span>:
+        messages = <span class="f">strip_images_from_messages</span>(messages)
+
+    formatted = <span class="f">format_messages_for_summary</span>(messages)
+
+    <span class="c"># Proactive split: avoid wasting an API call on oversized input</span>
+    <span class="k">if</span> <span class="f">len</span>(formatted) &gt; char_limit <span class="k">and</span> <span class="f">len</span>(messages) &gt; <span class="n">1</span>:
+        summary = <span class="k">await</span> <span class="f">_llm_compact_split</span>(...)
+    <span class="k">else</span>:
+        prompt = <span class="f">build_llm_compaction_prompt</span>(...)
+        <span class="k">if</span> preserve_user_messages:
+            system_msg = <span class="s">"You are a conversation compactor for an AI agent. ... CRITICAL: reproduce every user message verbatim and in full ..."</span>
+        <span class="k">else</span>:
+            system_msg = <span class="s">"You are a conversation compactor for an AI agent. Write a detailed summary that allows the agent to continue its work. Preserve user-stated rules, constraints, and account/identity preferences verbatim."</span>
+        summary_budget = <span class="f">max</span>(<span class="n">1024</span>, max_context_tokens // <span class="n">2</span>)
+        <span class="k">try</span>:
+            response = <span class="k">await</span> ctx.llm.<span class="f">acomplete</span>(
+                messages=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: prompt}],
+                system=system_msg,
+                max_tokens=summary_budget,
+            )
+            summary = response.content
+        <span class="k">except</span> Exception <span class="k">as</span> e:
+            <span class="k">if</span> <span class="f">is_context_too_large_error</span>(e) <span class="k">and</span> <span class="f">len</span>(messages) &gt; <span class="n">1</span>:
+                logger.<span class="f">info</span>(<span class="s">"LLM context too large (depth=%d, msgs=%d) &mdash; splitting"</span>, _depth, <span class="f">len</span>(messages))
+                summary = <span class="k">await</span> <span class="f">_llm_compact_split</span>(...)
+            <span class="k">else</span>:
+                <span class="k">raise</span>
+
+    <span class="c"># Append tool history at top level only</span>
+    <span class="k">if</span> _depth == <span class="n">0</span>:
+        tool_history = <span class="f">extract_tool_call_history</span>(messages)
+        <span class="k">if</span> tool_history <span class="k">and</span> <span class="s">"TOOLS ALREADY CALLED"</span> <span class="k">not in</span> summary:
+            summary += <span class="s">"\n\n"</span> + tool_history
+
+    <span class="k">return</span> summary</code></pre>
+
+<h3>The structured prompt</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L626-L656">core/framework/agent_loop/internals/compaction.py:626-656</a>
+<pre class="code"><code><span class="k">return</span> (
+    <span class="s">"You are compacting an AI agent's conversation history. "</span>
+    <span class="s">"The agent is still working and needs to continue.\n\n"</span>
+    <span class="s">f"AGENT CONTEXT:\n{node_ctx}\n\n"</span>
+    <span class="s">f"CONVERSATION MESSAGES:\n{formatted_messages}\n\n"</span>
+    <span class="s">"INSTRUCTIONS:\n"</span>
+    <span class="s">f"Write a summary of approximately {target_chars} characters "</span>
+    <span class="s">f"(~{target_tokens} tokens).\n\n"</span>
+    <span class="s">"Organise the summary into these sections (omit empty ones):\n\n"</span>
+    <span class="s">"1. **Primary Request and Intent** &mdash; What the user originally asked "</span>
+    <span class="s">"for and the high-level goal the agent is working toward.\n"</span>
+    <span class="s">"2. **Key Technical Concepts** &mdash; ...\n"</span>
+    <span class="s">"3. **Files and Code Sections** &mdash; Specific files read/written/edited ...\n"</span>
+    <span class="s">"4. **Errors and Fixes** &mdash; Problems encountered and how they were "</span>
+    <span class="s">"resolved. Include root causes so the agent doesn't repeat them.\n"</span>
+    <span class="s">"5. **Problem Solving Efforts** &mdash; Approaches tried, dead ends hit, ...\n"</span>
+    <span class="s">f"{user_messages_section}"</span>
+    <span class="s">"7. **Pending Tasks** &mdash; Work remaining, outputs still needed, ...\n"</span>
+    <span class="s">"8. **Current Work** &mdash; The most recent action taken and the immediate "</span>
+    <span class="s">"next step the agent should perform. This section is the most important "</span>
+    <span class="s">"for seamless resumption.\n\n"</span>
+    <span class="s">"Additional rules:\n"</span>
+    <span class="s">"- Be detailed enough that the agent can resume without re-doing work.\n"</span>
+    <span class="s">"- Preserve key decisions made and results obtained.\n"</span>
+    <span class="s">"- When in doubt, keep information rather than discard it.\n"</span>
+)</code></pre>
+
+<h3>Recursive split when input is oversize</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L521-L554">core/framework/agent_loop/internals/compaction.py:521-554</a>
+<pre class="code"><code><span class="k">async def</span> <span class="f">_llm_compact_split</span>(
+    ctx: NodeContext,
+    messages: list,
+    accumulator: OutputAccumulator | None,
+    _depth: int,
+    *,
+    char_limit: int = LLM_COMPACT_CHAR_LIMIT,
+    max_depth: int = LLM_COMPACT_MAX_DEPTH,
+    max_context_tokens: int = <span class="n">128_000</span>,
+    preserve_user_messages: bool = <span class="k">False</span>,
+) -&gt; <span class="k">str</span>:
+    <span class="s">"""Split messages in half and summarise each half independently."""</span>
+    mid = <span class="f">max</span>(<span class="n">1</span>, <span class="f">len</span>(messages) // <span class="n">2</span>)
+    s1 = <span class="k">await</span> <span class="f">llm_compact</span>(ctx, messages[:mid], <span class="k">None</span>, _depth + <span class="n">1</span>, ...)
+    s2 = <span class="k">await</span> <span class="f">llm_compact</span>(ctx, messages[mid:], accumulator, _depth + <span class="n">1</span>, ...)
+    <span class="k">return</span> s1 + <span class="s">"\n\n"</span> + s2</code></pre>
+
+<h2><span class="stage-tag emergency">Stage 3</span> Emergency deterministic summary</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L831-L921">core/framework/agent_loop/internals/compaction.py:831-921</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">build_emergency_summary</span>(
+    ctx: NodeContext,
+    accumulator: OutputAccumulator | None = <span class="k">None</span>,
+    conversation: NodeConversation | None = <span class="k">None</span>,
+    config: LoopConfig | None = <span class="k">None</span>,
+) -&gt; <span class="k">str</span>:
+    <span class="s">"""Build a structured emergency compaction summary.
+
+    Unlike normal/aggressive compaction which uses an LLM summary,
+    emergency compaction cannot afford an LLM call (context is already
+    way over budget).  Instead, build a deterministic summary from the
+    node's known state so the LLM can continue working after
+    compaction without losing track of its task and inputs.
+    """</span>
+    parts = [<span class="s">"EMERGENCY COMPACTION &mdash; previous conversation was too large and has been replaced with this summary.\n"</span>]
+
+    <span class="c"># 1. Node identity</span>
+    spec = ctx.agent_spec
+    parts.<span class="f">append</span>(<span class="s">f"NODE: {spec.name} (id={spec.id})"</span>)
+    <span class="k">if</span> spec.description:
+        parts.<span class="f">append</span>(<span class="s">f"PURPOSE: {spec.description}"</span>)
+
+    <span class="c"># 2. Inputs the node received</span>
+    <span class="c"># 3. Output accumulator state (what's been set so far)</span>
+    <span class="c"># 4. Available tools reminder</span>
+    <span class="c"># 5. Spillover files &mdash; list actual files so the LLM can load
+    #    them immediately instead of having to call list_data_files first.</span>
+    <span class="c"># 6. Tool call history (prevent re-calling tools)</span>
+
+    parts.<span class="f">append</span>(<span class="s">"\nContinue working towards setting the remaining outputs. Use your tools and the inputs above."</span>)
+    <span class="k">return</span> <span class="s">"\n\n"</span>.<span class="f">join</span>(parts)</code></pre>
+<p>
+  Note the spillover listing at
+  <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L883-L912">compaction.py:883-912</a>
+  &mdash; the emergency summary enumerates every <code class="inline">conversation_N.md</code> and data file
+  in the spillover directory with full paths, so the agent can rehydrate any earlier context on demand
+  without first having to call <code class="inline">list_directory</code>.
+</p>
+
+<h2>Cross-cutting safety mechanisms</h2>
+
+<h3>Circuit breaker</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L80-L88">core/framework/agent_loop/internals/compaction.py:80-88</a>
+<pre class="code"><code><span class="c"># Circuit-breaker: stop auto-compacting after this many consecutive failures</span>
+MAX_CONSECUTIVE_FAILURES: int = <span class="n">3</span>
+
+<span class="c"># Track consecutive compaction failures per conversation (module-level)</span>
+_failure_counts: dict[int, int] = {}
+
+<span class="c"># Track last compaction time per conversation for recompaction detection</span>
+_last_compact_times: dict[int, float] = {}</code></pre>
+<p>
+  After three consecutive Stage&nbsp;3 failures, the orchestrator skips the LLM call but
+  <em>still</em> falls through to Stage&nbsp;4. The reasoning is in the source comment at
+  <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L225-L235">compaction.py:225-235</a>:
+  &ldquo;Without this, a persistent LLM outage during compaction would leave the agent stuck sending
+  oversized prompts until the API 400s.&rdquo;
+</p>
+
+<h3>Recompaction detection</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L237-L244">core/framework/agent_loop/internals/compaction.py:237-244</a>
+<pre class="code"><code><span class="c"># Recompaction detection</span>
+now = time.<span class="f">monotonic</span>()
+last_time = _last_compact_times.<span class="f">get</span>(conv_id)
+<span class="k">if</span> last_time <span class="k">is not None and</span> (now - last_time) &lt; <span class="n">30</span>:
+    logger.<span class="f">warning</span>(
+        <span class="s">"Recompaction chain detected: only %.1fs since last compaction"</span>,
+        now - last_time,
+    )</code></pre>
+<p>
+  Two compactions within 30 seconds get a loud warning in the log. This catches pathological cases
+  like an LLM returning a summary that itself fills the context again.
+</p>
+
+<h3>Telemetry &mdash; the <code>CONTEXT_COMPACTED</code> event</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L806-L828">core/framework/agent_loop/internals/compaction.py:806-828</a>
+<pre class="code"><code><span class="k">if</span> event_bus:
+    <span class="k">from</span> framework.host.event_bus <span class="k">import</span> AgentEvent, EventType
+
+    event_data: dict[str, Any] = {
+        <span class="s">"level"</span>: level,
+        <span class="s">"usage_before"</span>: before_pct,
+        <span class="s">"usage_after"</span>: after_pct,
+    }
+    <span class="k">if</span> pre_inventory <span class="k">is not None</span>:
+        event_data[<span class="s">"message_inventory"</span>] = pre_inventory
+    <span class="k">await</span> event_bus.<span class="f">publish</span>(
+        <span class="f">AgentEvent</span>(
+            type=EventType.CONTEXT_COMPACTED,
+            stream_id=ctx.stream_id <span class="k">or</span> ctx.agent_id,
+            node_id=ctx.agent_id,
+            data=event_data,
+        )
+    )
+
+<span class="k">await</span> <span class="f">publish_context_usage</span>(event_bus, ctx, conversation, <span class="s">"post_compaction"</span>)
+
+<span class="k">if</span> os.environ.<span class="f">get</span>(<span class="s">"HIVE_COMPACTION_DEBUG"</span>):
+    <span class="f">write_compaction_debug_log</span>(ctx, before_pct, after_pct, level, pre_inventory)</code></pre>
+<p>
+  <code class="inline">level</code> is labeled <code class="inline">prune_only</code> if the after-percentage
+  did not actually drop by more than one percentage point, <code class="inline">llm</code> if it dropped to
+  &le;&nbsp;60%, otherwise <code class="inline">structural</code>. See
+  <a class="src-ref" href="../../core/framework/agent_loop/internals/compaction.py#L781-L787">compaction.py:781-787</a>.
+</p>
+
+<h3>Background fork-and-compact</h3>
+<p>
+  When the user runs a manual <code class="inline">/compact-and-fork</code> (queen colony creation),
+  compaction is dispatched as a background task with a wall-clock timeout so an orphaned LLM call
+  cannot block the new colony forever:
+</p>
+<a class="src-ref" href="../../core/framework/server/routes_execution.py#L1689">core/framework/server/routes_execution.py:1689</a>
+<pre class="code"><code>_COMPACTION_TIMEOUT_SECONDS = <span class="n">180.0</span></code></pre>
+<p>
+  Status is tracked in <code class="inline">&lt;queen_dir&gt;/compaction_status.json</code> (states:
+  <code class="inline">in_progress</code>, <code class="inline">done</code>,
+  <code class="inline">failed</code>) by
+  <a class="src-ref" href="../../core/framework/server/compaction_status.py">core/framework/server/compaction_status.py</a>.
+  Stale <code class="inline">in_progress</code> markers from crashed server runs are rewritten to
+  <code class="inline">failed</code> on startup so a fresh colony load doesn&rsquo;t wait the full 180&nbsp;s
+  timeout on a dead task.
+</p>
+
+<footer class="botline">
+  Next: <a href="./transformations.html">Transformations &rarr;</a> &mdash; what each stage does to the message list.
+</footer>
+
+</div>
+</body>
+</html>

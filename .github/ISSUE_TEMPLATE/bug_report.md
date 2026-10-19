@@ -1,9 +1,10 @@
 ---
 name: Bug Report
 about: Report a bug to help us improve
-title: '[Bug]: '
-labels: bug
+title: "[Bug]: "
+labels: bug, enhancement
 assignees: ''
+
 ---
 
 ## Describe the Bug

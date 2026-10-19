@@ -1,15 +1,18 @@
 """Tests for web_search tool with multi-provider support (FastMCP)."""
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from fastmcp import FastMCP
 
-from aden_tools.tools.web_search_tool import register_tools
+from aden_tools.tools.web_search_tool import register_tools, web_search_tool
 
 
 @pytest.fixture
-def web_search_fn(mcp: FastMCP):
+def web_search_fn(mcp: FastMCP, monkeypatch):
     """Register and return the web_search tool function."""
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: httpx.Response(200, json={}))
     register_tools(mcp)
     return mcp._tool_manager._tools["web_search"].fn
 
@@ -142,24 +145,28 @@ class TestParameters:
         ],
     )
     @pytest.mark.parametrize("provider", ["brave", "google", "auto"])
-    def test_invalid_num_results_skips_request(
-        self, web_search_fn, monkeypatch, num_results, message, provider
-    ):
-        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
-        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
-        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse")
+    @pytest.mark.parametrize("credential_source", ["environment", "store"])
+    def test_invalid_num_results_skips_request(self, mcp, mock_credentials, monkeypatch, num_results, message, provider, credential_source):
+        """Reject invalid counts before credential lookup or provider requests."""
+
+        def unexpected_credentials(*args, **kwargs):
+            pytest.fail("Invalid result counts must not read search credentials")
+
+        monkeypatch.setattr(web_search_tool, "os", SimpleNamespace(getenv=unexpected_credentials))
+        monkeypatch.setattr(mock_credentials, "get", unexpected_credentials)
+        register_tools(mcp, credentials=mock_credentials if credential_source == "store" else None)
+        web_search_fn = mcp._tool_manager._tools["web_search"].fn
 
         def unexpected_request(*args, **kwargs):
             pytest.fail("Invalid result counts must not reach a search provider")
 
         monkeypatch.setattr(httpx, "get", unexpected_request)
-        assert web_search_fn("test", num_results=num_results, provider=provider) == {
-            "error": message
-        }
+        assert web_search_fn("test", num_results=num_results, provider=provider) == {"error": message}
 
     @pytest.mark.parametrize("num_results", [1, 20])
     @pytest.mark.parametrize("provider", ["brave", "google"])
     def test_num_results_boundaries(self, web_search_fn, monkeypatch, num_results, provider):
+        """Preserve each provider's result-count cap at both valid boundaries."""
         monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
         monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse")
@@ -171,7 +178,10 @@ class TestParameters:
 
         monkeypatch.setattr(httpx, "get", search_response)
         result = web_search_fn("test", num_results=num_results, provider=provider)
-        assert result == {"query": "test", "results": [], "total": 0, "provider": provider}
+        assert result["query"] == "test"
+        assert result["results"] == []
+        assert result["total"] == 0
+        assert result["provider"] == provider
         assert len(requests) == 1
         if provider == "brave":
             assert requests[0][1]["count"] == num_results

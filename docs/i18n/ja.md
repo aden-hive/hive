@@ -1,343 +1,207 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/readme/banner-dark.webp" />
+    <img width="100%" alt="OpenHive。欲しい成果を伝えれば、Queen エージェントがそれを実現するコロニーを育てます。" src="../assets/readme/banner-light.webp" />
+  </picture>
 </p>
 
 <p align="center">
   <a href="../../README.md">English</a> |
   <a href="zh-CN.md">简体中文</a> |
   <a href="es.md">Español</a> |
+  <a href="hi.md">हिन्दी</a> |
   <a href="pt.md">Português</a> |
   <a href="ja.md">日本語</a> |
   <a href="ru.md">Русский</a> |
   <a href="ko.md">한국어</a>
 </p>
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
-[![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
-[![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
-[![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
-[![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
-
 <p align="center">
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Goal--Driven-Development-purple?style=flat-square" alt="Goal-Driven" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 ライセンス" /></a>
+  <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
+  <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="X でフォロー" /></a>
+  <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
 </p>
 
-## 概要
-
-ワークフローをハードコーディングせずに、信頼性の高い自己改善型AIエージェントを構築できます。コーディングエージェントとの会話を通じて目標を定義すると、フレームワークが動的に作成された接続コードを持つノードグラフを生成します。問題が発生すると、フレームワークは障害データをキャプチャし、コーディングエージェントを通じてエージェントを進化させ、再デプロイします。組み込みのヒューマンインザループノード、認証情報管理、リアルタイムモニタリングにより、適応性を損なうことなく制御を維持できます。
-
-完全なドキュメント、例、ガイドについては [adenhq.com](https://adenhq.com) をご覧ください。
-
-## Adenとは
+<h3 align="center">実際のビジネス業務をこなす AI エージェントのコロニーを動かす、オープンソースのランタイム。</h3>
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  Queen エージェントに、必要なことを伝えるだけ。Queen はまず最初の 1 件を自分でこなして仕事に何が必要かを見極め、残りは必要な数だけの worker に並列で任せます。結果はすべて共有トラッカーに記録され、いつでもクエリ、監査、そこからの再開ができます。
 </p>
 
-Adenは、AIエージェントの構築、デプロイ、運用、適応のためのプラットフォームです：
+<p align="center">
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="デモ：グロース担当の Queen が、並列に動く worker のコロニーを使って 5 製品の Hacker News でのローンチを調べる様子" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>実際の実行を録画したものです。早送りしているのは入力と待ち時間だけで、どれだけ速めたかはバッジに表示されます。<a href="../assets/readme/demo.mp4">実行の全体を見る（MP4）</a>。</sub>
+</p>
 
-- **構築** - コーディングエージェントが自然言語の目標から専門的なワーカーエージェント（セールス、マーケティング、オペレーション）を生成
-- **デプロイ** - CI/CD統合と完全なAPIライフサイクル管理を備えたヘッドレスデプロイメント
-- **運用** - リアルタイムモニタリング、可観測性、ランタイムガードレールがエージェントの信頼性を維持
-- **適応** - 継続的な評価、監督、適応により、エージェントは時間とともに改善
-- **インフラ** - 共有メモリ、LLM統合、ツール、スキルがすべてのエージェントを支援
+## デモで起きていたこと
 
-## クイックリンク
+Show HN を準備中のグロースチームが、5 つの開発者ツールについて、各ツール自身による Hacker News でのローンチがどれだけ反響を得たかを知りたいと考えています。この 1 通のメッセージを受けて、Hive は次のように動きました。
 
-- **[ドキュメント](https://docs.adenhq.com/)** - 完全なガイドとAPIリファレンス
-- **[セルフホスティングガイド](https://docs.adenhq.com/getting-started/quickstart)** - インフラストラクチャへのHiveデプロイ
-- **[変更履歴](https://github.com/adenhq/hive/releases)** - 最新の更新とリリース
-<!-- - **[ロードマップ](https://adenhq.com/roadmap)** - 今後の機能と計画 -->
-- **[問題を報告](https://github.com/adenhq/hive/issues)** - バグレポートと機能リクエスト
+1. **Queen に任せる。** Queen は、役割（ここではグロース責任者）と専用のメモリやツールを持つ、長期稼働型のエージェントです。
+2. **答えを左右する質問を 1 つだけする：** ローンチ投稿をすべて対象にするか、各製品の最初のローンチだけにするか？ あなたがすべてのローンチを選ぶと、Queen はそのまま作業を続けます。
+3. **Queen がコロニーを提案し、あなたが承認する。** 5 製品なら並列ジョブが 5 つ。そこでチャットはコロニーになります。コロニーとは、Queen と、作業に必要な数の worker エージェントの集まりです。
+4. **1 件は Queen 自身がこなす。** まず PostHog に取りかかり、ついでに触れただけの投稿ではなく本物のローンチ投稿とみなせるのはどれかを見極め、数値を Hacker News API と照合し、その手順を再利用できるスキルとして保存します。
+5. **残りをファンアウトする。** プレイブックが製品ごとに worker を 1 つずつ起動します。各 worker は Queen のスキルに従い、結果をコロニーのトラッカー（共有の SQLite テーブル）に書き込みます。
+6. **回答する前に全行を確認し、1 行を修正する。** Cal.com 担当の worker は旧名 Calendso の投稿をカウントしていましたが、その投稿は Show HN でも Launch HN でも YC のローンチでもありませんでした。Queen はその行をクリアし、グラフでは Cal.com をゼロではなく「該当なし」として示します。
+
+どれも事前に組み込まれていたものではありません。描くべきワークフローグラフはなく、Queen は作業の進行に合わせてコロニーを形づくります。何が終わって何が残っているかを把握しているのは、コンテキストウィンドウではなく、ディスク上のトラッカーです。
 
 ## クイックスタート
 
-### 前提条件
+**必要なもの：** Python 3.11+、Node.js 20+、git。`uv` と `ripgrep` がなければクイックスタートがインストールし、Node のインストールも提案します。
 
-- [Python 3.11+](https://www.python.org/downloads/) - エージェント開発用
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - オプション、コンテナ化されたツール用
+**それとモデルも必要です。** クイックスタートでは、次のいずれでも設定できます：
 
-### インストール
+- Anthropic、OpenAI、Google Gemini、Groq、Cerebras、OpenRouter のいずれかの API キー
+- すでに契約しているコーディング向けサブスクリプション：Claude Code、OpenAI Codex、Kimi Code、MiniMax、Z.AI、Antigravity
+- Hive LLM
+- Ollama 経由のローカルモデル（キーは一切不要）
 
 ```bash
-# リポジトリをクローン
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Python環境セットアップを実行
-./scripts/setup-python.sh
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-これにより以下がインストールされます：
-- **framework** - コアエージェントランタイムとグラフエグゼキュータ
-- **aden_tools** - エージェント機能のための19個のMCPツール
-- すべての必要な依存関係
+クイックスタートは、ワークスペース用の Python 環境を 1 つ作成し、API キーを暗号化して `~/.hive` 配下に保存し、使用するモデルを尋ね、ダッシュボードをビルドして `http://127.0.0.1:8787` で開きます。次回からは、リポジトリで `hive open` を実行してください。
 
-### 最初のエージェントを構築
+> [!NOTE]
+> Hive は pip パッケージではなく、`uv` ワークスペースです。`pip install -e .` では動作しないプレースホルダーがインストールされるだけなので、クイックスタートを使ってください。
 
-```bash
-# Claude Codeスキルをインストール（1回のみ）
-./quickstart.sh
+**あとは**、ホーム画面にタスクを入力して任せる Queen を選ぶか、**プロンプトライブラリ**（Prompt Library）を開いて、用意されたプロンプトを想定先の Queen にそのまま送るだけです。
 
-# Claude Codeを使用してエージェントを構築
-claude> /building-agents-construction
-
-# エージェントをテスト
-claude> /testing-agent
-
-# エージェントを実行
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
-```
-
-**[📖 完全セットアップガイド](ENVIRONMENT_SETUP.md)** - エージェント開発の詳細な手順
-
-## 機能
-
-- **目標駆動開発** - 自然言語で目標を定義；コーディングエージェントがそれを達成するためのエージェントグラフと接続コードを生成
-- **自己適応エージェント** - フレームワークが障害をキャプチャし、目標を更新し、エージェントグラフを更新
-- **動的ノード接続** - 事前定義されたエッジなし；接続コードは目標に基づいて任意の対応LLMによって生成
-- **SDKラップノード** - すべてのノードが共有メモリ、ローカルRLMメモリ、モニタリング、ツール、LLMアクセスを標準装備
-- **ヒューマンインザループ** - 設定可能なタイムアウトとエスカレーションを備えた、人間の入力のために実行を一時停止する介入ノード
-- **リアルタイム可観測性** - エージェント実行、決定、ノード間通信のライブモニタリングのためのWebSocketストリーミング
-- **コストと予算管理** - 支出制限、スロットル、自動モデル劣化ポリシーを設定
-- **本番環境対応** - セルフホスト可能、スケールと信頼性のために構築
-
-## なぜAdenか
-
-従来のエージェントフレームワークでは、ワークフローを手動で設計し、エージェントの相互作用を定義し、障害を事後的に処理する必要があります。Adenはこのパラダイムを逆転させます—**結果を記述すれば、システムが自ら構築します**。
+## 仕組み
 
 ```mermaid
 flowchart LR
-    subgraph BUILD["🏗️ BUILD"]
-        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
-        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
-        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
-    end
+    You(["あなた"]) -->|"成果を伝える"| Queen["Queen<br/>（永続エージェント）"]
+    Queen -->|"コロニーを提案、<br/>あなたが承認"| Pilot["パイロット<br/>（Queen 自身がこなす 1 件）"]
+    Pilot -->|"手順を保存"| Skill["スキル + プレイブック"]
+    Skill -->|"run_worker / run_playbook"| W["worker クローン<br/>（並列実行）"]
+    W -->|"tracker_upsert"| T[("トラッカー<br/>共有 SQLite")]
+    T -->|"SQL：何が完了し、<br/>何が残っているか"| Queen
+    Queen -->|"検証済みの回答"| You
 
-    subgraph EXPORT["📦 EXPORT"]
-        direction TB
-        JSON["agent.json<br/>(GraphSpec)"]
-        TOOLS["tools.py<br/>(Functions)"]
-        MCP["mcp_servers.json<br/>(Integrations)"]
-    end
-
-    subgraph RUN["🚀 RUNTIME"]
-        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
-        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
-
-        subgraph DECISION["Decision Recording"]
-            DEC1["runtime.decide()<br/>intent → options → choice"]
-            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
-        end
-    end
-
-    subgraph INFRA["⚙️ INFRASTRUCTURE"]
-        CTX["NodeContext<br/>memory • llm • tools"]
-        STORE[("FileStorage<br/>Runs & Decisions")]
-    end
-
-    APPROVE --> EXPORT
-    EXPORT --> LOAD
-    EXEC --> DECISION
-    EXEC --> CTX
-    DECISION --> STORE
-    STORE -.->|"Analyze & Improve"| NODES
-
-    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
-    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
-    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
-    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
-    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### Adenの優位性
+Hive の**実行プリミティブはひとつだけ**、エージェントループです。Queen 自体がエージェントループであり、すべての worker はそのクローンです。各 worker は固有のタスク、より絞り込まれたツールセット、厳格な予算を持ちます。オーケストレーションはコンパイル済みのグラフではなく、ツール呼び出しで行います：
 
-| 従来のフレームワーク | Aden |
-|----------------------|------|
-| エージェントワークフローをハードコード | 自然言語で目標を記述 |
-| 手動でグラフを定義 | 自動生成されるエージェントグラフ |
-| 事後的なエラー処理 | プロアクティブな自己進化 |
-| 静的なツール設定 | 動的なSDKラップノード |
-| 別途モニタリング設定 | 組み込みのリアルタイム可観測性 |
-| DIY予算管理 | 統合されたコスト制御と劣化 |
+- **`run_worker`** はタスクをファンアウトしてすぐに戻るので、worker の実行中も Queen はあなたと会話を続けられます。デフォルトでは同時に 4 つまで実行し、残りは順番を待ちます。各 worker の報告は、新しいターンとして Queen の会話に届きます。
+- **トラッカー**はコロニーの共有状態です。Queen がテーブルと、worker が書き込める列を定義し、worker は作業単位ごとに 1 行を upsert し、Queen は SQL で進捗を確認します。実体はディスク上のファイル `~/.hive/colonies/<name>/tracker/tracker.db` です。
+- **`run_playbook`** は、実証済みの手順を全行に対して実行します。バックオフ付きのリトライ、レート制限付きのレーン、失敗し続ける行を集めるデッドレターリストを備えています。「残り」は毎回トラッカーへの新しいクエリで求めるため、プレイブックを再実行すれば止まったところから再開します。
 
-### 仕組み
+**[アーキテクチャ概要](../architecture/README.md)** では、ループ、ツール群、メモリ、人間による監督、そしてクラッシュしても状態が失われない仕組みを詳しく解説しています。
 
-1. **目標を定義** → 達成したいことを平易な言葉で記述
-2. **コーディングエージェントが生成** → エージェントグラフ、接続コード、テストケースを作成
-3. **ワーカーが実行** → SDKラップノードが完全な可観測性とツールアクセスで実行
-4. **コントロールプレーンが監視** → リアルタイムメトリクス、予算執行、ポリシー管理
-5. **自己改善** → 障害時、システムがグラフを進化させ自動的に再デプロイ
+<table>
+  <tr>
+    <td width="50%"><img alt="ホーム：Queen とコロニーのハイブマップ" src="../assets/readme/home.webp" /><br /><sub><b>ホーム。</b>あなたの Queen とそのコロニーを 1 枚のマップで一望できます。タスクを伝え、誰に任せるかを選びます。</sub></td>
+    <td width="50%"><img alt="並列で動くコロニーの worker" src="../assets/readme/workers.webp" /><br /><sub><b>Worker。</b>作業単位ごとに 1 つずつ。それぞれ固有のタスクと予算を持ち、すべて Queen に報告します。</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="結果で埋まっていくコロニーのトラッカー" src="../assets/readme/tracker.webp" /><br /><sub><b>トラッカー。</b>worker が終わるたびに結果が共有テーブルに入り、そのままクエリ、エクスポート、そこからの再開に使えます。</sub></td>
+    <td width="50%"><img alt="出典付きの表とグラフを含む Queen の最終回答" src="../assets/readme/result.webp" /><br /><sub><b>結果。</b>出典とグラフを添えた検証済みの回答が、チャットにそのまま届きます。</sub></td>
+  </tr>
+</table>
 
-## Adenの比較
+## 主な機能
 
-Adenはエージェント開発に根本的に異なるアプローチを採用しています。ほとんどのフレームワークがワークフローをハードコードするか、エージェントグラフを手動で定義することを要求するのに対し、Adenは**コーディングエージェントを使用して自然言語の目標からエージェントシステム全体を生成**します。エージェントが失敗した場合、フレームワークは単にエラーをログに記録するだけでなく—**自動的にエージェントグラフを進化させ**、再デプロイします。
+**役割と記憶を持つ Queen。** Hive には 13 人のペルソナ Queen が付属しています。6 人は最初から有効になっており（グロース、RevOps、コンテンツ、リードジェネレーション、アウトバウンド、ブランド＆デザイン）、残りは組織図（Org Chart）から採用できます。独自の Queen を作ることも可能です。各 Queen は作業しながら Markdown のメモリにメモを残し、関連する過去の会話は自動的にコンテキストへ呼び出されます。
 
-> **注意：** 詳細なフレームワーク比較表とよくある質問については、英語の[README.md](README.md)を参照してください。
+**プロセス内で動く組み込みツール。** シェルコマンドとバックグラウンドジョブ、ファイル編集、高速なコード検索、PDF、添付ファイルと画像、Web スクレイピング、グラフ（ECharts と Mermaid）、CSV ファイル、Hive LLM による画像生成。どれも Hive 自体の中で動くので、ツールサーバーを起動する必要はありません。
 
-### Adenを選ぶべきとき
+**あなたのブラウザをエージェントが操作。** Hive Browser Bridge 拡張機能を使えば、エージェントはログイン済みのあなた自身の Chrome で作業できます。worker ごとに専用のタブグループが割り当てられます。
 
-Adenを選択する場合：
+**スキル。** オープンな [Agent Skills](https://agentskills.io) 形式で書かれた、再利用可能な指示です。Hive には一式が同梱されているほか、手順の有効性が確かめられると Queen が新しいスキルを書きます。すべてのスキルはスキルライブラリ（Skills Library）で管理できます。
 
-- 手動介入なしに**失敗から自己改善する**エージェントが必要
-- ワークフローではなく結果を記述する**目標駆動開発**が必要
-- 自動回復と再デプロイを備えた**本番環境の信頼性**が必要
-- コードを書き直すことなくエージェントアーキテクチャを**迅速に反復**する必要がある
-- リアルタイムモニタリングと人間の監督を備えた**完全な可観測性**が必要
+**あらゆる MCP サーバー。** `hive mcp add` で追加すると、そのツールは組み込みツールと同じ許可リストに加わります。[`tools/`](../../tools/src/aden_tools/tools) にある統合カタログ全体（GitHub、Gmail、HubSpot、Slack、Notion ほか多数）も、1 つの MCP サーバーとして動作します。詳しくは [docs/tools.md](../tools.md) を参照してください。
 
-他のフレームワークを選択する場合：
+**不在中も動き続ける。** コロニーは cron、インターバル、webhook のトリガーで自ら起動できます。コロニーごとにオプトインできる **Sentinel** は、Queen が止まるたびに様子を見て、続行を促すか、Hive の受信トレイ、Telegram、Slack を通じてあなたにエスカレーションします。あなたが返信すれば、Queen はすぐに作業を再開します。
 
-- **型安全で予測可能なワークフロー**（PydanticAI、Mastra）
-- **RAGとドキュメント処理**（LlamaIndex、Haystack）
-- **エージェント創発の研究**（CAMEL）
-- **リアルタイム音声/マルチモーダル**（TEN Framework）
-- **シンプルなコンポーネント連鎖**（LangChain、Swarm）
+**障害に強い設計。** すべてのエージェントは状態をディスクに保存し、クラッシュや再起動のあとも、止まった地点からそのまま再開します。大きなツール結果はコンテキストにあふれさせずファイルに書き出し、長いセッションは自動でコンパクションされ、行き詰まったターンやループしているターンは検出されます。さらに、すべての worker はツール呼び出し回数の厳格な上限のもとで動作します。
 
-## プロジェクト構造
+**あらゆるモデル。** [LiteLLM](https://docs.litellm.ai/docs/providers) がサポートするものなら何でも使えます。OpenAI、Anthropic、Gemini、OpenRouter、Hive LLM、OpenAI 互換の任意のエンドポイント、Ollama 経由のローカルモデルなどです。worker は Queen とは別のモデルで動かすこともでき、テキスト専用モデルでもビジョンフォールバックによって画像を扱えます。
 
-```
-hive/
-├── core/                   # コアフレームワーク - エージェントランタイム、グラフエグゼキュータ、プロトコル
-├── tools/                  # MCPツールパッケージ - エージェント機能のための19個のツール
-├── exports/                # エージェントパッケージ - 事前構築されたエージェントと例
-├── docs/                   # ドキュメントとガイド
-├── scripts/                # ビルドとユーティリティスクリプト
-├── .claude/                # エージェント構築用のClaude Codeスキル
-├── ENVIRONMENT_SETUP.md    # エージェント開発用のPythonセットアップガイド
-├── DEVELOPER.md            # 開発者ガイド
-├── CONTRIBUTING.md         # 貢献ガイドライン
-└── ROADMAP.md              # プロダクトロードマップ
-```
+## Hive はあなたに向いているか？
 
-## 開発
+難しいのがもはやモデルではなく、その周りのすべてになったとき、Hive は真価を発揮します：
 
-### Pythonエージェント開発
+- リード、アカウント、チケット、リポジトリ、ドキュメントなど、**似た作業単位が大量にある**プロセスを、並列に、しかも毎回同じやり方で処理したい。
+- **何時間も、あるいはスケジュールに沿って動き続け**、再起動にも耐えなければならない作業がある。
+- チャットで読むだけでなく、**確認、クエリ、監査**が必要な結果を扱う。
+- 重要な判断については、**人間が主導権を握り続けたい**。
 
-フレームワークで目標駆動エージェントを構築および実行するには：
-
-```bash
-# 1回限りのセットアップ
-./scripts/setup-python.sh
-
-# これにより以下がインストールされます：
-# - frameworkパッケージ（コアランタイム）
-# - aden_toolsパッケージ（19個のMCPツール）
-# - すべての依存関係
-
-# Claude Codeスキルを使用して新しいエージェントを構築
-claude> /building-agents-construction
-
-# エージェントをテスト
-claude> /testing-agent
-
-# エージェントを実行
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
-```
-
-完全なセットアップ手順については、[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)を参照してください。
+単発のプロンプトや使い捨てのスクリプトなら、普通のエージェントのほうがシンプルです。
 
 ## ドキュメント
 
-- **[開発者ガイド](DEVELOPER.md)** - 開発者向け総合ガイド
-- [はじめに](docs/getting-started.md) - クイックセットアップ手順
-- [設定ガイド](docs/configuration.md) - すべての設定オプション
-- [アーキテクチャ概要](docs/architecture/README.md) - システム設計と構造
+- [はじめに](../getting-started.md)：セットアップの詳細
+- [アーキテクチャ概要](../architecture/README.md)：コロニー、ループ、ツール、メモリがどう組み合わさっているか
+- 主要コンセプト：[コロニー](../key_concepts/colony.md)、[Queen](../key_concepts/queen.md)、[worker](../key_concepts/worker_agent.md)、[連携](../key_concepts/coordination.md)、[ループ](../key_concepts/the_loop.md)、[目標と成果](../key_concepts/goals_outcome.md)、[コロニーが改善していく仕組み](../key_concepts/improvement.md)
+- [ツール](../tools.md)：組み込みツール、MCP サーバー、統合カタログ
+- [設定](../configuration.md) と [開発者ガイド](../developer-guide.md)
+- [ロードマップ](../roadmap.md)：V1 で提供される機能と、まだ残っている課題
+- [docs.adenhq.com](https://docs.adenhq.com/)：オンラインドキュメント
 
-## ロードマップ
+## よくある質問
 
-Adenエージェントフレームワークは、開発者が結果志向で自己適応するエージェントを構築できるよう支援することを目指しています。ロードマップはこちらをご覧ください
+**Hive はどのモデルに対応していますか？**
+[LiteLLM](https://docs.litellm.ai/docs/providers) がサポートするすべてのプロバイダーと、OpenAI 互換の任意のエンドポイントに対応しています。Claude Code や OpenAI Codex といったコーディング向けサブスクリプションを含め、主要なものはクイックスタートで設定できます。それ以外は [docs/configuration.md](../configuration.md) を参照してください。
 
-[ROADMAP.md](ROADMAP.md)
+**ローカルモデルで動かせますか？**
+はい。クイックスタートで Ollama を選ぶか、Ollama をローカルで起動したうえで `ollama/llama3` などのモデルを指定してください。
 
-```mermaid
-timeline
-    title Aden Agent Framework Roadmap
-    section Foundation
-        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
-        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
-        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
-        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
-        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
-    section Expansion
-        Intelligence : Guardrails : Streaming Mode : Semantic Search
-        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
-        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
-        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
-```
+**他のエージェントフレームワークと何が違うのですか？**
+多くのフレームワークでは、エージェントのグラフを設計し、その入出力を配線する必要があります。Hive のエージェントは 1 種類だけです。Queen はエージェントループであり、すべての worker はそのクローンです。オーケストレーションは実行時にツール呼び出しで行われ、エージェント同士はエッジに沿ってメッセージを受け渡すのではなく、共有の SQL トラッカーを通じて連携します。永続化、再開、予算、コンパクション、監督はすべてこの 1 つのループに組み込まれているため、どのエージェントもそれらを備えています。
 
-## コミュニティとサポート
+**データはどこに保存されますか？**
+あなたのマシン上です。セッション、コロニー、トラッカー、メモリは `~/.hive`（または `HIVE_HOME` が指す場所）配下のプレーンなファイルで、API キーもそこに暗号化して保存されます。
 
-サポート、機能リクエスト、コミュニティディスカッションには[Discord](https://discord.com/invite/MXE49hrKDk)を使用しています。
+**コストはどう抑えればよいですか？**
+各 worker はターン数とツール呼び出し回数の厳格な上限のもとで動作するため、行き詰まった worker は自動的に止まります。同時に実行される worker の数にも上限があります。モデル呼び出しはすべて計測されます。金額ベースの支出上限は、まだありません。
 
-- Discord - [コミュニティに参加](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [会社ページ](https://www.linkedin.com/company/teamaden/)
+**エージェントに自前のツールや API を使わせられますか？**
+はい。組み込みのシェルとブラウザ、追加した任意の MCP サーバー、そしてあなたの手順を教えるスキルを通じて使えます。
+
+**Hive はオープンソースですか？**
+はい。[Apache License 2.0](../../LICENSE) のもとで公開されています。
 
 ## 貢献
 
-貢献を歓迎します！ガイドラインについては[CONTRIBUTING.md](CONTRIBUTING.md)をご覧ください。
+コントリビューションを歓迎します。特にツール、統合、スキルは大歓迎です（[#2805](https://github.com/aden-hive/hive/issues/2805)）。まず [CONTRIBUTING.md](../../CONTRIBUTING.md) を読み、プルリクエストを開く前に Issue にアサインしてもらってください。Issue にコメントすれば、メンテナーがアサインします。再現手順や具体的な提案を含む Issue が優先されます。
 
-**重要：** PRを提出する前に、まずIssueにアサインされてください。Issueにコメントして担当を申請すると、メンテナーが24時間以内にアサインします。これにより重複作業を防ぐことができます。
+## コミュニティ
 
-1. Issueを見つけるか作成し、アサインを受ける
-2. リポジトリをフォーク
-3. 機能ブランチを作成 (`git checkout -b feature/amazing-feature`)
-4. 変更をコミット (`git commit -m 'Add amazing feature'`)
-5. ブランチにプッシュ (`git push origin feature/amazing-feature`)
-6. プルリクエストを開く
+- [Discord](https://discord.com/invite/MXE49hrKDk)：質問、機能リクエスト、ディスカッション
+- [X / Twitter](https://x.com/aden_hq) と [LinkedIn](https://www.linkedin.com/company/teamaden/)：最新情報
+- [HoneyComb](http://honeycomb.open-hive.com/)：AI エージェントがどの仕事を自動化しつつあるかを追跡するコミュニティマーケット。お金ではなくコンピュートトークンで、仕事をロングまたはショートできます。
 
-## チームに参加
-
-**採用中です！** エンジニアリング、リサーチ、マーケティングの役職で私たちに参加してください。
-
-[オープンポジションを見る](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
+エンジニアリング、リサーチ、市場開拓（go-to-market）の各分野で**採用中です**。[募集中のポジションを見る](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)。
 
 ## セキュリティ
 
-セキュリティに関する懸念については、[SECURITY.md](SECURITY.md)をご覧ください。
+脆弱性を報告する場合は、[SECURITY.md](../../SECURITY.md) をご覧ください。
 
 ## ライセンス
 
-このプロジェクトはApache License 2.0の下でライセンスされています - 詳細は[LICENSE](LICENSE)ファイルをご覧ください。
+Apache License 2.0。詳しくは [LICENSE](../../LICENSE) をご覧ください。
 
-## よくある質問 (FAQ)
+## スター履歴
 
-> **注意：** よくある質問の完全版については、英語の[README.md](README.md)を参照してください。
-
-**Q: AdenはLangChainや他のエージェントフレームワークに依存していますか？**
-
-いいえ。AdenはLangChain、CrewAI、その他のエージェントフレームワークに依存せずにゼロから構築されています。フレームワークは軽量で柔軟に設計されており、事前定義されたコンポーネントに依存するのではなく、エージェントグラフを動的に生成します。
-
-**Q: AdenはどのLLMプロバイダーをサポートしていますか？**
-
-AdenはLiteLLM統合を通じて100以上のLLMプロバイダーをサポートしており、OpenAI（GPT-4、GPT-4o）、Anthropic（Claudeモデル）、Google Gemini、Mistral、Groqなどが含まれます。適切なAPIキー環境変数を設定し、モデル名を指定するだけです。
-
-**Q: Adenはオープンソースですか？**
-
-はい、AdenはApache License 2.0の下で完全にオープンソースです。コミュニティの貢献とコラボレーションを積極的に奨励しています。
-
-**Q: Adenは他のエージェントフレームワークと何が違いますか？**
-
-Adenはコーディングエージェントを使用して自然言語の目標からエージェントシステム全体を生成します—ワークフローをハードコードしたり、グラフを手動で定義したりする必要はありません。エージェントが失敗すると、フレームワークは自動的に障害データをキャプチャし、エージェントグラフを進化させ、再デプロイします。この自己改善ループはAden独自のものです。
-
-**Q: Adenはヒューマンインザループワークフローをサポートしていますか？**
-
-はい、Adenは人間の入力のために実行を一時停止する介入ノードを通じて、ヒューマンインザループワークフローを完全にサポートしています。設定可能なタイムアウトとエスカレーションポリシーが含まれており、人間の専門家とAIエージェントのシームレスなコラボレーションを可能にします。
+<a href="https://www.star-history.com/?type=date&repos=aden-hive%2Fhive">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+ </picture>
+</a>
 
 ---
 
-<p align="center">
-  サンフランシスコで 🔥 情熱を込めて作成
-</p>
+<p align="center">サンフランシスコから 🔥 情熱を込めて</p>

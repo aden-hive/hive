@@ -1,0 +1,61 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; }
+body { padding: 24px; background: #fafafa; }
+
+header h1 { margin: 0 0 4px; font-size: 22px; }
+header p { margin: 4px 0; color: #555; }
+
+.instruction {
+  background: #fffbea;
+  border: 1px solid #f0d878;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 0 0 18px;
+  font-size: 16px;
+}
+
+.verdict {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin: 12px 0;
+  min-width: 160px;
+  text-align: center;
+}
+.verdict.pending { background: #eee; color: #777; }
+.verdict.pass { background: #d6f5d6; color: #145a14; }
+.verdict.miss { background: #ffd6d6; color: #8a1a1a; }
+
+.back {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 6px 10px;
+  text-decoration: none;
+  color: #333;
+  font-size: 14px;
+  z-index: 100;
+}
+
+/* Index */
+body.index ol.tasks { list-style: decimal inside; padding: 0; margin: 18px 0; }
+body.index li { margin: 6px 0; }
+body.index li a { display: inline-block; padding: 6px 8px; text-decoration: none; color: #222; }
+body.index li a:hover { background: #fff; border-radius: 4px; }
+body.index .cat { color: #777; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+body.index .slug { color: #999; font-size: 12px; font-family: monospace; margin-left: 8px; }
+
+/* Report */
+body.report table { border-collapse: collapse; width: 100%; max-width: 900px; background: #fff; }
+body.report th, body.report td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+body.report th { background: #f0f0f0; }
+body.report td.pass { background: #e8f7e8; color: #145a14; font-weight: 600; }
+body.report td.miss { background: #fbe6e6; color: #8a1a1a; font-weight: 600; }
+body.report td.skip { color: #888; }
+body.report .score { font-size: 18px; }
+
+footer { margin-top: 22px; color: #666; font-size: 14px; }

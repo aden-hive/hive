@@ -1,54 +1,83 @@
 [project]
-name = "framework"
-version = "0.1.0"
-description = "Goal-driven agent runtime with Builder-friendly observability"
+name = "aden-hive"
+version = "1.0.10"
+description = "Hive: a goal-driven agent runtime. Build on its primitives with `from hive import ...`."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Aden", email = "team@aden.ai" }]
+# Only what the primitives need. Hive's own tools (aden-tools) are the `tools` extra:
+# installing them pulls a browser, PDF, OCR, database and SaaS clients.
 dependencies = [
-    "pydantic>=2.0",
-    "anthropic>=0.40.0",
-    "httpx>=0.27.0",
-    "litellm>=1.81.0",
-    "mcp>=1.0.0",
-    "fastmcp>=2.0.0",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "pytest-xdist>=3.0",
+  "pydantic>=2.0",
+  "anthropic>=0.40.0",
+  "httpx>=0.27.0",
+  "litellm==1.83.4",
+  "mcp>=1.0.0",
+  "fastmcp>=2.0.0",
+  "croniter>=1.4.0",
+  "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "ruff>=0.1.0",
-    "mypy>=1.0",
+webhook = ["aiohttp>=3.9.0"]
+server = ["aiohttp>=3.9.0"]
+# Hive the application: its built-in tools and the browser. `pip install "aden-hive[tools]"`, then `hive open`.
+tools = ["aden-tools==1.0.10"]
+testing = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/aden-hive/hive"
 
 [project.scripts]
 hive = "framework.cli:main"
+# Fresh credential values for scripts (`TOK=$(hive-cred token google --account x)`),
+# so an agent never pastes a short-lived OAuth token into a file. Goes through the
+# same store as the tools, so refresh-on-access fires. See framework/credentials/cli.py.
+hive-cred = "framework.credentials.cli:main"
+
+[tool.uv.sources]
+aden-tools = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["framework"]
+# `hive` is the public surface for projects built on Hive; `framework` is Hive itself.
+packages = ["framework", "hive"]
+
+# The built dashboard (frontend/dist) goes into the wheel as framework/server/frontend: see hatch_build.py.
+[tool.hatch.build.targets.wheel.hooks.custom]
+
+[tool.hatch.build.targets.sdist]
+# dist/ is git-ignored; the sdist carries the built dashboard so a wheel built from it has one.
+artifacts = ["frontend/dist/"]
+# Hatch reads core/.gitignore, not the repository's, so node_modules must be left out by name.
+exclude = ["frontend/node_modules"]
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 150
 
 lint.select = [
-  "B",   # bugbear errors
-  "C4",  # flake8-comprehensions errors
-  "E",   # pycodestyle errors
-  "F",   # pyflakes errors
-  "I",   # import sorting
-  "Q",   # flake8-quotes errors
-  "UP",  # py-upgrade
-  "W",   # pycodestyle warnings
+  "B", # bugbear errors
+  "C4", # flake8-comprehensions errors
+  "E", # pycodestyle errors
+  "F", # pyflakes errors
+  "I", # import sorting
+  "Q", # flake8-quotes errors
+  "UP", # py-upgrade
+  "W", # pycodestyle warnings
 ]
 
+lint.per-file-ignores."demos/*" = ["E501"]
 lint.isort.combine-as-imports = true
-lint.isort.known-first-party = ["framework"]
+lint.isort.known-first-party = ["framework", "hive"]
 lint.isort.section-order = [
   "future",
   "standard-library",
@@ -56,3 +85,29 @@ lint.isort.section-order = [
   "first-party",
   "local-folder",
 ]
+[tool.pytest.ini_options]
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:litellm.*"
+]
+
+[dependency-groups]
+dev = [
+  "ty>=0.0.13",
+  "ruff>=0.14.14",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.0",
+]
+# Hive the application (its server, colonies, credentials and built-in tools) needs these.
+# `uv sync` here installs them; projects that depend on aden-hive never get them.
+app = [
+  "aden-tools",
+  "aiohttp>=3.9.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "app"]

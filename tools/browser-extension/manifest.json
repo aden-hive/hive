@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Hive Browser Bridge",
+  "version": "1.7.4",
+  "description": "Let Hive AI agents drive your own Chrome for research, forms, scheduling, and outreach. Reliable browser automation.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuOrqbBVlYsCpwG7ptoGJbpyt+4/ogIRRHGZWngepWhR5ooxbYXY2BJqojo7vdErOtN3FuhUHQYGbjsNZ9F9JXX24795Wy46fBIATSxbMzUtrvQsXj/8+u7ctTXipumoeiSO4x++mBmKM29+1aytviD2Zu4XvLWQG/s2GY0KI8TT1fyLtLEv+UG7zo8w6iL86hCwrPLj9UqHdDPE0/ekiafPeEdZwc8g5X3blfki7Eu+5eT5Aa28admC79wpxyJZO7u479yHkZkTPKQvPfodcFrxMaWmSTKZXLPLbwnz/DiuLc7ulEOZIRJikLTJSuW4dQ3YLAhDOYfTfBf+jynbm3QIDAQAB",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "scripting",
+    "offscreen",
+    "storage",
+    "alarms",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:14830/*",
+    "http://localhost:14830/*",
+    "http://127.0.0.1:9230/*",
+    "http://localhost:9230/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Hive Browser Bridge",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  }
+}

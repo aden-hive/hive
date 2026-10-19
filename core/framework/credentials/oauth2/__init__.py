@@ -20,8 +20,7 @@ Quick Start:
 
     # Create store with OAuth2 provider
     store = CredentialStore.with_encrypted_storage(
-        "/var/hive/credentials",
-        providers=[provider]
+        providers=[provider]  # defaults to ~/.hive/credentials
     )
 
     # Get token using client credentials
@@ -64,6 +63,7 @@ For advanced lifecycle management:
 """
 
 from .base_provider import BaseOAuth2Provider
+from .hubspot_provider import HubSpotOAuth2Provider
 from .lifecycle import TokenLifecycleManager, TokenRefreshResult
 from .provider import (
     OAuth2Config,
@@ -73,14 +73,17 @@ from .provider import (
     TokenExpiredError,
     TokenPlacement,
 )
+from .zoho_provider import ZohoOAuth2Provider
 
 __all__ = [
     # Types
     "OAuth2Token",
     "OAuth2Config",
     "TokenPlacement",
-    # Provider
+    # Providers
     "BaseOAuth2Provider",
+    "HubSpotOAuth2Provider",
+    "ZohoOAuth2Provider",
     # Lifecycle
     "TokenLifecycleManager",
     "TokenRefreshResult",

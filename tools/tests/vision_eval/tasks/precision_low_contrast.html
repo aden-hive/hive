@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Low contrast</title>
+<style>
+  body { background: #f5f5f5; }
+  .stage {
+    position: relative;
+    margin: 24px auto;
+    width: 800px;
+    height: 460px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+  }
+  .noise {
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at 12% 20%, #f3f3f3 0 80px, transparent 90px),
+      radial-gradient(circle at 70% 65%, #f7f7f7 0 100px, transparent 110px),
+      radial-gradient(circle at 40% 80%, #f4f4f4 0 90px, transparent 100px),
+      radial-gradient(circle at 90% 30%, #f6f6f6 0 70px, transparent 80px);
+  }
+  /* Decoy buttons that look identical but are not labeled Submit. */
+  .decoy-btn {
+    position: absolute;
+    background: #f8f8f8;
+    color: #f0f0f0; /* almost invisible label */
+    border: 1px solid #f1f1f1;
+    padding: 8px 18px;
+    font: 14px sans-serif;
+    cursor: default;
+  }
+  .decoy-btn.d1 { left: 60px;  top: 70px;  }
+  .decoy-btn.d2 { left: 540px; top: 110px; }
+  .decoy-btn.d3 { left: 140px; top: 320px; }
+  .decoy-btn.d4 { left: 600px; top: 360px; }
+
+  /* The actual Submit button — also #f8f8f8 on #f5f5f5 with #f0f0f0 text. */
+  #target {
+    position: absolute;
+    left: 340px;
+    top: 210px;
+    background: #f8f8f8;
+    color: #f0f0f0;
+    border: 1px solid #f1f1f1;
+    padding: 8px 18px;
+    font: 14px sans-serif;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Precision · Low contrast</h1>
+  <p class="instruction">Click the button labeled <strong>"Submit"</strong>. It is there — but rendered at very low contrast. Several decoy buttons with other labels share the same styling.</p>
+</header>
+<div class="stage">
+  <div class="noise"></div>
+  <span class="decoy-btn d1">Cancel</span>
+  <span class="decoy-btn d2">Reset</span>
+  <span class="decoy-btn d3">Continue</span>
+  <span class="decoy-btn d4">Back</span>
+  <button id="target">Submit</button>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    Eval.requireClickOn(function () { return document.getElementById("target"); }, { allowRetry: true });
+  });
+</script>
+</body>
+</html>

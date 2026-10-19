@@ -1,397 +1,207 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/readme/banner-dark.webp" />
+    <img width="100%" alt="OpenHive. 원하는 결과를 설명하면 Queen 에이전트가 그 일을 해낼 colony를 키웁니다." src="../assets/readme/banner-light.webp" />
+  </picture>
 </p>
 
 <p align="center">
   <a href="../../README.md">English</a> |
   <a href="zh-CN.md">简体中文</a> |
   <a href="es.md">Español</a> |
+  <a href="hi.md">हिन्दी</a> |
   <a href="pt.md">Português</a> |
   <a href="ja.md">日本語</a> |
   <a href="ru.md">Русский</a> |
   <a href="ko.md">한국어</a>
 </p>
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
-[![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
-[![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
-[![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
-[![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
-
 <p align="center">
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Goal--Driven-Development-purple?style=flat-square" alt="Goal-Driven" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 라이선스" /></a>
+  <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
+  <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="X에서 팔로우" /></a>
+  <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
 </p>
 
-## 개요
-
-워크플로우를 하드코딩할 필요 없이 안정적이고 자체 개선 기능을 갖춘 AI 에이전트를 구축하세요. 코딩 에이전트와의 대화를 통해 목표를 정의하면, 프레임워크가 동적으로 생성된 연결 코드로 구성된 노드 그래프를 자동으로 생성합니다. 문제가 발생하면 프레임워크는 실패 데이터를 수집하고, 코딩 에이전트를 통해 에이전트를 진화시킨 뒤 다시 배포합니다. 사람이 개입할 수 있는(human-in-the-loop) 노드, 자격 증명 관리, 실시간 모니터링 기능이 기본으로 제공되어, 유연성을 유지하면서도 제어권을 잃지 않도록 합니다.
-
-자세한 문서, 예제, 가이드는 [adenhq.com](https://adenhq.com)에서 확인할 수 있습니다.
-
-## Aden이란 무엇인가
+<h3 align="center">실제 비즈니스 업무를 해내는 AI 에이전트 colony를 위한 오픈소스 런타임입니다.</h3>
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  Queen 에이전트에게 필요한 일을 말하세요. Queen은 첫 부분을 직접 처리하며 이 일에 무엇이 필요한지 파악한 뒤, 나머지는 필요한 만큼의 worker에게 나눠 병렬로 맡깁니다. 모든 결과는 공유 tracker에 쌓이므로 언제든 조회하고, 감사하고, 그 지점부터 재개할 수 있습니다.
 </p>
 
-Aden은 AI 에이전트를 구축, 배포, 운영, 적응시키기 위한 플랫폼입니다:
+<p align="center">
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="데모: 그로스 Queen이 병렬 worker로 이루어진 colony와 함께 제품 다섯 개의 Hacker News 런칭을 조사하는 모습" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>실제 실행을 녹화했습니다. 입력과 대기 시간만 빨리 감았고, 얼마나 빨리 감았는지는 배지에 표시됩니다. <a href="../assets/readme/demo.mp4">전체 실행 보기 (MP4)</a>.</sub>
+</p>
 
-- **Build** - 코딩 에이전트가 자연어로 정의된 목표를 기반으로 특화된 워커 에이전트(Sales, Marketing, Ops 등)를 생성
-- **Deploy** - CI/CD 통합과 전체 API 라이프사이클 관리를 포함한 헤드리스 배포 지원
-- **Operate** - 실시간 모니터링, 관측성(observability), 런타임 가드레일을 통해 에이전트를 안정적으로 유지
-- **Adapt** - 지속적인 평가, 감독, 적응 과정을 통해 에이전트가 시간이 지날수록 개선되도록 보장
-- **Infra** - 공유 메모리, LLM 연동, 도구, 스킬 등 모든 에이전트를 구동하는 인프라 제공
+## 데모에서 일어난 일
 
-## Quick Links
+Show HN을 준비하는 그로스 팀이, 개발자 도구 다섯 개가 Hacker News에서 직접 진행한 런칭의 성과를 알고 싶어 합니다. 이 메시지 하나로 Hive가 한 일은 다음과 같습니다.
 
-- **[문서](https://docs.adenhq.com/)** - 전체 가이드와 API 레퍼런스
-- **[셀프 호스팅 가이드](https://docs.adenhq.com/getting-started/quickstart)** - 자체 인프라에 Hive 배포하기
-- **[변경 사항(Changelog)](https://github.com/adenhq/hive/releases)** - 최신 업데이트 및 릴리스 내역
-<!-- - **[로드맵](https://adenhq.com/roadmap)** - 향후 기능 및 계획 -->
-- **[이슈 신고](https://github.com/adenhq/hive/issues)** - 버그 리포트 및 기능 요청
+1. **Queen에게 일을 맡깁니다.** Queen은 역할(여기서는 그로스 총괄)과 자신만의 메모리, 도구를 갖춘 지속형 에이전트입니다.
+2. **Queen이 답을 좌우할 질문 하나를 던집니다:** 모든 런칭 게시물을 볼까요, 아니면 제품별 최초 런칭만 볼까요? 모든 런칭을 선택하면 Queen이 작업을 이어갑니다.
+3. **Queen이 colony를 제안하면 승인합니다.** 제품이 다섯 개면 병렬 작업도 다섯 개이므로, 채팅이 colony, 즉 Queen과 작업에 필요한 만큼의 worker 에이전트로 이루어진 팀으로 바뀝니다.
+4. **하나는 Queen이 직접 해 봅니다.** 먼저 PostHog를 맡아, 지나가듯 언급한 글이 아니라 진짜 런칭 게시물로 볼 수 있는 것이 무엇인지 정하고, Hacker News API로 수치를 대조한 뒤, 그 방법을 재사용 가능한 스킬로 저장합니다.
+5. **worker들에게 나눠 맡깁니다.** 플레이북이 제품마다 worker를 하나씩 실행합니다. 각 worker는 Queen의 스킬을 따라 colony의 tracker(공유 SQLite 테이블)에 결과를 기록합니다.
+6. **답하기 전에 모든 행을 검증하고, 한 행을 바로잡습니다.** Cal.com을 맡은 worker가 예전 이름인 Calendso로 올라온 게시물을 집계했지만, 그 게시물은 Show HN도, Launch HN도, YC 런칭도 아니었습니다. Queen이 그 행을 비우고, 차트에는 Cal.com이 0이 아니라 "찾을 수 없음"으로 표시됩니다.
+
+이 과정에서 미리 연결해 둔 것은 하나도 없습니다. 그려야 할 워크플로 그래프도 없습니다. colony는 작업이 진행되는 대로 Queen이 구성해 나가고, 무엇이 끝났고 무엇이 남았는지는 컨텍스트 윈도우가 아니라 디스크에 있는 tracker가 기록합니다.
 
 ## 빠른 시작
 
-### 사전 요구 사항
+**필요한 환경은** Python 3.11+, Node.js 20+, git입니다. quickstart는 `uv`와 `ripgrep`이 없으면 설치해 주고, Node 설치도 제안합니다.
 
-- 에이전트 개발을 위한 [Python 3.11+](https://www.python.org/downloads/)
-- 컨테이너 기반 도구 사용 시 선택 사항: [Docker](https://docs.docker.com/get-docker/) (v20.10+)
+**모델도 필요합니다.** quickstart에서 다음 중 무엇이든 설정할 수 있습니다:
 
-### 설치
+- Anthropic, OpenAI, Google Gemini, Groq, Cerebras, OpenRouter 중 한 곳의 API 키
+- 이미 결제 중인 코딩 구독: Claude Code, OpenAI Codex, Kimi Code, MiniMax, Z.AI, Antigravity
+- Hive LLM
+- 키 없이 바로 쓸 수 있는 Ollama 로컬 모델
 
 ```bash
-# 저장소 클론
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Python 환경 설정 실행
-./scripts/setup-python.sh
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-다음 요소들이 설치됩니다:
-- **framework** - 핵심 에이전트 런타임 및 그래프 실행기
-- **aden_tools** - 에이전트 기능을 위한 19개의 MCP 도구
-- 필요한 모든 의존성
+quickstart는 워크스페이스 전체에서 쓸 Python 환경을 하나 만들고, API 키를 `~/.hive` 아래에 암호화해 저장하고, 사용할 모델을 물은 다음, 대시보드를 빌드해 `http://127.0.0.1:8787`에서 엽니다. 다음부터는 저장소에서 `hive open`을 실행하세요.
 
-### 첫 번째 에이전트 만들기
+> [!NOTE]
+> Hive는 pip 패키지가 아니라 `uv` 워크스페이스입니다. `pip install -e .`로는 실행되지 않는 플레이스홀더만 설치되니 quickstart를 사용하세요.
 
-```bash
-# Claude Code 스킬 설치 (최소 1회)
-./quickstart.sh
+**그다음** 홈 화면에 작업을 입력하고 맡길 Queen을 고르세요. 또는 **Prompt Library**를 열고, 미리 만들어 둔 프롬프트를 그 프롬프트에 맞는 Queen에게 바로 보내세요.
 
-# Claude Code를 사용해 에이전트 빌드
-claude> /building-agents
-
-# 에이전트 테스트
-claude> /testing-agent
-
-# 에이전트 실행
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
-```
-
-**[📖 전체 설정 가이드](ENVIRONMENT_SETUP.md)** - 에이전트 개발을 위한 상세한 설명
-
-## 주요 기능
-
-- **목표 기반 개발** - 자연어로 목표를 정의하면,  코딩 에이전트가 이를 달성하기 위한 에이전트 그래프와 연결 코드를 생성
-- **자기 적응형 에이전트** - 프레임워크가 실패를 수집하고, 목표를 갱신하며, 에이전트 그래프를 업데이트
-- **동적 노드 연결** - 사전에 정의된 엣지 없어. 목표에 따라 어떤 역량을 갖춘 LLM이든 연결 코드를 생성
-- **SDK 래핑 노드** - 모든 노드는 기본적으로 공유 메모리, 로컬 RLM 메모리, 모니터링, 도구, LLM 접근 권한 제공
-- **사람 개입형(Human-in-the-Loop)** - 실행을 일시 중지하고 사람의 입력을 받는 개입 노드 제공 (타입아웃 및 에스컬레이션 설정 가능)
-- **실시간 관측성** - WebSocket 스트리밍을 통해 에이전트 실행, 의사결정, 노드 간 통신을 실시간으로 모니터링
-- **비용 및 예산 제어** - 지출 한도, 호출 제한, 자동 모델 다운그레이드 정책 설정 가능
-- **프로덕션 대응** - 셀프 호스팅 가능하며, 확장성과 안정성을 고려해 설계됨
-
-## 왜 Aden인가
-
-기존의 에이전트 프레임워크는 워크플로를 직접 설계하고, 에이전트 간 상호작용을 정의하며, 실패를 사후적으로 처리해야 합니다. Aden은 이 패러다임을 뒤집어 — **결과만 설명하면, 시스템이 스스로를 구축합니다.**
+## 작동 방식
 
 ```mermaid
 flowchart LR
-    subgraph BUILD["🏗️ BUILD"]
-        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
-        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
-        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
-    end
+    You(["사용자"]) -->|"원하는 결과 설명"| Queen["Queen<br/>(지속형 에이전트)"]
+    Queen -->|"colony 제안,<br/>사용자 승인"| Pilot["파일럿<br/>(Queen이 직접 처리하는 한 단위)"]
+    Pilot -->|"방법을 저장"| Skill["스킬 + 플레이북"]
+    Skill -->|"run_worker / run_playbook"| W["병렬로 실행되는<br/>worker clone"]
+    W -->|"tracker_upsert"| T[("Tracker<br/>공유 SQLite")]
+    T -->|"SQL: 끝난 작업,<br/>남은 작업"| Queen
+    Queen -->|"검증된 답변"| You
 
-    subgraph EXPORT["📦 EXPORT"]
-        direction TB
-        JSON["agent.json<br/>(GraphSpec)"]
-        TOOLS["tools.py<br/>(Functions)"]
-        MCP["mcp_servers.json<br/>(Integrations)"]
-    end
-
-    subgraph RUN["🚀 RUNTIME"]
-        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
-        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
-
-        subgraph DECISION["Decision Recording"]
-            DEC1["runtime.decide()<br/>intent → options → choice"]
-            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
-        end
-    end
-
-    subgraph INFRA["⚙️ INFRASTRUCTURE"]
-        CTX["NodeContext<br/>memory • llm • tools"]
-        STORE[("FileStorage<br/>Runs & Decisions")]
-    end
-
-    APPROVE --> EXPORT
-    EXPORT --> LOAD
-    EXEC --> DECISION
-    EXEC --> CTX
-    DECISION --> STORE
-    STORE -.->|"Analyze & Improve"| NODES
-
-    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
-    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
-    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
-    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
-    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### Aden의 강점
+Hive의 **실행 프리미티브는 단 하나**, 에이전트 루프입니다. Queen도 에이전트 루프이고, 모든 worker는 그 clone으로서 각자의 작업, 더 좁은 범위의 도구, 엄격한 예산을 받습니다. 오케스트레이션은 컴파일된 그래프가 아니라 도구 호출입니다:
 
-| 기존 프레임워크       | Aden                |
-| -------------- |---------------------|
-| 에이전트 워크플로 하드코딩 | 자연어로 목표를 설명         |
-| 수동 그래프 정의      | 에이전트 그래프 자동 생성      |
-| 사후 대응식 에러 처리   | 선제적 자기 진화           |
-| 정적인 도구 설정      | 동적인 SDK 래핑 노드       |
-| 별도의 모니터링 구성    | 내장된 실시간 관측성         |
-| 수동 예산 관리       | 비용 제어 및 모델 다운그레이드 통합 |
+- **`run_worker`**는 작업을 팬아웃한 뒤 바로 반환하므로, worker가 실행되는 동안에도 Queen은 계속 사용자와 대화합니다. 기본적으로 한 번에 4개씩 실행되고 나머지는 차례를 기다립니다. 각 worker의 보고는 Queen의 대화에 새 턴으로 도착합니다.
+- **tracker**는 colony의 공유 상태입니다. Queen이 테이블과 worker가 쓸 수 있는 열을 정의하면, worker는 작업 단위마다 행 하나를 upsert하고, Queen은 SQL로 진행 상황을 확인합니다. tracker는 디스크에 있는 파일 `~/.hive/colonies/<name>/tracker/tracker.db`입니다.
+- **`run_playbook`**은 검증된 방법을 모든 행에 실행합니다. 재시도와 백오프, 레이트 리밋이 걸린 레인, 계속 실패하는 행을 모아 두는 dead-letter 목록을 갖추고 있습니다. "남은 작업"은 언제나 tracker를 새로 조회해 구하므로, 플레이북을 다시 실행하면 멈춘 지점부터 이어서 진행합니다.
 
-### 작동 방식
+**[아키텍처 개요](../architecture/README.md)**에서는 루프, 도구 구성, 메모리, 사람의 감독, 그리고 크래시 후에도 상태가 유지되는 방식을 더 깊이 다룹니다.
 
-1. **목표 정의** → 달성하고 싶은 결과를 평범한 영어 문장으로 설명
-2. **코딩 에이전트 생성** → 에이전트 그래프, 연결 코드, 테스트 케이스를 생성
-3. **워커 실행** → SDK로 래핑된 노드가 완전한 관측성과 도구 접근 권한을 갖고 실행
-4. **컨트롤 플레인 모니터링** → 실시간 메트릭, 예산 집행, 정책 관리
-5. **자기 개선** → 실패 시 그래프를 진화시키고 자동으로 재배포
+<table>
+  <tr>
+    <td width="50%"><img alt="홈: Queen과 colony를 보여 주는 하이브 맵" src="../assets/readme/home.webp" /><br /><sub><b>홈.</b> 내 Queen들과 각 colony를 하나의 맵에서 봅니다. 작업을 설명하고 누구에게 맡길지 고르세요.</sub></td>
+    <td width="50%"><img alt="병렬로 실행 중인 colony의 worker들" src="../assets/readme/workers.webp" /><br /><sub><b>Worker.</b> 작업 단위마다 하나씩, 각자의 작업과 예산을 갖고 모두 Queen에게 보고합니다.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="결과가 채워지고 있는 colony tracker" src="../assets/readme/tracker.webp" /><br /><sub><b>Tracker.</b> worker가 끝나는 대로 결과가 공유 테이블에 쌓이며, 바로 조회하거나 내보내거나 그 지점부터 재개할 수 있습니다.</sub></td>
+    <td width="50%"><img alt="출처가 달린 표와 차트를 담은 Queen의 최종 답변" src="../assets/readme/result.webp" /><br /><sub><b>결과.</b> 출처와 차트를 갖춘 검증된 답변을 채팅에서 바로 받습니다.</sub></td>
+  </tr>
+</table>
 
-## How Aden Compares
+## 주요 기능
 
-Aden은 에이전트 개발에 대해 근본적으로 다른 접근 방식을 취합니다. 대부분의 프레임워크가 워크플로를 하드코딩하거나 에이전트 그래프를 수동으로 정의하도록 요구하는 반면, Aden은 **코딩 에이전트를 사용해 자연어 목표로부터 전체 에이전트 시스템을 생성**합니다. 에이전트가 실패했을 때도 단순히 에러를 기록하는 데서 끝나지 않고, **에이전트 그래프를 자동으로 진화시킨 뒤 다시 배포**합니다.
+**역할과 메모리를 갖춘 Queen.** Hive에는 페르소나 Queen 13명이 들어 있습니다. 그중 6명(그로스, RevOps, 콘텐츠, 리드 생성, 아웃바운드, 브랜드 & 디자인)은 처음부터 활성화되어 있고, 나머지는 Org Chart에서 채용하거나 직접 만들 수 있습니다. 각 Queen은 일하면서 마크다운 메모리에 메모를 남기고, 관련된 과거 대화는 자동으로 컨텍스트에 불러옵니다.
 
-### 비교 표
+**프로세스 안에서 실행되는 내장 도구.** 셸 명령과 백그라운드 작업, 파일 편집, 빠른 코드 검색, PDF·첨부 파일·이미지, 웹 스크래핑, 차트(ECharts, Mermaid), CSV 파일, Hive LLM을 이용한 이미지 생성까지 지원합니다. 모두 Hive 안에서 실행되므로 따로 띄울 도구 서버가 없습니다.
 
-| 프레임워크                               | 분류              | 접근 방식                                          | Aden의 차별점                     |
-| ----------------------------------- | --------------- | ---------------------------------------------- | ----------------------------- |
-| **LangChain, LlamaIndex, Haystack** | 컴포넌트 라이브러리      | RAG/LLM 앱용 사전 정의 컴포넌트, 수동 연결 로직                | 전체 그래프와 연결 코드를 처음부터 자동 생성     |
-| **CrewAI, AutoGen, Swarm**          | 멀티 에이전트 오케스트레이션 | 역할 기반 에이전트와 사전 정의된 협업 패턴                       | 동적으로 에이전트/연결 생성, 실패 시 적응      |
-| **PydanticAI, Mastra, Agno**        | 타입 안전 프레임워크     | 알려진 워크플로를 위한 구조화된 출력 및 검증                      | 반복을 통해 구조가 형성되는 진화형 워크플로      |
-| **Agent Zero, Letta**               | 개인 AI 어시스턴트     | 메모리와 학습 중심, OS-as-tool 또는 상태 기반 메모리            | 자기 복구가 가능한 프로덕션용 멀티 에이전트 시스템  |
-| **CAMEL**                           | 연구용 프레임워크       | 대규모 시뮬레이션에서의 창발적 행동 연구 (최대 100만 에이전트)          | 신뢰 가능한 실행과 복구를 중시한 프로덕션 지향    |
-| **TEN Framework, Genkit**           | 인프라 프레임워크       | 실시간 멀티모달(TEN) 또는 풀스택 AI(Genkit)                | 더 높은 추상화 수준에서 에이전트 로직 생성 및 진화 |
-| **GPT Engineer, Motia**             | 코드 생성           | 명세 기반 코드 생성(GPT Engineer) 또는 Step 프리미티브(Motia) | 자동 실패 복구가 포함된 자기 적응형 그래프      |
-| **Trading Agents**                  | 도메인 특화          | LangGraph 기반, 트레이딩 회사 역할을 하드코딩                 | 도메인 독립적, 모든 사용 사례에 맞는 구조 생성   |
+**에이전트가 다루는 내 브라우저.** Hive Browser Bridge 확장 프로그램을 쓰면 에이전트가 이미 로그인되어 있는 내 Chrome에서 작업할 수 있습니다. worker마다 별도의 탭 그룹이 주어집니다.
 
-### Aden을 선택해야 할 때
+**스킬.** 개방형 [Agent Skills](https://agentskills.io) 형식으로 작성된 재사용 가능한 지침입니다. Hive에 기본 스킬 세트가 들어 있고, 방법이 검증되면 Queen이 새 스킬을 작성하며, 모든 스킬은 Skills Library에서 관리합니다.
 
-다음이 필요하다면 Aden을 선택:
+**모든 MCP 서버 지원.** `hive mcp add`로 추가하면 그 서버의 도구도 내장 도구와 같은 허용 목록(allowlist)에 들어갑니다. [`tools/`](../../tools/src/aden_tools/tools)에 있는 전체 통합 카탈로그(GitHub, Gmail, HubSpot, Slack, Notion 외 다수)도 하나의 MCP 서버로 실행됩니다. 자세한 내용은 [docs/tools.md](../tools.md)를 참고하세요.
 
-- 수동 개입 없이 **실패로부터 스스로 개선되는 에이전트**
-- 워크플로가 아닌 **결과 중심의 목표 기반 개발**
-- 자동 복구와 재배포를 포함한 **프로덕션 수준의 안정성**
-- 코드를 다시 쓰지 않고도 가능한 **빠른 에이전트 구조 반복**
-- 실시간 모니터링과 사람 개입이 가능한 **완전한 관측성**
+**자리를 비운 사이에도 실행.** colony는 cron, 일정 간격, webhook 트리거로 스스로 깨어날 수 있습니다. colony별로 켤 수 있는 **Sentinel**은 Queen이 멈출 때마다 이를 살펴, 계속 진행하도록 재촉하거나 Hive 인박스·Telegram·Slack으로 사용자에게 에스컬레이션합니다. 사용자가 답하면 Queen은 바로 작업을 이어갑니다.
 
-다음이 목적이라면 다른 프레임워크가 더 적합:
+**장애에 강한 설계.** 모든 에이전트는 상태를 디스크에 저장하고, 크래시나 재시작 뒤에도 멈춘 바로 그 지점에서 재개합니다. 큰 도구 결과는 컨텍스트를 가득 채우지 않도록 파일로 빼 두고, 긴 세션은 스스로 압축하며, 막히거나 루프에 빠진 턴은 감지해 잡아내고, 모든 worker는 엄격한 도구 호출 예산 안에서 실행됩니다.
 
-- **타입 안전하고 예측 가능한 워크플로** (PydanticAI, Mastra)
-- **RAG 및 문서 처리** (LlamaIndex, Haystack)
-- **에이전트 창발성 연구** (CAMEL)
-- **실시간 음성·멀티모달 처리** (TEN Framework)
-- **단순한 컴포넌트 체이닝** (LangChain, Swarm)
+**모든 모델 지원.** OpenAI, Anthropic, Gemini, OpenRouter, Hive LLM, 모든 OpenAI 호환 엔드포인트, Ollama를 통한 로컬 모델 등 [LiteLLM](https://docs.litellm.ai/docs/providers)이 지원하는 모델이라면 무엇이든 쓸 수 있습니다. worker는 Queen과 다른 모델로 실행할 수 있고, 텍스트 전용 모델도 비전 폴백을 통해 이미지를 볼 수 있습니다.
 
-## Project Structure
+## Hive가 적합할까요?
 
-```
-hive/
-├── core/                   # 핵심 프레임워크 – 에이전트 런타임, 그래프 실행기, 프로토콜
-├── tools/                  # MCP 도구 패키지 – 에이전트 기능을 위한 19개 도구
-├── exports/                # 에이전트 패키지 – 사전 제작된 에이전트 및 예제
-├── docs/                   # 문서 및 가이드
-├── scripts/                # 빌드 및 유틸리티 스크립트
-├── .claude/                # 에이전트 생성을 위한 Claude Code 스킬
-├── ENVIRONMENT_SETUP.md    # 에이전트 개발을 위한 Python 환경 설정 가이드
-├── DEVELOPER.md            # 개발자 가이드
-├── CONTRIBUTING.md         # 기여 가이드라인
-└── ROADMAP.md              # 제품 로드맵
-```
+모델 자체보다 모델을 둘러싼 나머지 전부가 어려워지는 순간부터 Hive가 진가를 발휘합니다:
 
-## 개발
+- 리드, 계정, 티켓, 저장소, 문서처럼 **비슷한 작업 단위가 많고**, 이를 병렬로, 매번 같은 방식으로 처리하고 싶은 프로세스
+- **몇 시간씩 또는 일정에 따라 실행되며**, 재시작에도 살아남아야 하는 작업
+- 채팅에서 읽고 끝나는 것이 아니라 **검증하고, 조회하고, 감사해야 하는** 결과
+- 중요한 결정만큼은 **사람이 주도권을 쥐고 있어야 하는** 업무
 
-### Python 에이전트 개발
-
-프레임워크를 사용해 목표 기반 에이전트를 구축하고 실행하기 위한 절차입니다:
-
-```bash
-# 최초 1회 설정
-./scripts/setup-python.sh
-
-# 다음 항목들이 설치됨:
-# - framework 패키지 (핵심 런타임)
-# - aden_tools 패키지 (19개의 MCP 도구)
-# - 모든 의존성
-
-# Claude Code 스킬을 사용해 새 에이전트 생성
-claude> /building-agents
-
-# 에이전트 테스트
-claude> /testing-agent
-
-# 에이전트 실행
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
-```
-
-전체 설정 방법은 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) 를 참고하세요.
+프롬프트 하나나 일회성 스크립트라면 일반 에이전트가 더 간단합니다.
 
 ## 문서
 
-- **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
-- [시작하기](docs/getting-started.md) - 빠른 설정 방법
-- [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
+- [시작하기](../getting-started.md): 더 자세한 설치 안내
+- [아키텍처 개요](../architecture/README.md): colony, 루프, 도구, 메모리가 어떻게 맞물려 동작하는지
+- 핵심 개념: [colony](../key_concepts/colony.md), [Queen](../key_concepts/queen.md), [worker](../key_concepts/worker_agent.md), [조율](../key_concepts/coordination.md), [루프](../key_concepts/the_loop.md), [목표와 결과](../key_concepts/goals_outcome.md), [colony가 개선되는 방식](../key_concepts/improvement.md)
+- [도구](../tools.md): 내장 도구, MCP 서버, 통합 카탈로그
+- [설정](../configuration.md)과 [개발자 가이드](../developer-guide.md)
+- [로드맵](../roadmap.md): V1에 포함된 것과 아직 남은 과제
+- [docs.adenhq.com](https://docs.adenhq.com/): 온라인 문서
 
-## 로드맵
+## 자주 묻는 질문
 
-Aden Agent Framework는 개발자가 결과 중심(outcome-oriented) 이며 자기 적응형(self-adaptive) 에이전트를 구축할 수 있도록 돕는 것을 목표로 합니다.
-자세한 로드맵은 아래 문서에서 확인할 수 있습니다.
+**Hive는 어떤 모델을 지원하나요?**
+[LiteLLM](https://docs.litellm.ai/docs/providers)이 지원하는 모든 제공자와, 모든 OpenAI 호환 엔드포인트를 지원합니다. quickstart는 Claude Code, OpenAI Codex 같은 코딩 구독을 포함해 많이 쓰는 것들을 설정해 주며, 나머지는 [docs/configuration.md](../configuration.md)에서 다룹니다.
 
-[ROADMAP.md](ROADMAP.md)
+**로컬 모델로 실행할 수 있나요?**
+네. quickstart에서 Ollama를 선택하거나, 로컬에서 Ollama를 실행해 둔 상태로 `ollama/llama3` 같은 모델을 지정하면 됩니다.
 
-```mermaid
-timeline
-    title Aden Agent Framework Roadmap
-    section Foundation
-        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
-        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
-        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
-        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
-        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
-    section Expansion
-        Intelligence : Guardrails : Streaming Mode : Semantic Search
-        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
-        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
-        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
-```
+**다른 에이전트 프레임워크와 무엇이 다른가요?**
+대부분의 프레임워크는 에이전트 그래프를 설계하고 각 에이전트의 입출력을 직접 연결하게 합니다. Hive에는 에이전트가 한 종류뿐입니다. Queen은 에이전트 루프이고, 모든 worker는 그 clone입니다. 오케스트레이션은 런타임에 도구 호출로 이루어지고, 에이전트들은 엣지를 따라 메시지를 주고받는 대신 공유 SQL tracker를 통해 서로 조율합니다. 영속성, 재개, 예산, 압축, 감독이 모두 그 하나의 루프에 들어 있으므로 모든 에이전트가 이 기능을 그대로 갖습니다.
 
-## 커뮤니티 및 지원
+**데이터는 어디에 저장되나요?**
+내 컴퓨터에 저장됩니다. 세션, colony, tracker, 메모리는 모두 `~/.hive`(또는 `HIVE_HOME`이 가리키는 위치) 아래의 일반 파일이며, API 키도 이곳에 암호화되어 저장됩니다.
 
-Aden은 지원, 기능 요청, 커뮤니티 토론을 위해 [Discord](https://discord.com/invite/MXE49hrKDk)를 사용합니다.
+**비용은 어떻게 통제하나요?**
+모든 worker는 턴 수와 도구 호출 수에 엄격한 상한을 두고 실행되므로 막힌 worker는 스스로 멈추고, 동시에 실행되는 worker 수에도 상한이 있습니다. 모든 모델 호출은 사용량이 측정됩니다. 다만 금액 기준의 지출 한도는 아직 없습니다.
 
-- Discord - [커뮤니티 참여하기](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [회사 페이지](https://www.linkedin.com/company/teamaden/)
+**에이전트가 내 도구와 API를 쓸 수 있나요?**
+네. 내장 셸과 브라우저, 직접 추가한 MCP 서버, 그리고 업무 절차를 가르쳐 주는 스킬을 통해 쓸 수 있습니다.
+
+**Hive는 오픈소스인가요?**
+네. [Apache License 2.0](../../LICENSE)으로 배포됩니다.
 
 ## 기여하기
 
-기여를 환영합니다. 기여 가이드라인은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
+기여를 환영합니다. 특히 도구, 통합, 스킬 기여를 기다리고 있습니다([#2805](https://github.com/aden-hive/hive/issues/2805)). 먼저 [CONTRIBUTING.md](../../CONTRIBUTING.md)를 읽고, Pull Request를 열기 전에 이슈를 할당받으세요. 이슈에 댓글을 남기면 메인테이너가 할당해 드립니다. 재현 단계나 구체적인 제안이 담긴 이슈를 우선 처리합니다.
 
-**중요:** PR을 제출하기 전에 먼저 Issue에 할당받으세요. Issue에 댓글을 달아 담당을 요청하면 유지관리자가 24시간 내에 할당해 드립니다. 이는 중복 작업을 방지하는 데 도움이 됩니다.
+## 커뮤니티
 
-1. Issue를 찾거나 생성하고 할당받습니다
-2. 저장소를 포크합니다
-3. 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`)
-4. 변경 사항을 커밋합니다 (`git commit -m 'Add amazing feature'`)
-5. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`)
-6. Pull Request를 생성합니다
+- 질문, 기능 요청, 토론은 [Discord](https://discord.com/invite/MXE49hrKDk)에서
+- 새 소식은 [X / Twitter](https://x.com/aden_hq)와 [LinkedIn](https://www.linkedin.com/company/teamaden/)에서
+- [HoneyComb](http://honeycomb.open-hive.com/): AI 에이전트가 어떤 직무를 자동화하고 있는지 추적하는 커뮤니티 마켓입니다. 돈이 아니라 컴퓨트 토큰으로 직무에 롱 또는 숏 포지션을 잡을 수 있습니다.
 
-## 팀에 합류하세요
-
-**채용 중입니다!** 엔지니어링, 연구, 그리고 Go-To-Market 분야에서 함께하실 분을 찾고 있습니다.
-
-[채용 공고 보기](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
+엔지니어링, 리서치, Go-To-Market 분야에서 **채용 중입니다**. [채용 공고 보기](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant).
 
 ## 보안
 
-보안 관련 문의 사항은 [SECURITY.md](SECURITY.md)를 참고해 주세요.
+취약점을 제보하려면 [SECURITY.md](../../SECURITY.md)를 참고하세요.
 
 ## 라이선스
 
-본 프로젝트는 Apache License 2.0 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE)를 참고해 주세요.
+Apache License 2.0. 자세한 내용은 [LICENSE](../../LICENSE)를 참고하세요.
 
-## Frequently Asked Questions (FAQ)
+## 스타 히스토리
 
-**Q: Aden은 LangChain이나 다른 에이전트 프레임워크에 의존하나요?**
-
-아니요. Aden은 LangChain, CrewAI, 또는 기타 에이전트 프레임워크에 전혀 의존하지 않고 처음부터 새롭게 구축되었습니다. 사전에 정의된 컴포넌트에 의존하는 대신, 에이전트 그래프를 동적으로 생성하도록 설계된 가볍고 유연한 프레임워크입니다.
-
-**Q: Aden은 어떤 LLM 제공자를 지원하나요?**
-
-Aden은 LiteLLM 연동을 통해 100개 이상의 LLM 제공자를 지원합니다. 여기에는 OpenAI(GPT-4, GPT-4o), Anthropic(Claude 모델), Google Gemini, Mistral, Groq 등이 포함됩니다. 적절한 API 키 환경 변수를 설정하고 모델 이름만 지정하면 바로 사용할 수 있습니다.
-
-**Ollama 같은 로컬 AI 모델과 함께 Aden을 사용할 수 있나요?**
-
-네, 가능합니다. Aden은 LiteLLM을 통해 로컬 모델을 지원합니다. `ollama/model-name` 형식(예: `ollama/llama3`, `ollama/mistral`)으로 모델 이름을 지정하고, Ollama가 로컬에서 실행 중이면 됩니다.
-
-**Q: Aden이 다른 에이전트 프레임워크와 다른 점은 무엇인가요?**
-
-Aden은 코딩 에이전트를 사용해 자연어 목표로부터 전체 에이전트 시스템을 생성합니다. 워크플로를 하드코딩하거나 그래프를 수동으로 정의할 필요가 없습니다. 에이전트가 실패하면 프레임워크가 실패 데이터를 자동으로 수집하고, 에이전트 그래프를 진화시킨 뒤 다시 배포합니다. 이러한 자기 개선 루프는 Aden만의 고유한 특징입니다.
-
-**Q: Aden은 오픈소스인가요?**
-
-네. Aden은 Apache License 2.0 하에 배포되는 완전한 오픈소스 프로젝트입니다. 커뮤니티의 기여와 협업을 적극적으로 장려하고 있습니다.
-
-**Q: Aden은 사용자 데이터를 수집하나요?**
-
-Aden은 모니터링과 관측성을 위해 토큰 사용량, 지연 시간 메트릭, 비용 추적과 같은 텔레메트리 데이터를 수집합니다. 프롬프트 및 응답과 같은 콘텐츠 수집은 설정 가능하며, 팀 단위로 격리된 상태로 저장됩니다. 셀프 호스팅 환경에서는 모든 데이터가 사용자의 인프라 내부에만 저장됩니다.
-
-**Q: Aden은 어떤 배포 방식을 지원하나요?**
-
-Aden은 Python 패키지를 통한 셀프 호스팅 배포를 지원합니다. 설치 방법은 [환경 설정 가이드](ENVIRONMENT_SETUP.md)를 참조하세요. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
-
-**Q: Aden은 복잡한 프로덕션 규모의 사용 사례도 처리할 수 있나요?**
-
-네. Aden은 자동 실패 복구, 실시간 관측성, 비용 제어, 수평 확장 지원 등 프로덕션 환경을 명확히 목표로 설계되었습니다. 단순한 자동화부터 복잡한 멀티 에이전트 워크플로까지 모두 처리할 수 있습니다.
-
-**Q: Aden은 Human-in-the-Loop 워크플로를 지원하나요?**
-
-네. Aden은 사람의 입력을 받기 위해 실행을 일시 중지하는 개입 노드를 통해 Human-in-the-Loop 워크플로를 완전히 지원합니다. 타임아웃과 에스컬레이션 정책을 설정할 수 있어, 인간 전문가와 AI 에이전트 간의 원활한 협업이 가능합니다.
-
-**Q: Aden은 어떤 모니터링 및 디버깅 도구를 제공하나요?**
-
-Aden은 다음과 같은 포괄적인 관측성 기능을 제공합니다. 실시간 에이전트 실행 모니터링을 위한 WebSocket 스트리밍, TimescaleDB 기반의 비용 및 성능 메트릭 분석, Kubernetes 연동을 위한 헬스 체크 엔드포인트, 예산 관리, 에이전트 상태, 정책 제어를 위한 19개의 MCP 도구
-
-**Q: Aden은 어떤 프로그래밍 언어를 지원하나요?**
-
-Aden은 Python과 JavaScript/TypeScript SDK를 모두 제공합니다. Python SDK에는 LangGraph, LangFlow, LiveKit 연동 템플릿이 포함되어 있습니다. 백엔드는 Node.js/TypeScript로 구현되어 있으며, 프론트엔드는 React/TypeScript를 사용합니다.
-
-**Q: Aden 에이전트는 외부 도구나 API와 연동할 수 있나요?**
-
-네. Aden의 SDK로 래핑된 노드는 기본적인 도구 접근 기능을 제공하며, 유연한 도구 생태계를 지원합니다. 노드 아키텍처를 통해 외부 API, 데이터베이스, 다양한 서비스와 연동할 수 있습니다.
-
-**Q: Aden에서 비용 제어는 어떻게 이루어지나요??**
-
-Aden은 지출 한도, 호출 제한, 자동 모델 다운그레이드 정책 등 세밀한 예산 제어 기능을 제공합니다. 팀, 에이전트, 워크플로 단위로 예산을 설정할 수 있으며, 실시간 비용 추적과 알림 기능을 제공합니다.
-
-**Q: 예제와 문서는 어디에서 확인할 수 있나요?**
-
-전체 가이드, API 레퍼런스, 시작 튜토리얼은 [docs.adenhq.com](https://docs.adenhq.com/) 에서 확인하실 수 있습니다. 또한 저장소의 `docs/` 디렉터리와 종합적인 [DEVELOPER.md](DEVELOPER.md) 가이드도 함께 제공됩니다.
-
-**Q: Aden에 기여하려면 어떻게 해야 하나요?**
-
-기여를 환영합니다. 저장소를 포크하고 기능 브랜치를 생성한 뒤 변경 사항을 구현하여 Pull Request를 제출해 주세요. 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
-
-**Q: Aden은 엔터프라이즈 지원을 제공하나요?**
-
-엔터프라이즈 관련 문의는 [adenhq.com](https://adenhq.com)을 통해 Aden 팀에 연락하시거나, 지원을 위해 [Discord community](https://discord.com/invite/MXE49hrKDk)에 참여해 주시기 바랍니다.
+<a href="https://www.star-history.com/?type=date&repos=aden-hive%2Fhive">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+ </picture>
+</a>
 
 ---
 
-<p align="center">
-  Made with 🔥 Passion in San Francisco
-</p>
+<p align="center">샌프란시스코에서 🔥 열정을 담아 만들었습니다</p>

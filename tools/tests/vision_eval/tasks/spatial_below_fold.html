@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Below the fold</title>
+<style>
+  .filler {
+    height: 900px;
+    background: repeating-linear-gradient(180deg, #fafafa 0 40px, #f1f1f1 40px 80px);
+    display: flex; align-items: center; justify-content: center;
+    color: #999; font: 14px sans-serif;
+  }
+  .target-zone {
+    height: 600px;
+    background: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #target {
+    width: 96px; height: 96px;
+    background: #2bb04a;
+    color: white;
+    border: 0;
+    border-radius: 50%;
+    font: 700 36px sans-serif;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  }
+  .decoy {
+    position: absolute;
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: #999;
+    color: white;
+    border: 0;
+    font: 700 22px sans-serif;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spatial · Below the fold</h1>
+  <p class="instruction">The target is offscreen. <strong>Scroll down</strong> and click the <strong>green circular ✓ checkmark</strong>. (The smaller grey circles you may pass on the way are decoys.)</p>
+</header>
+<div class="filler" style="position: relative;">
+  scroll past this filler
+  <button class="decoy" style="left: 22%; top: 200px;">×</button>
+  <button class="decoy" style="left: 70%; top: 420px;">!</button>
+  <button class="decoy" style="left: 50%; top: 680px;">?</button>
+</div>
+<div class="target-zone">
+  <button id="target" aria-label="checkmark">✓</button>
+</div>
+<div style="height: 600px;"></div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    Eval.requireClickOn(function () { return document.getElementById("target"); }, { allowRetry: true });
+  });
+</script>
+</body>
+</html>

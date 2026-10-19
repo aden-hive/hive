@@ -1,343 +1,207 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/readme/banner-dark.webp" />
+    <img width="100%" alt="OpenHive. Descreva o resultado; uma agente queen faz crescer a colônia que vai entregá-lo." src="../assets/readme/banner-light.webp" />
+  </picture>
 </p>
 
 <p align="center">
   <a href="../../README.md">English</a> |
   <a href="zh-CN.md">简体中文</a> |
   <a href="es.md">Español</a> |
+  <a href="hi.md">हिन्दी</a> |
   <a href="pt.md">Português</a> |
   <a href="ja.md">日本語</a> |
   <a href="ru.md">Русский</a> |
   <a href="ko.md">한국어</a>
 </p>
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
-[![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
-[![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
-[![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
-[![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
-
 <p align="center">
-  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
-  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
-  <img src="https://img.shields.io/badge/Goal--Driven-Development-purple?style=flat-square" alt="Goal-Driven" />
-  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
-  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
-  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <a href="https://github.com/aden-hive/hive/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Licença Apache 2.0" /></a>
+  <a href="https://www.ycombinator.com/companies/aden"><img src="https://img.shields.io/badge/Y%20Combinator-Aden-orange" alt="Y Combinator" /></a>
+  <a href="https://discord.com/invite/MXE49hrKDk"><img src="https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb" alt="Discord" /></a>
+  <a href="https://x.com/aden_hq"><img src="https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5" alt="Siga no X" /></a>
+  <a href="https://www.linkedin.com/company/teamaden/"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn" /></a>
 </p>
 
-## Visão Geral
-
-Construa agentes de IA confiáveis e auto-aperfeiçoáveis sem codificar fluxos de trabalho. Defina seu objetivo através de uma conversa com um agente de codificação, e o framework gera um grafo de nós com código de conexão criado dinamicamente. Quando algo quebra, o framework captura dados de falha, evolui o agente através do agente de codificação e reimplanta. Nós de intervenção humana integrados, gerenciamento de credenciais e monitoramento em tempo real dão a você controle sem sacrificar a adaptabilidade.
-
-Visite [adenhq.com](https://adenhq.com) para documentação completa, exemplos e guias.
-
-## O que é Aden
+<h3 align="center">Um runtime open source para colônias de agentes de IA que fazem trabalho de verdade para o seu negócio.</h3>
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  Diga a uma agente queen do que você precisa. Ela mesma faz a primeira parte para entender o que o trabalho exige e depois passa o resto para quantos workers em paralelo forem necessários. Cada resultado vai para um tracker compartilhado que você pode consultar, auditar e usar para retomar de onde parou.
 </p>
 
-Aden é uma plataforma para construir, implantar, operar e adaptar agentes de IA:
+<p align="center">
+  <a href="../assets/readme/demo.mp4"><img width="100%" alt="Demo: uma queen de growth pesquisa os lançamentos de cinco produtos no Hacker News com uma colônia de workers em paralelo" src="../assets/readme/demo.webp" /></a>
+  <br />
+  <sub>Uma execução real. Só a digitação e a espera são aceleradas, e o selo mostra em quanto. <a href="../assets/readme/demo.mp4">Assista à execução completa (MP4)</a>.</sub>
+</p>
 
-- **Construir** - Um Agente de Codificação gera Agentes de Trabalho especializados (Vendas, Marketing, Operações) a partir de objetivos em linguagem natural
-- **Implantar** - Implantação headless com integração CI/CD e gerenciamento completo do ciclo de vida de API
-- **Operar** - Monitoramento em tempo real, observabilidade e guardrails de runtime mantêm os agentes confiáveis
-- **Adaptar** - Avaliação contínua, supervisão e adaptação garantem que os agentes melhorem ao longo do tempo
-- **Infraestrutura** - Memória compartilhada, integrações LLM, ferramentas e habilidades alimentam cada agente
+## O que você acabou de ver
 
-## Links Rápidos
+Um time de growth que está preparando um Show HN quer saber como se saíram no Hacker News os próprios lançamentos de cinco ferramentas para desenvolvedores. Veja o que o Hive fez com essa única mensagem:
 
-- **[Documentação](https://docs.adenhq.com/)** - Guias completos e referência de API
-- **[Guia de Auto-Hospedagem](https://docs.adenhq.com/getting-started/quickstart)** - Implante o Hive em sua infraestrutura
-- **[Changelog](https://github.com/adenhq/hive/releases)** - Últimas atualizações e versões
-<!-- - **[Roadmap](https://adenhq.com/roadmap)** - Funcionalidades e planos futuros -->
-- **[Reportar Problemas](https://github.com/adenhq/hive/issues)** - Relatórios de bugs e solicitações de funcionalidades
+1. **Você entrega a tarefa a uma queen.** As queens são agentes de longa duração, com um papel (aqui, Head of Growth) e memória e ferramentas próprias.
+2. **Ela faz a única pergunta que muda a resposta:** todos os posts de lançamento ou só o lançamento original de cada produto? Você escolhe todos os lançamentos, e ela segue em frente.
+3. **Ela propõe uma colônia, e você aprova.** Cinco produtos são cinco tarefas paralelas, então o chat vira uma colônia: a queen mais quantos agentes worker o trabalho exigir.
+4. **Ela mesma faz uma delas.** Ela começa pelo PostHog, descobre o que conta como um post de lançamento genuíno em vez de uma menção de passagem, confere os números com a API do Hacker News e salva o método como uma skill reutilizável.
+5. **Ela distribui o trabalho.** Um playbook inicia um worker por produto. Cada um segue a skill dela e grava seu resultado no tracker da colônia, uma tabela SQLite compartilhada.
+6. **Ela confere cada linha antes de responder e corrige uma.** O worker do Cal.com contou um post publicado com o nome antigo, Calendso, mas esse post não era um Show HN, um Launch HN nem um lançamento da YC. Ela limpa a linha, e o gráfico mostra o Cal.com como não encontrado, e não como zero.
 
-## Início Rápido
+Nada disso foi montado de antemão. Não há grafo de workflow para desenhar: a queen molda a colônia conforme o trabalho avança, e quem controla o que já foi feito e o que falta é um tracker em disco, não uma janela de contexto.
 
-### Pré-requisitos
+## Início rápido
 
-- [Python 3.11+](https://www.python.org/downloads/) - Para desenvolvimento de agentes
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional, para ferramentas containerizadas
+**Você vai precisar de** Python 3.11+, Node.js 20+ e git. O quickstart instala o `uv` e o `ripgrep` se estiverem faltando e se oferece para instalar o Node.
 
-### Instalação
+**E de um modelo.** O quickstart configura qualquer uma destas opções:
+
+- uma chave de API da Anthropic, OpenAI, Google Gemini, Groq, Cerebras ou OpenRouter
+- uma assinatura de ferramenta de código que você já paga: Claude Code, OpenAI Codex, Kimi Code, MiniMax, Z.AI ou Antigravity
+- Hive LLM
+- um modelo local via Ollama, sem chave nenhuma
 
 ```bash
-# Clonar o repositório
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
-
-# Executar configuração do ambiente Python
-./scripts/setup-python.sh
+./quickstart.sh          # macOS / Linux
+.\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-Isto instala:
-- **framework** - Runtime do agente principal e executor de grafos
-- **aden_tools** - 19 ferramentas MCP para capacidades de agentes
-- Todas as dependências necessárias
+O quickstart cria um único ambiente Python para o workspace, guarda sua chave de API criptografada em `~/.hive`, pergunta qual modelo usar, faz o build do dashboard e o abre em `http://127.0.0.1:8787`. Da próxima vez, execute `hive open` a partir do repositório.
 
-### Construa Seu Primeiro Agente
+> [!NOTE]
+> O Hive é um workspace `uv`, não um pacote pip. O `pip install -e .` instala um placeholder que não roda; use o quickstart.
 
-```bash
-# Instalar habilidades do Claude Code (uma vez)
-./quickstart.sh
+**Depois,** digite uma tarefa na tela inicial e escolha a queen que vai recebê-la, ou abra a **Prompt Library** e envie um prompt pronto direto para a queen para quem ele foi escrito.
 
-# Construir um agente usando Claude Code
-claude> /building-agents-construction
-
-# Testar seu agente
-claude> /testing-agent
-
-# Executar seu agente
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
-```
-
-**[📖 Guia Completo de Configuração](ENVIRONMENT_SETUP.md)** - Instruções detalhadas para desenvolvimento de agentes
-
-## Funcionalidades
-
-- **Desenvolvimento Orientado a Objetivos** - Defina objetivos em linguagem natural; o agente de codificação gera o grafo de agentes e código de conexão para alcançá-los
-- **Agentes Auto-Adaptáveis** - Framework captura falhas, atualiza objetivos e atualiza o grafo de agentes
-- **Conexões de Nós Dinâmicas** - Sem arestas predefinidas; código de conexão é gerado por qualquer LLM capaz baseado em seus objetivos
-- **Nós Envolvidos em SDK** - Cada nó recebe memória compartilhada, memória RLM local, monitoramento, ferramentas e acesso LLM prontos para uso
-- **Humano no Loop** - Nós de intervenção que pausam a execução para entrada humana com timeouts e escalonamento configuráveis
-- **Observabilidade em Tempo Real** - Streaming WebSocket para monitoramento ao vivo de execução de agentes, decisões e comunicação entre nós
-- **Controle de Custo e Orçamento** - Defina limites de gastos, throttles e políticas de degradação automática de modelo
-- **Pronto para Produção** - Auto-hospedável, construído para escala e confiabilidade
-
-## Por que Aden
-
-Frameworks de agentes tradicionais exigem que você projete manualmente fluxos de trabalho, defina interações de agentes e lide com falhas reativamente. Aden inverte esse paradigma—**você descreve resultados, e o sistema se constrói sozinho**.
+## Como funciona
 
 ```mermaid
 flowchart LR
-    subgraph BUILD["🏗️ BUILD"]
-        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
-        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
-        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
-    end
+    You(["Você"]) -->|"descreve o resultado"| Queen["Queen<br/>(agente persistente)"]
+    Queen -->|"propõe uma colônia,<br/>você aprova"| Pilot["Piloto<br/>(uma unidade, feita pela queen)"]
+    Pilot -->|"salva o método"| Skill["Skill + playbook"]
+    Skill -->|"run_worker / run_playbook"| W["Clones de worker<br/>em paralelo"]
+    W -->|"tracker_upsert"| T[("Tracker<br/>SQLite compartilhado")]
+    T -->|"SQL: o que já foi feito,<br/>o que falta"| Queen
+    Queen -->|"resposta verificada"| You
 
-    subgraph EXPORT["📦 EXPORT"]
-        direction TB
-        JSON["agent.json<br/>(GraphSpec)"]
-        TOOLS["tools.py<br/>(Functions)"]
-        MCP["mcp_servers.json<br/>(Integrations)"]
-    end
-
-    subgraph RUN["🚀 RUNTIME"]
-        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
-        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
-
-        subgraph DECISION["Decision Recording"]
-            DEC1["runtime.decide()<br/>intent → options → choice"]
-            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
-        end
-    end
-
-    subgraph INFRA["⚙️ INFRASTRUCTURE"]
-        CTX["NodeContext<br/>memory • llm • tools"]
-        STORE[("FileStorage<br/>Runs & Decisions")]
-    end
-
-    APPROVE --> EXPORT
-    EXPORT --> LOAD
-    EXEC --> DECISION
-    EXEC --> CTX
-    DECISION --> STORE
-    STORE -.->|"Analyze & Improve"| NODES
-
-    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
-    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
-    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
-    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
-    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style Queen fill:#ffb100,stroke:#cc5d00,color:#333
+    style T fill:#fff3d6,stroke:#cc5d00,color:#333
+    style W fill:#ff9800,stroke:#cc5d00,color:#fff
 ```
 
-### A Vantagem Aden
+O Hive tem **uma única primitiva de execução**: o agent loop. A queen é um deles, e cada worker é um clone dela, com sua própria tarefa, um conjunto mais restrito de ferramentas e um orçamento rígido. A orquestração é uma chamada de ferramenta, não um grafo compilado:
 
-| Frameworks Tradicionais | Aden |
-|-------------------------|------|
-| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural |
-| Definição manual de grafos | Grafos de agentes auto-gerados |
-| Tratamento reativo de erros | Auto-evolução proativa |
-| Configurações de ferramentas estáticas | Nós dinâmicos envolvidos em SDK |
-| Configuração de monitoramento separada | Observabilidade em tempo real integrada |
-| Gerenciamento de orçamento DIY | Controles de custo e degradação integrados |
+- **`run_worker`** distribui as tarefas e retorna na hora, então a queen continua conversando com você enquanto os workers rodam. Por padrão, quatro rodam ao mesmo tempo; os demais esperam a vez. O relatório de cada worker chega à conversa da queen como um novo turno.
+- **O tracker** é o estado compartilhado da colônia. A queen define a tabela e em quais colunas os workers podem escrever, os workers fazem upsert de uma linha por unidade de trabalho, e a queen acompanha o progresso com SQL. É um arquivo em disco: `~/.hive/colonies/<name>/tracker/tracker.db`.
+- **`run_playbook`** aplica um método já validado a todas as linhas, com retentativas e backoff, lanes com rate limit e uma lista de dead letter para as linhas que continuam falhando. "O que falta" é sempre uma consulta nova ao tracker, então rodar um playbook de novo retoma de onde ele parou.
 
-### Como Funciona
+A **[visão geral da arquitetura](../architecture/README.md)** vai mais fundo: o loop, a superfície de ferramentas, a memória, a supervisão humana e como o estado sobrevive a um crash.
 
-1. **Defina Seu Objetivo** → Descreva o que você quer alcançar em linguagem simples
-2. **Agente de Codificação Gera** → Cria o grafo de agentes, código de conexão e casos de teste
-3. **Workers Executam** → Nós envolvidos em SDK executam com observabilidade completa e acesso a ferramentas
-4. **Plano de Controle Monitora** → Métricas em tempo real, aplicação de orçamento, gerenciamento de políticas
-5. **Auto-Aperfeiçoamento** → Em caso de falha, o sistema evolui o grafo e reimplanta automaticamente
+<table>
+  <tr>
+    <td width="50%"><img alt="Tela inicial: o mapa do hive com queens e colônias" src="../assets/readme/home.webp" /><br /><sub><b>Tela inicial.</b> Suas queens e as colônias delas em um único mapa. Descreva uma tarefa e escolha quem vai assumi-la.</sub></td>
+    <td width="50%"><img alt="Os workers de uma colônia rodando em paralelo" src="../assets/readme/workers.webp" /><br /><sub><b>Workers.</b> Um por unidade de trabalho, cada um com sua própria tarefa e orçamento, todos reportando à queen.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="O tracker da colônia sendo preenchido com resultados" src="../assets/readme/tracker.webp" /><br /><sub><b>Tracker.</b> Os resultados entram em uma tabela compartilhada à medida que os workers terminam, prontos para consultar, exportar ou retomar a partir deles.</sub></td>
+    <td width="50%"><img alt="A resposta final da queen, com tabela e gráfico com fontes" src="../assets/readme/result.webp" /><br /><sub><b>Resultado.</b> Uma resposta verificada, com fontes e gráfico, direto no chat.</sub></td>
+  </tr>
+</table>
 
-## Como Aden se Compara
+## O que tem dentro
 
-Aden adota uma abordagem fundamentalmente diferente para o desenvolvimento de agentes. Enquanto a maioria dos frameworks exige que você codifique fluxos de trabalho ou defina manualmente grafos de agentes, Aden usa um **agente de codificação para gerar todo o seu sistema de agentes** a partir de objetivos em linguagem natural. Quando os agentes falham, o framework não apenas registra erros—**ele evolui automaticamente o grafo de agentes** e reimplanta.
+**Queens com uma função e uma memória.** O Hive vem com treze queens, cada uma com sua persona. Seis já vêm ativas (Growth, RevOps, Content, Lead Generation, Outbound e Brand & Design); contrate as demais no Org Chart ou crie as suas. Cada uma faz anotações em uma memória em markdown enquanto trabalha, e conversas anteriores relevantes são trazidas automaticamente para o contexto dela.
 
-> **Nota:** Para a tabela de comparação detalhada de frameworks e perguntas frequentes, consulte o [README.md](README.md) em inglês.
+**Ferramentas nativas que rodam no mesmo processo.** Comandos de shell e jobs em segundo plano, edição de arquivos, busca rápida em código, PDFs, anexos e imagens, web scraping, gráficos (ECharts e Mermaid), arquivos CSV e geração de imagens com o Hive LLM. Elas rodam dentro do próprio Hive, sem nenhum servidor de ferramentas para iniciar.
 
-### Quando Escolher Aden
+**Seu navegador, controlado pelos seus agentes.** A extensão Hive Browser Bridge permite que os agentes trabalhem no seu próprio Chrome, onde você já está logado. Cada worker ganha seu próprio grupo de abas.
 
-Escolha Aden quando você precisar de:
+**Skills.** Instruções reutilizáveis no formato aberto [Agent Skills](https://agentskills.io). O Hive já vem com um conjunto delas, as queens escrevem novas quando um método se mostra eficaz, e você gerencia todas na Skills Library.
 
-- Agentes que **se auto-aperfeiçoam a partir de falhas** sem intervenção manual
-- **Desenvolvimento orientado a objetivos** onde você descreve resultados, não fluxos de trabalho
-- **Confiabilidade em produção** com recuperação e reimplantação automáticas
-- **Iteração rápida** em arquiteturas de agentes sem reescrever código
-- **Observabilidade completa** com monitoramento em tempo real e supervisão humana
+**Qualquer servidor MCP.** Adicione um com `hive mcp add`, e as ferramentas dele entram nas mesmas allowlists das nativas. O catálogo completo de integrações em [`tools/`](../../tools/src/aden_tools/tools) (GitHub, Gmail, HubSpot, Slack, Notion e muitas outras) roda como um servidor MCP; veja [docs/tools.md](../tools.md).
 
-Escolha outros frameworks quando você precisar de:
+**Roda enquanto você está fora.** As colônias podem acordar sozinhas com gatilhos de cron, de intervalo ou de webhook. O **Sentinel**, que você ativa por colônia, observa uma queen sempre que ela para: dá um empurrão para ela seguir ou escala o caso para você pela caixa de entrada do Hive, pelo Telegram ou pelo Slack, e ela retoma assim que você responde.
 
-- **Fluxos de trabalho previsíveis e type-safe** (PydanticAI, Mastra)
-- **RAG e processamento de documentos** (LlamaIndex, Haystack)
-- **Pesquisa sobre emergência de agentes** (CAMEL)
-- **Voz/multimodal em tempo real** (TEN Framework)
-- **Encadeamento simples de componentes** (LangChain, Swarm)
+**Feito para sobreviver.** Todo agente salva seu estado em disco e, depois de um crash ou reinício, retoma exatamente de onde parou. Resultados grandes de ferramentas vão para arquivos em vez de inundar o contexto, sessões longas se compactam sozinhas, turnos travados ou em loop são detectados, e todo worker roda com um orçamento rígido de chamadas de ferramenta.
 
-## Estrutura do Projeto
+**Qualquer modelo.** Tudo o que o [LiteLLM](https://docs.litellm.ai/docs/providers) suporta, incluindo OpenAI, Anthropic, Gemini, OpenRouter, Hive LLM, qualquer endpoint compatível com OpenAI e modelos locais via Ollama. Os workers podem rodar em um modelo diferente do da sua queen, e modelos só de texto continuam enxergando imagens graças a um fallback de visão.
 
-```
-hive/
-├── core/                   # Framework principal - Runtime de agentes, executor de grafos, protocolos
-├── tools/                  # Pacote de Ferramentas MCP - 19 ferramentas para capacidades de agentes
-├── exports/                # Pacotes de Agentes - Agentes pré-construídos e exemplos
-├── docs/                   # Documentação e guias
-├── scripts/                # Scripts de build e utilitários
-├── .claude/                # Habilidades Claude Code para construir agentes
-├── ENVIRONMENT_SETUP.md    # Guia de configuração Python para desenvolvimento de agentes
-├── DEVELOPER.md            # Guia do desenvolvedor
-├── CONTRIBUTING.md         # Diretrizes de contribuição
-└── ROADMAP.md              # Roadmap do produto
-```
+## O Hive é para você?
 
-## Desenvolvimento
+O Hive mostra seu valor quando a parte difícil já não é o modelo, e sim tudo ao redor dele:
 
-### Desenvolvimento de Agentes Python
+- Um processo com **muitas unidades de trabalho parecidas**, como leads, contas, tickets, repositórios ou documentos, que você quer executar em paralelo e sempre do mesmo jeito.
+- Trabalho que **roda por horas ou de forma agendada** e precisa sobreviver a um reinício.
+- Resultados que você precisa **conferir, consultar e auditar**, e não só ler em um chat.
+- Um **humano que continua no comando** das decisões que importam.
 
-Para construir e executar agentes orientados a objetivos com o framework:
-
-```bash
-# Configuração única
-./scripts/setup-python.sh
-
-# Isto instala:
-# - pacote framework (runtime principal)
-# - pacote aden_tools (19 ferramentas MCP)
-# - Todas as dependências
-
-# Construir novos agentes usando habilidades Claude Code
-claude> /building-agents-construction
-
-# Testar agentes
-claude> /testing-agent
-
-# Executar agentes
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
-```
-
-Consulte [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instruções completas de configuração.
+Para um único prompt ou um script pontual, um agente comum é mais simples.
 
 ## Documentação
 
-- **[Guia do Desenvolvedor](DEVELOPER.md)** - Guia abrangente para desenvolvedores
-- [Começando](docs/getting-started.md) - Instruções de configuração rápida
-- [Guia de Configuração](docs/configuration.md) - Todas as opções de configuração
-- [Visão Geral da Arquitetura](docs/architecture/README.md) - Design e estrutura do sistema
+- [Primeiros passos](../getting-started.md): a configuração em mais detalhes
+- [Visão geral da arquitetura](../architecture/README.md): como colônias, o loop, as ferramentas e a memória se encaixam
+- Conceitos principais: [colônia](../key_concepts/colony.md), [queen](../key_concepts/queen.md), [workers](../key_concepts/worker_agent.md), [coordenação](../key_concepts/coordination.md), [o loop](../key_concepts/the_loop.md), [objetivos e resultados](../key_concepts/goals_outcome.md), [como as colônias melhoram](../key_concepts/improvement.md)
+- [Ferramentas](../tools.md): ferramentas nativas, servidores MCP e o catálogo de integrações
+- [Configuração](../configuration.md) e o [guia do desenvolvedor](../developer-guide.md)
+- [Roadmap](../roadmap.md): o que a V1 entrega e o que ainda está em aberto
+- [docs.adenhq.com](https://docs.adenhq.com/): documentação online
 
-## Roadmap
+## Perguntas frequentes
 
-O Aden Agent Framework visa ajudar desenvolvedores a construir agentes auto-adaptativos orientados a resultados. Encontre nosso roadmap aqui
+**Quais modelos o Hive suporta?**
+Qualquer provedor suportado pelo [LiteLLM](https://docs.litellm.ai/docs/providers), além de qualquer endpoint compatível com OpenAI. O quickstart configura os mais comuns, incluindo assinaturas de ferramentas de código como Claude Code e OpenAI Codex; o [docs/configuration.md](../configuration.md) cobre o resto.
 
-[ROADMAP.md](ROADMAP.md)
+**Posso rodar com modelos locais?**
+Sim. Escolha Ollama no quickstart ou configure um modelo como `ollama/llama3` com o Ollama rodando localmente.
 
-```mermaid
-timeline
-    title Aden Agent Framework Roadmap
-    section Foundation
-        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
-        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
-        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
-        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
-        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
-    section Expansion
-        Intelligence : Guardrails : Streaming Mode : Semantic Search
-        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
-        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
-        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
-```
+**Qual a diferença para outros frameworks de agentes?**
+A maioria dos frameworks pede que você desenhe um grafo de agentes e conecte as entradas e saídas deles. O Hive tem um único tipo de agente: a queen é um agent loop, e cada worker é um clone dela. A orquestração acontece em tempo de execução, por meio de chamadas de ferramenta, e os agentes se coordenam por um tracker SQL compartilhado, em vez de trocar mensagens ao longo das arestas. Persistência, retomada, orçamentos, compactação e supervisão ficam nesse único loop, então todo agente já vem com eles.
 
-## Comunidade e Suporte
+**Onde ficam meus dados?**
+Na sua máquina. Sessões, colônias, trackers e memória são arquivos comuns em `~/.hive` (ou onde `HIVE_HOME` apontar), e as chaves de API ficam guardadas ali, criptografadas.
 
-Usamos [Discord](https://discord.com/invite/MXE49hrKDk) para suporte, solicitações de funcionalidades e discussões da comunidade.
+**Como mantenho os custos sob controle?**
+Cada worker roda com limites rígidos de turnos e de chamadas de ferramenta, então um worker travado para sozinho, e o número de workers rodando ao mesmo tempo tem um teto. Toda chamada ao modelo é contabilizada. Ainda não há limites de gasto em dólares.
 
-- Discord - [Junte-se à nossa comunidade](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [Página da Empresa](https://www.linkedin.com/company/teamaden/)
+**Os agentes podem usar minhas próprias ferramentas e APIs?**
+Sim: pelo shell e pelo navegador nativos, por qualquer servidor MCP que você adicionar e por skills que ensinam a eles os seus procedimentos.
+
+**O Hive é open source?**
+Sim, sob a [Licença Apache 2.0](../../LICENSE).
 
 ## Contribuindo
 
-Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes.
+Contribuições são bem-vindas, principalmente ferramentas, integrações e skills ([#2805](https://github.com/aden-hive/hive/issues/2805)). Leia o [CONTRIBUTING.md](../../CONTRIBUTING.md) primeiro e seja atribuído a uma issue antes de abrir um pull request: comente na issue e um mantenedor vai atribuí-la a você. Issues com passos para reproduzir ou com uma proposta concreta têm prioridade.
 
-**Importante:** Por favor, seja atribuído a uma issue antes de enviar um PR. Comente na issue para reivindicá-la e um mantenedor irá atribuí-la a você em 24 horas. Isso ajuda a evitar trabalho duplicado.
+## Comunidade
 
-1. Encontre ou crie uma issue e seja atribuído
-2. Faça fork do repositório
-3. Crie sua branch de funcionalidade (`git checkout -b feature/amazing-feature`)
-4. Faça commit das suas alterações (`git commit -m 'Add amazing feature'`)
-5. Faça push para a branch (`git push origin feature/amazing-feature`)
-6. Abra um Pull Request
+- [Discord](https://discord.com/invite/MXE49hrKDk) para dúvidas, pedidos de funcionalidades e discussões
+- [X / Twitter](https://x.com/aden_hq) e [LinkedIn](https://www.linkedin.com/company/teamaden/) para novidades
+- [HoneyComb](http://honeycomb.open-hive.com/): um mercado da comunidade que acompanha quais profissões os agentes de IA estão automatizando. Aposte na alta ou na baixa de uma profissão com tokens de computação, não com dinheiro.
 
-## Junte-se ao Nosso Time
-
-**Estamos contratando!** Junte-se a nós em funções de engenharia, pesquisa e go-to-market.
-
-[Ver Posições Abertas](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant)
+**Estamos contratando** para engenharia, pesquisa e go-to-market. [Veja as vagas abertas](https://jobs.adenhq.com/a8cec478-cdbc-473c-bbd4-f4b7027ec193/applicant).
 
 ## Segurança
 
-Para questões de segurança, por favor consulte [SECURITY.md](SECURITY.md).
+Para reportar uma vulnerabilidade, veja o [SECURITY.md](../../SECURITY.md).
 
 ## Licença
 
-Este projeto está licenciado sob a Licença Apache 2.0 - veja o arquivo [LICENSE](LICENSE) para detalhes.
+Licença Apache 2.0. Veja o [LICENSE](../../LICENSE).
 
-## Perguntas Frequentes (FAQ)
+## Histórico de estrelas
 
-> **Nota:** Para as perguntas frequentes completas, consulte o [README.md](README.md) em inglês.
-
-**P: O Aden depende do LangChain ou outros frameworks de agentes?**
-
-Não. O Aden é construído do zero sem dependências do LangChain, CrewAI ou outros frameworks de agentes. O framework é projetado para ser leve e flexível, gerando grafos de agentes dinamicamente em vez de depender de componentes predefinidos.
-
-**P: Quais provedores de LLM o Aden suporta?**
-
-O Aden suporta mais de 100 provedores de LLM através da integração LiteLLM, incluindo OpenAI (GPT-4, GPT-4o), Anthropic (modelos Claude), Google Gemini, Mistral, Groq e muitos mais. Simplesmente configure a variável de ambiente da chave API apropriada e especifique o nome do modelo.
-
-**P: O Aden é open-source?**
-
-Sim, o Aden é totalmente open-source sob a Licença Apache 2.0. Incentivamos ativamente contribuições e colaboração da comunidade.
-
-**P: O que torna o Aden diferente de outros frameworks de agentes?**
-
-O Aden gera todo o seu sistema de agentes a partir de objetivos em linguagem natural usando um agente de codificação—você não codifica fluxos de trabalho nem define grafos manualmente. Quando os agentes falham, o framework captura automaticamente os dados de falha, evolui o grafo de agentes e reimplanta. Este loop de auto-aperfeiçoamento é único do Aden.
-
-**P: O Aden suporta fluxos de trabalho com humano no loop?**
-
-Sim, o Aden suporta totalmente fluxos de trabalho com humano no loop através de nós de intervenção que pausam a execução para entrada humana. Estes incluem timeouts configuráveis e políticas de escalonamento, permitindo colaboração perfeita entre especialistas humanos e agentes de IA.
+<a href="https://www.star-history.com/?type=date&repos=aden-hive%2Fhive">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&theme=dark&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+   <img alt="Star history chart" src="https://api.star-history.com/chart?repos=aden-hive/hive&type=date&legend=top-left&sealed_token=vfX1DG8w_KTkonUUtIEjFRLvBopgDzxQpyb8hiYT22sobcDIpvQiMciZghLsDu5hyU3LJs-ZddFjl8eYFx5zRrY-kcMRsfyQ3vAiacsroPoqgRYmZaES3Q" />
+ </picture>
+</a>
 
 ---
 
-<p align="center">
-  Feito com 🔥 Paixão em San Francisco
-</p>
+<p align="center">Feito com 🔥 paixão em San Francisco</p>

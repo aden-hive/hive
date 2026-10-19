@@ -1,21 +1,19 @@
 [project]
-name = "tools"
-version = "0.1.0"
+name = "aden-tools"
+version = "1.0.10"
 description = "Tools library for the Aden agent framework"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [
-    { name = "Aden", email = "team@aden.ai" }
-]
+authors = [{ name = "Aden", email = "team@aden.ai" }]
 keywords = ["ai", "agents", "tools", "llm"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
@@ -23,11 +21,30 @@ dependencies = [
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "pypdf>=4.0.0",
+    "pdfplumber>=0.11.9",
+    "reportlab>=4.0.0",
+    "pypdfium2>=4.0.0",
     "pandas>=2.0.0",
     "jsonpath-ng>=1.6.0",
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=2.0.0",
+    "litellm==1.83.4",
+    "dnspython>=2.4.0",
+    "resend>=2.0.0",
+    "asana>=3.2.0",
+    "google-analytics-data>=0.18.0",
+    "aden-hive==1.0.10",
+    "stripe>=14.3.0",
+    "arxiv>=2.1.0",
+    "requests>=2.31.0",
+    "websockets>=12.0",
+    "psycopg2-binary>=2.9.0",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+    "fpdf2>=2.7.0",
 ]
 
 [project.optional-dependencies]
@@ -38,30 +55,59 @@ dev = [
 sandbox = [
     "RestrictedPython>=7.0",
 ]
+browser = [
+    "pillow>=10.0.0",
+]
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
 ]
+excel = [
+    "openpyxl>=3.1.0",
+]
 sql = [
     "duckdb>=1.0.0",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.0.0",
+]
+databricks = [
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
+    "openpyxl>=3.1.0",
+    "google-cloud-bigquery>=3.0.0",
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
+
+[project.scripts]
+# The browser CLI that replaces the browser_* MCP tools. Invoked by agents via
+# terminal_exec (always with --json); a `python -m gcu.cli` fallback is documented.
+hive-browser = "gcu.cli:main"
+
+[tool.uv.sources]
+aden-hive = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aden_tools"]
+# Every package Hive imports from src/. An editable install exposes the whole src path;
+# a wheel carries only what is listed, so `pip install "aden-hive[tools]"` needs them all:
+# aden_tools, gcu (the browser and the `hive-browser` CLI), and the terminal, memory and
+# chart tools Hive registers in-process.
+packages =["src/aden_tools", "src/gcu", "src/terminal_tools", "src/memory_tools", "src/chart_tools"]
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 150
 
 lint.select = [
   "B",   # bugbear errors
@@ -87,3 +133,14 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.13",
+    "ruff>=0.14.14",
+    "duckdb>=1.4.4",
+]

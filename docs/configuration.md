@@ -1,15 +1,92 @@
 # Configuration Guide
 
-Aden Hive is a Python-based agent framework. Configuration is handled through environment variables and agent-level config files. There is no centralized `config.yaml` or Docker Compose setup.
+Hive is a Python-based agent framework. Configuration is handled through environment variables and agent-level config files. There is no centralized `config.yaml` or Docker Compose setup.
 
 ## Configuration Overview
 
 ```
-Environment variables     (API keys, runtime flags)
-Agent config.py           (per-agent settings: model, tools, storage)
-pyproject.toml            (package metadata and dependencies)
-.mcp.json                 (MCP server connections)
+~/.hive/configuration.json  (global defaults: provider, model, max_tokens)
+Environment variables        (API keys, runtime flags)
+Agent config.py              (per-agent settings: model, tools, storage)
+pyproject.toml               (package metadata and dependencies)
+.mcp.json                    (MCP server connections)
 ```
+
+## Global Configuration (~/.hive/configuration.json)
+
+The `quickstart.sh` script creates this file during setup. It stores the default LLM provider, model, and max_tokens used by all agents unless overridden in an agent's own `config.py`.
+
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 8192,
+    "api_key_env_var": "ANTHROPIC_API_KEY"
+  },
+  "created_at": "2026-01-15T12:00:00+00:00"
+}
+```
+
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.orchestrator.edge` and re-exported from `framework.orchestrator`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
+
+Optional packages installed next to Hive are turned on in this file too, under `channels` or
+`turn_context`: see [Optional packages](optional-packages.md).
+
+### A queen's own model
+
+Every queen uses the `llm` section unless she has her own under `queen_llm`, by queen id, in the
+same shape:
+
+```json
+"queen_llm": {
+  "queen_archivist": {"provider": "openai", "model": "model-id", "api_base": "https://api.example.com/v1", "api_key": "sk-..."}
+}
+```
+
+Set it in the dashboard from her profile (Org Chart → her card → Model): pick a saved provider,
+edit the section, or go back to the main model. Her running chats switch on their next model call,
+her context window follows her model, and changing the main model leaves her on hers. The key can
+be literal, `api_key_env_var` or in the credential store; the subscription logins (Claude Code,
+Codex, Kimi, Antigravity) work only for the main model. Her colony workers use her model too,
+unless `worker_llm` is set.
+
+### Fields a provider takes in the request body
+
+`llm`, `worker_llm` and each `queen_llm` entry take `extra_body`: fields sent as they are in every
+request body to that model. Use it for what a provider adds to the OpenAI format, such as how
+hard the model thinks. For DeepSeek:
+
+```json
+"queen_llm": {
+  "queen_archivist": {"provider": "openai", "model": "deepseek-flash", "api_base": "https://api.deepseek.com/v1", "api_key": "sk-...",
+                      "extra_body": {"reasoning_effort": "low"}}
+}
+```
+
+`{"thinking": {"type": "disabled"}}` turns DeepSeek's thinking off; `reasoning_effort` takes
+`low`, `high` (the default) or `max`. Other providers name these fields differently: see their
+documentation. The main model's `extra_body` also goes on its small background calls, such as
+recall, so turning thinking off there keeps them fast.
+
+### How often queens write memory
+
+Every few replies a queen reads back the recent conversation and updates her memory files, which
+takes a few model calls each time. The `memory_reflection` section sets how often, and on which
+model:
+
+```json
+"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "main"}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `every_turns` | `6` | Reflect after every this many of her replies |
+| `long_every` | `4` | Every this many reflections, also tidy all her memory files (merge and delete duplicates) |
+| `model` | `"main"` | `"main"`: the model she talks with. `"worker"`: the `worker_llm` model, or hers if `worker_llm` isn't set. Her dated timeline uses the same model |
+
+A context compaction also tidies her memory, and ending a session reflects once more if anything was
+said since the last reflection.
 
 ## Environment Variables
 
@@ -22,6 +99,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI (optional, for GPT models via LiteLLM)
 export OPENAI_API_KEY="sk-..."
 
+# OpenRouter (optional, for OpenRouter-hosted models)
+export OPENROUTER_API_KEY="..."
+
+# Hive LLM (optional, for Hive-managed models)
+export HIVE_API_KEY="..."
+
 # Cerebras (optional, used by output cleaner and some nodes)
 export CEREBRAS_API_KEY="..."
 
@@ -30,6 +113,68 @@ export GROQ_API_KEY="..."
 ```
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
+
+### Provider Examples
+
+Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
+
+```json
+{
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "max_tokens": 8192,
+    "api_key_env_var": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `deepseek` (or `mistral`, `together`, `xai`, `perplexity`)
+- Use the standard model name in `model`, for example `deepseek-chat`
+- **No `api_base` is required** for these natively supported providers
+
+OpenRouter:
+
+```json
+{
+  "llm": {
+    "provider": "openrouter",
+    "model": "x-ai/grok-4.20-beta",
+    "max_tokens": 8192,
+    "api_key_env_var": "OPENROUTER_API_KEY",
+    "api_base": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `openrouter`
+- Use the raw OpenRouter model ID in `model`, for example `x-ai/grok-4.20-beta`
+- `api_base` should be `https://openrouter.ai/api/v1`
+- If you paste a model that already starts with `openrouter/`, Hive tolerates and normalizes it
+
+Hive LLM:
+
+```json
+{
+  "llm": {
+    "provider": "hive",
+    "model": "queen",
+    "max_tokens": 32768,
+    "api_key_env_var": "HIVE_API_KEY",
+    "api_base": "https://api.adenhq.com"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `hive`
+- Common Hive model values are `queen`, `kimi-k2.6`, `kimi-k2.5`, and `GLM-5`
+- Hive LLM requests use the Hive endpoint at `https://api.adenhq.com`
 
 ### Search & Tools (optional)
 
@@ -47,10 +192,10 @@ export EXA_API_KEY="..."
 # Run agents without LLM calls (structure-only validation)
 export MOCK_MODE=1
 
-# Custom credentials storage path (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
-# Custom agent storage path (default: /tmp)
+# Custom agent storage path (default: ~/.hive/agents/{agent_name}/)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
 
@@ -61,17 +206,21 @@ Each agent package in `exports/` contains its own `config.py`:
 ```python
 # exports/my_agent/config.py
 CONFIG = {
-    "model": "claude-haiku-4-5-20251001",  # Default LLM model
-    "max_tokens": 4096,
+    "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.orchestrator
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
-    "storage_path": "/tmp/my_agent",       # Runtime data location
+    "storage_path": "~/.hive/agents/my_agent/",  # Runtime data location (default)
 }
 ```
 
-### Agent Graph Specification
+If `model` or `max_tokens` are omitted, the agent loads defaults from `~/.hive/configuration.json`.
 
-Agent behavior is defined in `agent.json` (or constructed in `agent.py`):
+### Standalone agent specification (legacy export format)
+
+> **Scope:** the `nodes`/`edges` `agent.json` format below is the **standalone / exported-agent** format, still supported by the loader for single, exportable agents. It is **not** how the live colony runtime works — a [colony](key_concepts/colony.md) has no graph; the [Queen](key_concepts/queen.md) grows it at runtime and coordinates workers through the shared [tracker](key_concepts/coordination.md#the-tracker). Use this format only when authoring a portable standalone agent.
+
+A standalone agent is defined in `agent.json`:
 
 ```json
 {
@@ -86,41 +235,46 @@ Agent behavior is defined in `agent.json` (or constructed in `agent.py`):
 }
 ```
 
-See the [Getting Started Guide](getting-started.md) for building agents.
+See the [Getting Started Guide](getting-started.md) for building agents, and the [Architecture Overview](architecture/README.md) for how colonies actually run.
 
 ## MCP Server Configuration
 
-MCP (Model Context Protocol) servers are configured in `.mcp.json` at the project root:
+Hive's own tools run in-process and need no configuration (see [Tools](tools.md)); external MCP servers are added with `hive mcp add`. The `.mcp.json` at the project root is separate: it exposes Hive's tool servers to IDE agents such as Claude Code:
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
+    "files-tools": {
+      "command": "uv",
+      "args": ["run", "files_server.py", "--stdio"],
+      "cwd": "tools"
+    },
     "tools": {
-      "command": "python",
-      "args": ["tools/mcp_server.py"],
-      "env": {
-        "BRAVE_SEARCH_API_KEY": "..."
-      }
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
     }
   }
 }
 ```
 
-The tools MCP server exposes 19 tools including web search, PDF reading, CSV processing, and file system operations.
+The standalone `files-tools` server (`files_server.py`) exposes file I/O (`read_file`, `write_file`, `edit_file`, `search_files`); the `tools` server (`mcp_server.py`) exposes the full `aden_tools` integration catalog. Hive's queens and workers don't use either: they get the same file tools, and a curated subset of the integrations, in-process.
 
 ## Storage
 
-Aden Hive uses **file-based persistence** (no database required):
+Hive uses **file-based persistence** (no external database required). State lives under `HIVE_HOME`:
 
 ```
-{storage_path}/
-  runs/{run_id}.json          # Complete execution traces
-  indexes/
-    by_goal/{goal_id}.json    # Runs indexed by goal
-    by_status/{status}.json   # Runs indexed by status
-    by_node/{node_id}.json    # Runs indexed by node
-  summaries/{run_id}.json     # Quick-load run summaries
+$HIVE_HOME/
+  agents/queens/<queen_id>/     # Queen profiles + sessions
+  colonies/<name>/              # one self-contained directory per colony
+    worker.json                 #   the colony's worker (clone) spec
+    data/tracker.db             #   the colony's shared SQLite ledger
+  memories/                     # scoped Queen memory (global / colony / queen)
+  credentials/                  # encrypted credential store
 ```
+
+Each colony is self-contained in its directory, which is what makes it portable (export/import as a tarball). A colony's per-session conversation and cursor state persist under the colony's directory so a crash or restart resumes exactly where it left off.
 
 Storage is managed by `framework.storage.FileStorage`. No external database setup is needed.
 
@@ -148,8 +302,8 @@ Add to `.vscode/settings.json`:
 ## Security Best Practices
 
 1. **Never commit API keys** - Use environment variables or `.env` files
-2. **`.env` is git-ignored** - Copy from `.env.example` and fill in your values
-3. **Mock mode for testing** - Set `MOCK_MODE=1` to avoid LLM calls during development
+2. **If you use a local `.env` file, keep it private** - This repository does not include a root `.env.example`; use your own local `.env` file or shell environment variables for secrets
+3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
 ## Troubleshooting
@@ -159,7 +313,7 @@ Add to `.vscode/settings.json`:
 Install the core package:
 
 ```bash
-cd core && pip install -e .
+cd core && uv pip install -e .
 ```
 
 ### API key not found
@@ -167,13 +321,16 @@ cd core && pip install -e .
 Ensure the environment variable is set in your current shell session:
 
 ```bash
-echo $ANTHROPIC_API_KEY  # Should print your key
+echo $ANTHROPIC_API_KEY  # Or echo $OPENROUTER_API_KEY / echo $HIVE_API_KEY
 ```
 
 On Windows PowerShell:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
+# Or:
+$env:OPENROUTER_API_KEY = "your-openrouter-key"
+$env:HIVE_API_KEY = "your-hive-key"
 ```
 
 ### Agent not found
@@ -181,7 +338,7 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 Run from the project root with PYTHONPATH:
 
 ```bash
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-See [Environment Setup](../ENVIRONMENT_SETUP.md) for detailed installation instructions.
+See [Environment Setup](./environment-setup.md) for detailed installation instructions.

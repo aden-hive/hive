@@ -1,70 +1,49 @@
-"""
-Aden Hive Framework: A goal-driven agent runtime optimized for Builder observability.
+"""Hive Agent Framework.
 
-The runtime is designed around DECISIONS, not just actions. Every significant
-choice the agent makes is captured with:
-- What it was trying to do (intent)
-- What options it considered
-- What it chose and why
-- What happened as a result
-- Whether that was good or bad (evaluated post-hoc)
+Core classes:
+    ColonyRuntime -- orchestrates parallel worker clones in a colony
+    AgentLoop      -- the LLM + tool execution loop (one per worker)
+    AgentLoader    -- loads agent config from disk, builds pipeline
+    DecisionTracker -- records decisions for post-hoc analysis
 
-This gives the Builder LLM the information it needs to improve agent behavior.
-
-## Testing Framework
-
-The framework includes a Goal-Based Testing system (Goal → Agent → Eval):
-- Generate tests from Goal success_criteria and constraints
-- Mandatory user approval before tests are stored
-- Parallel test execution with error categorization
-- Debug tools with fix suggestions
-
-See `framework.testing` for details.
+They are imported when first used, so importing one module of the framework does not load
+all of it. Projects built on Hive import its primitives from ``hive``.
 """
 
-from framework.builder.query import BuilderQuery
-from framework.llm import AnthropicProvider, LLMProvider
-from framework.runner import AgentOrchestrator, AgentRunner
-from framework.runtime.core import Runtime
-from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
-from framework.schemas.run import Problem, Run, RunSummary
+from __future__ import annotations
 
-# Testing framework
-from framework.testing import (
-    ApprovalStatus,
-    DebugTool,
-    ErrorCategory,
-    Test,
-    TestResult,
-    TestStorage,
-    TestSuiteResult,
-)
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from framework.agent_loop import AgentLoop
+    from framework.host import ColonyRuntime
+    from framework.loader import AgentLoader
+    from framework.tracker import DecisionTracker
 
 __all__ = [
-    # Schemas
-    "Decision",
-    "Option",
-    "Outcome",
-    "DecisionEvaluation",
-    "Run",
-    "RunSummary",
-    "Problem",
-    # Runtime
-    "Runtime",
-    # Builder
-    "BuilderQuery",
-    # LLM
-    "LLMProvider",
-    "AnthropicProvider",
-    # Runner
-    "AgentRunner",
-    "AgentOrchestrator",
-    # Testing
-    "Test",
-    "TestResult",
-    "TestSuiteResult",
-    "TestStorage",
-    "ApprovalStatus",
-    "ErrorCategory",
-    "DebugTool",
+    "ColonyRuntime",
+    "AgentLoader",
+    "AgentLoop",
+    "DecisionTracker",
 ]
+
+_EXPORTS = {
+    "AgentLoop": "framework.agent_loop",
+    "ColonyRuntime": "framework.host",
+    "AgentLoader": "framework.loader",
+    "DecisionTracker": "framework.tracker",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module), name)
+    globals()[name] = value  # resolved once
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

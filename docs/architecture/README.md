@@ -1,648 +1,206 @@
-# Hive Agent Framework: Triangulated Verification for Reliable Goal-Driven Agents
+# Hive architecture
 
-## The Core Problem: The Ground Truth Crisis in Agentic Systems
+Hive's unit of work is not an agent and not a graph of hand-wired agents. It is a **colony**: a group of agents that together run and scale one business process. A colony has a **queen**, the persistent agent you talk to, and as many **worker** agents as the work needs. The queen grows the colony at runtime; nobody wires it by hand.
 
-Modern agent frameworks face a fundamental epistemological challenge: **there is no reliable oracle**.
+What makes that work is **one loop controlling many loops**. Hive has exactly one execution primitive, the `AgentLoop`. The queen is one. Every worker is another instance of the same class, given one task, a narrower set of tools and a strict budget. There are no graphs, edges or shared data buffers. Agents coordinate through a fan-out tool, a shared SQLite **tracker**, a persistent **task plan**, an **event bus** and a **reminder hub**. In the words of `core/framework/host/colony_runtime.py`:
 
-The dominant paradigm treats unit tests, execution results, or single-model evaluations as "ground truth" for agent optimization. Research reveals this assumption is critically flawed:
+> *"There are no graphs, no edges, no nodes, no data buffers. Just: spawn N independent clones, let them run, collect results."*
 
-| Assumed Ground Truth         | Failure Mode                                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| Unit tests                   | Binary signals lose quality nuance; coverage gaps allow overfitting; Goodhart's Law gaming      |
-| Model confidence (log-probs) | Poorly calibrated; high confidence on wrong answers; optimizes for plausibility not correctness |
-| Single LLM judge             | Hallucinated confidence; systematic biases; no calibration mechanism                            |
-| Execution results            | Non-deterministic environments; flaky tests; doesn't capture intent                             |
-
-The consequence: agents optimized against these proxies become **"optimizers of metrics" rather than "producers of value"**. They confidently generate code that passes tests but fails users.
+This document explains how those pieces fit. Paths are relative to `core/framework/` unless they start with `tools/` or `frontend/`.
 
 ---
 
-## Our Research Thesis: Triangulated Verification
+## System overview
 
-**Thesis**: Reliable agent behavior emerges not from a single perfect oracle, but from the _convergence of multiple imperfect signals_.
+```mermaid
+flowchart TB
+    User([You])
 
-We call this approach **Triangulated Verification**—borrowing from navigation, where position is determined by measuring angles to multiple known points. No single measurement is trusted absolutely; confidence comes from agreement across diverse signals.
+    subgraph Colony["Colony: ~/.hive/colonies/&lt;name&gt;/"]
+        direction TB
+        Queen["Queen<br/>long-lived AgentLoop<br/>persona, memory, task plan"]
+        subgraph Workers["Workers: short-lived AgentLoops"]
+            W1["worker"]
+            W2["worker"]
+            W3["worker …"]
+        end
+        Tracker[("Tracker<br/>tracker/tracker.db")]
+        Hub["Reminder hub"]
+    end
 
-### The Triangulation Principle
+    subgraph Tools["Tool surface"]
+        Harness["Built-in tools<br/>(in-process)"]
+        MCP["External MCP servers"]
+        Browser["Your Chrome<br/>(Hive Browser Bridge)"]
+    end
 
+    Sentinel["Sentinel<br/>Hive inbox · Telegram · Slack"]
+
+    User <-->|"chat"| Queen
+    Queen -->|"run_worker / run_playbook"| Workers
+    Workers -->|"report_to_parent"| Queen
+    Queen <-->|"tracker_sql / tracker_query"| Tracker
+    Workers -->|"tracker_upsert"| Tracker
+    Hub -.->|"&lt;system-reminder&gt;"| Queen
+    Queen --- Tools
+    Workers --- Tools
+    Sentinel -.->|"watches when she parks:<br/>nudge or escalate"| Queen
+    Sentinel -.-> User
 ```
-                    ┌─────────────────┐
-                    │  GOAL INTENT    │
-                    │  (User's true   │
-                    │   objective)    │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-              ▼              ▼              ▼
-       ┌──────────┐   ┌──────────┐   ┌──────────┐
-       │Deterministic│   │ Semantic │   │  Human   │
-       │   Rules   │   │Evaluation│   │ Judgment │
-       └──────────┘   └──────────┘   └──────────┘
-              │              │              │
-              └──────────────┼──────────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │   CONFIDENCE    │
-                    │  (Agreement =   │
-                    │   reliability)  │
-                    └─────────────────┘
-```
 
-**Key insight**: When multiple independent verification methods agree, confidence is justified. When they disagree, uncertainty should trigger escalation—not confident wrong answers.
+The queen fans workers out with one tool call and stays responsive. Workers do their piece, write rows to the tracker and report back; each report arrives in the queen's own conversation as a new turn. Nothing is compiled ahead of time: the topology is whatever the queen creates at runtime.
 
 ---
 
-## The Three Verification Signals
+## The colony
 
-### Signal 1: Deterministic Rules (Fast, Precise, Narrow)
+A colony is a directory under `~/.hive/colonies/<name>/` (or under `HIVE_HOME`) that holds everything its agents share (`config.py`, `colony_dir`):
 
-Programmatic checks that provide **definitive verdicts** for well-defined conditions:
+| Path | What it holds |
+| --- | --- |
+| `worker.json` | The worker spec the colony's workers are cloned from |
+| `tracker/tracker.db` | The tracker: the colony's shared SQLite ledger |
+| `colony.db` | Bookkeeping, such as the playbook run log |
+| `skills/` | Skills the queen wrote for this colony |
+| `playbooks/` | Saved playbook scripts (`<name>.play.py`) |
+| `triggers.json` | Scheduled and webhook triggers |
+| `queens/<queen>/sessions/<id>/` | The queen's sessions in this colony: conversation, events, task plan |
+| `workers/<id>/` | Each worker's run state |
 
-- Constraint violations (security patterns, forbidden operations)
-- Structural requirements (output format, required fields)
-- Known failure signatures (error types, timeout patterns)
+Colonies can be **scheduled**: `set_trigger` adds a cron, interval or webhook trigger that wakes the colony queen with a task (`host/triggers.py`). Timers fire while the colony is loaded; ticks missed while it wasn't are reported when it loads. A colony can be **imported** from a tarball (`POST /api/colonies/import`).
 
-**Characteristics**:
+## One primitive: the `AgentLoop`
 
-- Zero ambiguity when they match
-- No false positives (if written correctly)
-- Cannot assess semantic quality or intent alignment
+`AgentLoop` (`agent_loop/agent_loop.py`) is a multi-turn streaming LLM loop and Hive's only execution unit. Each turn it streams the model's reply, executes the tool calls (tools marked concurrency-safe run in parallel, up to ten at a time; the rest run in order), feeds the results back and decides whether to continue.
 
-**In Hive**: `EvaluationRule` with priority-ordered conditions evaluated before any LLM call.
+- **The queen** is configured for long-running conversation: effectively unlimited turns, a large context window, a 30-call-per-turn tool budget (50 once she runs a colony). Her turn ends when she replies without calling a tool; the loop then **parks** until you answer.
+- **A worker** gets a worker system prompt with no persona (`agents/queen/worker_definition.py`), a subset of the queen's tools without the queen-only ones, and optionally a different model (`worker_llm` in configuration). Its budget is fixed: **3 working turns plus 1 grace turn**, 30 tool calls per turn (hard stop at 90) and 200 over its lifetime, which the colony can adapt. The grace turn may only call `report_to_parent`, `tracker_upsert` and `task_update`, so a worker that runs out of budget still reports instead of vanishing.
 
-```python
-EvaluationRule(
-    id="security_violation",
-    condition="'eval(' in result.get('code', '')",
-    action=JudgmentAction.ESCALATE,
-    priority=200  # Checked first
-)
-```
+A worker is deliberately narrow. It has no memory of earlier runs, can't spawn other workers and can't talk to the user. It reads its task, does the work and calls `report_to_parent` with `success`, `partial` or `failed`. If it's blocked, it saves what it has to the tracker and reports, rather than looping on workarounds.
 
-### Signal 2: Semantic Evaluation (Flexible, Contextual, Fallible)
+Agents that declare success criteria are checked by a judge before a turn is accepted (`agent_loop/internals/judge_pipeline.py`); a `RETRY` verdict comes back as a `[Judge feedback]` message the agent sees on its next turn. The queen skips the judge (you are her judge); workers end when they report.
 
-LLM-based assessment that understands **intent and context**:
+## One loop controls many
 
-- Goal alignment ("Does this achieve what the user wanted?")
-- Quality assessment ("Is this solution elegant/maintainable?")
-- Edge case reasoning ("What happens if input is empty?")
-
-**Characteristics**:
-
-- Can assess nuance and implicit requirements
-- Subject to hallucination and miscalibration
-- Requires confidence gating
-
-**In Hive**: `HybridJudge` LLM evaluation with explicit confidence thresholds.
-
-```python
-if judgment.confidence < self.llm_confidence_threshold:
-    return Judgment(
-        action=JudgmentAction.ESCALATE,
-        reasoning="Confidence too low for autonomous decision"
-    )
-```
-
-### Signal 3: Human Judgment (Authoritative, Expensive, Sparse)
-
-Human oversight for **high-stakes or uncertain decisions**:
-
-- Ambiguous requirements needing clarification
-- Novel situations outside training distribution
-- Constraint violations requiring business judgment
-
-**Characteristics**:
-
-- Highest authority but highest latency
-- Should be reserved for cases where automation fails
-- Provides ground truth for future automation
-
-**In Hive**: `HITL` protocol with `pause_nodes`, `requires_approval`, and `ESCALATE` action.
-
----
-
-## The Triangulation Algorithm
+In a colony the queen delegates with one tool, `run_worker` (`tools/queen_lifecycle_tools.py`):
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     TRIANGULATED EVALUATION                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. RULE EVALUATION (Priority-ordered)                          │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ For each rule in priority order:            │             │
-│     │   if rule.matches(result):                  │             │
-│     │     return Definitive(rule.action)     ────────► DONE     │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                    No rule matched                               │
-│                          ▼                                       │
-│  2. LLM EVALUATION (With confidence gating)                     │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ judgment = llm.evaluate(goal, result)       │             │
-│     │                                             │             │
-│     │ if judgment.confidence >= threshold:        │             │
-│     │   return judgment                      ────────► DONE     │
-│     │                                             │             │
-│     │ if judgment.confidence < threshold:         │             │
-│     │   return Escalate("Low confidence")    ────────► HUMAN    │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-│  3. HUMAN ESCALATION                                            │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Pause execution                             │             │
-│     │ Present context + signals to human          │             │
-│     │ Human provides authoritative judgment       │             │
-│     │ Record decision for future rule generation  │             │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+run_worker(tasks=[{"task": "...", "data": {...}}, ...], timeout=600)
 ```
 
-### Why This Order Matters
-
-1. **Rules first**: Cheap, fast, definitive. Catches obvious violations without LLM cost.
-2. **LLM second**: Handles nuance that rules cannot express. Confidence-gated.
-3. **Human last**: Expensive but authoritative. Only invoked when automation is uncertain.
-
-This ordering optimizes for both **reliability** (multiple signals) and **efficiency** (cheapest signals first).
-
----
-
-## Goal-Driven Architecture: The Foundation
-
-Triangulated verification answers "how do we evaluate?" But first we need "what are we evaluating against?"
-
-Traditional agents optimize for **test passage**. Hive agents optimize for **goal satisfaction**.
-
-### Goals as First-Class Citizens
-
-```python
-Goal(
-    id="implement_auth",
-    name="Implement User Authentication",
-    description="Add secure user authentication to the API",
-
-    # Multiple weighted criteria—not just "does it pass?"
-    success_criteria=[
-        SuccessCriterion(
-            id="functional",
-            description="Users can register, login, and logout",
-            metric="llm_judge",
-            weight=0.4
-        ),
-        SuccessCriterion(
-            id="secure",
-            description="Passwords are hashed, tokens are signed",
-            metric="output_contains",
-            target="bcrypt",
-            weight=0.3
-        ),
-        SuccessCriterion(
-            id="tested",
-            description="Core flows have test coverage",
-            metric="custom",
-            weight=0.3
-        )
-    ],
-
-    # Constraints: what must NOT happen (hard stops)
-    constraints=[
-        Constraint(
-            id="no_plaintext_passwords",
-            description="Never store or log plaintext passwords",
-            constraint_type="hard",  # Violation = escalate
-            check="'password' not in str(result.get('logs', ''))"
-        ),
-        Constraint(
-            id="no_sql_injection",
-            description="Use parameterized queries only",
-            constraint_type="hard"
-        )
-    ]
-)
-```
-
-### Why Goals Beat Tests
-
-| Test-Driven                     | Goal-Driven                              |
-| ------------------------------- | ---------------------------------------- |
-| Binary pass/fail                | Weighted multi-criteria satisfaction     |
-| Tests can be gamed              | Goals capture intent                     |
-| Coverage gaps allow overfitting | Constraints define hard boundaries       |
-| Silent on quality               | Success criteria include quality metrics |
-
----
-
-## The Reflexion Loop: Learning from Failure
-
-Research shows that **iterative refinement beats expensive search**. Reflexion (feedback → reflection → correction) outperforms MCTS in efficiency rank (accuracy/cost).
-
-### Worker-Judge Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      REFLEXION LOOP                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌──────────┐         ┌──────────┐         ┌──────────┐        │
-│   │  WORKER  │────────►│  JUDGE   │────────►│ DECISION │        │
-│   │ Execute  │         │ Evaluate │         │          │        │
-│   │   step   │         │  result  │         │          │        │
-│   └──────────┘         └──────────┘         └────┬─────┘        │
-│        ▲                                         │               │
-│        │                                         ▼               │
-│        │    ┌─────────────────────────────────────────┐         │
-│        │    │  ACCEPT: Continue to next step          │         │
-│        │    ├─────────────────────────────────────────┤         │
-│        └────│  RETRY:  Try again with feedback        │◄─┐      │
-│             ├─────────────────────────────────────────┤  │      │
-│             │  REPLAN: Strategy failed, regenerate    │──┘      │
-│             ├─────────────────────────────────────────┤         │
-│             │  ESCALATE: Human judgment needed        │────►HITL│
-│             └─────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Feedback Context for Replanning
-
-When a plan fails, the feedback loop provides rich context:
-
-```python
-feedback_context = {
-    "completed_steps": [...],      # What succeeded
-    "failed_steps": [{             # What failed and why
-        "step_id": "generate_api",
-        "attempts": 3,
-        "errors": ["Type error on line 42", "Missing import"]
-    }],
-    "accumulated_context": {...},  # What we learned
-    "constraints_violated": [...]  # Hard stops triggered
-}
-```
-
-This enables the planner to **learn from failure** rather than blindly retrying.
-
----
-
-## Uncertainty as a Feature, Not a Bug
-
-Traditional agents hide uncertainty behind confident-sounding outputs. Hive agents **surface uncertainty explicitly**.
-
-### Four Levels of Capability
-
-```python
-class CapabilityLevel(Enum):
-    CANNOT_HANDLE = "cannot_handle"  # Wrong agent for this task
-    UNCERTAIN = "uncertain"           # Might help, not confident
-    CAN_HANDLE = "can_handle"         # Yes, this is my domain
-    BEST_FIT = "best_fit"            # Exactly what I'm designed for
-```
-
-### Graceful Degradation
-
-```
-High Confidence ──────────────────────────────► Low Confidence
-
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ ACCEPT   │    │  RETRY   │    │ REPLAN   │    │ ESCALATE │
-│          │    │  with    │    │  with    │    │  to      │
-│ Continue │    │ feedback │    │ context  │    │  human   │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘
-     │               │               │               │
-     ▼               ▼               ▼               ▼
-  Proceed      Learn from       Change          Ask for
-              minor error      approach          help
-```
-
-**Key principle**: An agent that knows when it doesn't know is more valuable than one that confidently fails.
-
----
-
-## The Complete Picture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         HIVE AGENT FRAMEWORK                         │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                         GOAL LAYER                           │    │
-│  │  • Success criteria (weighted, multi-metric)                 │    │
-│  │  • Constraints (hard/soft boundaries)                        │    │
-│  │  • Context (domain knowledge, preferences)                   │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                      EXECUTION LAYER                         │    │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐               │    │
-│  │  │  Graph   │───►│  Worker  │───►│  Shared  │               │    │
-│  │  │ Executor │    │   Node   │    │  Memory  │               │    │
-│  │  └──────────┘    └──────────┘    └──────────┘               │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                  TRIANGULATED VERIFICATION                   │    │
-│  │                                                              │    │
-│  │   Signal 1          Signal 2           Signal 3             │    │
-│  │  ┌────────┐       ┌──────────┐       ┌─────────┐            │    │
-│  │  │ Rules  │──────►│ LLM Judge│──────►│  Human  │            │    │
-│  │  │ (fast) │       │(flexible)│       │ (final) │            │    │
-│  │  └────────┘       └──────────┘       └─────────┘            │    │
-│  │       │                │                  │                  │    │
-│  │       └────────────────┴──────────────────┘                  │    │
-│  │                        │                                     │    │
-│  │                        ▼                                     │    │
-│  │              Confidence from Agreement                       │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                     REFLEXION LAYER                          │    │
-│  │  • ACCEPT: Proceed with confidence                          │    │
-│  │  • RETRY: Learn from failure, try again                     │    │
-│  │  • REPLAN: Strategy failed, change approach                 │    │
-│  │  • ESCALATE: Uncertainty too high, ask human                │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Roadmap: From Triangulation to Online Learning
-
-Triangulated verification provides the foundation for a more ambitious capability: **agents that learn and improve from every interaction**. The architecture is designed to enable progressive enhancement toward true online learning.
-
-### The Learning Loop Vision
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      ONLINE LEARNING LOOP                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│                         ┌───────────────┐                                │
-│                         │   EXECUTION   │                                │
-│                         │  Agent acts   │                                │
-│                         └───────┬───────┘                                │
-│                                 │                                        │
-│                                 ▼                                        │
-│   ┌─────────────┐      ┌───────────────┐      ┌─────────────┐           │
-│   │    RULE     │◄─────│ TRIANGULATED  │─────►│  CALIBRATE  │           │
-│   │  GENERATION │      │  EVALUATION   │      │  CONFIDENCE │           │
-│   │             │      └───────┬───────┘      │  THRESHOLDS │           │
-│   └──────┬──────┘              │              └──────┬──────┘           │
-│          │                     ▼                     │                   │
-│          │            ┌───────────────┐              │                   │
-│          │            │    HUMAN      │              │                   │
-│          └───────────►│   DECISION    │◄─────────────┘                   │
-│                       │  (when needed)│                                  │
-│                       └───────┬───────┘                                  │
-│                               │                                          │
-│                               ▼                                          │
-│                    Human decision becomes                                │
-│                    training signal for:                                  │
-│                    • New deterministic rules                             │
-│                    • Adjusted confidence thresholds                      │
-│                    • Signal weighting updates                            │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Phase 1: Robust Evaluation (Current)
-
-**Status**: Implemented
-
-The foundation—triangulated verification provides reliable evaluation through multiple independent signals.
-
-| Component              | Implementation                   | Purpose                              |
-| ---------------------- | -------------------------------- | ------------------------------------ |
-| Priority-ordered rules | `EvaluationRule` with `priority` | Fast, definitive checks              |
-| Confidence-gated LLM   | `HybridJudge` with threshold     | Semantic evaluation with uncertainty |
-| Human escalation       | `HITL` protocol                  | Authoritative fallback               |
-| Decision logging       | `Runtime.log_decision()`         | Record all judgments for analysis    |
-
-**What we can measure today**:
-
-- Escalation rate (how often humans are needed)
-- Rule match rate (how often rules provide definitive answers)
-- LLM confidence distribution (calibration signal)
-
-### Phase 2: Confidence Calibration (Next)
-
-**Status**: Designed, not yet implemented
-
-Learn optimal confidence thresholds by comparing LLM judgments to human decisions.
-
-```python
-@dataclass
-class CalibrationMetrics:
-    """Track LLM judgment accuracy against human ground truth."""
-
-    # When LLM said ACCEPT with confidence X, how often did human agree?
-    accept_accuracy_by_confidence: dict[float, float]
-
-    # When LLM said RETRY, did the retry actually succeed?
-    retry_success_rate: float
-
-    # Optimal threshold that maximizes agreement while minimizing escalations
-    recommended_threshold: float
-
-    # Per-goal-type calibration (security goals may need different thresholds)
-    threshold_by_goal_type: dict[str, float]
-```
-
-**Calibration algorithm**:
-
-```
-For each escalated decision where human provided judgment:
-    1. Record: (llm_judgment, llm_confidence, human_judgment)
-    2. If llm_judgment == human_judgment:
-        → LLM was correct, threshold could be lowered
-    3. If llm_judgment != human_judgment:
-        → LLM was wrong, threshold should be raised
-    4. Compute accuracy curve: P(correct | confidence >= t) for all t
-    5. Set threshold where accuracy meets target (e.g., 95%)
-```
-
-**Outcome**: Agents automatically tune their confidence thresholds based on observed accuracy, reducing unnecessary escalations while maintaining reliability.
-
-### Phase 3: Rule Generation from Escalations (Future)
-
-**Status**: Planned
-
-Transform human decisions into new deterministic rules, progressively automating common patterns.
-
-```python
-@dataclass
-class RuleProposal:
-    """A proposed rule learned from human escalation patterns."""
-
-    # The pattern that triggered escalations
-    trigger_pattern: str  # e.g., "result contains 'subprocess.call'"
-
-    # What humans consistently decided
-    human_action: JudgmentAction  # e.g., ESCALATE (for security review)
-
-    # Confidence in this rule (based on consistency of human decisions)
-    confidence: float
-
-    # Number of escalations this would have handled
-    coverage: int
-
-    # Proposed rule (requires human approval before activation)
-    proposed_rule: EvaluationRule
-```
-
-**Rule generation pipeline**:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    RULE GENERATION PIPELINE                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. PATTERN MINING                                              │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Analyze escalated results for common traits: │             │
-│     │ • Code patterns (regex over result.code)    │             │
-│     │ • Error signatures (result.error types)     │             │
-│     │ • Goal categories (security, performance)   │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  2. CONSISTENCY CHECK                                           │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ For each pattern, check human consistency:   │             │
-│     │ • Did humans always decide the same way?    │             │
-│     │ • Minimum N occurrences for confidence      │             │
-│     │ • No contradictory decisions                │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  3. RULE PROPOSAL                                               │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Generate candidate rule:                     │             │
-│     │ • condition: pattern as Python expression   │             │
-│     │ • action: consistent human decision         │             │
-│     │ • priority: based on coverage + confidence  │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  4. HUMAN APPROVAL (HITL)                                       │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Present rule to human for review:           │             │
-│     │ • Show examples it would have caught        │             │
-│     │ • Show edge cases for consideration         │             │
-│     │ • Require explicit approval before active   │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  5. DEPLOYMENT                                                  │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Add approved rule to evaluation pipeline:   │             │
-│     │ • Shadow mode first (log but don't act)     │             │
-│     │ • Gradual rollout with monitoring           │             │
-│     │ • Automatic rollback if accuracy drops      │             │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Example learned rule**:
-
-```python
-# After 10 escalations where humans consistently rejected code with eval()
-RuleProposal(
-    trigger_pattern="'eval(' in result.get('code', '')",
-    human_action=JudgmentAction.ESCALATE,
-    confidence=1.0,  # 10/10 humans agreed
-    coverage=10,
-    proposed_rule=EvaluationRule(
-        id="learned_no_eval",
-        description="Auto-generated: eval() requires security review",
-        condition="'eval(' in result.get('code', '')",
-        action=JudgmentAction.ESCALATE,
-        priority=150,  # Below manual security rules, above default
-        metadata={"source": "learned", "examples": 10, "approved_by": "user@example.com"}
-    )
-)
-```
-
-### Phase 4: Signal Weighting (Future)
-
-**Status**: Conceptual
-
-Learn which verification signals are most predictive for different goal types.
-
-```python
-@dataclass
-class SignalWeights:
-    """Learned weights for combining verification signals."""
-
-    # Per-goal-type weights
-    weights_by_goal_type: dict[str, dict[str, float]]
-
-    # Example:
-    # {
-    #     "security": {"rules": 0.7, "llm": 0.2, "human": 0.1},
-    #     "ux": {"rules": 0.2, "llm": 0.6, "human": 0.2},
-    #     "performance": {"rules": 0.5, "llm": 0.3, "human": 0.2},
-    # }
-```
-
-**Insight**: For security goals, deterministic rules (pattern matching for vulnerabilities) are highly predictive. For UX goals, LLM judgment (understanding user intent) is more valuable. Learning these weights optimizes the evaluation pipeline for each goal type.
-
-### Implementation Priority
-
-| Phase   | Value     | Complexity | Dependencies                        |
-| ------- | --------- | ---------- | ----------------------------------- |
-| Phase 1 | High      | Done       | —                                   |
-| Phase 2 | High      | Medium     | Decision logging infrastructure     |
-| Phase 3 | Very High | High       | Phase 2 + pattern mining            |
-| Phase 4 | Medium    | Medium     | Phase 2 + sufficient goal diversity |
-
-**Recommended next step**: Implement Phase 2 (Confidence Calibration) to enable data-driven threshold tuning. This provides immediate value (fewer unnecessary escalations) while building the dataset needed for Phase 3.
-
----
-
-## Research Contribution vs. Engineering Foundation
-
-| Layer                         | Type                   | Contribution                                                                 |
-| ----------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| **Triangulated Verification** | Research               | Novel approach to the Ground Truth problem; confidence from signal agreement |
-| **Online Learning Roadmap**   | Research               | Architecture enabling agents to improve from human feedback over time        |
-| **Goal-Driven Architecture**  | Research + Engineering | Goals as first-class citizens; weighted criteria; hard constraints           |
-| **Confidence Calibration**    | Research + Engineering | Data-driven threshold tuning based on human agreement rates                  |
-| **Rule Generation**           | Research               | Transforming human decisions into deterministic rules (closing the loop)     |
-| **HybridJudge**               | Engineering            | Implementation of triangulation with priority-ordered evaluation             |
-| **Reflexion Loop**            | Engineering            | Worker-Judge architecture with RETRY/REPLAN/ESCALATE                         |
-| **Graph Execution**           | Engineering            | Node composition, shared memory, edge traversal                              |
-| **HITL Protocol**             | Engineering            | Pause/resume, approval workflows, escalation handling                        |
-
----
+- **It returns immediately.** Workers run in the background while the queen keeps talking to you or dispatches more work.
+- **Reports come home as turns.** A finished worker emits a `SUBAGENT_REPORT` event, which the queen receives as a `[WORKER_REPORT]` message: status, a short summary and an optional structured payload.
+- **Concurrency is scheduled.** All tasks are admitted; up to four run at once (`HIVE_MAX_CONCURRENT_WORKERS`) and the rest queue. The queen sees how many are running, queued and left.
+- **Timeouts are soft, then hard.** At `timeout` each running worker is told to report now; at the hard deadline (four times the soft one, at least ten minutes more, at most an hour) stragglers are stopped. Stopped workers can be resumed from their saved conversation with `resume_worker_ids` and optional guidance.
+
+Workers can't see or message each other. Everything they share goes through the substrates below.
+
+## Coordination: what replaces edges and data buffers
+
+### The tracker
+
+Every colony has one `tracker.db`, identified by an immutable `ColonyBinding {name, dir, tracker_db}` (`host/colony_binding.py`). The binding reaches the queen through her tool context and the workers through their task input, so both always open the same database; a tracker tool without a binding refuses the call rather than guessing a path.
+
+- The **queen** creates tables with `tracker_sql` and declares which columns workers may write with `tracker_register_writable`.
+- **Workers** record results with `tracker_upsert`, one row per unit of work.
+- The **queen** checks progress with `tracker_query` (read-only SQL). "What's done and what's left" is always a fresh query, never state a crash could lose.
+
+### The task plan
+
+Each session has a file-backed plan (`tasks/`, stored as the session's `tasks.json`) that the queen maintains with `task_create`, `task_update`, `task_list` and `task_get`. You see it as the **Action Plan**, it survives reloads, and it outlives any single worker run.
+
+### The event bus
+
+`host/event_bus.py` carries worker reports back to the queen (`SUBAGENT_REPORT`) and streams the live transcript to the UI (`CLIENT_*` events over server-sent events).
+
+### The reminder hub
+
+The loop stays coherent over long, high-fan-out sessions because the framework injects short `<system-reminder>` context at fixed points (`agent_loop/reminders.py`): session start, each user message, after tool use, tool-budget checkpoints, before and after compaction, idle ticks while parked, and stalled streams. Sources include the current task plan, in-flight workers (so she doesn't dispatch the same work twice), tracker snapshots, the colony's worker fleet, a nudge to turn a proven pilot into a playbook, relevant past conversations, the tools she can load on demand and the skills available to her.
+
+## From chat to colony: execute first, then systematize
+
+A queen doesn't design a colony up front. She has two phases (`QUEEN_PHASES` in `tools/queen_lifecycle_tools.py`):
+
+1. **Independent.** She is a standalone agent doing the work herself. When a task turns out to be parallel, recurring or long-running, she calls `suggest_colony`.
+2. **Colony.** You confirm in the Create Colony dialog, and the chat becomes the colony queen's session. A short chat is carried over verbatim; a long one is summarized first. She continues there with the colony tools: `run_worker`, the tracker, `write_skill`, `run_playbook` and triggers.
+
+The defining move is **execute first, then systematize**. The queen does one unit of the work end to end herself, the **pilot**, and records it in the tracker. Then she writes the proven protocol down as a **skill** and runs a **playbook** (`tools/playbook_tools.py`, `host/playbook/runner.py`): a script that dispatches workers over the tracker's rows. It retries with backoff, supports rate-limited lanes and a circuit breaker, and lists rows that keep failing in a dead letter. It owns no durable state, because the tracker is the source of truth, so **re-running a playbook resumes it**. Playbooks run up to 8 workers at once by default (32 at most) and work best when each worker takes a chunk of rows.
+
+## Queens
+
+Queens are personas, not interchangeable orchestrators. Thirteen ship with Hive as YAML profiles (`agents/queen/queen_defaults/*.yaml`): Growth, RevOps, Content, Lead Generation, Outbound, Brand & Design, Technology, Operations, Product Strategy, Market Research, Finance, Legal and Talent. Each brings traits, background and behavior triggers to her system prompt, plus a default set of tool categories for her role. Six are active out of the box; the rest are hired from the Org Chart, and you can create your own.
+
+You choose which queen takes a request. (An LLM classifier still exists server-side as a fallback for sessions created without a queen.)
+
+## The tool surface
+
+Agents only ever see ordinary function calls, but those come from three places.
+
+**Built-in tools run in-process.** `tools/harness_tools.py` registers Hive's own tools inside the host, grouped as `terminal-tools` (shell, background jobs, ripgrep and glob search), `files-tools`, `chart-tools` (ECharts and Mermaid), `memory-tools` (conversation search) and `hive_tools` (attachments, PDFs, web scraping, CSV, image generation and a few more). They start with no subprocesses.
+
+**External MCP servers** are registered with `hive mcp add` or `hive mcp install` and stored in `~/.hive/mcp_registry/installed.json` (`loader/mcp_registry.py`). Their tools join the same allowlists as the built-ins. The full `aden_tools` integration catalog in `tools/` runs this way; see [docs/tools.md](../tools.md).
+
+**Gating.** What an agent can call is decided by tool **categories** (`agents/queen/queen_tools_defaults.py`), each queen's role defaults and per-queen and per-colony allowlists you edit in the Skills Library's MCP Tools tab. A small always-on set is loaded up front; everything else appears in a manifest the agent loads on demand with `search_tools`, which keeps prompts short.
+
+**The browser** is your own Chrome. The Hive Browser Bridge extension (`tools/browser-extension/`) connects to a long-lived bridge process (`tools/src/gcu/bridge_host.py`), and agents drive it through the `hive-browser` CLI from the terminal. The in-process `browser_setup` tool makes the browser discoverable and gateable. Each worker gets its own tab group in the same Chrome profile, so your logins carry over.
+
+**Images.** Models that support vision see screenshots and attachments directly; on APIs that can't carry images inside a tool result, they're moved into the next user message. Text-only models get a caption from a configured vision model instead (`llm/capabilities.py`, `agent_loop/internals/vision_fallback.py`).
+
+## Memory
+
+A queen remembers in three ways, all of them plain files:
+
+- **Reflection.** Every few turns a reflection step writes durable notes as markdown under `~/.hive/memories/`, scoped globally or to the queen (`agents/queen/queen_memory_v2.py`, `reflection_agent.py`). Before each turn a selector picks the notes relevant to your message and injects them as a reminder (`recall_selector.py`).
+- **Past conversations.** Relevant excerpts of earlier sessions are found by keyword search over the queen's history, or the colony's, and injected automatically (`tools/src/memory_tools/recall.py`). The queen can also search that history herself with `search_messages`.
+- **Timeline** (opt-in, the `memory_timeline` flag). Events, facts and plans you mention are extracted once per session with their dates resolved, so she can answer *when* and *how often* questions with `search_timeline` (`agents/queen/timeline.py`).
+
+## Skills
+
+A skill is a `SKILL.md` package in the open [Agent Skills](https://agentskills.io) format (`skills/`). Hive ships default and preset skills; queens and colonies have their own skill directories; and a colony queen turns a proven protocol into a colony skill with `write_skill`, which her workers then load from the catalog. Foundation skills for the browser, terminal and charts are activated automatically when an agent has those tools.
+
+## Human in the loop
+
+- **Questions.** Any time she needs a decision, the queen asks with `ask_user`; her loop parks until you answer.
+- **Commit points.** Turning a chat into a colony always needs your confirmation.
+- **Sentinel**, opt-in per colony (`sentinel/`), keeps a colony moving while you're away. When the queen parks, a classifier decides whether to nudge her on, mark the work done or escalate to you through the Hive inbox, Telegram or Slack; your reply resumes her.
+- **Workers escalate to the queen**, never to you directly, through the `escalate` tool.
+
+## Reliability is in the primitive
+
+Because every agent is the same loop, these live in one place and every agent has them:
+
+- **Park and resume.** A loop saves its position to disk whenever it waits: on a question, a credential form, a colony suggestion, a stop, an error or a crash mid-turn. Disk is the source of truth, so a restart resumes exactly where it stopped (`agent_loop/internals/cursor_persistence.py`).
+- **Large tool results go to files.** Any result over 30,000 characters (configurable) is saved as `<tool>_<n>.txt`; the conversation keeps a preview, the file's path and a hint to search it with the terminal tools (`agent_loop/internals/tool_result_handler.py`).
+- **Compaction.** As a session nears its context budget, older tool results are cleared to point at their saved files, then the oldest turns are summarized by the model, while the most recent turns stay intact (`agent_loop/internals/compaction.py`).
+- **Stall and loop detection.** A stream watchdog catches turns that stop producing output; similarity checks and tool-call fingerprints catch an agent repeating itself (`agent_loop/internals/stall_detector.py`). For queens there is also an opt-in stall check (Settings → Developer): a judge model, configured in the `judge` slot, reads each turn that ends waiting for you, and if she announced an action without taking it she gets one reminder to carry it out (`server/stall_check.py`).
+- **Budgets.** Per-turn and lifetime tool-call budgets, worker turn limits and concurrency caps bound what any agent can do.
+
+## The server and the UI
+
+`hive serve` (and `hive open`, which also opens a browser) runs an aiohttp server on `127.0.0.1:8787` (`server/app.py`). `POST /api/sessions` opens a queen chat or a colony, or forks a chat into a new colony; messages go to `POST /api/sessions/<id>/chat`; and events stream back over server-sent events. The React frontend (`frontend/`) is served from the same port: the home screen and hive map, queen chats, colony pages (Data, Plan, Automations and Workers), the Org Chart, and the prompt, skill, memory and credentials libraries.
+
+## Code map
+
+| Concern | Where |
+| --- | --- |
+| The loop | `agent_loop/agent_loop.py`, `agent_loop/internals/` |
+| Reminders | `agent_loop/reminders.py` and the `*_reminder.py` sources |
+| Colonies and workers | `host/colony_runtime.py`, `host/worker.py`, `agents/queen/worker_definition.py` |
+| Queen tools (`run_worker`, `suggest_colony`, triggers) | `tools/queen_lifecycle_tools.py` |
+| Tracker | `host/colony_binding.py`, `tools/tracker_tools.py` |
+| Playbooks | `tools/playbook_tools.py`, `host/playbook/runner.py` |
+| Queens and memory | `agents/queen/` |
+| Built-in tools | `tools/harness_tools.py`, `tools/src/` (repo root) |
+| MCP servers and tool registry | `loader/mcp_registry.py`, `loader/tool_registry.py` |
+| Skills | `skills/` |
+| Sentinel | `sentinel/` |
+| HTTP server | `server/` |
+| UI | `core/frontend/src/` |
 
 ## Summary
 
-The Hive Agent Framework addresses the fundamental reliability crisis in agentic systems through **Triangulated Verification** and a roadmap toward **Online Learning**:
-
-1. **The Problem**: No single evaluation signal is trustworthy. Tests can be gamed, model confidence is miscalibrated, LLM judges hallucinate.
-
-2. **The Solution**: Confidence emerges from agreement across multiple independent signals—deterministic rules, semantic evaluation, and human judgment.
-
-3. **The Foundation**: Goal-driven architecture ensures we're optimizing for user intent, not metric gaming. The reflexion loop enables learning from failure without expensive search.
-
-4. **The Learning Path**: Human escalations aren't just fallbacks—they're training signals. Confidence calibration tunes thresholds automatically. Rule generation transforms repeated human decisions into deterministic automation.
-
-5. **The Result**: Agents that are reliable not because they're always right, but because they **know when they don't know**—and get smarter every time they ask for help.
-
----
-
-## References
-
-- Reflexion: Shinn et al., "Reflexion: Language Agents with Verbal Reinforcement Learning"
-- Goodhart's Law in ML: "When a measure becomes a target, it ceases to be a good measure"
+1. **The colony is the unit.** A queen plus as many workers as the work needs, sharing one directory, one tracker and one plan.
+2. **One loop, many loops.** One `AgentLoop` class is the queen and every worker; orchestration is a runtime fan-out, not a compiled graph.
+3. **Coordination without a graph.** A shared SQLite tracker, a task plan, an event bus and a reminder hub replace edges and data buffers.
+4. **Execute first, then systematize.** The queen pilots one unit, writes the protocol down as a skill and converges the rest with a resumable playbook.
+5. **Reliability in the primitive.** Park and resume from disk, file-backed tool results, compaction, stall detection and hard budgets, which every agent has because there is only one kind of agent.

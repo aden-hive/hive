@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Triggers &mdash; Compaction Pipeline Analysis</title>
+  <link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumbs">
+    <a href="./index.html">Compaction Analysis</a> &nbsp;/&nbsp; <span>Triggers</span>
+  </div>
+  <nav>
+    <a href="./index.html">Overview</a>
+    <a class="active" href="./triggers.html">Triggers</a>
+    <a href="./pipeline.html">Pipeline</a>
+    <a href="./transformations.html">Transformations</a>
+    <a href="./configuration.html">Configuration</a>
+    <a href="./audit.html">Audit</a>
+  </nav>
+</header>
+
+<h1>When compaction fires</h1>
+<p class="lede">
+  Four checkpoints invoke the compaction pipeline. They cover the pre-LLM-call window, the
+  post-LLM-call window, an in-loop emergency guard, and a proactive synchronous path that runs
+  every time a tool result lands.
+</p>
+
+<h2>The four checkpoints</h2>
+
+<h3>Checkpoint 1 &mdash; Pre-turn (start of each iteration)</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L1055-L1059">core/framework/agent_loop/agent_loop.py:1055-1059</a>
+<pre class="code"><code><span class="c"># 6d. Pre-turn compaction check (tiered)</span>
+_compacted_this_iter = <span class="k">False</span>
+<span class="k">if</span> conversation.<span class="f">needs_compaction</span>():
+    <span class="k">await</span> self.<span class="f">_compact</span>(ctx, conversation, accumulator)
+    _compacted_this_iter = <span class="k">True</span></code></pre>
+<p>
+  Runs at the top of each event-loop iteration, immediately before the LLM is called. Sets
+  <code class="inline">_compacted_this_iter</code> so the post-turn checkpoint can skip if this
+  one already fired (otherwise the agent could see two back-to-back spillover files in a single
+  iteration, which is disorienting).
+</p>
+
+<h3>Checkpoint 2 &mdash; Post-turn (after tool results are recorded)</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L1415-L1420">core/framework/agent_loop/agent_loop.py:1415-1420</a>
+<pre class="code"><code><span class="c"># 6e''. Post-turn compaction check (catches tool-result bloat).
+# Skip if pre-turn already compacted this iteration &mdash; two compactions
+# in one iteration produce back-to-back spillover files and leave the
+# agent disoriented on the very next turn.</span>
+<span class="k">if not</span> _compacted_this_iter <span class="k">and</span> conversation.<span class="f">needs_compaction</span>():
+    <span class="k">await</span> self.<span class="f">_compact</span>(ctx, conversation, accumulator)</code></pre>
+<p>
+  Catches the case where the assistant&rsquo;s tool calls produced huge results within this iteration
+  (e.g.&nbsp;a single <code class="inline">browser_screenshot</code> that pushes usage past the budget).
+  Without this, the next iteration&rsquo;s pre-turn check would fire one turn later than necessary.
+</p>
+
+<h3>Checkpoint 3 &mdash; Pre-send guard (mid-iteration emergency)</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L2611-L2619">core/framework/agent_loop/agent_loop.py:2611-2619</a>
+<pre class="code"><code><span class="c"># Inner tool loop: stream may produce tool calls requiring re-invocation</span>
+<span class="k">while True</span>:
+    <span class="c"># Pre-send guard: if context is at or over budget, compact before
+    # calling the LLM &mdash; prevents API context-length errors.</span>
+    <span class="k">if</span> conversation.<span class="f">usage_ratio</span>() &gt;= <span class="n">1.0</span>:
+        logger.<span class="f">warning</span>(
+            <span class="s">"Pre-send guard: context at %.0f%% of budget, compacting"</span>,
+            conversation.<span class="f">usage_ratio</span>() * <span class="n">100</span>,
+        )
+        <span class="k">await</span> self.<span class="f">_compact</span>(ctx, conversation, accumulator)</code></pre>
+<p>
+  Runs inside the inner tool-loop right before serializing messages to send. Uses a strict
+  <code class="inline">usage_ratio() &gt;= 1.0</code> rather than <code class="inline">needs_compaction()</code>
+  &mdash; the buffer-based trigger has already failed if execution got here, so this is the last line of
+  defense against an HTTP 400 from the provider.
+</p>
+
+<h3>Checkpoint 4 &mdash; Proactive microcompaction (after every tool result)</h3>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L659-L687">core/framework/agent_loop/conversation.py:659-687</a>
+<pre class="code"><code><span class="c"># Proactive microcompaction: when a fresh result lands and the
+# conversation now has more than ``MICROCOMPACT_KEEP_RECENT``
+# compactable results pending, clear the oldest ones immediately
+# rather than waiting until usage_ratio crosses the compaction
+# threshold (~80%). This is cheap (pure Python, no LLM call)
+# and only mutates older compactable results &mdash; placeholders
+# already include the spillover path so the agent can re-read.
+# Guarded by ``_microcompact_inflight`` to avoid recursion.</span>
+<span class="k">if not</span> is_error <span class="k">and not</span> is_skill_content <span class="k">and not</span> self._microcompact_inflight:
+    self._microcompact_inflight = <span class="k">True</span>
+    <span class="k">try</span>:
+        <span class="k">from</span> framework.agent_loop.internals.compaction <span class="k">import</span> (
+            COMPACTABLE_TOOLS,
+            microcompact,
+        )
+
+        tool_name = self.<span class="f">_find_tool_name_for_use_id</span>(tool_use_id)
+        <span class="k">if</span> tool_name <span class="k">and</span> tool_name <span class="k">in</span> COMPACTABLE_TOOLS:
+            <span class="f">microcompact</span>(self)
+    <span class="k">except</span> Exception:
+        <span class="c"># Microcompaction is best-effort. A failure here must
+        # not lose the tool result we just persisted.</span>
+        logger.<span class="f">debug</span>(
+            <span class="s">"Proactive microcompact failed for tool_use_id=%s"</span>,
+            tool_use_id,
+            exc_info=<span class="k">True</span>,
+        )
+    <span class="k">finally</span>:
+        self._microcompact_inflight = <span class="k">False</span></code></pre>
+<div class="callout">
+  <div class="label">Why proactive</div>
+  Without this, several large compactable tool results can accumulate within one iteration before any of
+  the iteration-level checkpoints fire. The proactive path keeps the budget healthy turn-by-turn at near-zero
+  cost. The <code class="inline">_microcompact_inflight</code> flag prevents recursion if a future refactor
+  has <code class="inline">microcompact()</code> call back into <code class="inline">add_tool_result()</code>.
+</div>
+
+<h2>The <code>needs_compaction()</code> decision tree</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L969-L997">core/framework/agent_loop/conversation.py:969-997</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">needs_compaction</span>(self) -> <span class="k">bool</span>:
+    <span class="s">"""True when the conversation should be compacted before the
+    next LLM call.
+
+    Hybrid buffer rule: the headroom reserved before compaction fires
+    is the SUM of an absolute fixed component and a ratio of the hard
+    context limit:
+
+        effective_buffer = compaction_buffer_tokens
+                         + compaction_buffer_ratio * max_context_tokens
+
+    The fixed component gives a floor on tiny windows; the ratio
+    keeps the trigger meaningful on large windows where any constant
+    buffer becomes a rounding error (an 8k buffer is 75% on a 32k
+    window but 96% on a 200k window). Compaction fires when the
+    current estimate would consume more than (limit - effective_buffer).
+
+    When neither component is configured, falls back to the legacy
+    multiplicative threshold so old callers keep behaving identically.
+    """</span>
+    <span class="k">if</span> self._max_context_tokens &lt;= <span class="n">0</span>:
+        <span class="k">return False</span>
+    fixed = self._compaction_buffer_tokens
+    ratio = self._compaction_buffer_ratio
+    <span class="k">if</span> fixed <span class="k">is not None</span> <span class="k">or</span> ratio <span class="k">is not None</span>:
+        effective_buffer = (fixed <span class="k">or</span> <span class="n">0</span>) + (ratio <span class="k">or</span> <span class="n">0.0</span>) * self._max_context_tokens
+        budget = self._max_context_tokens - effective_buffer
+        <span class="k">return</span> self.<span class="f">estimate_tokens</span>() &gt;= <span class="f">max</span>(<span class="n">0.0</span>, budget)
+    <span class="k">return</span> self.<span class="f">estimate_tokens</span>() &gt;= self._max_context_tokens * self._compaction_threshold</code></pre>
+
+<div class="diagram">
+<svg viewBox="0 0 760 460" role="img" aria-label="needs_compaction decision tree">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .node { fill: #ffffff; stroke: #1f2937; stroke-width: 1.5; }
+    .diamond { fill: #fffbeb; stroke: #d97706; stroke-width: 1.5; }
+    .yes { fill: #fee2e2; stroke: #b91c1c; stroke-width: 1.5; }
+    .no { fill: #dcfce7; stroke: #166534; stroke-width: 1.5; }
+    .label { font: 13px ui-sans-serif, system-ui, sans-serif; fill: #111827; }
+    .small { font: 11px ui-monospace, monospace; fill: #475569; }
+    .edge { fill: none; stroke: #475569; stroke-width: 1.4; }
+    .edgelabel { font: 11px ui-sans-serif, sans-serif; fill: #475569; }
+  </style>
+
+  <rect class="node" x="290" y="10" width="200" height="42" rx="6"/>
+  <text class="label" x="390" y="35" text-anchor="middle">needs_compaction() called</text>
+
+  <line class="edge" x1="390" y1="52" x2="390" y2="80" marker-end="url(#arrow)"/>
+
+  <polygon class="diamond" points="390,80 530,130 390,180 250,130"/>
+  <text class="label" x="390" y="125" text-anchor="middle">max_context_tokens</text>
+  <text class="label" x="390" y="142" text-anchor="middle">&lt;= 0 ?</text>
+
+  <line class="edge" x1="530" y1="130" x2="640" y2="130" marker-end="url(#arrow)"/>
+  <text class="edgelabel" x="555" y="122">yes</text>
+  <rect class="no" x="640" y="108" width="110" height="44" rx="6"/>
+  <text class="label" x="695" y="135" text-anchor="middle">return False</text>
+
+  <line class="edge" x1="390" y1="180" x2="390" y2="210" marker-end="url(#arrow)"/>
+  <text class="edgelabel" x="400" y="200">no</text>
+
+  <polygon class="diamond" points="390,210 540,260 390,310 240,260"/>
+  <text class="label" x="390" y="252" text-anchor="middle">buffer_tokens or</text>
+  <text class="label" x="390" y="269" text-anchor="middle">buffer_ratio set ?</text>
+
+  <line class="edge" x1="540" y1="260" x2="620" y2="260" marker-end="url(#arrow)"/>
+  <text class="edgelabel" x="555" y="252">yes</text>
+  <rect class="node" x="620" y="225" width="130" height="70" rx="6"/>
+  <text class="small" x="685" y="247" text-anchor="middle">buffer = fixed + ratio*max</text>
+  <text class="small" x="685" y="262" text-anchor="middle">budget = max - buffer</text>
+  <text class="small" x="685" y="277" text-anchor="middle">est &gt;= budget ?</text>
+
+  <line class="edge" x1="240" y1="260" x2="160" y2="260" marker-end="url(#arrow)"/>
+  <text class="edgelabel" x="180" y="252">no</text>
+  <rect class="node" x="20" y="225" width="140" height="70" rx="6"/>
+  <text class="small" x="90" y="252" text-anchor="middle">legacy threshold</text>
+  <text class="small" x="90" y="267" text-anchor="middle">est &gt;= max * 0.8</text>
+  <text class="small" x="90" y="282" text-anchor="middle">(default)</text>
+
+  <line class="edge" x1="685" y1="295" x2="685" y2="340" marker-end="url(#arrow)"/>
+  <rect class="yes" x="640" y="340" width="110" height="44" rx="6"/>
+  <text class="label" x="695" y="368" text-anchor="middle">return True</text>
+
+  <line class="edge" x1="90" y1="295" x2="90" y2="340" marker-end="url(#arrow)"/>
+  <rect class="yes" x="35" y="340" width="110" height="44" rx="6"/>
+  <text class="label" x="90" y="368" text-anchor="middle">return True</text>
+
+  <rect class="no" x="280" y="340" width="220" height="44" rx="6"/>
+  <text class="label" x="390" y="368" text-anchor="middle">return False (under budget)</text>
+
+  <line class="edge" x1="660" y1="362" x2="500" y2="362"/>
+  <line class="edge" x1="145" y1="362" x2="280" y2="362"/>
+  <text class="edgelabel" x="565" y="355">no</text>
+  <text class="edgelabel" x="210" y="355">no</text>
+
+  <text class="small" x="390" y="430" text-anchor="middle">Hybrid path is the default in LoopConfig (fixed=8k + ratio=0.15).</text>
+  <text class="small" x="390" y="448" text-anchor="middle">The legacy path runs only when both buffer fields are explicitly None.</text>
+</svg>
+</div>
+
+<h2>Warning threshold</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L999-L1010">core/framework/agent_loop/conversation.py:999-1010</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">compaction_warning</span>(self) -> <span class="k">bool</span>:
+    <span class="s">"""True when the conversation has crossed the warning threshold
+    but not yet the hard compaction trigger.
+
+    Used by telemetry / UI to show a "context getting tight" hint
+    before a compaction pass actually runs. Returns False when no
+    warning buffer is configured (legacy behaviour).
+    """</span>
+    <span class="k">if</span> self._max_context_tokens &lt;= <span class="n">0</span> <span class="k">or</span> self._compaction_warning_buffer_tokens <span class="k">is None</span>:
+        <span class="k">return False</span>
+    warn_at = self._max_context_tokens - self._compaction_warning_buffer_tokens
+    <span class="k">return</span> self.<span class="f">estimate_tokens</span>() &gt;= <span class="f">max</span>(<span class="n">0</span>, warn_at)</code></pre>
+<p>
+  Separate from <code class="inline">needs_compaction()</code>; the warning is a softer
+  &ldquo;tight on space&rdquo; signal emitted by telemetry. By default the warning fires
+  <code class="inline">compaction_warning_buffer_tokens = 12_000</code> earlier than hard compaction.
+</p>
+
+<h3>The context-preservation skill warning</h3>
+<a class="src-ref" href="../../core/framework/skills/defaults.py#L22-L27">core/framework/skills/defaults.py:22-27</a>
+<pre class="code"><code><span class="c"># Default config values per skill &mdash; used for {{placeholder}} substitution</span>
+_SKILL_DEFAULTS: dict[str, dict[str, Any]] = {
+    <span class="s">"hive.quality-monitor"</span>: {<span class="s">"assessment_interval"</span>: <span class="n">5</span>},
+    <span class="s">"hive.error-recovery"</span>: {<span class="s">"max_retries_per_tool"</span>: <span class="n">3</span>},
+    <span class="s">"hive.context-preservation"</span>: {<span class="s">"warn_at_usage_ratio_pct"</span>: <span class="n">45</span>},
+}</code></pre>
+<p>
+  Independent of the loop-level warning. The <code class="inline">hive.context-preservation</code> skill
+  injects guidance into the agent (e.g.&nbsp;&ldquo;start condensing your scratch notes&rdquo;) once the
+  conversation crosses <strong>45%</strong> of the budget &mdash; well before any compaction fires.
+  Operators can override via <code class="inline">warn_at_usage_ratio</code> (float 0&ndash;1) in skills
+  config; the loader at
+  <a class="src-ref" href="../../core/framework/skills/defaults.py#L44-L54">defaults.py:44-54</a>
+  converts the float to the percent placeholder.
+</p>
+
+<h2>Worked examples by window size</h2>
+<p>
+  The hybrid buffer is <code class="inline">8_000 + 0.15 &times; max_context_tokens</code>. Compaction fires
+  when the estimated tokens reach <code class="inline">max_context_tokens &minus; buffer</code>.
+</p>
+<table>
+  <thead><tr>
+    <th>max_context_tokens</th>
+    <th>Effective buffer</th>
+    <th>Trigger at (tokens)</th>
+    <th>Trigger as % of window</th>
+  </tr></thead>
+  <tbody>
+    <tr><td>32,000</td><td>8,000 + 4,800 = 12,800</td><td>19,200</td><td>60%</td></tr>
+    <tr><td>136,000 (Sonnet 4.6)</td><td>8,000 + 20,400 = 28,400</td><td>107,600</td><td>~79%</td></tr>
+    <tr><td>200,000</td><td>8,000 + 30,000 = 38,000</td><td>162,000</td><td>81%</td></tr>
+    <tr><td>872,000 (Opus 4.6)</td><td>8,000 + 130,800 = 138,800</td><td>733,200</td><td>~84%</td></tr>
+    <tr><td>1,000,000</td><td>8,000 + 150,000 = 158,000</td><td>842,000</td><td>~84%</td></tr>
+  </tbody>
+</table>
+<div class="callout">
+  <div class="label">Why the trigger percentage drifts</div>
+  The fixed 8k component dominates on tiny windows (it&rsquo;s 25% of 32k), pulling the trigger down to 60%.
+  The 15% ratio dominates on huge windows, pinning the trigger at roughly 85%. This is exactly the intent:
+  small windows need an aggressive early trigger because each turn can easily emit a single 8k tool result,
+  while huge windows would be wasting headroom if the trigger fired at 60% of 1M tokens.
+</div>
+
+<h2>Token estimate</h2>
+<a class="src-ref" href="../../core/framework/agent_loop/conversation.py#L960-L967">core/framework/agent_loop/conversation.py:960-967</a>
+<pre class="code"><code><span class="k">def</span> <span class="f">usage_ratio</span>(self) -> <span class="k">float</span>:
+    <span class="s">"""Current token usage as a fraction of *max_context_tokens*.
+
+    Returns 0.0 when ``max_context_tokens`` is zero (unlimited).
+    """</span>
+    <span class="k">if</span> self._max_context_tokens &lt;= <span class="n">0</span>:
+        <span class="k">return</span> <span class="n">0.0</span>
+    <span class="k">return</span> self.<span class="f">estimate_tokens</span>() / self._max_context_tokens</code></pre>
+<p>
+  <code class="inline">estimate_tokens()</code> is the char-based approximation that feeds both
+  <code class="inline">needs_compaction()</code> and <code class="inline">usage_ratio()</code>. When a real
+  LLM response comes back the loop calls <code class="inline">update_token_count(turn_input)</code> at
+  <a class="src-ref" href="../../core/framework/agent_loop/agent_loop.py#L1410-L1413">agent_loop.py:1410-1413</a>
+  to recalibrate the estimate against the provider&rsquo;s actual count for that prompt.
+</p>
+
+<footer class="botline">
+  Next: <a href="./pipeline.html">Pipeline &rarr;</a> &mdash; what runs once a trigger fires.
+</footer>
+
+</div>
+</body>
+</html>

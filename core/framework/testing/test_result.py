@@ -6,13 +6,13 @@ categorization for guiding iteration strategy.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(StrEnum):
     """
     Category of test failure for guiding iteration.
 
@@ -53,15 +53,9 @@ class TestResult(BaseModel):
     stack_trace: str | None = None
 
     # Runtime data for debugging
-    runtime_logs: list[dict[str, Any]] = Field(
-        default_factory=list, description="Log entries from test execution"
-    )
-    node_outputs: dict[str, Any] = Field(
-        default_factory=dict, description="Output from each node executed during test"
-    )
-    execution_path: list[str] = Field(
-        default_factory=list, description="Sequence of nodes executed"
-    )
+    runtime_logs: list[dict[str, Any]] = Field(default_factory=list, description="Log entries from test execution")
+    node_outputs: dict[str, Any] = Field(default_factory=dict, description="Output from each node executed during test")
+    execution_path: list[str] = Field(default_factory=list, description="Sequence of nodes executed")
 
     # Associated run ID (links to Runtime data)
     run_id: str | None = Field(default=None, description="Runtime run ID for detailed analysis")

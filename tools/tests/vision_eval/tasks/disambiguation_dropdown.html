@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Custom dropdown</title>
+<style>
+  .form { width: 360px; margin: 32px auto; font: 14px sans-serif; }
+  .label { font-weight: 600; margin-bottom: 6px; }
+  .select {
+    border: 1px solid #888; background: #fff; padding: 10px 14px;
+    border-radius: 4px; cursor: pointer; user-select: none;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .select::after { content: "▾"; color: #888; }
+  .menu {
+    display: none;
+    margin-top: 4px;
+    border: 1px solid #aaa;
+    background: #fff;
+    border-radius: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .menu.open { display: block; }
+  .option { padding: 8px 14px; cursor: pointer; }
+  .option:hover { background: #eaf2ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Disambiguation · Custom dropdown</h1>
+  <p class="instruction">Open the country selector by clicking the box, then <strong>pick "Iceland"</strong> from the list. The dropdown is a div, not a native &lt;select&gt;.</p>
+</header>
+<div class="form">
+  <div class="label">Country</div>
+  <div id="select" class="select" tabindex="0">Choose a country…</div>
+  <div id="menu" class="menu"></div>
+</div>
+<script>
+  (function () {
+    const countries = [
+      "Argentina", "Australia", "Brazil", "Canada", "Denmark", "Estonia",
+      "France", "Germany", "Hungary", "Iceland", "Japan", "Kenya",
+      "Latvia", "Mexico", "Norway", "Poland", "Sweden", "Uruguay"
+    ];
+    const sel = document.getElementById("select");
+    const menu = document.getElementById("menu");
+    let succeeded = false;
+
+    function build() {
+      menu.innerHTML = "";
+      countries.forEach(function (name) {
+        const opt = document.createElement("div");
+        opt.className = "option";
+        opt.dataset.name = name;
+        opt.textContent = name;
+        menu.appendChild(opt);
+      });
+    }
+    build();
+
+    sel.addEventListener("click", function () {
+      menu.classList.toggle("open");
+    });
+
+    menu.addEventListener("click", function (e) {
+      const opt = e.target.closest(".option");
+      if (!opt) return;
+      const name = opt.dataset.name;
+      sel.textContent = name;
+      menu.classList.remove("open");
+      if (name === "Iceland") {
+        Eval.markSuccess({ picked: name });
+        succeeded = true;
+      } else {
+        Eval.markMiss({ picked: name });
+      }
+    });
+
+    // Any click that lands outside the select box and outside the menu is
+    // a wrong click — penalize it. Skip harness UI (back, verdict) and
+    // skip after success so the queen can leave the page cleanly.
+    document.addEventListener("click", function (e) {
+      if (succeeded) return;
+      if (Eval.isHarnessClick(e)) return;
+      if (sel.contains(e.target) || menu.contains(e.target)) return;
+      Eval.markMiss({ reason: "off_target", x: e.clientX, y: e.clientY });
+    }, true);
+  })();
+</script>
+</body>
+</html>

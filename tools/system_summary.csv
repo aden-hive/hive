@@ -1,0 +1,11 @@
+category,metric,value,notes
+playbook_runs,total_runs,0,No playbook runs executed yet
+playbook_runs,active_runs,0,
+playbook_runs,completed_runs,0,
+playbook_runs,failed_runs,0,
+tracker_tables,total_tables,0,No tracker tables created yet
+tracker_tables,total_rows,0,
+workers,active_workers,0,No workers spawned yet
+workers,total_workers_dispatched,0,
+colony,status,fresh,Brand new colony — no activity yet
+colony,created_session,session_20260602_202601_2d125707,

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>Vision Eval — Visual form fill</title>
+<style>
+  .form { width: 440px; margin: 24px auto; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: 1px solid #999;
+    flex: 0 0 28px;
+  }
+  .row input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    font: 16px sans-serif;
+  }
+  .row input:focus { outline: 2px solid #4a90ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spatial · Visual form fill</h1>
+  <p class="instruction">Five inputs, each preceded by a colored square (the only label). <strong>Type the word <code>walrus</code> into the input next to the <em>orange</em> square.</strong> No placeholder text; no DOM label.</p>
+</header>
+<div class="form" id="form">
+  <div class="row"><div class="swatch" data-color="blue"   style="background:#2266dd"></div><input data-target="blue"></div>
+  <div class="row"><div class="swatch" data-color="green"  style="background:#33aa55"></div><input data-target="green"></div>
+  <div class="row"><div class="swatch" data-color="orange" style="background:#ee8833"></div><input data-target="orange"></div>
+  <div class="row"><div class="swatch" data-color="purple" style="background:#9944cc"></div><input data-target="purple"></div>
+  <div class="row"><div class="swatch" data-color="grey"   style="background:#777777"></div><input data-target="grey"></div>
+</div>
+<script>
+  (function () {
+    const form = document.getElementById("form");
+    // Each field emits at most one event (the moment it first matches
+    // "walrus"). That way a wrong field followed by the right field is
+    // miss-then-pass, not a silent recovery.
+    const triggered = new WeakSet();
+    form.addEventListener("input", function (e) {
+      const input = e.target;
+      if (!input || input.tagName !== "INPUT") return;
+      if (triggered.has(input)) return;
+      const v = (input.value || "").trim().toLowerCase();
+      if (v !== "walrus") return;
+      triggered.add(input);
+      const target = input.dataset.target;
+      if (target === "orange") {
+        Eval.markSuccess({ field: target, value: input.value });
+      } else {
+        Eval.markMiss({ field: target, value: input.value });
+      }
+    });
+  })();
+</script>
+</body>
+</html>

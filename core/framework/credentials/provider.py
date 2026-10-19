@@ -245,10 +245,7 @@ class BearerTokenProvider(CredentialProvider):
         Raises:
             CredentialRefreshError: Always, as refresh is not supported
         """
-        raise CredentialRefreshError(
-            f"Bearer token '{credential.id}' cannot be refreshed. "
-            "Obtain a new token and save it to the credential store."
-        )
+        raise CredentialRefreshError(f"Bearer token '{credential.id}' cannot be refreshed. Obtain a new token and save it to the credential store.")
 
     def validate(self, credential: CredentialObject) -> bool:
         """

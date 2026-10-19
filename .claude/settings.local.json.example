@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(gh run view:*)",
+      "Bash(uv run:*)",
+      "Bash(env:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(source:*)",
+      "Bash(find:*)",
+      "Bash(PYTHONPATH=core:exports:tools/src uv run pytest:*)"
+    ]
+  },
+  "enabledMcpjsonServers": ["tools"]
+}
