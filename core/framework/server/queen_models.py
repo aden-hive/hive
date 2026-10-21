@@ -33,6 +33,11 @@ from framework.config import (
 logger = logging.getLogger(__name__)
 
 
+def _section_num_ctx(section: dict[str, Any]) -> int | None:
+    """The context window to ask Ollama for (its own default, 2048, truncates her prompt)."""
+    return section.get("num_ctx", 16384) if section.get("provider") == "ollama" else None
+
+
 def build(queen_id: str) -> Any | None:
     """A provider for the queen's own model, or ``None`` when she has none."""
     section = get_queen_llm_section(queen_id)
@@ -40,7 +45,9 @@ def build(queen_id: str) -> Any | None:
         return None
     from framework.llm.litellm import LiteLLMProvider
 
-    extra: dict[str, Any] = {"num_ctx": section.get("num_ctx", 16384)} if section.get("provider") == "ollama" else {}
+    extra: dict[str, Any] = {}
+    if num_ctx := _section_num_ctx(section):
+        extra["num_ctx"] = num_ctx
     if extra_body := section_extra_body(section):
         extra["extra_body"] = extra_body
     return LiteLLMProvider(
@@ -62,13 +69,15 @@ def apply(llm: Any, queen_id: str, *, default_model: str | None = None) -> bool:
         return False
     section = get_queen_llm_section(queen_id)
     if section is None:
+        main_extra = get_llm_extra_kwargs()
         llm.reconfigure(
             default_model or get_preferred_model(),
             api_key=get_api_key(),
             api_base=get_api_base(),
             api_key_resolver=get_api_key,
-            extra_body=get_llm_extra_kwargs().get("extra_body"),
+            extra_body=main_extra.get("extra_body"),
         )
+        num_ctx = main_extra.get("num_ctx")
     else:
         llm.reconfigure(
             section_model(section),
@@ -77,6 +86,14 @@ def apply(llm: Any, queen_id: str, *, default_model: str | None = None) -> bool:
             api_key_resolver=lambda: get_queen_api_key(queen_id),
             extra_body=section_extra_body(section),
         )
+        num_ctx = _section_num_ctx(section)
+    # num_ctx goes only to Ollama: set it for an Ollama model, drop it for any other.
+    extra_kwargs = getattr(llm, "extra_kwargs", None)
+    if isinstance(extra_kwargs, dict):
+        if num_ctx:
+            extra_kwargs["num_ctx"] = num_ctx
+        else:
+            extra_kwargs.pop("num_ctx", None)
     logger.info("queen %s now uses %s", queen_id, getattr(llm, "model", "?"))
     return True
 

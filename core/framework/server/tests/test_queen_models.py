@@ -178,3 +178,22 @@ def test_changing_the_main_model_leaves_a_queen_with_her_own(config_file):
 
     assert swapped == 1
     assert hers.calls == [] and other.model == "anthropic/claude-y"
+
+
+def test_switching_to_and_from_her_ollama_model_switches_num_ctx(config_file):
+    """A running session switched onto her Ollama model gets the num_ctx a fresh one would, and
+    loses it again when it goes back to a model that isn't Ollama."""
+    from framework.llm.litellm import LiteLLMProvider
+
+    ollama = {"provider": "ollama", "model": "qwen3:14b", "num_ctx": 32768}
+    _with(config_file, queen_llm={"queen_growth": ollama})
+    llm = LiteLLMProvider(model="anthropic/claude-x", api_key="sk-main")
+
+    queen_models.apply(llm, "queen_growth")
+    on_hers = llm.extra_kwargs.get("num_ctx")
+    fresh = queen_models.build("queen_growth").extra_kwargs.get("num_ctx")
+    _with(config_file)
+    queen_models.apply(llm, "queen_growth")
+
+    assert on_hers == fresh == 32768
+    assert "num_ctx" not in llm.extra_kwargs
