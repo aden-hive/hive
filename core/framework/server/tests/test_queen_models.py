@@ -199,6 +199,14 @@ def test_switching_to_and_from_her_ollama_model_switches_num_ctx(config_file):
     assert "num_ctx" not in llm.extra_kwargs
 
 
+@pytest.mark.parametrize("provider", ["ollama", "ollama_chat"])
+def test_either_ollama_provider_name_gets_num_ctx(config_file, provider):
+    """``ollama_chat`` runs on Ollama too, so it needs num_ctx just like ``ollama``."""
+    _with(config_file, queen_llm={"queen_growth": {"provider": provider, "model": "qwen3:14b"}})
+
+    assert queen_models.build("queen_growth").extra_kwargs.get("num_ctx") == 16384
+
+
 def test_back_to_main_model_sets_num_ctx_by_the_running_model_not_the_file(config_file):
     """Going back to the main model, num_ctx follows the running server's model (default_model),
     which can be on a different provider than the file's ``llm`` section."""

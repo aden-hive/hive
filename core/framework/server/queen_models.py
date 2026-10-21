@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 def _section_num_ctx(section: dict[str, Any]) -> int | None:
     """The context window to ask Ollama for (its own default, 2048, truncates her prompt)."""
-    return section.get("num_ctx", 16384) if section.get("provider") == "ollama" else None
+    return section.get("num_ctx", 16384) if section.get("provider") in ("ollama", "ollama_chat") else None
 
 
 def _is_ollama(model: str) -> bool:
