@@ -197,3 +197,21 @@ def test_switching_to_and_from_her_ollama_model_switches_num_ctx(config_file):
 
     assert on_hers == fresh == 32768
     assert "num_ctx" not in llm.extra_kwargs
+
+
+def test_back_to_main_model_sets_num_ctx_by_the_running_model_not_the_file(config_file):
+    """Going back to the main model, num_ctx follows the running server's model (default_model),
+    which can be on a different provider than the file's ``llm`` section."""
+    from framework.llm.litellm import LiteLLMProvider
+
+    # File says Anthropic, but the server runs an Ollama main model.
+    llm = LiteLLMProvider(model="anthropic/claude-x", api_key="sk-main")
+    queen_models.apply(llm, "queen_growth", default_model="ollama/qwen3:14b")
+    runtime_ollama = llm.extra_kwargs.get("num_ctx")
+
+    # File says Ollama, but the server runs an Anthropic main model.
+    _with(config_file, llm={"provider": "ollama", "model": "qwen3:14b", "num_ctx": 8192})
+    queen_models.apply(llm, "queen_growth", default_model="anthropic/claude-x")
+
+    assert runtime_ollama == 16384
+    assert "num_ctx" not in llm.extra_kwargs

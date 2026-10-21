@@ -38,6 +38,11 @@ def _section_num_ctx(section: dict[str, Any]) -> int | None:
     return section.get("num_ctx", 16384) if section.get("provider") == "ollama" else None
 
 
+def _is_ollama(model: str) -> bool:
+    """Whether a ``provider/model`` string runs on Ollama (``ollama/`` or ``ollama_chat/``)."""
+    return model.split("/", 1)[0] in ("ollama", "ollama_chat")
+
+
 def build(queen_id: str) -> Any | None:
     """A provider for the queen's own model, or ``None`` when she has none."""
     section = get_queen_llm_section(queen_id)
@@ -70,14 +75,17 @@ def apply(llm: Any, queen_id: str, *, default_model: str | None = None) -> bool:
     section = get_queen_llm_section(queen_id)
     if section is None:
         main_extra = get_llm_extra_kwargs()
+        main_model = default_model or get_preferred_model()
         llm.reconfigure(
-            default_model or get_preferred_model(),
+            main_model,
             api_key=get_api_key(),
             api_base=get_api_base(),
             api_key_resolver=get_api_key,
             extra_body=main_extra.get("extra_body"),
         )
-        num_ctx = main_extra.get("num_ctx")
+        # Decide by the model actually applied: the running server's model can be on a
+        # different provider than the file's ``llm`` section that get_llm_extra_kwargs() reads.
+        num_ctx = main_extra.get("num_ctx", 16384) if _is_ollama(main_model) else None
     else:
         llm.reconfigure(
             section_model(section),
