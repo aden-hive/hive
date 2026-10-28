@@ -290,21 +290,17 @@ hive chat <session_id> "your message here"
 | `-c, --colony`      | Colony path or name to preload (repeatable)            |
 | `-m, --model`       | LLM model for preloaded colonies                       |
 | `--open`            | Open dashboard in browser after server starts (`serve` only) |
-| `-v, --verbose`     | Enable INFO log level                                  |
-| `--debug`           | Enable DEBUG log level                                 |
+| `--debug`           | Enable DEBUG log level (default: INFO)                 |
 
 ### Log levels
 
-All commands support three verbosity tiers:
+By default, `hive serve` logs at INFO level. Pass `--debug` to enable verbose DEBUG logs for troubleshooting:
 
 ```bash
-# Quiet — errors only (default)
+# Standard INFO logging (default)
 hive serve
 
-# Verbose — execution steps, LLM calls
-hive serve -v
-
-# Debug — everything including internal subsystems (memory reflection, recall)
+# Full DEBUG logging — internal subsystems (memory reflection, recall)
 hive serve --debug
 ```
 
@@ -317,10 +313,10 @@ hive serve --debug -p 9090  # Custom port with debug logs
 
 ### Using Python Directly
 
-The current architecture has no exported agents: everything runs through the
-`AgentLoop` driven by the `SessionManager` and the HTTP API. Start the server
+Agent packages in `exports/` are still loaded by the server. Start the server
 with `hive serve` (or `hive open`) and interact with sessions through the
-dashboard, the REST + SSE endpoints, or `hive chat`.
+dashboard, the REST + SSE endpoints, or `hive chat`. Sessions run through the
+`AgentLoop` driven by the `SessionManager`.
 
 ---
 
