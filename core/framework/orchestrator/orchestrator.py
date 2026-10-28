@@ -1129,7 +1129,9 @@ class Orchestrator:
                 # Branch timed out
                 branch.status = "timed_out"
                 branch.error = f"Branch timed out after {timeout}s"
-                self.logger.warning(f"      ⏱ Branch {graph.get_node(branch.node_id).name}: timed out after {timeout}s")
+                timed_out_spec = graph.get_node(branch.node_id)
+                timed_out_name = timed_out_spec.name if timed_out_spec is not None else branch.node_id
+                self.logger.warning(f"      ⏱ Branch {timed_out_name}: timed out after {timeout}s")
                 path.append(branch.node_id)
                 failed_branches.append(branch)
             elif isinstance(result, Exception):
@@ -1149,7 +1151,12 @@ class Orchestrator:
 
         # Handle failures based on config
         if failed_branches:
-            failed_names = [graph.get_node(b.node_id).name for b in failed_branches]
+            # Error-reporting path must be resilient to missing node specs:
+            # fall back to the node ID instead of accessing `.name` on None.
+            failed_names = []
+            for b in failed_branches:
+                spec = graph.get_node(b.node_id)
+                failed_names.append(spec.name if spec is not None else b.node_id)
             if self._parallel_config.on_branch_failure == "fail_all":
                 raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":
