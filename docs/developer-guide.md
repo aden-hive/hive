@@ -246,76 +246,66 @@ If you prefer to build agents manually:
 # Open the browser dashboard (Recommended for interactive use)
 hive open
 
-# Run a specific agent
-hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
+# Start the HTTP API server only
+hive serve
 
-# Run with input from a file
-hive run exports/my_agent --input-file input.json
+# Preload a colony when starting the server
+hive serve --colony my_colony --model claude-sonnet-4-20250514
 
-# Run and write output to file
-hive run exports/my_agent -i '{...}' -o result.json
+# List queen profiles, colonies, and sessions
+hive queen list
+hive colony list
+hive session list
 
-# Resume a previous session
-hive run exports/my_agent --resume-session <session_id>
+# Inspect a queen profile or a colony
+hive queen show queen_technology
+hive colony info my_colony
 
-# Resume from a specific checkpoint
-hive run exports/my_agent --resume-session <session_id> --checkpoint <checkpoint>
-
-# Use a specific LLM model
-hive run exports/my_agent --model claude-sonnet-4-20250514
+# Send a message to a live session via the HTTP API
+hive chat <session_id> "your message here"
 ```
 
 ### CLI Command Reference
 
-| Command                | Description                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `hive run <path>`      | Execute an agent (see flags below)                                      |
-| `hive shell [path]`    | Interactive REPL (`--no-approve`)                                       |
-| `hive serve`           | Start HTTP API server                                                   |
-| `hive open`            | Start server + open dashboard in browser                                |
-| `hive info <path>`     | Show agent details                                                      |
-| `hive validate <path>` | Validate agent structure                                                |
-| `hive list [dir]`      | List available agents                                                   |
-
-### `hive run` flags
-
-| Flag                  | Description                                          |
-| --------------------- | ---------------------------------------------------- |
-| `-i, --input`         | Input context as JSON string                         |
-| `-f, --input-file`    | Input context from JSON file                         |
-| `-o, --output`        | Write results to file instead of stdout              |
-| `-m, --model`         | LLM model to use (any LiteLLM-compatible name)       |
-| `-q, --quiet`         | Only output the final result JSON (log level: ERROR) |
-| `-v, --verbose`       | Show execution logs (log level: INFO)                |
-| `--debug`             | Show all debug-level logs (log level: DEBUG)         |
-| `--resume-session`    | Resume from a specific session ID                    |
-| `--checkpoint`        | Resume from a specific checkpoint (requires --resume-session) |
+| Command                                  | Description                                                       |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `hive serve`                             | Start HTTP API server (see flags below)                          |
+| `hive open`                              | Start server + open dashboard in browser                          |
+| `hive queen list`                        | List all queen profiles                                           |
+| `hive queen show <queen_id>`             | Show a queen profile                                              |
+| `hive queen sessions <queen_id>`         | List sessions belonging to a queen                                |
+| `hive colony list`                       | List all colonies                                                 |
+| `hive colony info <name>`                | Show colony details                                               |
+| `hive colony delete <name>`              | Delete a colony from disk                                         |
+| `hive session list`                      | List live sessions (`--cold` includes on-disk sessions)           |
+| `hive session stop <session_id>`         | Stop a live session                                               |
+| `hive chat <session_id> <message>`       | Send a message to a live session via the HTTP API                 |
 
 ### `hive serve` / `hive open` flags
 
-| Flag              | Description                                        |
-| ----------------- | -------------------------------------------------- |
-| `--host`          | Host to bind (default: 127.0.0.1)                  |
-| `-p, --port`      | Port to listen on (default: 8787)                  |
-| `-a, --agent`     | Agent path to preload (repeatable)                  |
-| `-m, --model`     | LLM model for preloaded agents                      |
-| `--open`          | Open dashboard in browser after server starts (serve only) |
-| `-v, --verbose`   | Enable INFO log level                               |
-| `--debug`         | Enable DEBUG log level                              |
+| Flag                | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `--host`            | Host to bind (default: 127.0.0.1)                      |
+| `-p, --port`        | Port to listen on (default: 8787)                      |
+| `-c, --colony`      | Colony path or name to preload (repeatable)            |
+| `-m, --model`       | LLM model for preloaded colonies                       |
+| `--open`            | Open dashboard in browser after server starts (`serve` only) |
+| `-v, --verbose`     | Enable INFO log level                                  |
+| `--debug`           | Enable DEBUG log level                                 |
 
 ### Log levels
 
 All commands support three verbosity tiers:
 
 ```bash
-# Quiet — errors only
-hive run exports/my_agent -q -i '{...}'
+# Quiet — errors only (default)
+hive serve
 
 # Verbose — execution steps, LLM calls
-hive run -v exports/my_agent -i '{...}'
+hive serve -v
 
 # Debug — everything including internal subsystems (memory reflection, recall)
-hive run --debug exports/my_agent -i '{...}'
+hive serve --debug
 ```
 
 The same flags work for `hive serve` and `hive open`:
@@ -327,9 +317,10 @@ hive serve --debug -p 9090  # Custom port with debug logs
 
 ### Using Python Directly
 
-```bash
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
-```
+The current architecture has no exported agents: everything runs through the
+`AgentLoop` driven by the `SessionManager` and the HTTP API. Start the server
+with `hive serve` (or `hive open`) and interact with sessions through the
+dashboard, the REST + SSE endpoints, or `hive chat`.
 
 ---
 
@@ -659,9 +650,8 @@ echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 ### Debugging Agent Execution
 
 ```bash
-# Run with verbose output
-hive run exports/my_agent --verbose --input '{"task": "..."}'
-
+# Start the server with debug logging to trace agent execution
+hive serve --debug
 ```
 
 ---
