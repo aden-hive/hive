@@ -10,6 +10,7 @@ from typing import Any
 # limits here so untrusted edge conditions cannot exhaust CPU or memory.
 MAX_POWER_ABS_EXPONENT = 1_000
 MAX_POWER_RESULT_BITS = 4_096
+MAX_SAFE_MULT_RESULT_SIZE = 10_000
 # Typical edge-condition evaluations in this repo complete well under 1ms.
 # 100ms leaves ample headroom for legitimate checks while failing fast on abuse.
 # On Windows (where SIGALRM is unavailable) the fallback relies on periodic
@@ -30,6 +31,16 @@ def _safe_pow(base: Any, exp: Any) -> Any:
                 raise ValueError("Power operation exceeds safe size limit")
 
     return operator.pow(base, exp)
+
+
+def _safe_mult(left: Any, right: Any) -> Any:
+    # Bound sequence repetition (str/list/bytes * int) to prevent
+    # memory exhaustion, mirroring _safe_pow's size guard.
+    for seq, n in ((left, right), (right, left)):
+        if isinstance(seq, (str, bytes, list, tuple)) and isinstance(n, int) and n > 0:
+            if len(seq) * n > MAX_SAFE_MULT_RESULT_SIZE:
+                raise ValueError("Multiplication exceeds safe size limit")
+    return operator.mul(left, right)
 
 
 def _timeout_message(timeout_ms: int) -> str:
@@ -85,7 +96,7 @@ def _execution_timeout(timeout_ms: int | None):
 SAFE_OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
+    ast.Mult: _safe_mult,
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
