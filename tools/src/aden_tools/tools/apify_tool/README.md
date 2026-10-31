@@ -104,38 +104,39 @@ actors = apify_search_actors(query="instagram", limit=5)
 ### Lead Generation
 
 ```python
-# Find email addresses of decision-makers on LinkedIn
+# Find decision-makers on LinkedIn by job title and location
 result = apify_run_actor(
-    actor_id="apify/linkedin-profile-scraper",
-    input={"search": "CEO at tech company in SF"},
+    actor_id="johnvc/linkedin-people-search-api",
+    input={"jobTitle": "CEO", "location": "San Francisco", "maxResults": 25},
     wait=True
 )
-emails = [p["email"] for p in result["items"] if p.get("email")]
+leads = [(p["fullName"], p["profileUrl"]) for p in result["items"] if p.get("profileUrl")]
 ```
 
 ### Market Research
 
 ```python
-# Monitor product prices across multiple platforms
+# Compare product prices across stores (Google Shopping)
 result = apify_run_actor(
-    actor_id="apify/amazon-scraper",
-    input={"search": "wireless headphones", "maxItems": 50},
+    actor_id="johnvc/google-shopping-api-google-shopping-products-prices-deals",
+    input={"q": "wireless headphones"},
     wait=True
 )
-prices = [item["price"] for item in result["items"]]
+offers = result["items"][0]["shopping_results"]
+prices = [o["extracted_price"] for o in offers if o.get("extracted_price")]
 avg_price = sum(prices) / len(prices)
 ```
 
 ### Social Media Analytics
 
 ```python
-# Analyze YouTube video comments for sentiment
+# Get a YouTube video's transcript for sentiment analysis
 result = apify_run_actor(
-    actor_id="apify/youtube-scraper",
-    input={"videoUrls": ["https://youtube.com/watch?v=..."]},
+    actor_id="johnvc/YoutubeTranscripts",
+    input={"youtube_url": "https://youtube.com/watch?v=...", "output_formats": ["text"]},
     wait=True
 )
-comments = result["items"][0]["comments"]
+transcript = result["items"][0]["text"]
 ```
 
 ## Error Handling
