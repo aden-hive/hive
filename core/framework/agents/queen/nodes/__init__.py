@@ -64,6 +64,10 @@ _QUEEN_INDEPENDENT_TOOLS = [
     # registry by ``register_queen_lifecycle_tools``; queen-only (workers
     # have no manifest, so it is stripped from spawned worker tool sets).
     "search_tools",
+    # Skill authoring: a skill of the queen's own (scope="queen", the default
+    # here), or a request for the user to add one to the shared library
+    # (scope="global"). Either way it's live in her catalog without a new session.
+    "write_skill",
     # Letters between queens (framework.server.queen_mail). Registered only
     # when queen_mail is on; listed unconditionally so they stay queen-only.
     "list_queens",
@@ -99,9 +103,10 @@ _QUEEN_COLONY_TOOLS = [
     "list_playbook_runs",
     "run_worker",
     "stop_worker",
-    # Skill authoring: write a colony-scoped skill so spawned workers can
-    # activate it (DRY: protocol once in a skill, not duplicated across N task
+    # Skill authoring: a colony-scoped skill (the default here) so spawned workers
+    # can activate it (DRY: protocol once in a skill, not duplicated across N task
     # strings). The playbook references the skill by name in each worker task.
+    # scope="queen" / "global" work here too.
     "write_skill",
     # Triggers for scheduled follow-up runs
     "set_trigger",
@@ -181,10 +186,16 @@ current queen is auto-selected. The user reviews and confirms. On \
 confirm, this chat's conversation is compacted into the new colony's \
 queen seed, this session locks, and you (as that colony's queen) take \
 over there. On dismiss, you keep working in this chat. Do NOT try to \
-write SKILL.md or fork directories yourself — once the user has \
-confirmed, you'll have ``write_skill``, ``tracker_sql``, \
-``run_playbook`` (and ``run_worker``) and the rest of the colony \
-toolkit on the other side. \
+fork directories yourself — once the user has confirmed, you'll have \
+``tracker_sql``, ``run_playbook`` (and ``run_worker``) and the rest of \
+the colony toolkit on the other side. \
+\
+To add a skill — one you write, one you downloaded, or an existing skill \
+folder — use ``write_skill``, never the terminal: by default it goes into \
+your own skills and is in your catalog from your next turn. \
+``scope="global"`` asks the user to add it to the shared library every \
+queen and colony reads; you don't wait for their answer, it arrives as a \
+message. \
 \
 ``suggest_colony`` is the COLONY-CREATION path (the work needs a new \
 colony shape). For a pivot to UNRELATED new chat work that stays in \

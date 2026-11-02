@@ -2079,8 +2079,8 @@ def register_queen_lifecycle_tools(
 
     # --- write_skill ----------------------------------------------------------
     #
-    # Author colony-scoped skills so later workers can share protocol without
-    # repeating it in every task string.
+    # Author skills for a colony's workers, for the queen herself, or (with the
+    # user's consent) for the shared library every queen and colony reads.
 
     async def write_skill_tool(
         *,
@@ -2089,43 +2089,44 @@ def register_queen_lifecycle_tools(
         skill_body: str | None = None,
         skill_files: list[dict] | None = None,
         source_path: str | None = None,
+        scope: str | None = None,
     ) -> str:
-        """Write or replace a colony-scoped skill.
+        """Write or replace a skill, or ask the user to add one to the shared library.
 
-        Two modes:
+        ``scope`` says who sees it:
 
-        - **Inline** (default): pass ``skill_name`` + ``skill_description``
-          + ``skill_body``, with optional ``skill_files``. The skill is
-          materialized from those arguments.
-        - **Copy from source**: pass ``source_path`` pointing at an
-          existing skill's root directory (the one that contains
-          ``SKILL.md``). The tool reads ``SKILL.md`` + every other file
-          in that directory and writes them all into the colony scope.
-          ``skill_name`` may be supplied to rename the skill on copy;
-          the other inline params are rejected in this mode to keep
-          the contract unambiguous (use inline mode if you want to
-          edit content).
+        - ``"colony"`` (the default inside a colony): written to
+          ``COLONIES_DIR/{colony_id}/skills/``, in the catalog of the colony's
+          workers spawned from now on.
+        - ``"queen"`` (the default outside one): written to
+          ``QUEENS_DIR/{queen_id}/skills/``, in this queen's catalog from her
+          next turn and in her colonies'. A skill the user made there is never
+          replaced.
+        - ``"global"``: the shared library ``HIVE_HOME/skills/``, read by every
+          queen and colony. Nothing is written here: the request waits in this
+          session's chat page until the user approves or denies it, and the queen
+          gets a message then. She doesn't wait for it.
 
-        Either way the skill lands at
-        ``~/.hive/colonies/{colony_id}/skills/{skill_name}/`` and is
-        immediately visible in the ``<available_skills>`` catalog of
-        subsequently-spawned workers, who can activate it on demand.
-        Replaces an existing skill of the same name in place — the
-        queen owns her colony-scoped skill namespace.
+        Content comes inline (``skill_name`` + ``skill_description`` +
+        ``skill_body``, optional ``skill_files``) or from ``source_path``, an
+        existing skill folder copied as it is (``skill_name`` may rename it; the
+        other inline params are rejected).
         """
         if session is None:
             return json.dumps({"error": "No session bound to this tool registry."})
 
         # Resolve colony_id from session (preferred) or live runtime.
         colony_id_resolved = getattr(session, "colony_id", None) or getattr(_get_unified_colony() or _get_runtime(), "colony_id", None)
-        if not colony_id_resolved:
+        scope = scope or ("colony" if colony_id_resolved else "queen")
+        if scope not in ("colony", "queen", "global"):
+            return json.dumps({"error": f"write_skill: scope must be 'colony', 'queen' or 'global', not {scope!r}"})
+        if scope == "colony" and not colony_id_resolved:
             return json.dumps(
                 {
                     "error": (
-                        "write_skill: no colony bound to this session. "
-                        "This tool only works once the colony has been "
-                        "forked (via the Create Colony popup) and you're "
-                        "operating inside it."
+                        "write_skill: no colony bound to this session, so there is no "
+                        "colony scope. Use scope='queen' for a skill of your own, or "
+                        "scope='global' to ask the user to add it to the shared library."
                     )
                 }
             )
@@ -2242,12 +2243,6 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
-        colony_dir = COLONIES_DIR / colony_id_resolved
-        try:
-            colony_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            return json.dumps({"error": f"failed to create colony dir: {e}"})
-
         draft, draft_err = build_draft(
             skill_name=skill_name,
             skill_description=skill_description,
@@ -2268,6 +2263,17 @@ def register_queen_lifecycle_tools(
                     ),
                 }
             )
+
+        if scope == "queen":
+            return await _write_queen_skill(draft, source_path=source_path, files_copied=len(skill_files or []))
+        if scope == "global":
+            return await _request_global_skill(draft)
+
+        colony_dir = COLONIES_DIR / colony_id_resolved
+        try:
+            colony_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return json.dumps({"error": f"failed to create colony dir: {e}"})
 
         installed, write_err, replaced = write_skill(
             draft,
@@ -2314,18 +2320,130 @@ def register_queen_lifecycle_tools(
             }
         )
 
+    async def _write_queen_skill(draft: Any, *, source_path: str | None, files_copied: int) -> str:
+        """``write_skill(scope="queen")``: into this queen's own skills, then live in her catalog."""
+        from framework.config import QUEENS_DIR
+        from framework.skills.live_reload import ManagerReloadAdapter, live_skill_runtimes, reload_runtimes
+        from framework.skills.manager import SkillsManager
+        from framework.skills.overrides import OverrideEntry, Provenance, SkillOverrideStore, utc_now
+        from framework.skills.skill_writer import write_skill
+
+        queen_id = getattr(session, "queen_name", None) or "default"
+        queen_home = QUEENS_DIR / queen_id
+        store = SkillOverrideStore.load(queen_home / "skills_overrides.json", scope_label=f"queen:{queen_id}")
+        entry = store.get(draft.name)
+        hers = entry is not None and entry.provenance in (Provenance.QUEEN_CREATED, Provenance.LEARNED_RUNTIME)
+        # The Skills page writes no store entry for a skill dropped into this folder, so a skill
+        # here that isn't marked as hers is the user's.
+        if (queen_home / "skills" / draft.name).exists() and not hers:
+            return json.dumps(
+                {
+                    "error": (
+                        f"write_skill: the user made the skill '{draft.name}' in your skills, so you "
+                        "can't replace it. Pick another name, or ask the user to change it on the "
+                        "Skills page."
+                    )
+                }
+            )
+        installed, write_err, replaced = write_skill(draft, target_root=queen_home / "skills", replace_existing=True)
+        if write_err is not None or installed is None:
+            return json.dumps({"error": write_err or "failed to write skill folder"})
+        if not hers:
+            entry = OverrideEntry(enabled=True, provenance=Provenance.QUEEN_CREATED, created_at=utc_now(), created_by=f"queen:{queen_id}")
+            store.upsert(draft.name, entry)
+            store.save()
+
+        if session_manager is not None:
+            runtimes = live_skill_runtimes(session_manager, queen_id=queen_id)
+        else:
+            own = getattr(phase_state, "skills_manager", None)
+            runtimes = [ManagerReloadAdapter(own)] if isinstance(own, SkillsManager) else []
+            colony = _get_unified_colony()
+            if colony is not None and hasattr(colony, "reload_skills"):
+                runtimes.append(colony)
+        await reload_runtimes(runtimes)
+
+        message = (
+            f"Skill '{draft.name}' is in your own skills. It's in your skills catalog from your "
+            "next turn, and your colonies' workers spawned from now on see it. No other queen "
+            "does: scope='global' asks the user to add it to the shared library."
+        )
+        if entry.enabled is False:
+            message += " The user has turned this skill off, so it stays off until they turn it back on."
+        return json.dumps(
+            {
+                "success": True,
+                "scope": "queen",
+                "skill_name": draft.name,
+                "skill_path": str(installed),
+                "replaced": replaced,
+                "source_path": source_path,
+                "files_copied": files_copied,
+                "message": message,
+            }
+        )
+
+    async def _request_global_skill(draft: Any) -> str:
+        """``write_skill(scope="global")``: file a request the session's chat page asks the user about."""
+        from framework.skills import install_requests
+
+        session_dir = getattr(session, "queen_dir", None)
+        if session_dir is None:
+            return json.dumps({"error": "write_skill: this session has no folder to keep the request in, so scope='global' isn't available here."})
+        request = install_requests.add_request(Path(session_dir), draft)
+        bus = getattr(session, "event_bus", None)
+        if bus is not None:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.SKILL_INSTALL_REQUESTED,
+                    stream_id="queen",
+                    node_id="queen",
+                    execution_id=getattr(session, "id", None),
+                    data={"request_id": request["id"], "name": draft.name},
+                )
+            )
+        return json.dumps(
+            {
+                "success": True,
+                "scope": "global",
+                "pending": True,
+                "request_id": request["id"],
+                "skill_name": draft.name,
+                "message": (
+                    f"The user has to approve adding '{draft.name}' to the shared skill library, "
+                    "where every queen and colony sees it. They decide in this session's chat in "
+                    "the Hive dashboard, and you'll get a message when they do. Carry on meanwhile, "
+                    "and don't put it in a skills folder any other way. If you're talking with them "
+                    "somewhere else, such as a chat app, tell them it's waiting in the dashboard."
+                ),
+            }
+        )
+
     _write_skill_tool = Tool(
         name="write_skill",
         description=(
-            "Write or replace a colony-scoped skill. Use this BEFORE "
-            "fanning out parallel workers when the per-task protocol is "
-            "the same across all workers (schema, output format, tool "
-            "conventions, quality bar). Writing the protocol ONCE into a "
-            "skill — then pointing each worker at it BY NAME in the task "
-            "string — is dramatically cheaper than duplicating the same "
-            "prose across N task strings, and keeps the protocol "
-            "consistent. Workers see the skill in their "
-            "<available_skills> catalog and activate it on demand.\n\n"
+            "Write or replace a skill, or install one (yours, a downloaded "
+            "one, an existing skill folder). This is the way to add a "
+            "skill: don't write SKILL.md into a skills folder with the "
+            "terminal or write_file, since a skill put there by hand isn't "
+            "loaded until a new session and skips the user's approval.\n\n"
+            "SCOPE (who sees it):\n"
+            "  - 'queen' (default outside a colony): your own skills. In "
+            "your skills catalog from your next turn and in your colonies'; "
+            "no other queen sees it. A skill the user made in your skills "
+            "can't be replaced.\n"
+            "  - 'colony' (default inside a colony): THIS colony's workers "
+            "only. Use it BEFORE fanning out parallel workers when the "
+            "per-task protocol is the same across them (schema, output "
+            "format, tool conventions, quality bar): write the protocol "
+            "ONCE, then point each worker at it BY NAME in the task string "
+            "instead of repeating the prose. Workers spawned AFTER this "
+            "call pick it up; existing workers do not.\n"
+            "  - 'global': the shared library every queen and colony "
+            "reads. Needs the user's approval: nothing is installed yet, "
+            "the user is asked in this session's chat in the Hive "
+            "dashboard, and you get a message when they approve or deny. "
+            "You don't wait for it; carry on.\n\n"
             "TWO MODES:\n"
             "  - Inline: pass skill_name + skill_description + skill_body "
             "(and optional skill_files). Authors a fresh skill from "
@@ -2333,18 +2451,16 @@ def register_queen_lifecycle_tools(
             "  - Copy: pass source_path pointing at an existing skill "
             "root directory (the one containing SKILL.md). The tool "
             "reads SKILL.md plus every other file in that directory and "
-            "writes them into the colony scope verbatim. Optionally pass "
+            "writes them into the chosen scope verbatim. Optionally pass "
             "skill_name to rename on copy. The other inline params are "
             "REJECTED in this mode — use inline mode if you need to "
             "edit content.\n\n"
-            "Skill is colony-scoped: only THIS colony's workers see it. "
-            "Replacing an existing skill of the same name is fine — "
-            "your latest content wins. Workers spawned AFTER this call "
-            "pick it up; existing workers do not.\n\n"
+            "Replacing your own skill of the same name is fine — your "
+            "latest content wins.\n\n"
             "Skill body should read like a self-contained operating "
-            "procedure: what the worker is doing, the exact tools/schema "
+            "procedure: what the agent is doing, the exact tools/schema "
             "to use, the output format, what 'done' looks like. Skip "
-            "the per-worker specifics — those go in the task string."
+            "the per-task specifics — those go in the task string."
         ),
         parameters={
             "type": "object",
@@ -2362,8 +2478,8 @@ def register_queen_lifecycle_tools(
                 "skill_description": {
                     "type": "string",
                     "description": (
-                        "One-line summary of what this skill teaches a "
-                        "worker. Surfaced in the worker's skill catalog. "
+                        "One-line summary of what this skill teaches and "
+                        "when to use it. Surfaced in the skills catalog. "
                         "Required in inline mode; rejected in "
                         "source_path mode (description comes from the "
                         "source SKILL.md frontmatter)."
@@ -2373,7 +2489,7 @@ def register_queen_lifecycle_tools(
                     "type": "string",
                     "description": (
                         "Markdown body of SKILL.md — the operational "
-                        "procedure the worker needs to run unattended. "
+                        "procedure the agent needs to run it unattended. "
                         "Required in inline mode; rejected in "
                         "source_path mode."
                     ),
@@ -2404,10 +2520,22 @@ def register_queen_lifecycle_tools(
                         "skill's root directory (the one that contains "
                         "SKILL.md). When set, the tool copies the entire "
                         "skill folder — SKILL.md + every other UTF-8 "
-                        "file — into the colony scope. Use this to lift "
-                        "a framework default skill, user-scoped skill, "
-                        "or another colony's skill into THIS colony so "
-                        "the queen can pilot/customize it locally."
+                        "file — into the chosen scope. Use this to install "
+                        "a skill you downloaded (e.g. git clone it into "
+                        "your workspace first), or to lift a framework "
+                        "default, shared or another colony's skill into "
+                        "your own skills or THIS colony to customize it."
+                    ),
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["queen", "colony", "global"],
+                    "description": (
+                        "Who sees the skill: 'queen' (you, and your "
+                        "colonies), 'colony' (this colony's workers), or "
+                        "'global' (every queen and colony, after the user "
+                        "approves). Defaults to 'colony' inside a colony, "
+                        "'queen' outside one."
                     ),
                 },
             },

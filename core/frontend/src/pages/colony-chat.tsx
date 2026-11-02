@@ -8,6 +8,7 @@ import CredentialsModal, {
   clearCredentialCache,
 } from "@/components/CredentialsModal";
 import AgentCredentialForm from "@/components/AgentCredentialForm";
+import SkillInstallConsent from "@/components/SkillInstallConsent";
 import type { AgentCredentialFormRequest } from "@/api/credentials";
 import { executionApi } from "@/api/execution";
 import { workersApi } from "@/api/workers";
@@ -382,6 +383,9 @@ export default function ColonyChat() {
   // Set by the client_credential_form_requested SSE handler; the modal POSTs
   // the secret values straight to the store and resumes the parked queen.
   const [credentialForm, setCredentialForm] = useState<AgentCredentialFormRequest | null>(null);
+  // Bumped when the queen files or the user decides a request to add a skill
+  // to the shared library, so SkillInstallConsent reads the list again.
+  const [skillInstallsKey, setSkillInstallsKey] = useState(0);
   // The "run this colony on a cloud computer" (workspace VM / noVNC embed)
   // feature was cloud-only and has been removed. Colonies always run locally.
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
@@ -1447,6 +1451,13 @@ export default function ColonyChat() {
           break;
         }
 
+        case "skill_install_requested":
+        case "skill_install_decided":
+          // write_skill(scope="global"). The queen doesn't wait for the
+          // answer; the prompt reads the session's pending requests.
+          if (isQueen) setSkillInstallsKey((k) => k + 1);
+          break;
+
         case "queen_phase_changed": {
           const rawPhase = event.data?.phase as string;
           const eventAgentPath = (event.data?.agent_path as string) || null;
@@ -2416,6 +2427,10 @@ export default function ColonyChat() {
           request={credentialForm}
           onClose={() => setCredentialForm(null)}
         />
+      )}
+
+      {agentState.sessionId && (
+        <SkillInstallConsent sessionId={agentState.sessionId} refreshKey={skillInstallsKey} />
       )}
 
       {pivotPopup && (

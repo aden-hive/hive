@@ -271,6 +271,8 @@ export type EventTypeName =
   | "client_input_committed"
   | "client_credential_form_requested"
   | "colony_suggestion_requested"
+  | "skill_install_requested"
+  | "skill_install_decided"
   | "node_internal_output"
   | "node_input_blocked"
   | "node_stalled"

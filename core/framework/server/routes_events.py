@@ -64,6 +64,10 @@ DEFAULT_EVENT_TYPES = [
     # secure form. Must be in the live set or the form only appears after a
     # reload (and the queen stays parked in the meantime).
     EventType.CLIENT_CREDENTIAL_FORM_REQUESTED,
+    # write_skill(scope="global"): the chat page shows the consent prompt live
+    # (a reload reads pending requests from /skill-installs instead).
+    EventType.SKILL_INSTALL_REQUESTED,
+    EventType.SKILL_INSTALL_DECIDED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
     EventType.TRIGGER_AVAILABLE,
@@ -263,6 +267,10 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "llm_turn_complete",
         "loop_state_changed",
         "tool_call_completed",
+        # The queen doesn't wait for the user's answer, so nothing else would
+        # bring a dropped consent prompt back before a reload.
+        "skill_install_requested",
+        "skill_install_decided",
     }
 
     client_disconnected = asyncio.Event()

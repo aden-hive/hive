@@ -1,6 +1,6 @@
 ---
 name: hive.writing-hive-skills
-description: Author a new Agent Skill for a Hive agent that conforms to the Agent Skills specification (SKILL.md with YAML frontmatter, optional scripts/references/assets directories). Use when the user asks to create, scaffold, add, or package a new skill for a Hive agent.
+description: Author a new Agent Skill for a Hive agent that conforms to the Agent Skills specification (SKILL.md with YAML frontmatter, optional scripts/references/assets directories). Use when the user asks to create, scaffold, add, install, or package a new skill for a Hive agent, or you want to keep a procedure as a skill.
 metadata:
   author: hive
   type: default-skill
@@ -9,28 +9,30 @@ metadata:
 
 ## Operational Protocol: Writing Hive Skills
 
-Hive agents discover skills by scanning several roots, in precedence order:
+Hive agents discover skills by scanning several roots, in precedence order (later wins):
 
-1. `<project>/.hive/skills/` — project, Hive-specific
-2. `<project>/.agents/skills/` — project, cross-client
-3. `~/.hive/skills/` — user, Hive-specific
-4. `~/.agents/skills/` — user, cross-client
-5. Framework defaults shipped in `core/framework/skills/_default_skills/`
+1. Framework defaults shipped in `core/framework/skills/_default_skills/`
+2. `~/.agents/skills/` — user, cross-client
+3. `$HIVE_HOME/skills/` — the shared library every queen and colony reads
+4. `$HIVE_HOME/queens/<queen_id>/skills/` — one queen's own skills (her colonies read them too)
+5. `$HIVE_HOME/colonies/<colony_name>/skills/` — one colony's skills
+6. `<project>/.agents/skills/`, then `<project>/.hive/skills/` — project
 
 Each skill is a directory containing a `SKILL.md`. At startup, only the frontmatter `name` + `description` of every skill is loaded; the body is loaded only when the agent activates the skill. Design for that.
 
-### Choosing where to put a new skill
+### Adding a skill as a queen: `write_skill`
 
-- **Colony-scoped (via `write_skill` inside colony mode)**: when the skill is the operational protocol a single colony needs — its API auth, DOM selectors, DB schema, task-queue conventions — do NOT place it under `~/.hive/skills/` or `<project>/.hive/skills/` yourself. Those roots are SHARED and every colony on the machine will see it. Instead, once you're inside the colony (post-fork), call `write_skill(skill_name, skill_description, skill_body, skill_files?)` and the skill is materialized under `~/.hive/colonies/<colony_name>/skills/<skill-name>/` where only that colony's workers discover it. See the subsection below.
-- **Project-scoped**: put under `<project>/.hive/skills/` when the skill is tied to that codebase's APIs, conventions, or infra and multiple agents in the project should share it.
-- **User-scoped**: put under `~/.hive/skills/` when the skill is reusable across projects for this machine/user and all agents should see it.
-- **Framework default**: add under `core/framework/skills/_default_skills/` AND register in `framework/skills/defaults.py::SKILL_REGISTRY` only when the skill is a universal operational protocol shipped with Hive. Default skills use the `hive.<name>` naming convention and include `type: default-skill` in metadata.
+**Always add a skill with `write_skill`. Never write a `SKILL.md` into a skills folder with the terminal or `write_file`**: a skill put there by hand isn't in any running catalog until a new session, and one put in the shared library skips the user's approval. `write_skill` takes the content inline or copies an existing skill folder (`source_path`, e.g. one you `git clone`d into your workspace), and its `scope` decides who sees it:
 
-### Colony-scoped skills via `write_skill`
+| `scope` | Lands in | Who sees it |
+|---|---|---|
+| `queen` (default outside a colony) | your own skills | you from your next turn, and your colonies' workers |
+| `colony` (default inside a colony) | this colony's skills | this colony's workers spawned from now on |
+| `global` | the shared library, **after the user approves** | every queen and colony |
 
-A colony-scoped skill is one that belongs to exactly ONE colony — e.g. it encodes the HoneyComb staging API the `honeycomb_research` colony polls, or the LinkedIn outbound flow the `linkedin_outbound_campaign` colony runs. Writing such a skill at `~/.hive/skills/` or `<project>/.hive/skills/` leaks it to every other colony, which will then see it at selection time.
-
-**Do not create the folder yourself with the terminal.** Once the colony has been forked (via `suggest_colony` → user confirms the Create Colony popup), call `write_skill` inside the colony:
+- **Your own (`scope="queen"`)**: a protocol, an API you use, a style you keep. You can replace a skill you wrote, but not one the user made in your skills.
+- **One colony (`scope="colony"`)**: the operational protocol a single colony needs — its API auth, DOM selectors, DB schema, task-queue conventions. Write it once before fanning out workers and name it in each task string. Keeping it in the colony means no other colony sees it at selection time.
+- **Everyone (`scope="global"`)**: only when the skill is genuinely useful to every queen. Nothing is installed when you call it: the user is asked in this session's chat in the Hive dashboard, and a message tells you when they approve or decline. You don't wait for it; carry on. If you're talking with them in a chat app, tell them it's waiting in the dashboard.
 
 ```
 write_skill(
@@ -38,12 +40,14 @@ write_skill(
     skill_description="How to query the HoneyComb staging API…",
     skill_body="## Operational Protocol\n\nAuth: …",
     skill_files=[{"path": "scripts/fetch_tickers.py", "content": "…"}],  # optional
+    scope="colony",
 )
 ```
 
-The tool writes `~/.hive/colonies/<this_colony>/skills/honeycomb-api-protocol/SKILL.md` (plus any `skill_files`), which `SkillDiscovery` picks up as project scope when that colony's workers start — and ONLY that colony's workers. No cross-colony leakage.
+### Other places skills come from
 
-Do not write colony-bound skill folders by hand under `~/.hive/skills/`. A skill placed there is user-scoped and becomes visible to every colony on the machine — defeating the isolation you wanted.
+- **Project-scoped**: `<project>/.hive/skills/` when the skill is tied to that codebase's APIs, conventions, or infra and multiple agents in the project should share it.
+- **Framework default**: add under `core/framework/skills/_default_skills/` AND register in `framework/skills/defaults.py::SKILL_REGISTRY` only when the skill is a universal operational protocol shipped with Hive. Default skills use the `hive.<name>` naming convention and include `type: default-skill` in metadata.
 
 ### Directory layout
 
@@ -144,8 +148,8 @@ For Python scripts in a Hive project, prefer `uv run scripts/foo.py ...`.
 ### Creating a new skill — workflow
 
 1. Pick a `<skill-name>` (lowercase-hyphenated).
-2. Decide scope: **colony** (pass content INLINE to `create_colony` — STOP here, do not hand-author the folder), project (`<project>/.hive/skills/`), user (`~/.hive/skills/`), or framework default (`core/framework/skills/_default_skills/` + registry entry).
-3. For the non-colony scopes: create the directory and write `SKILL.md` with frontmatter + body.
+2. Decide scope: **queen**, **colony** or **global** (call `write_skill` with that `scope` — STOP here, do not hand-author the folder), project (`<project>/.hive/skills/`), or framework default (`core/framework/skills/_default_skills/` + registry entry).
+3. For the project and framework scopes: create the directory and write `SKILL.md` with frontmatter + body.
 4. Add `scripts/`, `references/`, `assets/` only if needed.
 5. Validate the frontmatter: name matches dir, description is specific, no forbidden characters.
 6. Validate using the Hive CLI:

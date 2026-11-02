@@ -46,6 +46,7 @@ from aiohttp import web
 from framework.cloud_sync_hooks import schedule_push
 from framework.config import COLONIES_DIR, QUEENS_DIR
 from framework.skills.discovery import DiscoveryConfig, ExtraScope, SkillDiscovery
+from framework.skills.live_reload import live_skill_runtimes, reload_runtimes
 from framework.skills.manager import SkillsManager, SkillsManagerConfig
 from framework.skills.overrides import (
     OverrideEntry,
@@ -101,28 +102,6 @@ def _ensure_queens_known() -> None:
         logger.debug("ensure_default_queens failed (non-fatal)", exc_info=True)
 
 
-class _ManagerReloadAdapter:
-    """Makes a bare ``SkillsManager`` look like a runtime to ``_reload_scope``.
-
-    ``_reload_scope`` calls ``await rt.reload_skills()`` on every entry in
-    ``affected_runtimes``. Live queen DM sessions expose their manager on
-    ``phase_state.skills_manager`` but don't have a runtime wrapper, so
-    we provide this thin shim so PATCHes reach them with the same call.
-    """
-
-    def __init__(self, skills_manager: SkillsManager) -> None:
-        self._mgr = skills_manager
-
-    @property
-    def skills_manager(self) -> SkillsManager:
-        return self._mgr
-
-    async def reload_skills(self) -> dict[str, Any]:
-        async with self._mgr.mutation_lock:
-            self._mgr.reload()
-        return {"catalog_chars": len(self._mgr.skills_catalog_prompt)}
-
-
 def _queen_scope(manager: Any, queen_id: str) -> SkillScope | None:
     _ensure_queens_known()
     queen_home = QUEENS_DIR / queen_id
@@ -141,30 +120,15 @@ def _queen_scope(manager: Any, queen_id: str) -> SkillScope | None:
     # it here means newly-bundled skills stay invisible until a restart.
     admin_manager = _build_admin_manager(queen_id=queen_id)
 
-    runtimes: list = []
-    try:
-        for colony in manager.iter_colony_runtimes(queen_id=queen_id):  # type: ignore[union-attr]
-            runtimes.append(colony)
-        # Also collect live DM-session managers as reload targets so a
-        # PATCH reaches running queens, even though we enumerate from
-        # the admin manager.
-        for session in manager.iter_queen_sessions(queen_id):  # type: ignore[union-attr]
-            phase_state = getattr(session, "phase_state", None)
-            if phase_state is None:
-                continue
-            skills_mgr = getattr(phase_state, "skills_manager", None)
-            if isinstance(skills_mgr, SkillsManager):
-                runtimes.append(_ManagerReloadAdapter(skills_mgr))
-    except Exception:
-        logger.debug("queen scope: live manager lookup failed", exc_info=True)
-
     return SkillScope(
         kind="queen",
         target_id=queen_id,
         write_dir=write_dir,
         overrides_path=overrides_path,
         store=store,
-        affected_runtimes=runtimes,
+        # Her live colonies and DM sessions, so a PATCH reaches running queens even though
+        # GET enumerates from the admin manager.
+        affected_runtimes=live_skill_runtimes(manager, queen_id=queen_id),
         manager=admin_manager,
     )
 
@@ -530,14 +494,6 @@ async def handle_list_scopes(request: web.Request) -> web.Response:
 
 async def _reload_scope(scope: SkillScope) -> None:
     """Reload the primary manager and every live runtime affected by the scope."""
-    import asyncio
-
-    async def _reload_one(rt) -> None:
-        try:
-            await rt.reload_skills()
-        except Exception:
-            logger.warning("reload_skills failed for runtime %r", rt, exc_info=True)
-
     # The primary manager (often the queen's) gets reloaded too.
     if scope.manager is not None:
         async with scope.manager.mutation_lock:
@@ -546,8 +502,7 @@ async def _reload_scope(scope: SkillScope) -> None:
             except Exception:
                 logger.warning("primary manager reload failed", exc_info=True)
     # Runtimes in parallel — each has its own mutation lock.
-    if scope.affected_runtimes:
-        await asyncio.gather(*[_reload_one(rt) for rt in scope.affected_runtimes], return_exceptions=True)
+    await reload_runtimes(scope.affected_runtimes)
 
 
 async def _handle_create(scope: SkillScope, payload: dict[str, Any], user_id: str) -> web.Response:
@@ -1100,6 +1055,131 @@ def _parse_skill_md_text(text: str) -> tuple[str, str, str, str | None]:
 
 
 # ---------------------------------------------------------------------------
+# A queen's requests to add a skill to the shared library
+# ---------------------------------------------------------------------------
+
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _install_session_dir(request: web.Request) -> Path | None:
+    """The folder of the URL's session, running or not; None when there is no such session."""
+    from framework.server.session_manager import _find_queen_session_dir
+
+    session_id = request.match_info["session_id"]
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        return None
+    manager = request.app.get("manager")
+    live = manager.get_session(session_id) if manager is not None else None
+    if live is not None and getattr(live, "queen_dir", None) is not None:
+        return Path(live.queen_dir)
+    session_dir = _find_queen_session_dir(session_id)
+    return session_dir if session_dir.is_dir() else None
+
+
+async def _tell_queen(session: Any, message: str) -> bool:
+    """Hand the queen of a running session a note, as the credential form does; False if she isn't running."""
+    executor = getattr(session, "queen_executor", None)
+    node = executor.node_registry.get("queen") if executor is not None else None
+    if node is None or not hasattr(node, "inject_event"):
+        return False
+    try:
+        await node.inject_event(message, is_client_input=True)
+    except Exception:
+        logger.exception("skill install: couldn't tell the queen of session %s", getattr(session, "id", "?"))
+        return False
+    return True
+
+
+async def handle_list_skill_installs(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/skill-installs -- the queen's requests waiting for the user.
+
+    Each carries the skill as it would be installed (``body`` and ``files`` with their content),
+    and ``replaces``: whether the shared library already has a skill of that name.
+    """
+    from framework.config import HIVE_HOME
+    from framework.skills import install_requests
+
+    session_dir = _install_session_dir(request)
+    if session_dir is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    library = HIVE_HOME / "skills"
+    fields = ("id", "name", "description", "body", "files", "requested_at")
+    pending = [{**{k: r.get(k) for k in fields}, "replaces": (library / r["name"]).exists()} for r in install_requests.pending_requests(session_dir)]
+    return web.json_response({"requests": pending})
+
+
+async def handle_decide_skill_install(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/skill-installs/{request_id} -- the user approves or denies.
+
+    Body: ``{"decision": "approve" | "deny"}``. Approving writes the stored copy into the shared
+    library (``HIVE_HOME/skills``) and reloads every live catalog. Either way the queen is told,
+    if she's running. 409 when the request was already decided.
+    """
+    from framework.config import HIVE_HOME
+    from framework.skills import install_requests
+    from framework.skills.live_reload import reload_live_skills
+
+    session_dir = _install_session_dir(request)
+    if session_dir is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    decision = body.get("decision") if isinstance(body, dict) else None
+    if decision not in ("approve", "deny"):
+        return web.json_response({"error": "decision must be 'approve' or 'deny'"}, status=400)
+
+    request_id = request.match_info["request_id"]
+    try:
+        pending = install_requests.pending_request(session_dir, request_id)
+    except install_requests.RequestNotFound as e:
+        return web.json_response({"error": str(e)}, status=404)
+    except install_requests.RequestDecided as e:
+        return web.json_response({"error": str(e)}, status=409)
+
+    name = pending["name"]
+    result: dict[str, Any] = {"name": name, "decision": decision}
+    manager = request.app.get("manager")
+    if decision == "approve":
+        try:
+            draft = install_requests.draft_of(pending)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=422)
+        installed, err, replaced = write_skill(draft, target_root=HIVE_HOME / "skills", replace_existing=True)
+        if err is not None or installed is None:
+            return web.json_response({"error": err or "failed to write skill folder"}, status=500)
+        install_requests.mark_decided(session_dir, request_id, "approved")
+        await reload_live_skills(manager)
+        result |= {"installed_path": str(installed), "replaced": replaced}
+        note = (
+            f"[The user approved adding your skill '{name}' to the shared skill library"
+            f"{', replacing the shared skill of that name' if replaced else ''}. Every queen and "
+            "colony can use it now, and it's in your skills catalog from your next turn.]"
+        )
+    else:
+        install_requests.mark_decided(session_dir, request_id, "denied")
+        note = f"[The user declined adding your skill '{name}' to the shared skill library, so it isn't installed. Don't install it another way.]"
+
+    live = manager.get_session(request.match_info["session_id"]) if manager is not None else None
+    result["queen_told"] = await _tell_queen(live, note) if live is not None else False
+    bus = getattr(live, "event_bus", None)
+    if bus is not None:
+        from framework.host.event_bus import AgentEvent, EventType
+
+        await bus.publish(
+            AgentEvent(
+                type=EventType.SKILL_INSTALL_DECIDED,
+                stream_id="queen",
+                node_id="queen",
+                execution_id=live.id,
+                data={"request_id": request_id, "name": name, "decision": decision},
+            )
+        )
+    return web.json_response(result)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -1116,6 +1196,10 @@ def register_routes(app: web.Application) -> None:
     r.add_post("/api/queen/{queen_id}/skills/{skill_name}/rename", handle_rename_queen_skill)
     r.add_delete("/api/queen/{queen_id}/skills/{skill_name}", handle_delete_queen_skill)
     r.add_post("/api/queen/{queen_id}/skills/reload", handle_reload_queen_skills)
+
+    # A queen's requests to add a skill to the shared library (write_skill(scope="global"))
+    r.add_get("/api/sessions/{session_id}/skill-installs", handle_list_skill_installs)
+    r.add_post("/api/sessions/{session_id}/skill-installs/{request_id}", handle_decide_skill_install)
 
     # Aggregated library (powers the Skills Library page)
     r.add_get("/api/skills", handle_list_all_skills)

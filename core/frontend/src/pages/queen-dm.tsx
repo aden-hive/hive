@@ -17,6 +17,7 @@ import { sessionsApi } from "@/api/sessions";
 import { resolveAttachmentUrl } from "@/lib/attachments";
 import { queensApi, type PortraitDescriptor } from "@/api/queens";
 import AgentCredentialForm from "@/components/AgentCredentialForm";
+import SkillInstallConsent from "@/components/SkillInstallConsent";
 import type { AgentCredentialFormRequest } from "@/api/credentials";
 import { useMultiSSE } from "@/hooks/use-sse";
 import { usePendingQueue } from "@/hooks/use-pending-queue";
@@ -321,6 +322,9 @@ export default function QueenDM() {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   // Secure credential form the queen popped via credentials(action="collect").
   const [credentialForm, setCredentialForm] = useState<AgentCredentialFormRequest | null>(null);
+  // Bumped when the queen files or the user decides a request to add a skill
+  // to the shared library, so SkillInstallConsent reads the list again.
+  const [skillInstallsKey, setSkillInstallsKey] = useState(0);
   const [cloneColonyName, setCloneColonyName] = useState("");
   const [cloneGoal, setCloneGoal] = useState("");
   const [cloneHandover, setCloneHandover] = useState("");
@@ -2137,6 +2141,13 @@ export default function QueenDM() {
           break;
         }
 
+        case "skill_install_requested":
+        case "skill_install_decided":
+          // write_skill(scope="global"). The queen doesn't wait for the
+          // answer; the prompt reads the session's pending requests.
+          setSkillInstallsKey((k) => k + 1);
+          break;
+
         case "colony_created": {
           // Queen called create_colony() — surface a clickable system
           // message linking to /colony/{colony_id} so the user can
@@ -2911,6 +2922,10 @@ export default function QueenDM() {
           request={credentialForm}
           onClose={() => setCredentialForm(null)}
         />
+      )}
+
+      {sessionId && (
+        <SkillInstallConsent sessionId={sessionId} refreshKey={skillInstallsKey} />
       )}
 
       {cloneDialogOpen && (

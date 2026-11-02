@@ -18,6 +18,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from framework.server.routes_skills import register_routes
+from framework.skills.manager import SkillsManager
 from framework.skills.overrides import (
     OverrideEntry,
     Provenance,
@@ -34,7 +35,11 @@ class _StubSessionManager:
     ``manager.iter_colony_runtimes`` to find live managers to reload.
     In-process tests don't spin up runtimes, so these iterators yield
     nothing — the routes fall back to the admin manager built from disk.
+    ``sessions`` are the live sessions the skill-install routes look up.
     """
+
+    def __init__(self, sessions: dict | None = None) -> None:
+        self._sessions = sessions or {}
 
     def iter_queen_sessions(self, queen_id: str):
         return iter([])
@@ -42,10 +47,16 @@ class _StubSessionManager:
     def iter_colony_runtimes(self, *, queen_id=None, colony_id=None):
         return iter([])
 
+    def get_session(self, session_id: str):
+        return self._sessions.get(session_id)
 
-def _build_app() -> web.Application:
+    def list_sessions(self) -> list:
+        return list(self._sessions.values())
+
+
+def _build_app(manager: _StubSessionManager | None = None) -> web.Application:
     application = web.Application()
-    application["manager"] = _StubSessionManager()
+    application["manager"] = manager or _StubSessionManager()
     register_routes(application)
     return application
 
@@ -238,6 +249,144 @@ async def test_list_scopes_enumerates_queens_and_colonies(client: TestClient, _s
     data = await resp.json()
     assert any(q["id"] == "ops" for q in data["queens"])
     assert any(c["name"] == "research_one" for c in data["colonies"])
+
+
+# ---------------------------------------------------------------------------
+# A queen's requests to add a skill to the shared library
+# ---------------------------------------------------------------------------
+
+
+def _session_dir(session_id: str = "session_ava_1") -> Path:
+    import framework.config as config
+
+    path = config.QUEENS_DIR / "queen_ava" / "sessions" / session_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _file_request(session_dir: Path, name: str = "house-style") -> dict:
+    from framework.skills import install_requests
+    from framework.skills.skill_writer import build_draft
+
+    draft, _ = build_draft(
+        skill_name=name,
+        skill_description="How Ava formats her reports.",
+        skill_body="# House style\n\nLead with the answer.\n",
+        skill_files=[{"path": "scripts/check.py", "content": "print('ok')\n"}],
+    )
+    return install_requests.add_request(session_dir, draft)
+
+
+class _CountingSkillsManager(SkillsManager):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reloads = 0
+
+    def reload(self) -> None:
+        self.reloads += 1
+
+
+def _live_session(session_dir: Path):
+    """A running queen session: her loop takes notes, her catalog counts reloads."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from framework.host.event_bus import EventBus
+
+    queen = SimpleNamespace(inject_event=AsyncMock())
+    return SimpleNamespace(
+        id=session_dir.name,
+        queen_name="queen_ava",
+        queen_dir=session_dir,
+        queen_executor=SimpleNamespace(node_registry={"queen": queen}),
+        event_bus=EventBus(),
+        phase_state=SimpleNamespace(skills_manager=_CountingSkillsManager()),
+        colony=None,
+    )
+
+
+async def test_pending_skill_installs_carry_the_skill_and_whether_it_replaces_one(client: TestClient) -> None:
+    import framework.config as config
+
+    session_dir = _session_dir()
+    request = _file_request(session_dir)
+    _file_request(session_dir, name="fresh-skill")
+    existing = config.HIVE_HOME / "skills" / "house-style"
+    existing.mkdir(parents=True)
+
+    resp = await client.get(f"/api/sessions/{session_dir.name}/skill-installs")
+
+    assert resp.status == 200
+    rows = (await resp.json())["requests"]
+    assert [(r["name"], r["replaces"]) for r in rows] == [("house-style", True), ("fresh-skill", False)]
+    assert rows[0]["id"] == request["id"]
+    assert rows[0]["files"] == [{"path": "scripts/check.py", "content": "print('ok')\n"}]
+
+
+async def test_approving_installs_the_stored_skill_and_tells_the_queen() -> None:
+    import framework.config as config
+    from framework.host.event_bus import EventType
+    from framework.skills import install_requests
+
+    session_dir = _session_dir()
+    request = _file_request(session_dir)
+    live = _live_session(session_dir)
+    decided = []
+
+    async def on_event(event) -> None:
+        decided.append(event.data)
+
+    live.event_bus.subscribe(event_types=[EventType.SKILL_INSTALL_DECIDED], handler=on_event)
+    app = _build_app(_StubSessionManager({live.id: live}))
+    async with TestClient(TestServer(app)) as tc:
+        resp = await tc.post(f"/api/sessions/{live.id}/skill-installs/{request['id']}", json={"decision": "approve"})
+        result = await resp.json()
+
+    assert resp.status == 200
+    assert result["queen_told"] is True
+    installed = config.HIVE_HOME / "skills" / "house-style"
+    assert "Lead with the answer." in (installed / "SKILL.md").read_text(encoding="utf-8")
+    assert (installed / "scripts" / "check.py").read_text(encoding="utf-8") == "print('ok')\n"
+    assert install_requests.pending_requests(session_dir) == []
+    assert live.phase_state.skills_manager.reloads == 1
+    [note] = live.queen_executor.node_registry["queen"].inject_event.await_args.args
+    assert "approved" in note and "house-style" in note
+    assert decided == [{"request_id": request["id"], "name": "house-style", "decision": "approve"}]
+
+
+async def test_denying_installs_nothing(client: TestClient) -> None:
+    import framework.config as config
+    from framework.skills import install_requests
+
+    session_dir = _session_dir()
+    request = _file_request(session_dir)
+
+    resp = await client.post(f"/api/sessions/{session_dir.name}/skill-installs/{request['id']}", json={"decision": "deny"})
+
+    assert resp.status == 200
+    assert (await resp.json())["queen_told"] is False  # her session isn't running
+    assert not (config.HIVE_HOME / "skills" / "house-style").exists()
+    assert install_requests.pending_requests(session_dir) == []
+
+
+async def test_a_request_is_decided_once(client: TestClient) -> None:
+    session_dir = _session_dir()
+    request = _file_request(session_dir)
+    url = f"/api/sessions/{session_dir.name}/skill-installs/{request['id']}"
+    await client.post(url, json={"decision": "deny"})
+
+    resp = await client.post(url, json={"decision": "approve"})
+
+    assert resp.status == 409
+
+
+async def test_deciding_an_unknown_request_or_session_is_not_found(client: TestClient) -> None:
+    session_dir = _session_dir()
+
+    unknown_request = await client.post(f"/api/sessions/{session_dir.name}/skill-installs/nope", json={"decision": "approve"})
+    unknown_session = await client.get("/api/sessions/session_nobody/skill-installs")
+
+    assert (unknown_request.status, unknown_session.status) == (404, 404)
 
 
 # ---------------------------------------------------------------------------

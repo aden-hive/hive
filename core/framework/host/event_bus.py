@@ -175,6 +175,15 @@ class EventType(StrEnum):
     # with colony_id + source_session_id to drive the fork.
     COLONY_SUGGESTION_REQUESTED = "colony_suggestion_requested"
 
+    # The queen asked to install a skill in the shared library
+    # (write_skill(scope="global")); the session's chat page asks the user. The
+    # request lives in the session folder (framework.skills.install_requests) and
+    # is read from /api/sessions/{id}/skill-installs. Carries {request_id, name}.
+    SKILL_INSTALL_REQUESTED = "skill_install_requested"
+    # The user approved or denied one, so other open pages drop their prompt.
+    # Carries {request_id, name, decision}.
+    SKILL_INSTALL_DECIDED = "skill_install_decided"
+
     # Internal node observability
     NODE_INTERNAL_OUTPUT = "node_internal_output"
     NODE_INPUT_BLOCKED = "node_input_blocked"
