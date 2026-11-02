@@ -14,6 +14,7 @@ while replies are long and generic.
 
 from __future__ import annotations
 
+import bisect
 import math
 import os
 import re
@@ -68,8 +69,23 @@ _ID_DIGITS = 5
 MAX_TERMS = 12
 TOP_K = 6
 USER_CHARS = 500
-REPLY_CHARS = 300
+# The reply budget matches the user budget. It used to be 300: narrower, on the
+# theory that replies are long and generic. Measured on LongMemEval-S, that cost
+# real answers — for questions about what the assistant said, the share of blocks
+# carrying every word of the gold answer went 43% -> 60% from centring the window
+# on the query (above) and 60% -> 68% from this budget, for ~860 more characters
+# per block. 800 would reach 74%, at roughly double that cost.
+REPLY_CHARS = 500
+# Expansion inside a session that already placed a top hit: how many extra
+# turns per session, the overall cap, and the fraction of the best score they
+# must still reach. Tuned offline on LongMemEval-S; see _expand_within_sessions.
+EXPAND_PER_SESSION = 2
+EXPAND_TOTAL = 4
+EXPAND_FLOOR = 0.15
 _K1, _B = 1.2, 0.75
+# Cap on term occurrences scanned when choosing a snippet window; a long reply
+# can hold hundreds and the extra ones do not change which window wins.
+_MAX_MARKS = 200
 
 
 @dataclass
@@ -218,17 +234,90 @@ def recall(
         return []
     scored.sort(key=lambda t: t.score, reverse=True)
     best = scored[0].score
-    return [t for t in scored[:top_k] if t.score >= 0.35 * best]
+    primary = [t for t in scored[:top_k] if t.score >= 0.35 * best]
+    if not primary:
+        return []
+    return primary + _expand_within_sessions(scored, primary, best)
+
+
+def _expand_within_sessions(
+    scored: list[RecalledTurn],
+    primary: list[RecalledTurn],
+    best: float,
+) -> list[RecalledTurn]:
+    """More turns from the conversations that already placed a top hit.
+
+    A question's evidence is often spread over several turns of one
+    conversation — what the user wants, said in turn 1, and the constraint that
+    shapes the answer, said in turn 7. The global cut keeps only the single
+    best-matching turn of that conversation, so the rest never reaches the
+    model. A session that already produced a top hit has proved relevant, so
+    its other matching turns clear a lower bar.
+    """
+    if not EXPAND_TOTAL or not EXPAND_PER_SESSION:
+        return []
+    hot = {t.session for t in primary}
+    seen = {(t.session, t.ordinal) for t in primary}
+    added: dict[str, int] = {}
+    extra: list[RecalledTurn] = []
+    floor = EXPAND_FLOOR * best
+    for t in scored:
+        if len(extra) >= EXPAND_TOTAL:
+            break
+        if t.score < floor:
+            break  # sorted by score, so nothing further qualifies
+        if t.session not in hot or (t.session, t.ordinal) in seen:
+            continue
+        if added.get(t.session, 0) >= EXPAND_PER_SESSION:
+            continue
+        extra.append(t)
+        seen.add((t.session, t.ordinal))
+        added[t.session] = added.get(t.session, 0) + 1
+    return extra
+
+
+def _window_start(text: str, terms: list[str], limit: int) -> int:
+    """Where a *limit*-char window should start to carry the most of the query.
+
+    Centering on the first term is wrong when the terms are spread out: a reply
+    that opens with one topic word and answers the question 400 characters later
+    gets cut before the answer. So consider a window around every occurrence and
+    keep the one covering the most distinct terms (then the most occurrences,
+    then the earliest).
+    """
+    marks: list[tuple[int, int]] = []
+    for i, term in enumerate(terms):
+        for m in re.finditer(_term_pattern(term), text, re.IGNORECASE):
+            marks.append((m.start(), i))
+            if len(marks) >= _MAX_MARKS:
+                break
+        if len(marks) >= _MAX_MARKS:
+            break
+    if not marks:
+        return 0
+    marks.sort()
+    positions = [p for p, _ in marks]
+    # Several marks clamp to the same start; score each distinct one once.
+    starts = sorted({max(0, min(p - limit // 3, len(text) - limit)) for p in positions})
+    best_start, best_key = starts[0], (-1, -1)
+    for start in starts:
+        lo = bisect.bisect_left(positions, start)
+        hi = bisect.bisect_left(positions, start + limit)
+        if hi <= lo:
+            continue
+        window = marks[lo:hi]
+        key = (len({i for _, i in window}), len(window))
+        if key > best_key:
+            best_key, best_start = key, start
+    return best_start
 
 
 def _snippet(text: str, terms: list[str], limit: int) -> str:
-    """*text* cut to *limit* chars, centered on the first term it contains."""
+    """*text* cut to *limit* chars, on the window carrying the most query terms."""
     text = " ".join(text.split())
     if len(text) <= limit:
         return text
-    hits = [m.start() for t in terms if (m := re.search(_term_pattern(t), text, re.IGNORECASE))]
-    center = min(hits) if hits else 0
-    start = max(0, min(center - limit // 3, len(text) - limit))
+    start = _window_start(text, terms, limit)
     return ("…" if start else "") + text[start : start + limit].strip() + ("…" if start + limit < len(text) else "")
 
 

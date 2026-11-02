@@ -112,6 +112,53 @@ def test_one_shared_common_word_is_not_enough(hive_home: Path) -> None:
     assert R.recall("queens", QUEEN, "Planning to buy a telescope?") == []
 
 
+def test_recall_quotes_the_answer_from_a_long_reply_not_just_its_opening(hive_home: Path) -> None:
+    """The snippet window follows the query, not the start of the text.
+
+    A long reply names the topic up front and answers 600 characters later.
+    Centring the window on the earliest matching term cuts the answer off.
+    """
+    filler = "It was a calm afternoon and the illustration took shape slowly. " * 10
+    reply = "The Plesiosaur appears in chapter three. " + filler + "Its scaly body is a deep blue colour throughout."
+    assert len(reply) > R.REPLY_CHARS + 200, "the answer must sit outside a window pinned to the opening"
+    _session(
+        hive_home,
+        "session_20230523_064400_dddd0001",
+        [("user", "describe the next picture"), ("assistant", reply)],
+    )
+
+    question = "What colour was the Plesiosaur scaly body?"
+    block = R.render(R.recall("queens", QUEEN, question), question)
+
+    assert block is not None
+    assert "deep blue colour" in block
+
+
+def test_recall_adds_the_other_matching_turns_of_a_session_that_placed_a_hit(hive_home: Path, monkeypatch) -> None:
+    """Evidence spread over two turns of one conversation comes back together."""
+    _session(
+        hive_home,
+        "session_20230522_055400_dddd0002",
+        [
+            ("user", "Help me organize my kitchen utensils in the new utensil holder I bought."),
+            ("assistant", "Group them by how often you reach for them."),
+            ("user", "My kitchen has granite countertops and a very deep sink to work around."),
+            ("assistant", "Granite likes a pH-neutral cleaner."),
+        ],
+    )
+
+    question = "My kitchen is a mess again, any tips for keeping it clean?"
+    # top_k=1 keeps only the single best turn, so whatever else comes back
+    # arrives through the in-session expansion and nothing else.
+    turns = R.recall("queens", QUEEN, question, top_k=1)
+    assert len(turns) > 1
+    assert any("granite countertops" in t.user for t in turns)
+    assert any("utensil holder" in t.user for t in turns)
+
+    monkeypatch.setattr(R, "EXPAND_TOTAL", 0)
+    assert len(R.recall("queens", QUEEN, question, top_k=1)) == 1
+
+
 # ---------------------------------------------------------------------------
 # timeline search
 # ---------------------------------------------------------------------------
