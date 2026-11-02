@@ -28,8 +28,10 @@ from framework.agent_loop.reminders import (
 logger = logging.getLogger(__name__)
 
 # Retrieval runs before the turn starts, so it must never hold a turn
-# hostage: past this, the turn proceeds without excerpts.
-RECALL_TIMEOUT_S = float(os.environ.get("HIVE_PAST_RECALL_TIMEOUT", "8"))
+# hostage: past this, the turn proceeds without excerpts. A query takes tens of
+# milliseconds; what can run long is a first build of the index, which keeps
+# going in its thread, so only that turn misses out.
+RECALL_TIMEOUT_S = float(os.environ.get("HIVE_PAST_RECALL_TIMEOUT", "3"))
 # Messages shorter than this ("ok", "thanks!") carry no topic to recall by.
 MIN_MESSAGE_CHARS = 8
 

@@ -102,6 +102,10 @@ def data_index_dir(scope: Scope, owner: str, session: str | None = None) -> Path
     return base / session if session else base
 
 
+def turn_index_path(scope: Scope, owner: str) -> Path:
+    return index_root() / "recall" / scope / f"{owner}.sqlite3"
+
+
 def meta_dir(scope: Scope, owner: str, session: str) -> Path:
     return index_root() / "meta" / scope / owner / session
 
