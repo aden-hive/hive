@@ -530,3 +530,91 @@ def test_since_until_filter_results_not_just_indexing(hive_home: Path, bind_quee
     assert [m["session"] for m in after["matches"]] == ["session_20260505_100000_bbbb"]
     before = fn(pattern="NEEDLE_DATED", until="2026-04-01")
     assert [m["session"] for m in before["matches"]] == ["session_20260110_100000_aaaa"]
+
+
+# ── A session's final assistant reply ─────────────────────────────────
+#
+# A conversation ends on the assistant's last reply: no event follows it. The
+# indexer used to hold that snapshot in cursor.pending_assistant and wait for a
+# later event to flush it, so the last thing the queen said in any finished
+# session never became searchable. These three tests pin the fix.
+
+
+def test_sync_indexes_the_final_assistant_reply_of_a_finished_session(hive_home: Path):
+    from memory_tools import index, paths as P
+
+    events = [
+        _user_event("tell me about the plesiosaur"),
+        *_assistant_deltas("The Plesiosaur has a blue scaly body."),
+    ]
+    _write_session(hive_home, queen="queen_fin", session="session_20230523_064400_aaaa", events=events)
+
+    index.sync_session("queens", "queen_fin", "session_20230523_064400_aaaa")
+
+    idx = P.events_index_dir("queens", "queen_fin", "session_20230523_064400_aaaa")
+    names = sorted(p.name for p in idx.iterdir() if p.suffix == ".txt")
+    assert names == ["000000.user.txt", "000001.assistant.txt"]
+    assert "blue scaly body" in (idx / "000001.assistant.txt").read_text(encoding="utf-8")
+
+
+def test_sync_rewrites_a_still_streaming_turn_in_place(hive_home: Path):
+    """Resuming a turn extends one cache file; it does not append a second."""
+    from memory_tools import index, paths as P
+
+    session = "session_20230524_100000_bbbb"
+    first_delta = {"type": "client_output_delta", "data": {"snapshot": "the whole", "iteration": 0, "inner_turn": 0}}
+    sdir = _write_session(hive_home, queen="queen_fin", session=session, events=[_user_event("start"), first_delta])
+    index.sync_session("queens", "queen_fin", session)
+
+    idx = P.events_index_dir("queens", "queen_fin", session)
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the whole"
+
+    # The same turn keeps streaming, then the user speaks again.
+    with (sdir / "events.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "client_output_delta", "data": {"snapshot": "the whole reply", "iteration": 0, "inner_turn": 0}}) + "\n")
+        f.write(json.dumps(_user_event("and another thing")) + "\n")
+    index.sync_session("queens", "queen_fin", session)
+
+    assert sorted(p.name for p in idx.iterdir() if p.suffix == ".txt") == [
+        "000000.user.txt",
+        "000001.assistant.txt",
+        "000002.user.txt",
+    ]
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the whole reply"
+
+
+def test_sync_materializes_a_pending_snapshot_left_by_an_older_cache(hive_home: Path):
+    """An existing cache gains the reply it dropped, without a full rebuild."""
+    from memory_tools import index, paths as P
+
+    session = "session_20230525_100000_cccc"
+    events = [_user_event("question"), *_assistant_deltas("the answer was forty five")]
+    _write_session(hive_home, queen="queen_fin", session=session, events=events)
+    index.sync_session("queens", "queen_fin", session)
+
+    # Rewind to what the previous build left behind: the whole file consumed,
+    # the trailing snapshot parked in the cursor with no ordinal and no file.
+    idx = P.events_index_dir("queens", "queen_fin", session)
+    (idx / "000001.assistant.txt").unlink()
+    cursor = json.loads(P.cursor_path("queens", "queen_fin", session).read_text(encoding="utf-8"))
+    cursor["next_ordinal"] = 1
+    cursor["pending_assistant"] = {"iteration": 1, "inner_turn": 0, "snapshot": "the answer was forty five"}
+    P.cursor_path("queens", "queen_fin", session).write_text(json.dumps(cursor), encoding="utf-8")
+
+    index.sync_session("queens", "queen_fin", session)
+
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the answer was forty five"
+
+
+def test_search_messages_finds_the_last_thing_the_assistant_said(hive_home: Path, bind_queen):
+    events = [
+        _user_event("write me a children's book about dinosaurs"),
+        *_assistant_deltas("Chapter three: the Plesiosaur, with its blue scaly body, glided past."),
+    ]
+    _write_session(hive_home, queen="queen_books", session="session_20230523_064400_dddd", events=events)
+    bind_queen("queen_books")
+
+    out = _make_tool()(pattern="(?i)plesiosaur")
+
+    assert out["total_matches"] == 1
+    assert "blue scaly body" in json.dumps(out["matches"], ensure_ascii=False)

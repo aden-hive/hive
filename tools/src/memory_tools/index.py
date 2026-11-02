@@ -29,9 +29,15 @@ Cursor invariants:
       from cursor.events_byte_offset only sees genuinely new content.
     * If file size < cursor offset, the file was wiped (compact-and-fork
       on a forked session). We reset the cursor and start over.
-    * Trailing pending assistant (a turn still streaming deltas at EOF)
-      is NOT flushed; we stash it in cursor.pending_assistant and resume
-      next sync once a non-delta event arrives.
+    * A pending assistant turn (one still streaming deltas at EOF) IS
+      written to the cache, at an ordinal reserved when the turn opened,
+      and rewritten in place as later deltas extend its snapshot. The
+      snapshot is cumulative, so last write wins. Writing it eagerly is
+      what makes the final reply of a finished session searchable: no
+      further event ever arrives to flush it.
+      To keep that cheap, a turn is written at most once per sync pass —
+      deltas only mark it dirty; the write happens when the turn is
+      finalized or when the pass ends.
 """
 
 from __future__ import annotations
@@ -113,7 +119,11 @@ _SPILL_PATH_RE = re.compile(r"Full result saved at:\s*(\S+)")
 class Cursor:
     events_byte_offset: int = 0
     next_ordinal: int = 0
-    pending_assistant: dict | None = None  # {iteration, inner_turn, snapshot}
+    # {iteration, inner_turn, snapshot, ordinal}. ``ordinal`` is reserved when
+    # the turn opens and the cache file at that ordinal is rewritten as the
+    # snapshot grows. A cursor written by an older build has no ``ordinal``:
+    # its snapshot never reached the cache, so sync materializes it on load.
+    pending_assistant: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -190,24 +200,41 @@ def _ordinal_filename(ordinal: int, role: str) -> str:
     return f"{ordinal:06d}.{role}.txt"
 
 
-def _flush_pending_assistant(
+def _write_pending_assistant(
     *,
     cursor: Cursor,
     events_dir: Path,
     stats: SyncStats,
 ) -> None:
-    """Write the buffered assistant snapshot (if any) and bump the ordinal."""
+    """Put the pending assistant snapshot on disk, if it changed since the last write.
+
+    The ordinal is reserved on the first write and reused afterwards, so a turn
+    that keeps streaming rewrites one file instead of appending new ones. Every
+    caller finalizes the pending turn before writing a later message, so
+    reserving here still hands out ordinals in event order.
+    """
     pa = cursor.pending_assistant
-    if not pa:
+    if not pa or not pa.get("dirty"):
         return
     snapshot = pa.get("snapshot") or ""
     if not snapshot:
-        cursor.pending_assistant = None
         return
-    out = events_dir / _ordinal_filename(cursor.next_ordinal, "assistant")
-    _atomic_write_text(out, snapshot)
-    cursor.next_ordinal += 1
-    stats.ordinals_added += 1
+    if pa.get("ordinal") is None:
+        pa["ordinal"] = cursor.next_ordinal
+        cursor.next_ordinal += 1
+        stats.ordinals_added += 1
+    _atomic_write_text(events_dir / _ordinal_filename(pa["ordinal"], "assistant"), snapshot)
+    pa["dirty"] = False
+
+
+def _finalize_pending_assistant(
+    *,
+    cursor: Cursor,
+    events_dir: Path,
+    stats: SyncStats,
+) -> None:
+    """The assistant turn is over: make sure it reached the cache, then forget it."""
+    _write_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
     cursor.pending_assistant = None
 
 
@@ -367,6 +394,13 @@ def sync_session(
         events_dir = P.events_index_dir(scope, owner, session)
         events_dir.mkdir(parents=True, exist_ok=True)
 
+        # A cursor from an older build carries a pending snapshot that never
+        # reached the cache — the final reply of a session that ended. Land it
+        # now, so existing caches gain it without a full rebuild.
+        if cursor.pending_assistant is not None and cursor.pending_assistant.get("ordinal") is None:
+            cursor.pending_assistant["dirty"] = True
+            _write_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
+
         # Load data_map (filename → ordinal) so spill mirror hits can be
         # mapped back to a turn ordinal.
         data_map_p = P.data_map_path(scope, owner, session)
@@ -400,6 +434,10 @@ def sync_session(
             stats.errors.append(f"read {events_path}: {exc}")
             stats.elapsed_ms = int((time.monotonic() - t0) * 1000)
             return stats
+
+        # The pass ended with a turn still open (the common case: the session's
+        # last event is its final assistant reply). Write it; nothing else will.
+        _write_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
 
         # Persist cursor + data_map AFTER processing.
         _atomic_write_json(cursor_p, cursor.to_dict())
@@ -456,7 +494,7 @@ def _process_event(
     data = event.get("data") or {}
 
     if etype == "client_input_received":
-        _flush_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
+        _finalize_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
         content = data.get("content") or ""
         if content:
             _write_message(
@@ -474,20 +512,24 @@ def _process_event(
         snapshot = data.get("snapshot") or ""
         pa = cursor.pending_assistant
         if pa and pa.get("iteration") == iteration and pa.get("inner_turn") == inner_turn:
+            # Snapshots are cumulative; keep the latest and write it once, later.
             pa["snapshot"] = snapshot
+            pa["dirty"] = True
         else:
-            _flush_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
+            _finalize_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
             cursor.pending_assistant = {
                 "iteration": iteration,
                 "inner_turn": inner_turn,
                 "snapshot": snapshot,
+                "ordinal": None,
+                "dirty": True,
             }
         return
 
     if etype == "tool_call_completed":
         # Any tool result implicitly closes the assistant turn that
         # produced it.
-        _flush_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
+        _finalize_pending_assistant(cursor=cursor, events_dir=events_dir, stats=stats)
         result = data.get("result")
         if not isinstance(result, str):
             # Some result shapes may be dicts; serialize for searchability.
