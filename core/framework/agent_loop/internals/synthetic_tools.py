@@ -194,22 +194,24 @@ def build_collect_result_tool() -> Tool:
     Tools listed in ``LoopConfig.background_tools`` (e.g. ``image_generate``,
     whose work can take minutes) return a ``handle`` immediately and keep
     running off the agent's critical path. The agent calls
-    ``collect_result(handle)`` to fetch the outcome: it waits up to
-    ``wait_seconds`` and returns ``{"status": "pending"}`` until the work
-    finishes, then returns the tool's real result. The caller (AgentLoop)
-    intercepts this tool — it is never dispatched to an MCP server.
+    ``collect_result(handle)`` to fetch the outcome: it waits for the work and
+    returns the tool's real result, or ``{"status": "pending"}`` if a new message
+    arrives or ``wait_seconds`` runs out first. The caller (AgentLoop) intercepts
+    this tool — it is never dispatched to an MCP server.
     """
     return Tool(
         name="collect_result",
         description=(
             "Fetch the result of a tool that is running in the background — one "
             'that returned {"status":"started","handle":"bg_…"}. Pass that handle. '
-            'It waits a few seconds and returns {"status":"pending"} if the work '
-            "isn't done yet; keep calling it until you get the real result. This "
+            "It waits until the work is done and returns the real result. If a new "
+            'message for you arrives first it returns {"status":"pending"} at once, '
+            "so you can answer it; call this again to go back to waiting. This "
             "is how you retrieve image_generate and slow terminal_exec results. "
             "If the result contains auto_backgrounded=true and job_id, the "
-            "command is still a terminal job: use terminal_job_logs(job_id) "
-            "for its final output/status, or terminal_job_manage to stop it."
+            "command is still a terminal job: use terminal_job_logs(job_id, "
+            "wait_until_exit=true) for its final output/status, or "
+            "terminal_job_manage to stop it."
         ),
         parameters={
             "type": "object",
@@ -220,9 +222,8 @@ def build_collect_result_tool() -> Tool:
                 },
                 "wait_seconds": {
                     "type": "integer",
-                    "description": "Max seconds to wait this poll (1-45, default 30).",
-                    "minimum": 1,
-                    "maximum": 45,
+                    "description": "Stop waiting after this many seconds. Leave it out to wait until the work is done.",
+                    "minimum": 0,
                 },
             },
             "required": ["handle"],

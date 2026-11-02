@@ -157,14 +157,14 @@ def register_job_tools(mcp: FastMCP) -> None:
         since_offset: int = 0,
         max_bytes: int = 64000,
         wait_until_exit: bool = False,
-        wait_timeout_sec: float = 30.0,
+        wait_timeout_sec: float = 600.0,
         tail: bool = False,
     ) -> dict:
         """Read job output at an offset. Combined read + status + wait primitive.
 
         Track next_offset across calls to avoid replaying data. When
-        wait_until_exit=True, blocks server-side until the job exits or
-        wait_timeout_sec elapses, then returns logs and final status.
+        wait_until_exit=True, waits until the job exits, a new message for you
+        arrives, or wait_timeout_sec elapses, then returns logs and status.
 
         Args:
             job_id: From terminal_job_start (or auto-promoted from terminal_exec).
@@ -173,9 +173,12 @@ def register_job_tools(mcp: FastMCP) -> None:
             since_offset: Absolute byte offset to start reading from. Pass 0
                 on first call; pass next_offset on subsequent calls.
             max_bytes: Max bytes of decoded output to return inline.
-            wait_until_exit: When True, blocks until the job exits before reading.
-            wait_timeout_sec: Cap on this poll (clamped to 0-45 seconds).
-                Does not change the job's execution deadline.
+            wait_until_exit: When True, waits for the job to exit before reading.
+                Prefer one long wait to repeated short ones: each repeat costs a
+                whole model turn. If it returns status="running" because a new
+                message arrived, deal with the message, then wait again.
+            wait_timeout_sec: Longest to wait, in seconds (up to 600). Does not
+                change the job's execution deadline.
             tail: When True, ignores since_offset and returns the last max_bytes.
 
         Returns: {data, offset, next_offset, status, exit_code, timed_out, eof, truncated_bytes_dropped}
@@ -185,6 +188,9 @@ def register_job_tools(mcp: FastMCP) -> None:
             return {"error": f"unknown job_id: {job_id}"}
 
         if wait_until_exit:
+            # The agent loop does long waits itself, in short status checks
+            # (AgentLoop._wait_for_job); a long wait here would hold the connection
+            # that every other terminal tool shares, and hit the per-call timeout.
             manager.wait(job_id, timeout_sec=max(0, min(wait_timeout_sec, 45)))
             record = manager.get(job_id) or record
 

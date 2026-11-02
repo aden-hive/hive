@@ -354,6 +354,19 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
 
 
+# How often a waiting tool call checks on what it waits for, and for new messages.
+_WAIT_TICK_S = 1.0
+
+
+def _job_status(result: ToolResult) -> str | None:
+    """The ``status`` in a ``terminal_job_logs`` result; None if it isn't one (an error, say)."""
+    try:
+        payload = json.loads(result.content)
+    except (TypeError, ValueError):
+        return None
+    return payload.get("status") if isinstance(payload, dict) else None
+
+
 def _queen_account_preflight(tc: Any) -> ToolResult | None:
     """Return an ``account_selection_required`` ToolResult, or None.
 
@@ -765,6 +778,9 @@ class AgentLoop(AgentProtocol):
         # event emitted at receive time, so the drain can emit a matching
         # CLIENT_INPUT_COMMITTED carrying the true injection time.
         self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None, str | None]] = asyncio.Queue()
+        # True while the conversation holds an injected message the model hasn't
+        # responded to yet: tools running right now shouldn't wait on anything.
+        self._input_unread = False
         # Text of real user messages queued but not yet drained, so the
         # USER_PROMPT_SUBMIT reminders can see what the user is asking.
         self._pending_user_texts: list[str] = []
@@ -4010,6 +4026,9 @@ class AgentLoop(AgentProtocol):
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
+            # Everything injected so far is in the conversation this stream reads.
+            self._input_unread = False
+
             # Mid-turn dynamic tool refresh. The outer loop's 6b2 refresh runs
             # only once per iteration, BEFORE this inner loop — but a
             # search_tools call here loads a tool into the phase state mid-loop.
@@ -4709,42 +4728,9 @@ class AgentLoop(AgentProtocol):
 
             # Priority drain: if user sent a message while the LLM was
             # streaming, inject it into the conversation NOW -- before tool
-            # execution.  The LLM will see it on the next inner turn.
-            # Mirrors drain_injection_queue() in cursor_persistence.py:
-            # same timestamp prefix, is_client_input, and image_content
-            # so steered messages enter the conversation identically to
-            # messages drained at the outer-loop boundary.
-            if not self._injection_queue.empty():
-                while not self._injection_queue.empty():
-                    _inj_content, _inj_client, _inj_images, _inj_corr = self._injection_queue.get_nowait()
-                    _inj_stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
-                    if _inj_client:
-                        _inj_stamped = f"[{_inj_stamp}] {_inj_content}" if _inj_content else f"[{_inj_stamp}]"
-                    else:
-                        _inj_stamped = f"[{_inj_stamp}] [External event] {_inj_content}"
-                    _inj_msg = await conversation.add_user_message(
-                        _inj_stamped,
-                        is_client_input=_inj_client,
-                        image_content=_inj_images if _inj_images else None,
-                    )
-                    if _inj_client:
-                        logger.info(
-                            "[%s] Priority-injected user message mid-turn (%d chars)",
-                            node_id,
-                            len(_inj_content),
-                        )
-                        # The message truly enters the conversation HERE (mid-turn,
-                        # before tool execution), not at receive time. Announce the
-                        # real injection moment + seq so the UI can place the bubble
-                        # after the in-flight turn's deltas. See emit docstring.
-                        if self._event_bus and ctx.emits_client_io:
-                            await self._event_bus.emit_client_input_committed(
-                                stream_id=stream_id,
-                                node_id=node_id,
-                                execution_id=execution_id,
-                                seq=_inj_msg.seq,
-                                correlation_id=_inj_corr,
-                            )
+            # execution.  The LLM will see it on the next inner turn, so a
+            # tool in this batch mustn't sit waiting on anything meanwhile.
+            self._input_unread = await self._inject_queued_input(conversation, ctx, stream_id, node_id, execution_id)
 
             # Execute tool calls -- framework tools (set_output, ask_user)
             # run inline; real MCP tools run in parallel.
@@ -6125,8 +6111,64 @@ class AgentLoop(AgentProtocol):
                     False,
                 )
 
+            # A message that arrived while the tools ran goes in now, so the next
+            # response answers it instead of the one after that.
+            await self._inject_queued_input(conversation, ctx, stream_id, node_id, execution_id)
+
             # Tool calls processed -- loop back to stream with updated conversation
             inner_turn += 1
+
+    async def _inject_queued_input(
+        self,
+        conversation: NodeConversation,
+        ctx: AgentContext,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None,
+    ) -> bool:
+        """Move queued messages into the conversation mid-turn; True if there were any.
+
+        Mirrors drain_injection_queue() in cursor_persistence.py: same timestamp
+        prefix, is_client_input, and image_content so steered messages enter the
+        conversation identically to messages drained at the outer-loop boundary,
+        with the context a turn's first message gets (past conversations, ...).
+        """
+        if self._injection_queue.empty():
+            return False
+        user_text = "\n".join(self._pending_user_texts) or None
+        self._pending_user_texts.clear()
+        await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation, user_text=user_text)
+        while not self._injection_queue.empty():
+            content, is_client, images, correlation_id = self._injection_queue.get_nowait()
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            if is_client:
+                stamped = f"[{stamp}] {content}" if content else f"[{stamp}]"
+            else:
+                stamped = f"[{stamp}] [External event] {content}"
+            msg = await conversation.add_user_message(
+                stamped,
+                is_client_input=is_client,
+                image_content=images if images else None,
+            )
+            if is_client:
+                logger.info(
+                    "[%s] Priority-injected user message mid-turn (%d chars)",
+                    node_id,
+                    len(content),
+                )
+                # The message truly enters the conversation HERE (mid-turn),
+                # not at receive time. Announce the real injection moment + seq
+                # so the UI can place the bubble after the in-flight turn's
+                # deltas. See emit docstring.
+                if self._event_bus and ctx.emits_client_io:
+                    await self._event_bus.emit_client_input_committed(
+                        stream_id=stream_id,
+                        node_id=node_id,
+                        execution_id=execution_id,
+                        seq=msg.seq,
+                        correlation_id=correlation_id,
+                    )
+        return True
 
     # -------------------------------------------------------------------
     # Synthetic tools: set_output, ask_user, escalate
@@ -6567,6 +6609,9 @@ class AgentLoop(AgentProtocol):
         if tc.tool_name in (getattr(self._config, "background_tools", None) or set()):
             return await self._start_background_tool(tc)
 
+        if tc.tool_name == "terminal_job_logs" and (tc.tool_input or {}).get("wait_until_exit"):
+            return await self._wait_for_job(tc)
+
         return await self._execute_tool_inner(tc, self._resolve_tool_timeout(tc.tool_name))
 
     async def _execute_tool_inner(self, tc: ToolCallEvent, timeout: float) -> ToolResult:
@@ -6686,8 +6731,9 @@ class AgentLoop(AgentProtocol):
             "tool": tc.tool_name,
             "note": (
                 f"'{tc.tool_name}' is running in the background (can take a few "
-                f'minutes). Call collect_result(handle="{handle}") to fetch it; '
-                'it returns {"status":"pending"} until done, then the real result.'
+                f'minutes). Call collect_result(handle="{handle}") to fetch it: '
+                "it waits for the work and returns the real result, or "
+                '{"status":"pending"} if a new message for you arrives first.'
             ),
         }
         return ToolResult(tool_use_id=tc.tool_use_id, content=json.dumps(payload), is_error=False)
@@ -6705,27 +6751,27 @@ class AgentLoop(AgentProtocol):
                 ),
                 is_error=True,
             )
-        try:
-            wait_seconds = int(tool_input.get("wait_seconds", 30))
-        except (TypeError, ValueError):
-            wait_seconds = 30
-        wait_seconds = max(1, min(wait_seconds, 45))
         task: asyncio.Task = entry["task"]
+        deadline = time.monotonic() + self._wait_budget(tool_input.get("wait_seconds"))
+        while not task.done():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self._input_waiting():
+                return ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=json.dumps(
+                        {
+                            "status": "pending",
+                            "handle": handle,
+                            "elapsed_seconds": int(time.time() - entry["started"]),
+                        }
+                    ),
+                    is_error=False,
+                )
+            self._mark_session_progress()
+            # asyncio.wait, unlike wait_for: running out of time leaves the work running.
+            await asyncio.wait({task}, timeout=min(_WAIT_TICK_S, remaining))
         try:
-            # shield: a poll-wait timeout must not cancel the in-flight work.
-            result = await asyncio.wait_for(asyncio.shield(task), timeout=wait_seconds)
-        except TimeoutError:
-            return ToolResult(
-                tool_use_id=tc.tool_use_id,
-                content=json.dumps(
-                    {
-                        "status": "pending",
-                        "handle": handle,
-                        "elapsed_seconds": int(time.time() - entry["started"]),
-                    }
-                ),
-                is_error=False,
-            )
+            result = task.result()
         except Exception as exc:  # noqa: BLE001
             self._background_calls.pop(handle, None)
             return ToolResult(
@@ -6743,6 +6789,46 @@ class AgentLoop(AgentProtocol):
             image_content=getattr(result, "image_content", None),
             is_skill_content=getattr(result, "is_skill_content", False),
         )
+
+    async def _wait_for_job(self, tc: ToolCallEvent) -> ToolResult:
+        """Wait for a terminal job here, in quick status checks, then read its output.
+
+        A wait inside the tool call would hold the connection every other terminal
+        call shares (MCP calls run one at a time on Windows), so it has to stay
+        short; and a short wait the model repeats costs a whole model turn per
+        repeat. Waiting here costs neither, and a new message can end it.
+        """
+        inputs = tc.tool_input or {}
+        deadline = time.monotonic() + self._wait_budget(inputs.get("wait_timeout_sec"))
+        timeout = self._resolve_tool_timeout(tc.tool_name)
+        status_check = ToolCallEvent(
+            tool_use_id=tc.tool_use_id,
+            tool_name=tc.tool_name,
+            tool_input={"job_id": inputs.get("job_id"), "max_bytes": 0},
+        )
+        while time.monotonic() < deadline and not self._input_waiting():
+            if _job_status(await self._execute_tool_inner(status_check, timeout)) != "running":
+                break
+            self._mark_session_progress()
+            await asyncio.sleep(_WAIT_TICK_S)
+        read = ToolCallEvent(
+            tool_use_id=tc.tool_use_id,
+            tool_name=tc.tool_name,
+            tool_input={**inputs, "wait_until_exit": False},
+        )
+        return await self._execute_tool_inner(read, timeout)
+
+    def _wait_budget(self, requested: Any) -> float:
+        """Seconds a waiting tool call may wait: what it asked for, up to the limit."""
+        limit = float(self._config.tool_wait_limit_seconds)
+        try:
+            return max(0.0, min(float(requested), limit))
+        except (TypeError, ValueError):
+            return limit
+
+    def _input_waiting(self) -> bool:
+        """Is there a message for this agent that the model hasn't seen yet?"""
+        return self._input_unread or not self._injection_queue.empty()
 
     def _next_spill_filename(self, tool_name: str) -> str:
         """Return a short, monotonic filename for a tool result spill."""

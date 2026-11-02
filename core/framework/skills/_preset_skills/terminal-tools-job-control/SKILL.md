@@ -29,9 +29,9 @@ terminal_job_logs(job_id, since_offset=0, max_bytes=64000)
   → { data, offset, next_offset, status: "running"|"exited", exit_code, ... }
 
 # Repeat with since_offset = previous next_offset until status == "exited"
-# Or block once with wait_until_exit=True:
-terminal_job_logs(job_id, since_offset=N, wait_until_exit=True, wait_timeout_sec=30)
-  → blocks server-side until exit or timeout
+# Or, better when you have nothing else to do, wait once with wait_until_exit=True:
+terminal_job_logs(job_id, since_offset=N, wait_until_exit=True)
+  → waits until exit, a new message for you, or wait_timeout_sec (at most 600, the default)
 ```
 
 After exit, the job is retained for inspection (`terminal_job_manage(action="list")`) until evicted by FIFO (50 most recent exits kept).
@@ -101,7 +101,7 @@ terminal_job_logs(job_id="job_xxx", tail=True, max_bytes=64000)
 Or block until exit and grab everything:
 
 ```
-terminal_job_logs(job_id="job_xxx", since_offset=0, wait_until_exit=True, wait_timeout_sec=30)
+terminal_job_logs(job_id="job_xxx", since_offset=0, wait_until_exit=True)
 ```
 
 ## Hard rules

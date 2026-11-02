@@ -58,21 +58,21 @@ the path in their message) or an image you generated earlier (use its saved
 
 Image generation can take a couple of minutes, so `image_generate` **runs in the
 background**: it returns immediately with `{"status":"started","handle":"bg_…"}`.
-You then poll the generic **`collect_result`** tool with that handle until the
-image is ready:
+You then call the generic **`collect_result`** tool with that handle, which waits
+for the image:
 
 ```
 start = image_generate(prompt="A minimalist bee logo, flat vector, amber on white")
 # start.handle == "bg_1"
-res = collect_result(handle="bg_1", wait_seconds=30)
-#   → {"status":"pending", ...}   ← not done yet; call collect_result again
-#   → eventually the real result: {"images":[{"path": …}], "usage": …, …}
+res = collect_result(handle="bg_1")
+#   → the real result: {"images":[{"path": …}], "usage": …, …}
+#   → or {"status":"pending", ...} if a new message arrived first
 ```
 
-`collect_result` waits up to `wait_seconds` (≤45) per call and returns
-`{"status":"pending"}` until generation finishes — just call it again with the
-same handle until you get the real result. It's fine to do other small things
-between polls. Don't start a second image while one is pending unless the user
+`collect_result` waits until generation finishes. If a new message for you arrives
+first it returns `{"status":"pending"}` at once: answer the message, then call it
+again with the same handle. It's fine to do other small things before calling it.
+Don't start a second image while one is pending unless the user
 asked for several.
 
 ## Show the user
@@ -104,6 +104,6 @@ never raises). Handle these:
 User: "make us a logo — a friendly robot, simple and modern."
 
 1. `image_generate(prompt="A friendly modern robot mascot logo, simple flat vector, rounded shapes, teal and white, centered, plain background", quality="low")` → `{"status":"started","handle":"bg_1"}`
-2. `collect_result(handle="bg_1", wait_seconds=30)` — repeat until it returns the real result (not `{"status":"pending"}`).
+2. `collect_result(handle="bg_1")` — it waits for the real result (call it again if a new message made it return `{"status":"pending"}`).
 3. Take `result.images[0].path`, call `attach_file(that_path)`.
 4. Reply briefly: "Here's a first take — want it bolder, a different color, or any tweaks?"

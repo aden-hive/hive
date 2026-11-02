@@ -52,8 +52,24 @@ def _call(name, **inputs):
 
 
 def _loop(inner):
-    loop = SimpleNamespace(_config=LoopConfig(), _bg_counter=0, _background_calls={}, _execute_tool_inner=inner)
-    for name in ("_execute_tool", "_start_background_tool", "_collect_background_result", "_resolve_tool_timeout"):
+    loop = SimpleNamespace(
+        _config=LoopConfig(),
+        _bg_counter=0,
+        _background_calls={},
+        _execute_tool_inner=inner,
+        _injection_queue=asyncio.Queue(),
+        _input_unread=False,
+    )
+    for name in (
+        "_execute_tool",
+        "_start_background_tool",
+        "_collect_background_result",
+        "_resolve_tool_timeout",
+        "_wait_for_job",
+        "_wait_budget",
+        "_input_waiting",
+        "_mark_session_progress",
+    ):
         setattr(loop, name, getattr(AgentLoop, name).__get__(loop))
     return loop
 

@@ -234,6 +234,12 @@ class LoopConfig:
     # (median command 1.5s vs 4.9s of model latency per collect_result
     # turn a handle forces). Set 0 to always background immediately.
     background_tool_grace_seconds: float = 5.0
+    # Longest one collect_result or terminal_job_logs(wait_until_exit=True) call
+    # may wait. Far past the per-call timeout on purpose: both wait in the loop,
+    # holding no MCP call open, and a new message for the agent ends the wait. A
+    # wait that covers the job beats a short one repeated, which costs a whole
+    # model turn per repeat.
+    tool_wait_limit_seconds: float = 600.0
 
     # LLM stream inactivity watchdog. Split into two budgets so legitimate
     # slow TTFT on large contexts doesn't get mistaken for a dead connection.
