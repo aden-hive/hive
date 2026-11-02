@@ -1688,6 +1688,7 @@ async def create_queen(
                 # Same scope search_messages uses; the live session is
                 # excluded (it's already in context).
                 past_conversation_recall_provider=lambda text: _recall_past_conversations(session, text, queen_dir.name),
+                chat_app_provider=lambda: session.channel,
                 # Whatever installed turn-context packages (e.g. voice
                 # examples) want her to see before she answers; nothing
                 # when none is installed and enabled.

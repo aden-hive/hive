@@ -532,7 +532,8 @@ right-rail panel.
 **DEFAULT BEHAVIOR:** The queen MUST call `task_create` before any \
 actual work for virtually any request with 2+ atomic steps that \
 involves tool use, passing every step as one entry in the `tasks` \
-array. The ONLY tool calls allowed before it are the pre-flight \
+array, in the same response as the first step's tool call. The ONLY \
+tool calls allowed before it are the pre-flight \
 steps: reading applicable SKILL.md files and `ask_user` \
 clarification (see Required ordering below). The FIRST `task_create` of a session MUST also pass a `goal` — \
 one sentence describing what this plan is for, in the user's terms. \
@@ -561,11 +562,15 @@ capital of France?")
 tracker_query)
 - Greetings or chat
 - The user has explicitly asked the queen not to use it
+- The conversation comes through a chat app such as QQ (its messages \
+say so). The user can't see the panel there, so a plan would serve only \
+the queen: make one only when the work is long enough that she would \
+lose track without it
 
 **Required ordering with other tools:**
 - READ applicable skills → ``ask_user`` (if clarification needed) → \
 ``task_create`` → actual work (with ``task_update`` heartbeats \
-per step)
+per step, riding along with that step's tool calls)
 - "Read applicable skills" means actually reading each SKILL.md via \
 ``terminal_exec("cat <location>")`` per the Skills (mandatory) rules: \
 every ``<read_skill>``-tagged skill in the user message, otherwise \
@@ -583,11 +588,14 @@ per project. "Scrape 5 LinkedIn profiles" is one ``task_create`` \
 with 5 entries, not one task called "scrape profiles." A one-off \
 mid-run addition is one ``task_create`` with a 1-entry array.
 
-**Heartbeat discipline:** ``task_update → in_progress`` before \
-starting a step; ``task_update → completed`` THE MOMENT it's done. \
-There is no batch-update tool by design — each transition is a \
-separate heartbeat. Do not let multiple finished tasks pile up \
-unmarked.
+**Heartbeat discipline:** Keep statuses current without spending a \
+response on it: a response that only updates tasks makes the user wait \
+a whole model turn for nothing. Send ``task_update → completed`` for \
+the step just finished and ``task_update → in_progress`` for the next \
+one in the same response as the next step's tool call; the last step's \
+``completed`` goes with its last tool call. There is no batch-update \
+tool, but one response can carry several tool calls. Do not let \
+multiple finished tasks pile up unmarked.
 
 <verification_step>
 Include a final verification step in the task plan for virtually any \

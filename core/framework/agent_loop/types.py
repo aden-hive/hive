@@ -220,6 +220,11 @@ class AgentContext:
     # user turn. Wired by the queen orchestrator; None elsewhere.
     past_conversation_recall_provider: Any = None
 
+    # Optional Callable[[], str | None]: the chat app this conversation comes
+    # through (see framework.server.channels), None for the dashboard. The user
+    # there can't see the task panel. Wired by the queen orchestrator.
+    chat_app_provider: Any = None
+
     # Optional async Callable[[str], str | None]: the user's message in, what the
     # installed turn-context packages want the queen to see before answering it
     # out (framework.server.turn_context). Read by the turn-context reminder

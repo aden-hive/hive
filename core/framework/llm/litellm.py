@@ -1471,6 +1471,9 @@ class LiteLLMProvider(LLMProvider):
         )
     """
 
+    # Set once a backend refuses the parameter, so only the first request pays for finding out.
+    _parallel_tools_refused = False
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
@@ -3029,6 +3032,10 @@ class LiteLLMProvider(LLMProvider):
                 # See `complete()` for the rationale: GLM behind the Hive
                 # proxy needs forcing or it goes chat-mode on long contexts.
                 kwargs.setdefault("tool_choice", "required")
+            # One response per tool call means one model turn per tool call. Anthropic
+            # models batch by default; OpenAI-style backends may need asking.
+            if not self._is_anthropic_model() and not self._parallel_tools_refused:
+                kwargs["parallel_tool_calls"] = True
         if response_format:
             kwargs["response_format"] = response_format
         if logger.isEnabledFor(logging.DEBUG):
@@ -3534,6 +3541,11 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                if "parallel_tool_calls" in kwargs and "parallel_tool_calls" in str(e):
+                    logger.warning("[stream] %s refused parallel_tool_calls; going on without it: %s", self.model, e)
+                    self._parallel_tools_refused = True
+                    del kwargs["parallel_tool_calls"]
+                    continue
                 # Some providers return non-standard finish_reason values
                 # (e.g., Kimi K2.x sends 'pause_turn') that LiteLLM's
                 # internal stream_chunk_builder rejects via Pydantic

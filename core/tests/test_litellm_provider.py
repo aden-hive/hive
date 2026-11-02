@@ -795,6 +795,73 @@ class TestMiniMaxStreamFallback:
         assert not LiteLLMProvider(model="gpt-4o-mini", api_key="x")._is_minimax_model()
 
 
+class TestParallelToolCalls:
+    """Asking for several tool calls per response, so one tool call isn't one model turn."""
+
+    TOOLS = [Tool(name="web_search", description="Search the web", parameters={"properties": {}, "required": []})]
+
+    @staticmethod
+    def _sent(mock_acompletion, *, error: str = "the model call failed") -> list[dict]:
+        """Have every model call fail, and return the requests made."""
+        sent: list[dict] = []
+
+        async def side_effect(*args, **kwargs):
+            sent.append(kwargs)
+            raise RuntimeError(error)
+
+        mock_acompletion.side_effect = side_effect
+        return sent
+
+    @staticmethod
+    async def _stream(provider: LiteLLMProvider, tools: list[Tool] | None) -> None:
+        async for _ in provider.stream(messages=[{"role": "user", "content": "hi"}], tools=tools):
+            pass
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_an_openai_style_model_is_asked_to_batch_tool_calls(self, mock_acompletion):
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1"), self.TOOLS)
+        assert sent[0]["parallel_tool_calls"] is True
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_a_request_without_tools_does_not_mention_it(self, mock_acompletion):
+        # OpenAI rejects parallel_tool_calls on a request with no tools.
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1"), None)
+        assert "parallel_tool_calls" not in sent[0]
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_an_anthropic_model_already_batches(self, mock_acompletion):
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="anthropic/claude-x", api_key="test-key"), self.TOOLS)
+        assert "parallel_tool_calls" not in sent[0]
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_a_gateway_that_refuses_it_is_asked_once_and_never_again(self, mock_acompletion):
+        sent: list[dict] = []
+
+        async def side_effect(*args, **kwargs):
+            sent.append(kwargs)
+            if "parallel_tool_calls" in kwargs:
+                raise RuntimeError("400: unknown parameter parallel_tool_calls")
+            raise RuntimeError("the model call failed")
+
+        mock_acompletion.side_effect = side_effect
+        provider = LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1")
+
+        await self._stream(provider, self.TOOLS)
+        assert "parallel_tool_calls" in sent[0]
+        assert "parallel_tool_calls" not in sent[1]
+
+        sent.clear()
+        await self._stream(provider, self.TOOLS)
+        assert all("parallel_tool_calls" not in kwargs for kwargs in sent)
+
+
 class TestOpenRouterToolCompatFallback:
     """OpenRouter models should fall back when native tool use is unavailable."""
 

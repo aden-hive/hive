@@ -288,7 +288,7 @@ def _drift_lines(kind: str, records: list[TaskRecord]) -> list[str]:
     in_progress = [r for r in records if r.status == TaskStatus.IN_PROGRESS]
     lines = [
         "[task_reminder] The task tools haven't been used in several turns. If you're working on tasks that would benefit from tracked progress:",
-        "  - Mark the in_progress task `completed` THE MOMENT it's done — before starting the next step. Don't batch completions.",
+        "  - Mark the in_progress task `completed` THE MOMENT it's done, in the same response as the next step's tool call. Don't batch completions.",
         "  - If you've finished work that wasn't on the list, add a task_create + task_update completed pair so the panel reflects it.",
         "  - If you're umbrella-tracking ('reply to all posts' as one task), "
         "break it into one task per atomic action — one `task_create` call "
@@ -430,6 +430,7 @@ class TaskReminderSource(ReminderSource):
         # Hydrated from disk on the first render of the session so the
         # counter survives a restart. See _ensure_loaded.
         self._loaded = False
+        self._in_chat_app = False
 
     def points(self) -> set[ReminderPoint]:
         return {
@@ -483,6 +484,8 @@ class TaskReminderSource(ReminderSource):
         if records is None:
             return None
         goal = await _read_goal(session_id)
+        chat_app = getattr(rctx.agent_ctx, "chat_app_provider", None)
+        self._in_chat_app = callable(chat_app) and bool(chat_app())
         if rctx.point is ReminderPoint.SESSION_START and records:
             # A session that already has tasks HAS tracked before — covers
             # the first run after this feature ships (no persisted file yet).
@@ -497,6 +500,11 @@ class TaskReminderSource(ReminderSource):
         # survives a session restart.
         await asyncio.to_thread(_save_state, session_id, self._state)
         return body
+
+    def _drift_kind(self, open_count: int, completed_count: int) -> str | None:
+        # Nobody in a chat app sees the panel, so pushing the queen to keep it
+        # current would only spend the user's wait on model turns they can't see.
+        return None if self._in_chat_app else self._state.drift_trigger(open_count, completed_count)
 
     # ----- per-point renderers -----------------------------------------
 
@@ -534,7 +542,7 @@ class TaskReminderSource(ReminderSource):
         # (too_many_completed is the exception: it is not staleness-gated,
         # so completing a task that tips the count over the threshold does
         # nudge for cleanup on that same turn — the cooldown then spaces it.)
-        drift_kind = s.drift_trigger(open_count, completed_count)
+        drift_kind = self._drift_kind(open_count, completed_count)
         if not snap_due and drift_kind is None:
             return None
         # all_done renders goal + message only — never the completed list, so
@@ -554,7 +562,7 @@ class TaskReminderSource(ReminderSource):
         s = self._state
         open_count = sum(1 for r in records if r.status != TaskStatus.COMPLETED)
         completed_count = sum(1 for r in records if r.status == TaskStatus.COMPLETED)
-        drift_kind = s.drift_trigger(open_count, completed_count)
+        drift_kind = self._drift_kind(open_count, completed_count)
         if drift_kind is None:
             return None
         # all_done shows goal + message only — no task list, so it does not
