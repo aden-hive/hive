@@ -1,6 +1,6 @@
 [project]
 name = "aden-hive"
-version = "1.0.13"
+version = "1.0.14"
 description = "Hive: a goal-driven agent runtime. Build on its primitives with `from hive import ...`."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,7 +26,7 @@ dependencies = [
 webhook = ["aiohttp>=3.9.0"]
 server = ["aiohttp>=3.9.0"]
 # Hive the application: its built-in tools and the browser. `pip install "aden-hive[tools]"`, then `hive open`.
-tools = ["aden-tools==1.0.13"]
+tools = ["aden-tools==1.0.14"]
 testing = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",

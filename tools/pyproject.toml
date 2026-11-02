@@ -1,6 +1,6 @@
 [project]
 name = "aden-tools"
-version = "1.0.13"
+version = "1.0.14"
 description = "Tools library for the Aden agent framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,7 +36,7 @@ dependencies = [
     "resend>=2.0.0",
     "asana>=3.2.0",
     "google-analytics-data>=0.18.0",
-    "aden-hive==1.0.13",
+    "aden-hive==1.0.14",
     "stripe>=14.3.0",
     "arxiv>=2.1.0",
     "requests>=2.31.0",

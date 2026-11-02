@@ -21,7 +21,7 @@ members = [
 
 [[package]]
 name = "aden-hive"
-version = "1.0.13"
+version = "1.0.14"
 source = { editable = "core" }
 dependencies = [
     { name = "anthropic" },
@@ -99,7 +99,7 @@ dev = [
 
 [[package]]
 name = "aden-tools"
-version = "1.0.13"
+version = "1.0.14"
 source = { editable = "tools" }
 dependencies = [
     { name = "aden-hive" },

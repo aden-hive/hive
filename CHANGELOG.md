@@ -2,6 +2,10 @@
 
 > Full, detailed release notes live in [`docs/releases/`](docs/releases/). The entries below summarize the architecturally significant releases; older entries follow.
 
+## v1.0.14 — Models and Skills
+
+**New:** Configuration → Models chooses the models in use, adds Magpie or any OpenAI-compatible endpoint and manages API keys; `write_skill` takes a `scope` and works when a queen is alone with you, so she can write skills for herself, and one for every queen and colony (`scope="global"`) waits for your consent in that session's chat page. **Changed:** recall quotes the window carrying the most of the query, gives replies 500 characters and brings back more matching turns from a conversation that placed a hit. **Fixed:** a conversation's final reply reaches `search_messages` and recall; the stall check catches a queen who agrees to a change and doesn't make it; compaction summarises both halves of a split at once; `hive serve` on its own keeps the browser bridge alive; a chat channel's thread stays in its session; a model's key or `extra_body` no longer carries over to the next model picked for a slot. See [docs/releases/v1.0.14.md](docs/releases/v1.0.14.md).
+
 ## v1.0.13 — Letters Between Queens
 
 **New:** queens write to each other with `message_queen`, each in a conversation that lasts, with chains of letters kept to `max_depth` hops and every hop logged in `queens/mail.jsonl` (`queen_mail`); a queen can be Claude Code itself, with all its tools, writing and written to like any other, paid for with an API key and shown read only on the org chart (`queen_mail.claude_code`). Running her on a Claude subscription takes `"auth": "subscription"` and is at your own risk. See [docs/releases/v1.0.13.md](docs/releases/v1.0.13.md).
