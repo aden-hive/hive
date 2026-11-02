@@ -96,7 +96,7 @@ class MyChatChannel:
         await self.host.send(session_id, text, images=images)
 
     async def reply(self, chat_id: str, out: QueenOutput) -> None:
-        ...  # out.kind is "message", "question" (out.questions), "files" (out.files) or "error"
+        ...  # out.kind is "message", "question" (out.questions), "files" (out.files), "error", or "idle" (she's done)
 ```
 
 - **`open_session`** resumes the conversation's earlier session, or starts a new one named `title`.
@@ -106,7 +106,8 @@ class MyChatChannel:
   It raises `ChannelError` when the session is locked; open a new one.
 - **`subscribe`** hears each finished model turn's text, each `ask_user` question, the files she
   hands over with `attach_file`, and each failed model call, in order, including after the session is resumed and for messages typed in the
-  dashboard.
+  dashboard. Text written before a tool call arrives as the tool starts, not when she is done;
+  `"idle"` says she is done, which is when to clear a "typing" indicator.
 - **`judge`** asks the judge in the `judge` slot (Settings → AI Model → Judge) a yes/no question
   about the `state` you pass, and returns the probability of yes, or `None` when no judge is set
   up or it can't answer now. A channel can use it to decide, say, whether the queen should speak

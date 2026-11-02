@@ -61,7 +61,7 @@ class QueenOutput:
     ``kind`` is one of:
 
     - ``"message"``: the text of one finished model turn. A queen often says several in a row,
-      between tool calls.
+      between tool calls; each arrives as she moves on to the tool, not when she is done.
     - ``"question"``: she asked the user something. ``questions`` is the ``ask_user`` list of
       ``{"id", "prompt", "options"?}`` (``options`` only on multiple-choice questions); the next
       message sent to the session answers it. The question is not also sent as a message.
@@ -70,13 +70,15 @@ class QueenOutput:
     - ``"files"``: she handed the user files with ``attach_file`` (an image she made, a report).
       ``files`` are their copies in the session's ``data/attachments``; the dashboard shows the
       same files on her next message.
+    - ``"idle"``: she has finished and is waiting for the next message. Nothing to show the user,
+      but the end of any "typing" indicator. A channel can ignore it.
 
     ``session_id`` is the session she said it in. When she moves the conversation into a new
     session, outputs carry the new id: keep it for the next :meth:`ChannelHost.send`.
     """
 
     session_id: str
-    kind: Literal["message", "question", "error", "files"]
+    kind: Literal["message", "question", "error", "files", "idle"]
     text: str = ""
     questions: list[dict[str, Any]] = field(default_factory=list)
     files: list[Path] = field(default_factory=list)
@@ -323,6 +325,14 @@ class _Subscription:
             data = event.data or {}
             if event.type == EventType.CLIENT_OUTPUT_DELTA:
                 pending = data.get("snapshot") or pending
+            elif event.type == EventType.TOOL_CALL_STARTED:
+                # What she wrote before a tool call is finished, and the tool may run for
+                # minutes: the user should have it now. (LLM_TURN_COMPLETE can be many tool
+                # calls away, and the next model turn's text would replace it.) An ask_user
+                # question carries its own text, so it isn't said twice.
+                if pending.strip() and data.get("tool_name") != "ask_user":
+                    self._put(reply_kind(pending), text=pending)
+                    pending = ""
             elif event.type == EventType.LLM_TURN_COMPLETE:
                 if pending.strip():
                     self._put(reply_kind(pending), text=pending)
@@ -337,6 +347,7 @@ class _Subscription:
                 elif pending.strip():
                     self._put(reply_kind(pending), text=pending)
                 pending = ""
+                self._put("idle")
             elif event.type == EventType.SESSION_FORKED:
                 new_id = data.get("new_session_id")
                 if isinstance(new_id, str) and new_id:
@@ -352,6 +363,7 @@ class _Subscription:
             session.event_bus.subscribe(
                 event_types=[
                     EventType.CLIENT_OUTPUT_DELTA,
+                    EventType.TOOL_CALL_STARTED,
                     EventType.LLM_TURN_COMPLETE,
                     EventType.CLIENT_INPUT_REQUESTED,
                     EventType.SESSION_FORKED,
@@ -371,7 +383,7 @@ class _Subscription:
                 self._bus.unsubscribe(sub_id)
         self._bus, self._bus_subs = None, []
 
-    def _put(self, kind: Literal["message", "question", "error", "files"], **fields: Any) -> None:
+    def _put(self, kind: Literal["message", "question", "error", "files", "idle"], **fields: Any) -> None:
         self._queue.put_nowait(QueenOutput(session_id=self.session_id, kind=kind, **fields))
 
     async def _deliver(self) -> None:

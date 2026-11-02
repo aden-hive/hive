@@ -65,7 +65,8 @@ def _heard(host: ChannelHost, session_id: str) -> list[QueenOutput]:
     heard: list[QueenOutput] = []
 
     async def on_output(output: QueenOutput) -> None:
-        heard.append(output)
+        if output.kind != "idle":  # says nothing to the user; has its own test
+            heard.append(output)
 
     host.subscribe(session_id, on_output)
     return heard
@@ -119,6 +120,75 @@ async def test_the_queen_is_heard_turn_by_turn_in_order(manager):
         QueenOutput(session_id=sid, kind="message", text="Let me look."),
         QueenOutput(session_id=sid, kind="message", text="Found it."),
     ]
+
+
+@pytest.mark.asyncio
+async def test_what_she_says_before_a_tool_is_heard_before_the_tool_runs(manager):
+    host = ChannelHost("onebot", manager, {})
+    sid = await host.open_session(QUEEN)
+    heard = _heard(host, sid)
+    bus = manager.get_session(sid).event_bus
+
+    await _say(
+        bus,
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Let me draw that."}),
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "terminal_exec"}),
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "task_update"}),
+    )
+    assert heard == [QueenOutput(session_id=sid, kind="message", text="Let me draw that.")]
+
+    # No text before the next tool (the usual case), then the final reply: each said once.
+    await _say(
+        bus,
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "terminal_job_logs"}),
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Done."}),
+        (EventType.LLM_TURN_COMPLETE, {"stop_reason": "stop"}),
+        (EventType.CLIENT_INPUT_REQUESTED, {"park_reason": "turn_done"}),
+    )
+    assert heard == [
+        QueenOutput(session_id=sid, kind="message", text="Let me draw that."),
+        QueenOutput(session_id=sid, kind="message", text="Done."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_text_before_a_question_is_not_said_on_top_of_it(manager):
+    host = ChannelHost("onebot", manager, {})
+    sid = await host.open_session(QUEEN)
+    heard = _heard(host, sid)
+    question = {"id": "q1", "prompt": "Which city?"}
+
+    await _say(
+        manager.get_session(sid).event_bus,
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Which city?"}),
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "ask_user"}),
+        (EventType.CLIENT_INPUT_REQUESTED, {"park_reason": "ask_user", "questions": [question]}),
+    )
+
+    assert heard == [QueenOutput(session_id=sid, kind="question", questions=[question])]
+
+
+@pytest.mark.asyncio
+async def test_a_channel_hears_when_she_is_done(manager):
+    host = ChannelHost("onebot", manager, {})
+    sid = await host.open_session(QUEEN)
+    heard: list[QueenOutput] = []
+
+    async def on_output(output: QueenOutput) -> None:
+        heard.append(output)
+
+    host.subscribe(sid, on_output)
+
+    await _say(
+        manager.get_session(sid).event_bus,
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Working on it."}),
+        (EventType.LLM_TURN_COMPLETE, {"stop_reason": "tool_calls"}),
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Done."}),
+        (EventType.LLM_TURN_COMPLETE, {"stop_reason": "stop"}),
+        (EventType.CLIENT_INPUT_REQUESTED, {"park_reason": "turn_done"}),
+    )
+
+    assert [(o.kind, o.text) for o in heard] == [("message", "Working on it."), ("message", "Done."), ("idle", "")]
 
 
 @pytest.mark.asyncio
