@@ -5,9 +5,9 @@ The slot names a protocol, an endpoint, a model and a key, so no vendor is built
     "judge": {"protocol": "typesafe", "api_base": "<endpoint>", "model": "<model>", "api_key": "...", "threshold": 0.5}
 
 The one protocol so far is ``typesafe``: TypeSafe's ``/systemone`` endpoint answering a "noul"
-(probability) question, for example with Jev. The stall check asks it whether a queen announced
-work and stopped; channels ask it through :meth:`ChannelHost.judge`. The slot is read on every
-question, so changing it applies at once.
+(probability) question, for example with Jev. The stall check asks it whether a queen talked
+about work and stopped without doing it; channels ask it through :meth:`ChannelHost.judge`.
+The slot is read on every question, so changing it applies at once.
 """
 
 from __future__ import annotations

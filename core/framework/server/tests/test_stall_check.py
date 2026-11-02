@@ -1,4 +1,4 @@
-"""The stall check: a judge catches queen turns that announce work and stop."""
+"""The stall check: a judge catches queen turns that talk about work and stop without doing it."""
 
 from __future__ import annotations
 
@@ -128,6 +128,30 @@ async def test_the_judge_reads_the_last_model_call(config):
     assert judge.states[0]["assistant_reasoning_tail"] == ""
     assert judge.states[0]["assistant_reply"] == "Here it is."
     assert judge.states[0]["tools_called_this_turn"] == ["terminal_exec"]
+
+
+@pytest.mark.asyncio
+async def test_a_correction_is_judged_with_the_turn_it_corrects(config):
+    bus, _, judge = _watch(0.05)
+
+    await _turn(
+        bus,
+        (EventType.CLIENT_INPUT_RECEIVED, {"content": "[Ava(1)]: draw a fox"}),
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "terminal_exec"}),
+        (EventType.TOOL_CALL_STARTED, {"tool_name": "attach_file"}),
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "Here's your fox."}),
+        (EventType.CLIENT_INPUT_REQUESTED, {"park_reason": "turn_done"}),
+        (EventType.CLIENT_INPUT_RECEIVED, {"content": "[Ava(1)]: its paw has six fingers"}),
+        (EventType.CLIENT_OUTPUT_DELTA, {"snapshot": "You're right, the paw should have five."}),
+        (EventType.CLIENT_INPUT_REQUESTED, {"park_reason": "turn_done"}),
+    )
+
+    assert "previous_turn" not in judge.states[0]
+    assert judge.states[1]["previous_turn"] == {
+        "assistant_reply": "Here's your fox.",
+        "tools_called": ["terminal_exec", "attach_file"],
+    }
+    assert judge.states[1]["tools_called_this_turn"] == []
 
 
 @pytest.mark.asyncio

@@ -1919,7 +1919,7 @@ async def create_queen(
 
             _title_llm = (session_manager.build_worker_llm() if session_manager is not None else None) or session.llm
             _reflection_subs += subscribe_title_trigger(session.event_bus, queen_dir, _title_llm)
-            # Developer option: a judge catches turns that announce work and stop.
+            # Developer option: a judge catches turns that talk about work and stop without doing it.
             from framework.server.stall_check import subscribe_stall_check
 
             def _queen_node():

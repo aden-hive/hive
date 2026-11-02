@@ -500,8 +500,9 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                   <div className="min-w-0 pr-3">
                     <p className="text-[12px] font-medium text-foreground">Stall check</p>
                     <p className="text-[11px] text-muted-foreground leading-snug">
-                      When a queen ends a turn, a judge model checks whether she announced an action and stopped without
-                      taking it, and if so reminds her once to carry it out. Applies to running sessions.
+                      When a queen ends a turn, a judge model checks whether she announced an action, or agreed to a
+                      change you asked for, and stopped without doing it, and if so reminds her once to do it. Applies
+                      to running sessions.
                     </p>
                     {judgeSet === false && (
                       <button

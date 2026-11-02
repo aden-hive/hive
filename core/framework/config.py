@@ -999,7 +999,7 @@ def get_email_senders_enabled() -> bool:
 
 
 def get_stall_check_enabled() -> bool:
-    """Return whether a judge checks queen turns that announce work and stop.
+    """Return whether a judge checks queen turns that talk about work and stop without doing it.
 
     See ``framework.server.stall_check``; it also needs the ``judge`` slot.
     Resolution: ``HIVE_STALL_CHECK`` env var when set, else the top-level
