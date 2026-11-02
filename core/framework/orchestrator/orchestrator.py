@@ -447,19 +447,13 @@ class Orchestrator:
         messages: list,
         _depth: int,
     ) -> str:
-        """Split messages in half and summarise each half."""
+        """Split messages in half and summarise both halves at once."""
+        from framework.agent_loop.internals.compaction import await_both
+
         mid = max(1, len(messages) // 2)
-        s1 = await self._phase_llm_compact(
-            conversation,
-            next_spec,
-            messages[:mid],
-            _depth + 1,
-        )
-        s2 = await self._phase_llm_compact(
-            conversation,
-            next_spec,
-            messages[mid:],
-            _depth + 1,
+        s1, s2 = await await_both(
+            self._phase_llm_compact(conversation, next_spec, messages[:mid], _depth + 1),
+            self._phase_llm_compact(conversation, next_spec, messages[mid:], _depth + 1),
         )
         return s1 + "\n\n" + s2
 

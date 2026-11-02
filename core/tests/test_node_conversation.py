@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -1565,6 +1566,60 @@ class TestLlmCompact:
         assert "Part 2 summary" in result
         # LLM should have been called twice (no failure, proactive split)
         assert ctx.llm.acomplete.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_split_halves_are_summarised_at_once(self):
+        """Neither half's call returns until both are in flight; the summary keeps their order."""
+        from unittest.mock import MagicMock
+
+        node = self._make_node()
+        node._LLM_COMPACT_CHAR_LIMIT = 100
+        in_flight = 0
+        both = asyncio.Event()
+
+        async def acomplete(**kwargs):
+            nonlocal in_flight
+            in_flight += 1
+            if in_flight == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), timeout=2)
+            resp = MagicMock()
+            resp.content = "first half" if "x" * 80 in kwargs["messages"][0]["content"] else "second half"
+            return resp
+
+        ctx = self._make_ctx()
+        ctx.llm.acomplete = acomplete
+        msgs = [
+            Message(seq=0, role="user", content="x" * 80),
+            Message(seq=1, role="user", content="y" * 80),
+        ]
+        result = await node._llm_compact(ctx, msgs, None)
+        assert result.index("first half") < result.index("second half")
+
+    @pytest.mark.asyncio
+    async def test_a_failing_half_cancels_the_other_and_raises_its_error(self):
+        node = self._make_node()
+        node._LLM_COMPACT_CHAR_LIMIT = 100
+        cancelled = asyncio.Event()
+
+        async def acomplete(**kwargs):
+            if "x" * 80 in kwargs["messages"][0]["content"]:
+                raise ValueError("API key invalid")
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        ctx = self._make_ctx()
+        ctx.llm.acomplete = acomplete
+        msgs = [
+            Message(seq=0, role="user", content="x" * 80),
+            Message(seq=1, role="user", content="y" * 80),
+        ]
+        with pytest.raises(ValueError, match="API key invalid"):
+            await asyncio.wait_for(node._llm_compact(ctx, msgs, None), timeout=2)
+        assert cancelled.is_set()
 
     @pytest.mark.asyncio
     async def test_tool_history_appended_at_top_level(self):

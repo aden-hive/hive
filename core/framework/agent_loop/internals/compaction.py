@@ -10,12 +10,14 @@ Implements the multi-level compaction strategy:
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import logging
 import os
 import re
 import time
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -680,31 +682,49 @@ async def _llm_compact_split(
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
 ) -> str:
-    """Split messages in half and summarise each half independently."""
+    """Split messages in half and summarise both halves at once."""
     if char_limit is None:
         char_limit = llm_compact_char_limit(max_context_tokens)
     mid = max(1, len(messages) // 2)
-    s1 = await llm_compact(
-        ctx,
-        messages[:mid],
-        None,
-        _depth + 1,
-        char_limit=char_limit,
-        max_depth=max_depth,
-        max_context_tokens=max_context_tokens,
-        preserve_user_messages=preserve_user_messages,
-    )
-    s2 = await llm_compact(
-        ctx,
-        messages[mid:],
-        accumulator,
-        _depth + 1,
-        char_limit=char_limit,
-        max_depth=max_depth,
-        max_context_tokens=max_context_tokens,
-        preserve_user_messages=preserve_user_messages,
+    s1, s2 = await await_both(
+        llm_compact(
+            ctx,
+            messages[:mid],
+            None,
+            _depth + 1,
+            char_limit=char_limit,
+            max_depth=max_depth,
+            max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
+        ),
+        llm_compact(
+            ctx,
+            messages[mid:],
+            accumulator,
+            _depth + 1,
+            char_limit=char_limit,
+            max_depth=max_depth,
+            max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
+        ),
     )
     return s1 + "\n\n" + s2
+
+
+async def await_both(first: Awaitable[str], second: Awaitable[str]) -> tuple[str, str]:
+    """Await two summaries at once, in order.
+
+    A summary can take minutes on a reasoning model, and the agent's turn waits for the
+    compaction, so the halves of a split aren't summarised one after the other. If one fails,
+    the other is cancelled and that error is raised as it is (not inside an ExceptionGroup).
+    """
+    try:
+        async with asyncio.TaskGroup() as group:
+            a = group.create_task(first)
+            b = group.create_task(second)
+    except ExceptionGroup as failed:
+        raise failed.exceptions[0] from None
+    return a.result(), b.result()
 
 
 # --- Compaction helpers ------------------------------------------------
