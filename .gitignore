@@ -73,7 +73,9 @@ exports/*
 exports.old*
 artifacts/*
 
-.claude/settings.local.json
+.claude/*
+!.claude/skills/
+!.claude/settings.local.json.example
 
 docs/github-issues/*
 core/tests/*dumps/*

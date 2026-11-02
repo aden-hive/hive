@@ -96,7 +96,7 @@ For any editor, you can always rely on `make lint` and `make format` from the co
 
 ### Claude Code
 
-The repository includes a `.claude/settings.json` hook that automatically runs `ruff check --fix` and `ruff format` after every file edit made by Claude Code. No setup needed — it works out of the box.
+`.claude/settings.json` isn't tracked in git, so your Claude Code settings stay your own. To lint every edit Claude Code makes, add a `PostToolUse` hook there that runs `ruff check --fix` and `ruff format`; otherwise `make check` and CI catch the same problems.
 
 ### Codex CLI
 
@@ -133,7 +133,6 @@ make check    # Verify locally before pushing
 | `.pre-commit-config.yaml` | Pre-commit hook definitions |
 | `.vscode/settings.json` | VS Code ruff integration |
 | `.vscode/extensions.json` | Recommended VS Code extensions |
-| `.claude/settings.json` | Claude Code post-edit hooks |
 
 The single source of truth for lint rules is the `[tool.ruff]` section in each package's `pyproject.toml`. All other configs (VS Code, pre-commit, Makefile, CI) reference these.
 
