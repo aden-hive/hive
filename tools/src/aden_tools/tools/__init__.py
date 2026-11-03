@@ -40,6 +40,7 @@ from .apify_tool import register_tools as register_apify
 from .apollo_tool import register_tools as register_apollo
 from .arxiv_tool import register_tools as register_arxiv
 from .asana_tool import register_tools as register_asana
+from .atomicmail_tool import register_tools as register_atomicmail
 from .attach_file_tool import register_tools as register_attach_file
 from .attio_tool import register_tools as register_attio
 from .aws_s3_tool import register_tools as register_aws_s3
@@ -300,6 +301,7 @@ def _register_unverified(
     register_airtable(mcp, credentials=credentials)
     register_apify(mcp, credentials=credentials)
     register_asana(mcp, credentials=credentials)
+    register_atomicmail(mcp, credentials=credentials)
     register_attio(mcp, credentials=credentials)
     register_aws_s3(mcp, credentials=credentials)
     register_azure_sql(mcp, credentials=credentials)

@@ -89,6 +89,7 @@ Common providers that may appear:
 - `slack` - Slack workspaces
 - `github` - GitHub accounts
 - `hubspot` - HubSpot CRM accounts
+- `atomicmail` - Atomic Mail agent-owned inboxes
 - `brevo` - Brevo email/SMS accounts
 - And any other configured OAuth or API integrations
 

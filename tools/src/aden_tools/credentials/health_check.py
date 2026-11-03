@@ -1374,11 +1374,52 @@ class CloudflareHealthChecker(BaseHttpHealthChecker):
     SERVICE_NAME = "Cloudflare"
 
 
+class AtomicMailHealthChecker:
+    """Health checker for Atomic Mail inbox API keys.
+
+    The key is not a bearer token: it is only accepted by the session
+    exchange, after a proof-of-work. So the check performs the real login
+    (challenge, PoW, session, capability) and reports the inbox address.
+    """
+
+    ENDPOINT = "https://auth.atomicmail.ai/api/v1/session"
+
+    def check(self, credential_value: str) -> HealthCheckResult:
+        # Lazy import: the auth flow lives with the tool and pulls in hashlib/scrypt.
+        from aden_tools.tools.atomicmail_tool.auth import AtomicMailAuthError, AtomicMailSession
+
+        session = AtomicMailSession(credential_value)
+        try:
+            session.capability_token()
+        except AtomicMailAuthError as e:
+            details: dict[str, Any] = {"error": str(e)}
+            if e.status_code is not None:
+                details["status_code"] = e.status_code
+            if e.status_code in (401, 403):
+                return HealthCheckResult(valid=False, message="Atomic Mail API key is invalid", details=details)
+            return HealthCheckResult(valid=False, message=f"Atomic Mail login failed: {e}", details=details)
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Atomic Mail auth request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Atomic Mail: {e}",
+                details={"error": str(e)},
+            )
+        details = {"identity": {"email": session.inbox_address}} if session.inbox_address else {}
+        return HealthCheckResult(valid=True, message="Atomic Mail API key valid", details=details)
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "apify": ApifyHealthChecker(),
     "apollo": ApolloHealthChecker(),
     "asana": AsanaHealthChecker(),
+    "atomicmail": AtomicMailHealthChecker(),
     "attio": AttioHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "brevo": BrevoHealthChecker(),

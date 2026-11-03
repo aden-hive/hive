@@ -36,6 +36,7 @@ Credential categories:
 - search.py: Search tool credentials (brave_search, google_search, etc.)
 - email.py: Email provider credentials (resend, google/gmail)
 - apollo.py: Apollo.io API credentials
+- atomicmail.py: Atomic Mail agent-owned inbox credentials
 - brevo.py: Brevo (Sendinblue) transactional email/SMS credentials
 - discord.py: Discord bot credentials
 - github.py: GitHub API credentials
@@ -61,6 +62,7 @@ from .airtable import AIRTABLE_CREDENTIALS
 from .apify import APIFY_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
 from .asana import ASANA_CREDENTIALS
+from .atomicmail import ATOMICMAIL_CREDENTIALS
 from .attio import ATTIO_CREDENTIALS
 from .aws_s3 import AWS_S3_CREDENTIALS
 from .azure_sql import AZURE_SQL_CREDENTIALS
@@ -157,6 +159,7 @@ CREDENTIAL_SPECS = {
     **APIFY_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **ASANA_CREDENTIALS,
+    **ATOMICMAIL_CREDENTIALS,
     **ATTIO_CREDENTIALS,
     **AWS_S3_CREDENTIALS,
     **AZURE_SQL_CREDENTIALS,
@@ -255,6 +258,7 @@ __all__ = [
     "APIFY_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "ASANA_CREDENTIALS",
+    "ATOMICMAIL_CREDENTIALS",
     "ATTIO_CREDENTIALS",
     "AWS_S3_CREDENTIALS",
     "AZURE_SQL_CREDENTIALS",
