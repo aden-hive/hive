@@ -28,6 +28,7 @@ from framework.pipeline.stage import PipelineStage
 logger = logging.getLogger(__name__)
 
 _STAGE_REGISTRY: dict[str, type[PipelineStage]] = {}
+_builtins_imported = False
 
 
 def register(name: str):
@@ -89,9 +90,16 @@ def build_pipeline_from_config(
 
 
 def _ensure_builtins_registered() -> None:
-    """Import built-in stage modules so their ``@register`` decorators fire."""
-    if _STAGE_REGISTRY:
-        return  # already populated
+    """Import built-in stage modules so their ``@register`` decorators fire.
+
+    Tracked with a module-level flag rather than "is the registry empty",
+    since a third-party or user-defined stage registering first would
+    otherwise make the registry look already populated and skip this import.
+    """
+    global _builtins_imported
+    if _builtins_imported:
+        return
+    _builtins_imported = True
     try:
         import framework.pipeline.stages.cost_guard  # noqa: F401
         import framework.pipeline.stages.credential_resolver  # noqa: F401
@@ -101,4 +109,4 @@ def _ensure_builtins_registered() -> None:
         import framework.pipeline.stages.rate_limit  # noqa: F401
         import framework.pipeline.stages.skill_registry  # noqa: F401
     except ImportError:
-        pass
+        logger.warning("Failed to import built-in pipeline stages", exc_info=True)
