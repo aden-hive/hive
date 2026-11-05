@@ -20,6 +20,7 @@ Example config::
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from framework.pipeline.runner import PipelineRunner
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _STAGE_REGISTRY: dict[str, type[PipelineStage]] = {}
 _builtins_imported = False
+_builtins_lock = threading.Lock()
 
 
 def register(name: str):
@@ -99,14 +101,18 @@ def _ensure_builtins_registered() -> None:
     global _builtins_imported
     if _builtins_imported:
         return
-    _builtins_imported = True
-    try:
-        import framework.pipeline.stages.cost_guard  # noqa: F401
-        import framework.pipeline.stages.credential_resolver  # noqa: F401
-        import framework.pipeline.stages.input_validation  # noqa: F401
-        import framework.pipeline.stages.llm_provider  # noqa: F401
-        import framework.pipeline.stages.mcp_registry  # noqa: F401
-        import framework.pipeline.stages.rate_limit  # noqa: F401
-        import framework.pipeline.stages.skill_registry  # noqa: F401
-    except ImportError:
-        logger.warning("Failed to import built-in pipeline stages", exc_info=True)
+    with _builtins_lock:
+        if _builtins_imported:
+            return
+        try:
+            import framework.pipeline.stages.cost_guard  # noqa: F401
+            import framework.pipeline.stages.credential_resolver  # noqa: F401
+            import framework.pipeline.stages.input_validation  # noqa: F401
+            import framework.pipeline.stages.llm_provider  # noqa: F401
+            import framework.pipeline.stages.mcp_registry  # noqa: F401
+            import framework.pipeline.stages.rate_limit  # noqa: F401
+            import framework.pipeline.stages.skill_registry  # noqa: F401
+        except ImportError:
+            logger.warning("Failed to import built-in pipeline stages", exc_info=True)
+        else:
+            _builtins_imported = True
