@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Check, ChevronDown, Eye, Loader2, Server, Star } from "lucide-react";
+import { AlertCircle, Bookmark, Check, ChevronDown, Eye, Loader2, Server, Star } from "lucide-react";
+import type { LlmSection } from "@/api/config";
 import {
   contextLabel,
   modelsApi,
@@ -16,8 +17,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * Pick a model for one slot: a searchable list, grouped by where models come from. Endpoints
- * (Magpie, Ollama, ...) list theirs live; catalog providers show their models once their key is in.
- * Picking applies at once; a failure shows its reason under the button.
+ * (Magpie, Ollama, ...) list theirs live; catalog providers show their models once their key is in;
+ * saved setups, when given, are copied into the slot whole. Picking applies at once; a failure
+ * shows its reason under the button.
  */
 
 const MENU_HEIGHT = 420;
@@ -37,6 +39,17 @@ export function slotLabel(summary: SlotSummary | null): { model: string; from: s
   return { model: summary.model, from: providerName(summary.provider) };
 }
 
+/** The saved setup a slot was copied from, judged by what the slot's summary shows of it. */
+function savedSetupOf(summary: SlotSummary | null, saved: Record<string, LlmSection>): string | null {
+  if (!summary || summary.endpoint) return null;
+  const same = ([, s]: [string, LlmSection]) =>
+    s.model === summary.model &&
+    (s.provider ?? null) === summary.provider &&
+    (s.api_base ?? null) === summary.api_base &&
+    (s.max_context_tokens ?? null) === summary.max_context_tokens;
+  return Object.entries(saved).find(same)?.[0] ?? null;
+}
+
 interface ModelPickerProps {
   overview: ModelsOverview;
   value: SlotSummary | null;
@@ -45,19 +58,23 @@ interface ModelPickerProps {
   onPick: (choice: ModelChoice) => Promise<void>;
   /** Offered first in the list when given: returns the slot to its default. */
   onClear?: () => Promise<void>;
+  /** Saved setups by name, offered as a group of their own; picking one calls `onPickSaved`. */
+  saved?: Record<string, LlmSection>;
+  onPickSaved?: (name: string) => Promise<void>;
   ariaLabel?: string;
 }
 
 interface Row {
   key: string;
-  choice: ModelChoice;
+  /** A model to pick, or the name of a saved setup to copy in. */
+  choice: ModelChoice | { saved: string };
   label: string;
   hint: string | null;
   recommended?: boolean;
   vision?: boolean;
 }
 
-export default function ModelPicker({ overview, value, placeholder, onPick, onClear, ariaLabel }: ModelPickerProps) {
+export default function ModelPicker({ overview, value, placeholder, onPick, onClear, saved, onPickSaved, ariaLabel }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [query, setQuery] = useState("");
@@ -108,7 +125,7 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matches = (row: Row, group: string) => !q || `${row.label} ${row.key} ${group}`.toLowerCase().includes(q);
-    const out: Array<{ key: string; title: string; logo?: string; note?: string; rows: Row[] }> = [];
+    const out: Array<{ key: string; title: string; logo?: string; saved?: boolean; note?: string; rows: Row[] }> = [];
     for (const endpoint of reachable) {
       const title = endpoint.name === "magpie" ? "Magpie" : endpoint.name;
       const state = live[endpoint.name];
@@ -138,13 +155,32 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
         .filter((r) => matches(r, title));
       if (rows.length) out.push({ key: `catalog:${provider.id}`, title, logo: provider.id, rows });
     }
+    if (saved && onPickSaved) {
+      const title = "Saved setups";
+      const rows = Object.entries(saved)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map<Row>(([name, s]) => ({
+          key: `saved:${name}`,
+          choice: { saved: name },
+          label: name,
+          hint: s.model ?? null,
+        }))
+        .filter((r) => matches(r, `${title} ${r.hint ?? ""}`));
+      // First: a short list of the user's own, which an endpoint's hundreds of models would bury.
+      if (rows.length) out.unshift({ key: "saved", title, saved: true, rows });
+    }
     return out;
-  }, [overview, reachable, live, query]);
+  }, [overview, reachable, live, query, saved, onPickSaved]);
 
-  const isCurrent = (choice: ModelChoice) =>
-    !!value &&
-    value.model === choice.model &&
-    (choice.source === "endpoint" ? value.endpoint === choice.endpoint : value.source === "catalog" && value.provider === choice.provider);
+  const savedName = saved ? savedSetupOf(value, saved) : null;
+  const isCurrent = (choice: Row["choice"]) =>
+    "saved" in choice
+      ? choice.saved === savedName
+      : !!value &&
+        !savedName &&
+        value.model === choice.model &&
+        (choice.source === "endpoint" ? value.endpoint === choice.endpoint : value.source === "catalog" && value.provider === choice.provider);
+  const pickRow = (choice: Row["choice"]) => ("saved" in choice ? onPickSaved!(choice.saved) : onPick(choice));
 
   const apply = async (run: () => Promise<void>) => {
     setOpen(false);
@@ -159,7 +195,8 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
     }
   };
 
-  const label = slotLabel(value);
+  const shown = slotLabel(value);
+  const label = shown && savedName ? { ...shown, from: savedName } : shown;
   const style: React.CSSProperties | null = rect
     ? (() => {
         const width = Math.max(rect.width, MENU_WIDTH);
@@ -186,7 +223,9 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
           open && "border-primary/60",
         )}
       >
-        {value?.source === "catalog" && value.provider ? (
+        {savedName ? (
+          <Bookmark className="w-4 h-4 shrink-0 text-muted-foreground" />
+        ) : value?.source === "catalog" && value.provider ? (
           <ProviderLogo provider={value.provider} size={18} />
         ) : (
           <Server className="w-4 h-4 shrink-0 text-muted-foreground" />
@@ -240,7 +279,13 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
               {groups.map((group) => (
                 <div key={group.key} className="mt-1">
                   <div className="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                    {group.logo ? <ProviderLogo provider={group.logo} size={12} /> : <Server className="w-3 h-3" />}
+                    {group.logo ? (
+                      <ProviderLogo provider={group.logo} size={12} />
+                    ) : group.saved ? (
+                      <Bookmark className="w-3 h-3" />
+                    ) : (
+                      <Server className="w-3 h-3" />
+                    )}
                     {group.title}
                   </div>
                   {group.note && <div className="px-2.5 pb-1 text-xs text-muted-foreground">{group.note}</div>}
@@ -252,7 +297,7 @@ export default function ModelPicker({ overview, value, placeholder, onPick, onCl
                         type="button"
                         role="option"
                         aria-selected={current}
-                        onClick={() => apply(() => onPick(row.choice))}
+                        onClick={() => apply(() => pickRow(row.choice))}
                         className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted"
                       >
                         <span className="min-w-0 flex-1 truncate">{row.label}</span>

@@ -100,4 +100,41 @@ describe("ModelPicker", () => {
 
     await waitFor(() => expect(onClear).toHaveBeenCalled());
   });
+
+  const saved = {
+    "zed-official": { provider: "openai", model: "zed-chat", api_base: "https://api.zed.example/v1", api_key: "sk-made-up", max_context_tokens: 128000 },
+    "gus-local": { provider: "openai", model: "qwen-x", api_base: "http://localhost:8000/v1" },
+  };
+
+  it("offers saved setups as a group and copies in the one picked", async () => {
+    const onPick = vi.fn();
+    const onPickSaved = vi.fn().mockResolvedValue(undefined);
+    render(<ModelPicker overview={overview} value={null} placeholder="Pick a model" onPick={onPick} saved={saved} onPickSaved={onPickSaved} ariaLabel="Main model" />);
+    const list = open();
+
+    expect(within(list).getByText("Saved setups")).toBeTruthy();
+    fireEvent.change(within(list).getByPlaceholderText("Search models"), { target: { value: "qwen" } });
+    expect(within(list).queryByText("zed-official")).toBeNull();
+    fireEvent.click(within(list).getByText("gus-local"));
+
+    await waitFor(() => expect(onPickSaved).toHaveBeenCalledWith("gus-local"));
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("names the saved setup a slot was copied from", () => {
+    const value = {
+      source: "catalog" as const,
+      provider: "openai",
+      model: "zed-chat",
+      endpoint: null,
+      subscription: null,
+      api_base: "https://api.zed.example/v1",
+      max_context_tokens: 128000,
+      has_extra_body: false,
+    };
+    render(<ModelPicker overview={overview} value={value} placeholder="Pick a model" onPick={vi.fn()} saved={saved} onPickSaved={vi.fn()} ariaLabel="Main model" />);
+
+    expect(screen.getByText("zed-official · 128k context")).toBeTruthy();
+    expect(within(open()).getByRole("option", { name: /zed-official/ }).getAttribute("aria-selected")).toBe("true");
+  });
 });

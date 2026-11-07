@@ -23,7 +23,22 @@ vi.mock("@/context/ModelContext", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/context/ModelContext")>()),
   useModelOptional: () => ({ refresh, activateSubscription, saveProviderKey: vi.fn(), removeProviderKey: vi.fn() }),
 }));
-vi.mock("@/components/ProviderManager", () => ({ default: () => <div>Slot editor</div> }));
+const applyProviderLibraryEntry = vi.fn();
+const LIBRARY = {
+  "local-vllm": { provider: "openai", model: "qwen-x", api_base: "http://localhost:8000/v1" },
+  "zed-official": { provider: "openai", model: "zed-chat", api_base: "https://api.zed.example/v1", api_key: "sk-made-up-9876" },
+  "mira-judge": { protocol: "typesafe", model: "mira-judge", api_base: "https://judge.mira.example/v1", api_key: "made-up-5555", threshold: 0.5 },
+};
+vi.mock("@/api/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/config")>()),
+  configApi: {
+    getLlmSections: async () => ({ llm: { provider: "anthropic", model: "claude-x" }, worker_llm: null, vision_fallback: null, judge: null }),
+    getProviderLibrary: async () => ({ library: LIBRARY }),
+    putLlmSection: vi.fn(),
+    putProviderLibraryEntry: vi.fn(),
+    applyProviderLibraryEntry: (name: string, role: string) => applyProviderLibraryEntry(name, role),
+  },
+}));
 
 import ModelsPage from "./models";
 
@@ -77,7 +92,7 @@ function renderPage() {
 
 describe("ModelsPage", () => {
   beforeEach(() => {
-    for (const f of [overview, setSlot, saveEndpoint, refresh, activateSubscription]) f.mockReset();
+    for (const f of [overview, setSlot, saveEndpoint, refresh, activateSubscription, applyProviderLibraryEntry]) f.mockReset();
     overview.mockResolvedValue(OVERVIEW);
     setSlot.mockResolvedValue({ slot: "llm", summary: null, sessions_switched: 2 });
     saveEndpoint.mockResolvedValue({ name: "ollama", api_base: "http://localhost:11434/v1", builtin: false, has_key: false, running: false });
@@ -125,5 +140,49 @@ describe("ModelsPage", () => {
     fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(saveEndpoint).toHaveBeenCalledWith("ollama", { api_base: "http://localhost:11434/v1" }));
+  });
+
+  it("lists saved setups beside endpoints and keys, without showing a key", async () => {
+    renderPage();
+
+    const heading = await screen.findByRole("heading", { name: "Saved setups" });
+    const section = heading.closest("section") as HTMLElement;
+    expect(await within(section).findByText("zed-official")).toBeTruthy();
+    expect(within(section).getByText("zed-chat · https://api.zed.example/v1")).toBeTruthy();
+    expect(within(section).getAllByText("key saved")).toHaveLength(2); // zed-official and mira-judge
+    expect(within(section).getByText("local-vllm")).toBeTruthy();
+    expect(section.textContent).not.toMatch(/9876/);
+  });
+
+  it("copies a saved setup into a slot under Advanced and refreshes what is in use", async () => {
+    applyProviderLibraryEntry.mockResolvedValue({ role: "worker_llm", section: LIBRARY["local-vllm"] });
+    renderPage();
+    await screen.findByText("claude-x");
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const pickers = await screen.findAllByTitle("Load a saved setup into this slot");
+    fireEvent.change(pickers[1], { target: { value: "local-vllm" } });
+
+    await waitFor(() => expect(applyProviderLibraryEntry).toHaveBeenCalledWith("local-vllm", "worker_llm"));
+    await waitFor(() => expect(overview).toHaveBeenCalledTimes(2));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("offers chat setups in the model lists and judge setups on the Judge row", async () => {
+    applyProviderLibraryEntry.mockResolvedValue({ role: "llm", section: LIBRARY["zed-official"] });
+    renderPage();
+    await screen.findByText("claude-x");
+    await screen.findByText("zed-official");
+
+    fireEvent.click(screen.getByRole("button", { name: "Main model" }));
+    const list = screen.getByRole("listbox");
+    expect(within(list).queryByText("mira-judge")).toBeNull();
+    fireEvent.click(within(list).getByText("zed-official"));
+    await waitFor(() => expect(applyProviderLibraryEntry).toHaveBeenCalledWith("zed-official", "llm"));
+
+    const judge = screen.getByRole("combobox", { name: "Use a saved judge" });
+    expect(within(judge).queryByText("zed-official")).toBeNull();
+    fireEvent.change(judge, { target: { value: "mira-judge" } });
+    await waitFor(() => expect(applyProviderLibraryEntry).toHaveBeenCalledWith("mira-judge", "judge"));
   });
 });
