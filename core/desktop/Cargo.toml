@@ -1,0 +1,20 @@
+[package]
+name = "hive-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Native Hive client drawn with GPUI; talks to the same HTTP API as the web dashboard."
+publish = false
+
+[dependencies]
+anyhow = "1"
+# Pins the matching GPUI snapshot and re-exports it, the components and the Lucide icons.
+gpui-kit = "=0.9.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smol = "2"
+ureq = { version = "3", features = ["json"] }
+
+[profile.dev]
+# Dependencies are compiled once; optimising them keeps the debug app's drawing smooth.
+[profile.dev.package."*"]
+opt-level = 2

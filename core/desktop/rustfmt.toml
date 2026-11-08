@@ -1,0 +1,3 @@
+# The repository's line length (pyproject.toml); short chains stay on one line where they fit.
+max_width = 120
+use_small_heuristics = "Max"
