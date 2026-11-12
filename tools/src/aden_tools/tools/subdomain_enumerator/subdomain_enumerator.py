@@ -98,6 +98,15 @@ def register_tools(mcp: FastMCP) -> None:
         if ":" in domain:
             domain = domain.split(":")[0]
 
+        # Reject non-positive limits before any network call. Python slices
+        # treat a negative max_results as "drop N from the end", so -1 would
+        # silently return almost every subdomain instead of an empty/error result.
+        if max_results < 1:
+            return {
+                "error": "max_results must be at least 1",
+                "domain": domain,
+            }
+
         max_results = min(max_results, 200)
 
         try:

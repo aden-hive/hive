@@ -90,6 +90,18 @@ class TestInputValidation:
             # Result should not error
             assert "error" not in result
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_limit", [-1, 0])
+    async def test_non_positive_max_results_rejected(self, enumerate_fn, bad_limit):
+        with patch("httpx.AsyncClient") as MockClient:
+            result = await enumerate_fn("example.com", max_results=bad_limit)
+
+            assert result == {
+                "error": "max_results must be at least 1",
+                "domain": "example.com",
+            }
+            MockClient.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Connection Errors
