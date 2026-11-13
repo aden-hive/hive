@@ -19,6 +19,7 @@ Example config::
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
@@ -28,6 +29,12 @@ from framework.pipeline.stage import PipelineStage
 logger = logging.getLogger(__name__)
 
 _STAGE_REGISTRY: dict[str, type[PipelineStage]] = {}
+
+# Tracks whether the built-in stage modules have been imported. Kept
+# separate from ``_STAGE_REGISTRY`` because a user-defined stage can also
+# populate the registry before the built-ins are imported, which previously
+# caused ``_ensure_builtins_registered`` to skip importing the built-ins.
+_BUILTINS_REGISTERED = False
 
 
 def register(name: str):
@@ -90,15 +97,25 @@ def build_pipeline_from_config(
 
 def _ensure_builtins_registered() -> None:
     """Import built-in stage modules so their ``@register`` decorators fire."""
-    if _STAGE_REGISTRY:
-        return  # already populated
-    try:
-        import framework.pipeline.stages.cost_guard  # noqa: F401
-        import framework.pipeline.stages.credential_resolver  # noqa: F401
-        import framework.pipeline.stages.input_validation  # noqa: F401
-        import framework.pipeline.stages.llm_provider  # noqa: F401
-        import framework.pipeline.stages.mcp_registry  # noqa: F401
-        import framework.pipeline.stages.rate_limit  # noqa: F401
-        import framework.pipeline.stages.skill_registry  # noqa: F401
-    except ImportError:
-        pass
+    global _BUILTINS_REGISTERED
+    if _BUILTINS_REGISTERED:
+        return
+    # Import built-ins one at a time so a failure in one module does not
+    # silently prevent the remaining built-ins from registering.
+    builtin_modules = (
+        "framework.pipeline.stages.cost_guard",
+        "framework.pipeline.stages.credential_resolver",
+        "framework.pipeline.stages.input_validation",
+        "framework.pipeline.stages.llm_provider",
+        "framework.pipeline.stages.mcp_registry",
+        "framework.pipeline.stages.rate_limit",
+        "framework.pipeline.stages.skill_registry",
+    )
+    for module in builtin_modules:
+        try:
+            importlib.import_module(module)
+        except ImportError as exc:
+            logger.warning(
+                "Failed to import built-in pipeline stage %r: %s", module, exc
+            )
+    _BUILTINS_REGISTERED = True
