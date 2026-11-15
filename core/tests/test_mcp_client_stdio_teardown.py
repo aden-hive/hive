@@ -73,6 +73,56 @@ def _child_pids() -> set[str]:
         return set()
 
 
+def test_windows_stdio_cwd_workaround_passes_dir_via_env(tmp_path) -> None:
+    """On Windows, MCPClient discards cwd (the WinError 267 workaround) but
+    must hand the directory to the child via HIVE_MCP_SERVER_CWD.
+
+    Regression for agent-generated files landing in the project root:
+    without this, any stdio server script that falls back to os.getcwd()
+    for relative paths (e.g. files_server.py) silently inherits the
+    *launching* Hive process's cwd instead of the directory this client was
+    configured with.
+    """
+    if os.name != "nt":
+        pytest.skip("exercises the Windows-only cwd=None workaround")
+
+    srv_dir = tmp_path / "srv"
+    srv_dir.mkdir()
+    script = srv_dir / "env_probe_server.py"
+    script.write_text(
+        textwrap.dedent(
+            """
+            import os
+            from mcp.server.fastmcp import FastMCP
+
+            mcp = FastMCP("env-probe")
+
+            @mcp.tool()
+            def get_cwd_env() -> str:
+                return os.environ.get("HIVE_MCP_SERVER_CWD", "<missing>")
+
+            mcp.run()
+            """
+        )
+    )
+
+    client = MCPClient(
+        MCPServerConfig(
+            name="env-probe",
+            transport="stdio",
+            command=sys.executable,
+            args=["env_probe_server.py"],  # relative — exercises the cwd-resolve branch
+            cwd=str(srv_dir),
+        )
+    )
+    client.connect()
+    try:
+        result = client.call_tool("get_cwd_env", {})
+        assert str(srv_dir) in str(result)
+    finally:
+        client.disconnect()
+
+
 def test_stdio_connect_call_disconnect_is_clean(tmp_path, caplog) -> None:
     script = tmp_path / "echo_server.py"
     script.write_text(_ECHO_SERVER)
