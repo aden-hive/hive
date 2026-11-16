@@ -10,6 +10,7 @@
   <a href="zh-CN.md">简体中文</a> |
   <a href="es.md">Español</a> |
   <a href="hi.md">हिन्दी</a> |
+  <a href="mr.md">मराठी</a> |
   <a href="pt.md">Português</a> |
   <a href="ja.md">日本語</a> |
   <a href="ru.md">Русский</a> |
