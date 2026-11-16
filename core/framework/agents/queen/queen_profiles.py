@@ -187,12 +187,58 @@ def _materialize_default_queen(queen_id: str) -> Path | None:
 
 def list_queens() -> list[dict[str, Any]]:
     """Return the queen catalog: union of materialized on-disk profiles
-    plus the built-in DEFAULT_QUEENS catalog.
+    plus the built-in DEFAULT_QUEENS catalog, less the queens the user
+    removed from it (see :func:`set_queen_removed`).
 
     Default queens that the user has never selected don't have on-disk
     directories yet, but the catalog should still surface them so the
     UI can offer them as choices.
     """
+    removed = removed_queen_ids()
+    return [q for q in _known_queens() if q["id"] not in removed]
+
+
+def list_removed_queens() -> list[dict[str, Any]]:
+    """The queens the user removed from the catalog, to offer back."""
+    removed = removed_queen_ids()
+    return [q for q in _known_queens() if q["id"] in removed]
+
+
+#: ``queens/catalog.json``: ``{"removed": [queen_id, ...]}``, the queens the user took out of her
+#: catalog. A removed queen keeps her files (profile, chats, memory, soul) and comes back as she was
+#: when restored; the shipped queens can't leave the catalog any other way.
+CATALOG_FILE = "catalog.json"
+
+
+def _read_catalog() -> dict[str, Any]:
+    try:
+        data = json.loads((QUEENS_DIR / CATALOG_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def removed_queen_ids() -> set[str]:
+    """The ids of the queens the user removed from the catalog."""
+    removed = _read_catalog().get("removed")
+    return {q for q in removed if isinstance(q, str)} if isinstance(removed, list) else set()
+
+
+def set_queen_removed(queen_id: str, removed: bool) -> None:
+    """Take a queen out of the catalog (``removed``), or put her back.
+
+    Raises ``FileNotFoundError`` for a queen Hive doesn't know.
+    """
+    if queen_id not in DEFAULT_QUEENS and not (QUEENS_DIR / queen_id / "profile.yaml").exists():
+        raise FileNotFoundError(queen_id)
+    data = _read_catalog()
+    ids = removed_queen_ids()
+    data["removed"] = sorted(ids | {queen_id} if removed else ids - {queen_id})
+    _atomic_write_text(QUEENS_DIR / CATALOG_FILE, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+
+def _known_queens() -> list[dict[str, Any]]:
+    """Every queen Hive knows, removed or not: the built-in catalog and the profiles on disk."""
     results: dict[str, dict[str, Any]] = {}
     # 1. Built-in catalog (always available).
     for queen_id, profile in DEFAULT_QUEENS.items():
@@ -217,9 +263,8 @@ def list_queens() -> list[dict[str, Any]]:
                     "title": _current_title(queen_id, data.get("title", "")),
                     "has_avatar": _queen_has_avatar(queen_id),
                     # Not part of the shipped catalog — created by the user
-                    # (UI "New Queen" or a hand-written profile.yaml). The
-                    # frontend groups these under "Custom" in the leader
-                    # catalog instead of a preset function slot.
+                    # (UI "New position" or a hand-written profile.yaml): a
+                    # position of her own, with no leaders shipped to hire.
                     "custom": queen_id not in DEFAULT_QUEENS,
                 }
                 if data.get("portrait"):
@@ -265,9 +310,7 @@ def create_queen_profile(
         raise ValueError("name is required")
     qid = (queen_id or "").strip() or _slugify_queen_id(name)
     if not _QUEEN_ID_RE.match(qid):
-        raise ValueError(
-            "queen_id must match [a-z0-9][a-z0-9_-]{0,62} (lowercase slug)"
-        )
+        raise ValueError("queen_id must match [a-z0-9][a-z0-9_-]{0,62} (lowercase slug)")
     if qid in DEFAULT_QUEENS or (QUEENS_DIR / qid / "profile.yaml").exists():
         raise FileExistsError(qid)
     profile: dict[str, Any] = {"name": name, "title": (title or "").strip()}
@@ -382,6 +425,73 @@ def update_queen_profile(queen_id: str, updates: dict[str, Any]) -> dict[str, An
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
     )
     return data
+
+
+#: The persona fields of profile.yaml the dashboard's profile page edits, by the shape each takes.
+PERSONA_TEXT_FIELDS = ("name", "title", "core_traits", "skills")
+PERSONA_MAP_FIELDS = ("hidden_background", "psychological_profile", "world_lore")
+#: ``behavior_triggers`` is the one list: ``{"trigger": text, "reaction": text}`` items.
+PERSONA_FIELDS = (*PERSONA_TEXT_FIELDS, *PERSONA_MAP_FIELDS, "behavior_triggers")
+#: Snapshots of profile.yaml kept from dashboard edits (older ones are pruned).
+_DASHBOARD_SNAPSHOTS = 30
+
+
+class _ProfileDumper(yaml.SafeDumper):
+    """Writes multi-line text as literal blocks, so a profile stays readable and hand-editable."""
+
+
+def _represent_text(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_ProfileDumper.add_representer(str, _represent_text)
+
+
+def _tidy(value: Any) -> Any:
+    """Line-end spaces would force a quoted scalar instead of a block; they say nothing to a prompt."""
+    if isinstance(value, str) and "\n" in value:
+        return "\n".join(line.rstrip() for line in value.split("\n"))
+    if isinstance(value, dict):
+        return {k: _tidy(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_tidy(v) for v in value]
+    return value
+
+
+def dump_profile(data: dict[str, Any]) -> str:
+    """``data`` as profile.yaml text, multi-line fields as literal blocks."""
+    return yaml.dump(_tidy(data), Dumper=_ProfileDumper, sort_keys=False, allow_unicode=True, width=1_000_000)
+
+
+def replace_queen_persona(queen_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Replace these persona fields of the queen's profile.yaml whole (``None`` removes one); the new profile.
+
+    Unlike :func:`update_queen_profile` nothing is merged: the editor sends each field as it should be.
+    The file as it was is kept in ``_profile_snapshots/`` first.
+    """
+    from datetime import datetime
+
+    profile_path = QUEENS_DIR / queen_id / "profile.yaml"
+    if not profile_path.exists():
+        materialized = _materialize_default_queen(queen_id)
+        if materialized is None:
+            raise FileNotFoundError(f"Queen profile not found: {queen_id}")
+        profile_path = materialized
+    original = profile_path.read_text(encoding="utf-8")
+    data = yaml.safe_load(original) or {}
+    for key, value in fields.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    snapshots = profile_path.parent / "_profile_snapshots"
+    snapshots.mkdir(exist_ok=True)
+    (snapshots / f"profile.yaml.{datetime.now():%Y%m%d-%H%M%S}.pre-dashboard-edit").write_text(original, encoding="utf-8")
+    for old in sorted(snapshots.glob("profile.yaml.*.pre-dashboard-edit"))[:-_DASHBOARD_SNAPSHOTS]:
+        old.unlink(missing_ok=True)
+    _atomic_write_text(profile_path, dump_profile(data))
+    return load_queen_profile(queen_id)
 
 
 # ---------------------------------------------------------------------------
@@ -545,10 +655,13 @@ _QUEEN_SELECTOR_DESCRIPTIONS: dict[str, str] = {
 
 def _allowed_queen_ids(active_queen_ids: list[str] | None) -> list[str]:
     """Queens the selector may pick from: the caller's active set, restricted
-    to known defaults. Empty/None (prefs not loaded, older client) falls back
-    to the full catalog rather than refusing to route."""
-    allowed = [qid for qid in (active_queen_ids or []) if qid in DEFAULT_QUEENS]
-    return allowed or list(DEFAULT_QUEENS)
+    to known defaults still in the catalog. Empty/None (prefs not loaded, older
+    client) falls back to the full catalog rather than refusing to route."""
+    removed = removed_queen_ids()
+    # With every default removed there is still someone to route to.
+    catalog = [qid for qid in DEFAULT_QUEENS if qid not in removed] or list(DEFAULT_QUEENS)
+    allowed = [qid for qid in (active_queen_ids or []) if qid in catalog]
+    return allowed or catalog
 
 
 def _queen_selector_system_prompt(allowed_ids: list[str]) -> str:

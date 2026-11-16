@@ -2,7 +2,15 @@
 
 import logging
 
-from framework.config import get_api_base, get_hive_config, get_preferred_model
+import pytest
+
+from framework.config import (
+    MemoryReflectionConfig,
+    get_api_base,
+    get_hive_config,
+    get_memory_reflection_config,
+    get_preferred_model,
+)
 
 
 class TestGetHiveConfig:
@@ -65,3 +73,20 @@ class TestOpenRouterConfig:
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
 
         assert get_api_base() == "https://proxy.example/v1"
+
+
+@pytest.mark.parametrize(
+    ("section", "expected"),
+    [
+        (None, MemoryReflectionConfig(every_turns=6, long_every=4, model="main")),
+        ({"every_turns": 10, "long_every": 2, "model": "worker"}, MemoryReflectionConfig(10, 2, "worker")),
+        ({"every_turns": 0, "long_every": -1, "model": "cheap"}, MemoryReflectionConfig(6, 4, "main")),
+        ({"every_turns": "3", "long_every": True}, MemoryReflectionConfig(6, 4, "main")),
+        ("often", MemoryReflectionConfig(6, 4, "main")),
+    ],
+)
+def test_memory_reflection_config(monkeypatch, section, expected):
+    config = {} if section is None else {"memory_reflection": section}
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: config)
+
+    assert get_memory_reflection_config() == expected

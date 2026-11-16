@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { LlmSection } from "./config";
 
 export interface PortraitDescriptor {
   cut?: string;
@@ -108,6 +109,98 @@ export type QueenToolsResetResult = QueenToolsResponse & {
   refreshed_sessions: number;
 };
 
+export type QueenLlm = {
+  queen_id: string;
+  section: LlmSection | null;
+  /** The main model she uses without a section of her own. */
+  default_model?: string;
+};
+
+/** Her persona as profile.yaml holds it (the fields the profile page edits). */
+export type QueenPersona = {
+  name?: string;
+  title?: string;
+  /** The heart of the persona: free text, often in <tag>…</tag> chapters. */
+  core_traits?: string;
+  /** Comma-separated. */
+  skills?: string;
+  hidden_background?: Record<string, string>;
+  psychological_profile?: Record<string, string>;
+  world_lore?: Record<string, string>;
+  behavior_triggers?: { trigger: string; reaction: string }[];
+};
+
+export type QueenOverview = {
+  queen_id: string;
+  /** `limit`: the most notes her memory keeps. */
+  memory: { count: number; limit: number; by_type: Record<string, number> };
+  sessions: { count: number; first: string | null; last_active: string | null };
+};
+
+export type SoulItem = { text: string; date: string };
+
+export type SoulSectionView = {
+  key: string;
+  title: string;
+  /** Characters the section may hold, and holds now. */
+  limit: number;
+  used: number;
+  max_age_days: number | null;
+  /** Quotes, from different people or chats, each change to it needs. */
+  evidence: number;
+  items: SoulItem[];
+};
+
+export type SoulEdit = {
+  op: "add" | "update" | "remove";
+  section: string;
+  text: string;
+  old: string;
+  date: string;
+  evidence: { quote: string; where: string }[];
+  reason: string;
+  /** Dropped for its age, not by her. */
+  expired: boolean;
+};
+
+export type SoulProposal = {
+  id: string;
+  created_at: string;
+  base_version: number;
+  edits: SoulEdit[];
+  summary: string;
+  status: "pending" | "applied" | "dismissed";
+  sources: string[];
+  bootstrap: boolean;
+  /** Her probe questions answered with the soul before and after these changes. */
+  probes: { q: string; anchor: string; before: string; after: string }[];
+};
+
+export type SoulVersion = { version: number; at: string; author: string; note: string; changes: number };
+
+/** A queen's soul: the short self-description she revises once a day (configuration.json `soul`). */
+export type QueenSoul =
+  | { queen_id: string; enabled: false }
+  | {
+      queen_id: string;
+      enabled: true;
+      /** "review": changes wait for approval; "auto": they apply at once. */
+      mode: "review" | "auto";
+      /** Local hour after which the daily reflection runs. */
+      hour: number;
+      version: number;
+      updated_at: string;
+      sections: SoulSectionView[];
+      proposal: SoulProposal | null;
+      history: SoulVersion[];
+      reflecting: boolean;
+      /** How many probe questions she has, and whether she is answering them now. */
+      probes: number;
+      probing: boolean;
+      last_run: string | null;
+      last_result: string | null;
+    };
+
 export const queensApi = {
   /** List all queen profiles (id, name, title, portrait, has_avatar). */
   list: () =>
@@ -140,9 +233,65 @@ export const queensApi = {
       };
     }>("/queen/create", body),
 
+  /** Take her out of the catalog (the position goes; her files stay, for a restore). */
+  removeQueen: (queenId: string) =>
+    api.post<{ queen_id: string; removed: boolean }>(`/queen/${queenId}/remove`),
+
+  /** Put a removed queen back in the catalog, as she was. */
+  restoreQueen: (queenId: string) =>
+    api.post<{ queen_id: string; removed: boolean }>(`/queen/${queenId}/restore`),
+
+  /** The queens taken out of the catalog. */
+  listRemoved: () =>
+    api.get<{ queens: Array<{ id: string; name: string; title: string; custom?: boolean }> }>("/queen/removed"),
+
   /** Get full profile for a queen. */
   getProfile: (queenId: string) =>
     api.get<QueenProfile>(`/queen/${queenId}/profile`),
+
+  /** The queen's own model (configuration.json `queen_llm`), or `section: null` when she
+   * uses the main model (AI Model → LLM). */
+  getLlm: (queenId: string) =>
+    api.get<QueenLlm>(`/queen/${queenId}/llm`),
+
+  /** Give the queen a model of her own (same shape and key check as the main slot), or
+   * `null` to return her to the main model. Her running sessions switch at once. */
+  setLlm: (queenId: string, section: LlmSection | null) =>
+    api.put<QueenLlm & { sessions_switched: number }>(`/queen/${queenId}/llm`, { section }),
+
+  /** Her persona fields as profile.yaml holds them. */
+  getPersona: (queenId: string) =>
+    api.get<{ queen_id: string; persona: QueenPersona }>(`/queen/${queenId}/persona`),
+
+  /** Replace persona fields whole (`null` removes a map or list); her running chats follow. */
+  setPersona: (queenId: string, persona: Partial<Record<keyof QueenPersona, unknown>>) =>
+    api.put<{ queen_id: string; persona: QueenPersona }>(`/queen/${queenId}/persona`, { persona }),
+
+  /** What her profile page counts: memories by type, sessions, last activity. */
+  getOverview: (queenId: string) => api.get<QueenOverview>(`/queen/${queenId}/overview`),
+
+  /** Her soul by section, the proposal waiting for a decision, and its history. */
+  getSoul: (queenId: string) => api.get<QueenSoul>(`/queen/${queenId}/soul`),
+
+  /** Replace her soul by hand: a new version. */
+  setSoul: (queenId: string, sections: Record<string, SoulItem[]>) =>
+    api.put<QueenSoul>(`/queen/${queenId}/soul`, { sections }),
+
+  /** Apply the accepted changes of a proposal (`null`: all of them; `[]`: dismiss it). */
+  decideSoulProposal: (queenId: string, proposalId: string, accept: number[] | null) =>
+    api.post<QueenSoul>(`/queen/${queenId}/soul/proposals/${proposalId}/decide`, { accept }),
+
+  /** Make an earlier version current again (as a new version). */
+  rollbackSoul: (queenId: string, version: number) =>
+    api.post<QueenSoul>(`/queen/${queenId}/soul/rollback`, { version }),
+
+  /** Answer her probe questions before and after a proposal's changes, in the background. */
+  probeSoulProposal: (queenId: string, proposalId: string) =>
+    api.post<{ started: boolean }>(`/queen/${queenId}/soul/proposals/${proposalId}/probe`),
+
+  /** Run a reflection now, in the background; `bootstrap` writes the first draft. */
+  reflectSoul: (queenId: string, bootstrap = false) =>
+    api.post<{ started: boolean }>(`/queen/${queenId}/soul/reflect`, { bootstrap }),
 
   /** Update queen profile fields (partial update). */
   updateProfile: (queenId: string, updates: Partial<QueenProfile>) =>

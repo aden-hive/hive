@@ -161,7 +161,9 @@ class TestSupabaseAuth:
             }
             result = tool_fns["supabase_auth_signin"](email="a@b.com", password="password123")
 
-        assert result["access_token"] == "jwt-token"
+        assert result["authenticated"] is True
+        assert "access_token" not in result
+        assert "jwt-token" not in str(result)
         assert result["expires_in"] == 3600
 
 

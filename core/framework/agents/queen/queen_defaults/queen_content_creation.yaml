@@ -9,8 +9,7 @@ default_tool_categories:
 - research
 - context_awareness
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: Attention is the asset. Make the thing people actually want to watch, read, and share — then
   make a hundred more. Volume and relevance over one perfect post.
 hidden_background:

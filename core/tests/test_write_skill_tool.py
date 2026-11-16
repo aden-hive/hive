@@ -4,7 +4,9 @@ Companion to ``create_colony``'s inline-skill writing. Covers:
   - Happy path: writes ``~/.hive/colonies/{name}/skills/{skill_name}/`` and
     returns the path so the queen can immediately reference it.
   - Replace-existing: re-writing the same name replaces in place.
-  - No colony bound: fails cleanly (the tool is meaningless outside a colony).
+  - No colony bound: scope="colony" fails cleanly; the default there is the
+    queen's own skills (scope="queen"), and scope="global" files a request
+    the user approves.
   - Invalid input: surfaces validator errors.
   - Source-path mode: copies an on-disk skill folder into the colony scope,
     optionally renaming, and rejects ambiguous mixed-mode payloads.
@@ -121,22 +123,149 @@ async def test_write_skill_replaces_existing(tmp_path: Path, monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_write_skill_no_colony_returns_clear_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """When the session is NOT bound to a colony (queen DM only), refuse cleanly."""
-    monkeypatch.setattr("framework.config.COLONIES_DIR", tmp_path)
+async def test_colony_scope_without_a_colony_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    colonies = tmp_path / "colonies"
+    colonies.mkdir()
+    monkeypatch.setattr("framework.config.COLONIES_DIR", colonies)
     session = _session_for_colony(colony_id=None)
     reg = _registry_for(session)
 
-    body = await _call_write_skill(
-        reg,
-        {
-            "skill_name": "x",
-            "skill_description": "y",
-            "skill_body": "z",
-        },
-    )
-    assert "error" in body
+    body = await _call_write_skill(reg, {"skill_name": "x", "skill_description": "y", "skill_body": "z", "scope": "colony"})
+
     assert "no colony" in body["error"].lower()
+    assert not any(colonies.iterdir())
+
+
+# ---------------------------------------------------------------------------
+# scope="queen" (the default outside a colony) and scope="global"
+# ---------------------------------------------------------------------------
+
+
+def _queen_session(tmp_path: Path, queen_id: str = "queen_ava") -> SimpleNamespace:
+    session = _session_for_colony(colony_id=None)
+    session.queen_name = queen_id
+    session.queen_dir = tmp_path / "sessions" / session.id
+    return session
+
+
+def _queen_skills_manager(queen_id: str = "queen_ava"):
+    """The queen's own catalog, built as queen_orchestrator builds it."""
+    import framework.config as config
+    from framework.skills.discovery import ExtraScope
+    from framework.skills.manager import SkillsManager, SkillsManagerConfig
+
+    queen_home = config.QUEENS_DIR / queen_id
+    mgr = SkillsManager(
+        SkillsManagerConfig(
+            queen_id=queen_id,
+            queen_overrides_path=queen_home / "skills_overrides.json",
+            extra_scope_dirs=[ExtraScope(directory=queen_home / "skills", label="queen_ui", priority=2)],
+            project_root=None,
+            skip_community_discovery=True,
+            interactive=False,
+        )
+    )
+    mgr.load()
+    return mgr
+
+
+def _queen_registry(session: SimpleNamespace, skills_manager=None) -> ToolRegistry:
+    from framework.tools.queen_lifecycle_tools import QueenPhaseState
+
+    phase_state = QueenPhaseState(phase="independent")
+    phase_state.skills_manager = skills_manager
+    reg = ToolRegistry()
+    register_queen_lifecycle_tools(reg, session=session, session_id=session.id, phase_state=phase_state)
+    return reg
+
+
+_HOUSE_STYLE = {
+    "skill_name": "house-style",
+    "skill_description": "How Ava formats her reports.",
+    "skill_body": "# House style\n\nLead with the answer.\n",
+}
+
+
+@pytest.mark.asyncio
+async def test_without_a_colony_it_writes_the_queens_own_skill_into_her_live_catalog(tmp_path: Path) -> None:
+    import framework.config as config
+    from framework.skills.overrides import Provenance, SkillOverrideStore
+
+    mgr = _queen_skills_manager()
+    assert "house-style" not in mgr.skills_catalog_prompt
+    reg = _queen_registry(_queen_session(tmp_path), mgr)
+
+    body = await _call_write_skill(reg, _HOUSE_STYLE)
+
+    assert body["success"] is True, body
+    assert body["scope"] == "queen"
+    queen_home = config.QUEENS_DIR / "queen_ava"
+    assert "Lead with the answer." in (queen_home / "skills" / "house-style" / "SKILL.md").read_text(encoding="utf-8")
+    assert "house-style" in mgr.skills_catalog_prompt
+    entry = SkillOverrideStore.load(queen_home / "skills_overrides.json").get("house-style")
+    assert entry.provenance == Provenance.QUEEN_CREATED
+    assert entry.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_queen_scope_never_replaces_a_skill_the_user_made(tmp_path: Path) -> None:
+    import framework.config as config
+
+    users = config.QUEENS_DIR / "queen_ava" / "skills" / "house-style"
+    users.mkdir(parents=True)
+    (users / "SKILL.md").write_text("---\nname: house-style\ndescription: Mine.\n---\n\nThe user's.\n", encoding="utf-8")
+    reg = _queen_registry(_queen_session(tmp_path))
+
+    body = await _call_write_skill(reg, _HOUSE_STYLE)
+
+    assert "the user made" in body["error"]
+    assert "The user's." in (users / "SKILL.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_queen_scope_replaces_her_own_skill_and_keeps_the_users_switch(tmp_path: Path) -> None:
+    import framework.config as config
+    from framework.skills.overrides import Provenance, SkillOverrideStore
+
+    reg = _queen_registry(_queen_session(tmp_path))
+    await _call_write_skill(reg, _HOUSE_STYLE)
+    store_path = config.QUEENS_DIR / "queen_ava" / "skills_overrides.json"
+    store = SkillOverrideStore.load(store_path)
+    store.get("house-style").enabled = False  # the user turned it off on the Skills page
+    store.save()
+
+    body = await _call_write_skill(reg, {**_HOUSE_STYLE, "skill_body": "# House style\n\nShorter.\n"})
+
+    assert body["replaced"] is True
+    assert "turned this skill off" in body["message"]
+    entry = SkillOverrideStore.load(store_path).get("house-style")
+    assert entry.enabled is False
+    assert entry.provenance == Provenance.QUEEN_CREATED
+
+
+@pytest.mark.asyncio
+async def test_global_scope_files_a_request_and_installs_nothing(tmp_path: Path) -> None:
+    import framework.config as config
+    from framework.host.event_bus import EventType
+    from framework.skills import install_requests
+
+    session = _queen_session(tmp_path)
+    seen = []
+
+    async def on_event(event) -> None:
+        seen.append(event)
+
+    session.event_bus.subscribe(event_types=[EventType.SKILL_INSTALL_REQUESTED], handler=on_event)
+    reg = _queen_registry(session)
+
+    body = await _call_write_skill(reg, {**_HOUSE_STYLE, "scope": "global"})
+
+    assert body["pending"] is True, body
+    [request] = install_requests.pending_requests(session.queen_dir)
+    assert (request["id"], request["name"]) == (body["request_id"], "house-style")
+    assert [e.data for e in seen] == [{"request_id": request["id"], "name": "house-style"}]
+    assert not (config.HIVE_HOME / "skills" / "house-style").exists()
+    assert not (config.QUEENS_DIR / "queen_ava" / "skills" / "house-style").exists()
 
 
 @pytest.mark.asyncio

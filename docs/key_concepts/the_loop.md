@@ -7,7 +7,7 @@ Hive has exactly one execution primitive: the **agent loop**. It's the atom ever
 An agent loop is a multi-turn, streaming conversation with an LLM. Each turn:
 
 1. **Stream** the model's response (text and tool calls).
-2. **Execute** any tool calls — a batch runs in parallel.
+2. **Execute** any tool calls — read-only tools marked safe for concurrency run in parallel, the rest in order.
 3. **Feed results back** into the conversation.
 4. **Decide** whether to stop (the turn produced what was needed) or iterate again.
 
@@ -15,27 +15,30 @@ It keeps going until it's produced its required outputs, hit its budget, or park
 
 ## Self-correction: the reflexion pattern
 
-The most important behavior in the loop is that it evaluates its own work and tries again when it falls short. After a turn, a **judge** checks the result: did it meet the bar?
+The most important behavior in the loop is that it notices when it falls short and tries again. The first layer is simple: every tool result, errors included, goes back into the conversation, so the next turn sees what went wrong and adjusts. Stall and doom-loop detection catch a loop that keeps repeating itself.
+
+Agents that declare [success criteria](./goals_outcome.md) also get a **judge** that checks each finished turn:
 
 - **Accept** — good enough; move on.
 - **Retry** — not yet, but recoverable. The judge's feedback is injected back into the conversation as a message, so on the next turn the loop sees its previous attempt *and* the critique, and adjusts.
-- **Escalate** — something is fundamentally stuck; hand off (to the Queen, or to a human via Sentinel).
+- **Escalate** — something is fundamentally stuck; stop and hand it up.
 
 This is the **reflexion pattern**: try, evaluate, learn from the result, try again — in-context, without retraining the model. An agent that takes three tries to get something right is far more useful than one that fails once and gives up. This is self-correction *within a session*; improvement *across* sessions is covered in [How a Colony Improves](./improvement.md).
 
-The judge itself is a small pipeline — a cheap output-key check first, then an optional custom judge or a quality gate against your [success criteria](./goals_outcome.md). Details in the [Architecture Overview](../architecture/README.md#the-judge-pipeline).
+The judge itself is a small pipeline — a cheap output-key check first, then an optional custom judge or an LLM quality check against the agent's success criteria (`agent_loop/internals/judge_pipeline.py`). The Queen skips it, since you're her judge, and a worker ends when it reports. Details in the [Architecture Overview](../architecture/README.md#one-primitive-the-agentloop).
 
 ## One loop, many settings
 
-The loop is configured by a `LoopConfig`. The Queen and a worker are the same code with different budgets:
+The loop is configured by a `LoopConfig`. The Queen and a worker are the same code with different prompts, tools, and budgets:
 
 | | Queen | Worker clone |
 | --- | --- | --- |
 | Role | persistent, client-facing lead | ephemeral, single task |
-| Iterations | effectively unbounded | ~3 work + 1 grace |
-| Tool budget | generous | tight, plus a lifetime cap |
-| Escalation | can escalate to a human | none — fail fast and report |
-| Memory | scoped, evolving | none (fresh each run) |
+| Iterations | effectively unbounded | 3 work + 1 grace |
+| Tool budget | soft checkpoints every 30 calls (50 in a colony) | 30 per turn (hard stop at 90), 200 over its life |
+| Questions | asks you; Sentinel can escalate for her | none — fail fast and report |
+| Memory | reflection notes and past conversations | none (fresh each run) |
+| Model | your configured model | the same, or a separate worker model |
 
 The **grace iteration** on a worker is a guaranteed wrap-up turn: even if it runs out of budget, it still gets to call `report_to_parent` so it never dies silently. See [The Worker Agent](./worker_agent.md).
 
@@ -48,8 +51,8 @@ Within the loop, work happens in **iterations** — one turn of reason → act �
 Because there's only one primitive, durability is built once and inherited everywhere. Every loop:
 
 - **persists a cursor to disk** and can **park/resume** — a crash, restart, or deploy picks up exactly where it left off;
-- **manages its own context window** through compaction and the [pointer pattern](../architecture/README.md#tool-result-truncation-and-the-pointer-pattern), so long sessions don't blow the budget;
-- **meters every LLM call** so cost limits are enforced;
+- **manages its own context window** through compaction, and spills oversized tool results to a file it can search instead of the conversation ([Reliability](../architecture/README.md#reliability-is-in-the-primitive)), so long sessions don't blow the budget;
+- **meters every LLM call** (tokens and cost) and caps tool calls per turn and per run;
 - **stays coherent** via framework-injected reminders (see [Coordination](./coordination.md#the-reminder-hub)).
 
 ## Learn more

@@ -316,216 +316,6 @@ def initialize_memory_scopes(session: Session, phase_state: Any) -> tuple[Path, 
     return global_dir, queen_dir
 
 
-# The fixed Head-of-RevOps queen the CRM "Set up" / "Configure" buttons hand off
-# to — the board the CRM renders IS a sales pipeline, and setup is a conversation
-# about how this team's deals actually move. When she is active the session is
-# about the CRM, so we force the current global state to be loaded before any
-# change. Not sufficient on its own to mean "a setup session", though: she is an
-# ordinary queen the user can also just talk to. ``Session.crm_setup`` is the
-# label for that.
-CRM_QUEEN_ID = "queen_sales"
-
-# Always on for the CRM host queen, setup or not: she owns this team's board, so
-# any change she makes has to start from its current state — which is the one
-# thing the comment above says her identity IS sufficient to establish. Scoped to
-# that mandate and to tooling hygiene; the setup PLAYBOOK is a separate string
-# below, gated separately.
-_CRM_STATE_DIRECTIVE = """\
-
-# CRM — load the current state FIRST (mandatory)
-Before you change ANYTHING in this team's CRM — before your first user-facing \
-sentence about what to do — call the `crm_summary` tool. It returns the \
-up-to-date GLOBAL picture: contact / company / opportunity counts and their \
-lifecycle distribution, the custom fields already defined, data-quality signals, \
-and this team's existing CRM steering rules. Base every change on what the \
-summary returns and follow the steering rules it surfaces. The CRM will refuse \
-writes until you have loaded it. Do not describe the tool, the data plumbing, or \
-that you "loaded" anything to the user — just speak to their pipeline in \
-business terms (you are their Head of RevOps, not their engineer).
-
-# Never debug the CRM in front of the user
-`hive-crm whoami --json` returns `commands.available` and \
-`commands.not_in_this_build`. Read it once and route around what is missing. Do \
-NOT run `--help` on one noun after another to discover the surface, and do NOT \
-write a test/placeholder record to check whether writes work — the user sees \
-every record you create, and watching you probe your own tooling reads as a \
-broken product."""
-
-
-# The setup PLAYBOOK — appended only while a setup handoff is actually owed.
-#
-# Every line here presumes the user is locked out of a CRM they have never seen:
-# the two rounds of questions, the example records, the five-minute budget, and
-# above all "your FINAL action of the turn is `hive-crm reveal` — always, and
-# without being asked". In an ordinary post-setup chat that premise is simply
-# false, and the reveal mandate is unconditional enough that the queen follows it
-# anyway — handing a user who asked a casual question a fresh "your CRM's ready
-# to explore" card. Hence the gate in `_with_crm_directives`: identity alone is
-# NOT a setup session (see CRM_QUEEN_ID above), and a setup session whose reveal
-# already happened is not one either.
-_CRM_SETUP_DIRECTIVE = """\
-
-# CRM configuration — you are here to configure this team's CRM
-The `crm_summary` above also carries — automatically, for you — a `campaigns` \
-INDEX of every existing campaign: each colony's one-line goal and its tracker \
-tables with column names and a `row_count`. That index answers exactly ONE \
-question — which campaign already produced leads worth importing — and `row_count` \
-is the answer (see "do not hand back an EMPTY CRM" below). It carries no row \
-values, and you must NOT go read colony databases to make up the difference. \
-Campaigns are evidence of what this user has WORKED ON; they are NOT a \
-specification of what their business is, and you must not infer their pipeline, \
-their ICP or their fields from one. What they sell you learn by ASKING them.
-
-# If the CRM is fresh or still on the default pipeline, ASK BEFORE YOU BUILD
-When the summary comes back near-empty, or its `pipelines_configured.person` is \
-false (this team is still on the stock pipeline), you do NOT yet know enough to \
-recommend anything — you do not know what this user sells. Fill that gap by \
-ASKING, and only by asking. Do not substitute a stock pipeline or a stale memory \
-file — and do NOT go read their website or marketing pages. Their site tells you \
-how they position, never how they sell; it is the slowest possible route to a \
-worse answer than one question gets you, and the user is sitting on a locked \
-screen while you browse. Map their sales process WITH \
-them, starting from the product itself: what EXACTLY they sell and what the \
-buyer walks away with (push past the category to the real thing), what makes \
-someone buy or pass, who signs off, their most recent real deal end to end, where \
-deals stall, what makes a lead worth their time, what they must know before \
-calling one qualified, and what a deal is worth. A few questions per round is \
-fine — the ROUND is the unit, and what matters is that round 2 is built from \
-their round-1 answers rather than written in advance. You will not get all of \
-that in two rounds and you should not try: ask what you need to build a board \
-they recognize, and let the rest come from them correcting it.
-
-EVERY QUESTION IN BOTH ROUNDS IS ABOUT THEIR BUSINESS, NOT THEIR DATA. Never \
-spend a question on cleaning up stale records, on reconciling stage names against \
-whatever is already stored, or on whether to import their existing contacts. None \
-of that teaches you what they sell, and it turns a five-minute setup into data-ops \
-decisions about a board they have not seen yet. Whatever is already in the CRM, \
-leave it: build their pipeline from what they tell you, and show it to them. Any \
-decision the stored data really needs comes AFTER the reveal, with the board in \
-front of them — and bringing in their campaign leads is gated until then anyway.
-
-AT LEAST TWO ROUNDS OF QUESTIONS BEFORE YOU CONFIGURE ANYTHING — a hard floor, \
-not a target. One round only ever yields labels ("I sell to VCs", "enterprise \
-SaaS"), which is exactly enough to build a generic template and no more. Round 1 \
-establishes what the business IS (what they sell, what the buyer gets, who signs \
-off). Round 2 is built FROM their round-1 answers, not from a pre-written list — \
-walk me through your last real deal, where did it stall, what made it worth your \
-time, what did you need to know before taking the call. NEVER write schema in \
-the same turn as the first answer: if you are reaching for `stages set` or \
-`fields add` after one exchange, you do not yet know enough — ask the second \
-round first. But two rounds is also the NORMAL number: a third only if an \
-answer genuinely opened something up, and never a fourth. You are not trying to \
-understand their business completely — only well enough to build a first board \
-they recognize, which they will correct once they can see it.
-
-You are their Head of RevOps, so as you build, say the ONE thing you would \
-change about how they sell — a leak in the process, a qualification bar set too \
-loose or too tight, something they should be tracking and aren't. One \
-observation, offered as a recommendation they can reject, in the same breath as \
-the work. Not a consulting report, not its own turn, never instead of \
-configuring.
-
-Then make their answers REAL: their stages (in their words, in their order, with \
-the gate on each) via `hive-crm stages set`, and the facts they track via \
-`hive-crm fields add` — 4-8 fields specific to THEIR business, and then actually \
-populate them (`person add --field name=value`), because a declared field nobody \
-fills is a permanently empty column. Resist a ninth: fields are trivial to add \
-later with the user watching the board, and every one you declare now is one you \
-owe a value for on every record you write. A pipeline captured only as prose in \
-`hive-crm memory` is invisible to the user — they will open the CRM and see the \
-same generic template they started with, which is a failed setup no matter how \
-good the conversation was. Use memory for behavior and judgment, never for \
-structure.
-
-Name stages after what the BUYER has done ("replied", "took a demo", "pilot \
-running"), never after your own activity ("emailed", "followed up") — an \
-activity board looks busy and tells the user nothing about which deals are real.
-
-Finally, do not hand back an EMPTY CRM — it teaches nothing and feels broken. \
-Fill it in TWO STAGES, in this order, and the order is enforced:
-
-(1) BEFORE you reveal: write 3-5 records YOURSELF that are PLAUSIBLE for this \
-specific business, with the custom fields filled and spread across stages so the \
-board reads. Build them from what THIS user told you they sell — if you are \
-inventing a vertical they never mentioned, stop and use theirs. Say plainly they \
-are examples you will replace with their real data. Never junk placeholders \
-("Test Person", test@example.com): the user sees everything you leave behind. \
-That is enough to reveal — you are NOT waiting for real data here.
-
-DO NOT PREPARE THE IMPORT BEFORE YOU REVEAL. The reveal needs nothing from you \
-about the campaign data — no chosen campaign, no column mapping, no plan. So \
-before revealing: do not open a colony's tracker, do not work out which columns \
-map to which fields, do not decide which campaign to pull in. Being confident \
-about the import is not a precondition for revealing; it is the conversation you \
-have AFTER, with the user, who is the one who knows which list is real. Anything \
-you prepare first is prepared blind — if they choose a different campaign, or \
-none, it is all thrown away, and every minute of it was a minute they sat locked \
-out of a CRM you had already finished building.
-
-(2) AFTER the reveal: `hive-crm import` is REFUSED until the user has seen their \
-board (exit 6, `reveal_required`) — that is the ordering, not an error to route \
-around. Once revealed, if the `campaigns` index shows a tracker table with a \
-non-zero `row_count`, pull it in with `hive-crm import --file`; you supply the \
-column mapping and the bulk upsert is done for you. When more than one campaign \
-has data, ASK which one matters rather than taking the biggest — the largest \
-table is usually a scraped list, not their pipeline. Then DELETE the example \
-records you wrote, so the board is not part fiction. Tell the user in one line \
-what landed. The big import running while they are already looking at their \
-board is the entire point: they are never locked out waiting for it.
-
-DO NOT RESEARCH INDIVIDUAL COMPANIES OR PEOPLE DURING SETUP. No `web_scrape`, \
-no browser, no looking up a prospect's headcount or funding round to fill a \
-field — not for imported rows, not for records that were already in the CRM \
-before you started. If you do not know a value, leave it blank or write the \
-plausible one. Enrichment is real work, but it is work you offer AFTER the \
-reveal, as its own task the user opts into. A single company lookup is the \
-first step of a twenty-minute detour that ends with the user still unable to \
-see their CRM.
-
-Likewise: do not audit or clean up records that predate this session. They are \
-not your setup's problem, and a board with some older rows in it is far better \
-than a board the user cannot open yet.
-
-# Setup is a FIVE MINUTE job — reveal early, refine after
-The user was told this takes about five minutes, and they are staring at a \
-locked setup screen until you reveal. Treat that as the budget: roughly two \
-rounds of questions, stages, fields, something in the board, reveal. If you have \
-been working for more than about ten minutes and have not revealed, you have \
-already gone wrong — stop whatever you are perfecting and reveal what you have.
-
-Reveal is a CHECKPOINT, not a finish line. The board does not have to be \
-finished or complete; it has to be honest and recognizable — their stages in \
-their words, columns that read as their business, a few records so it is not \
-blank, and nothing they would have to explain away. That bar is reachable in \
-minutes. Everything past it — more fields, real leads, enrichment, cleanup — is \
-better done WITH them looking at the board than in front of a locked screen, \
-because that is when their corrections start, and their corrections are worth \
-more than your extra polish.
-
-The only thing that justifies delaying a reveal is that the board would \
-genuinely embarrass them: stock template columns, or zero records. Not "I could \
-make this better."
-
-# `hive-crm reveal` — run it, or the user never sees the CRM (mandatory)
-"Reveal" is a COMMAND you run, not a quality bar you describe. Running \
-`hive-crm reveal` is the ONLY thing that gives the user a button to open their \
-CRM. Until you run it they are still sitting on the setup prompt — no matter how \
-much you configured, no matter how clearly you summarized it. A report is not a \
-reveal: telling them what you built while they have no way to look at it is the \
-single worst way to end a setup turn.
-
-So: as soon as the CRM clears that bar, your FINAL action of the turn is \
-`hive-crm reveal` — always, and without being asked. If you ever find yourself \
-writing "I'm done" or "that's the finished configuration", you should already \
-have run it. Never make the user ask you to reveal, and never answer "is it \
-done?" with anything but a reveal or a one-line reason you are not ready.
-
-Keep the message you send alongside it SHORT — two or three plain sentences on \
-what is there and what you would do next. No headers, no "Done / Not done" \
-lists, no tables, no dumps of the summary JSON. Never announce the CRM as \
-complete: configuration continues after the reveal."""
-
-
 async def materialize_queen_identity(
     session: Session,
     phase_state: Any,
@@ -564,13 +354,25 @@ async def materialize_queen_identity(
 
 
 _SCOPE_SENSITIVE_MCP_SERVERS: frozenset[str] = frozenset({"memory-tools"})
-"""MCP servers whose subprocesses bind to a queen/colony scope via env vars
-(e.g. memory-tools reads HIVE_QUEEN_ID at startup). The bare bootstrap
-registry is queen-agnostic, so spawning these here would pool a stale
-empty-env subprocess that later queen sessions would silently inherit
-(returning ``scope_unbound`` from every tool call). Real queen sessions
-load these servers through queen_orchestrator's slow path with the right
-env injected, so skipping them in the bootstrap is safe."""
+"""Tool groups that only work bound to a queen/colony scope (memory-tools
+scopes ``search_messages`` by the session's queen or colony). The bare
+bootstrap registry is queen-agnostic, so it leaves them out rather than
+list tools that would answer ``scope_unbound``. Real queen sessions load
+them through queen_orchestrator's slow path with their identity set."""
+
+
+def _recall_past_conversations(session: Any, text: str, current_session: str) -> str | None:
+    """Excerpts of earlier sessions related to *text*, or None.
+
+    Searches the same history the memory tools do (``_session_identity``):
+    the colony's once the session is bound to one, else the queen's own.
+    Resolved per message, because a live session can bind or unbind.
+    """
+    from memory_tools.recall import recall_block
+
+    if session.colony_id:
+        return recall_block("colonies", session.colony_id, text, exclude_session=current_session)
+    return recall_block("queens", session.queen_name or "default", text, exclude_session=current_session)
 
 
 def build_queen_tool_registry_bare() -> tuple[Any, dict[str, list[dict[str, Any]]]]:
@@ -730,11 +532,19 @@ async def create_queen(
     from framework.llm.capabilities import supports_image_tool_results
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
+
+    # A queen with a model of her own (queen_llm) runs on it. Nothing holds session.llm yet, so
+    # it is replaced outright; a queen picked later is switched in place (queen_models.apply).
+    from framework.server import boot_status, queen_models
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         normalize_legacy_phase,
         register_queen_lifecycle_tools,
     )
+
+    if queen_models.has_own(session.queen_name):
+        session.llm = queen_models.build(session.queen_name)
+        logger.info("Queen %s uses her own model %s", session.queen_name, getattr(session.llm, "model", "?"))
 
     # ---- Tool registry ------------------------------------------------
     # Use pre-loaded cached registry if available (fast path)
@@ -743,13 +553,24 @@ async def create_queen(
         logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
     else:
         # Build fresh (slow path - for backwards compatibility)
+        boot_status.report("Loading tools")
         queen_registry = ToolRegistry()
-        # Inject the queen's identity into every MCP subprocess this
-        # registry spawns. The memory-tools server reads HIVE_QUEEN_ID
-        # to scope `search_messages` to this queen's own history (the
-        # model never picks the scope itself). Set BEFORE MCP servers
-        # are registered, since env is captured at MCPClient construction.
-        queen_registry.set_mcp_extra_env({"HIVE_QUEEN_ID": session.queen_name or "default"})
+
+        # The session's identity, handed to every tool this registry runs.
+        # memory-tools scopes `search_messages` by it (the model never picks
+        # the scope): a DM searches the queen's own history; once the
+        # session is bound to a colony, the colony's — its overseer
+        # sessions, which also log what its workers' tools returned. Workers
+        # run on this registry too, so they get the colony scope as well.
+        # Re-read per call, because a live session can bind or unbind a
+        # colony. Set BEFORE servers are registered: user MCP subprocesses
+        # capture it in their env at spawn.
+        def _session_identity() -> dict[str, str]:
+            if session.colony_id:
+                return {"HIVE_COLONY_NAME": session.colony_id}
+            return {"HIVE_QUEEN_ID": session.queen_name or "default"}
+
+        queen_registry.set_identity_env_provider(_session_identity)
         import framework.agents.queen as _queen_pkg
 
         queen_pkg_dir = Path(_queen_pkg.__file__).parent
@@ -757,7 +578,7 @@ async def create_queen(
         if mcp_config.exists():
             try:
                 queen_registry.load_mcp_config(mcp_config)
-                logger.info("Queen: loaded MCP tools from %s", mcp_config)
+                logger.debug("Queen: loaded server config %s", mcp_config)
             except Exception:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
@@ -813,9 +634,17 @@ async def create_queen(
                     log_collisions=True,
                     max_tools=selection_max_tools,
                 )
-                logger.info("Queen: loaded MCP registry servers: %s", results)
+                from framework.tools.harness_tools import HARNESS_GROUP_NAMES
+
+                harness = {r["server"]: r["tools_loaded"] for r in results if r["server"] in HARNESS_GROUP_NAMES}
+                external = [r for r in results if r["server"] not in HARNESS_GROUP_NAMES]
+                logger.info("Queen: harness tool groups: %s", harness)
+                if external:
+                    logger.info("Queen: external MCP servers: %s", external)
         except Exception:
             logger.warning("Queen: MCP registry config failed to load", exc_info=True)
+
+    boot_status.report("Composing queen prompt")
 
     # ---- Phase state --------------------------------------------------
     # Phase resolution cascade — first non-empty wins:
@@ -846,6 +675,8 @@ async def create_queen(
             # create, and a resume passes no body at all.
             if _persisted.get("crm_setup"):
                 session.crm_setup = True
+            if isinstance(_persisted.get("channel"), str):
+                session.channel = _persisted["channel"]
         except (json.JSONDecodeError, OSError):
             persisted_phase = None
     bound_to_colony = bool(session.colony_id or session.binding or session.worker_path)
@@ -866,10 +697,13 @@ async def create_queen(
     # ---- Ambient credentials provider --------------------------------
     # Renders the "Connected integrations" block injected into every Queen
     # phase prompt so the Queen always knows which credentials are connected
-    # without having to call list_credentials. Cached briefly to keep the
+    # without having to run `hive-cred browse`. Cached briefly to keep the
     # per-iteration prompt rebuild cheap; invalidated by routes_credentials
     # when the user adds/removes an integration.
     phase_state.credentials_prompt_provider = _build_credentials_provider(session.id)
+    from framework.loader.mcp_cli import registry_cli_servers_prompt
+
+    phase_state.mcp_cli_prompt = registry_cli_servers_prompt()
 
     # ---- Lifecycle tools (always registered) --------------------------
     register_queen_lifecycle_tools(
@@ -1277,7 +1111,7 @@ async def create_queen(
         total_mcp = len(phase_state.mcp_tool_names_all)
         allowed_mcp = len(set(phase_state.enabled_mcp_tools) & phase_state.mcp_tool_names_all)
         logger.info(
-            "Queen: per-queen MCP allowlist active — %d of %d MCP tools enabled",
+            "Queen: per-queen tool allowlist active — %d of %d gateable tools enabled",
             allowed_mcp,
             total_mcp,
         )
@@ -1460,10 +1294,14 @@ async def create_queen(
         if not block or block == _last_injected_recall:
             return
         _last_injected_recall = block
+        # wake=False: recall is context for a turn, never a reason to take
+        # one. A wake-up injection could land just after the queen replied
+        # and make her answer the same message again.
         await loop.inject_event(
             "<system-reminder>\nRecalled memories relevant to the latest "
             "user message (supersedes earlier recall reminders):\n\n"
-            f"{block}\n</system-reminder>"
+            f"{block}\n</system-reminder>",
+            wake=False,
         )
 
     async def _recall_on_user_input(event: AgentEvent) -> None:
@@ -1474,9 +1312,9 @@ async def create_queen(
         we fire it off as a background task. The immediate injection delivers
         whatever recall we already cached (seeding or the prior turn's
         refresh) so this turn starts with relevant memories; the background
-        refresh injects the fresh blocks mid-turn if they differ — but only
-        while the queen is still executing, so a slow refresh landing after
-        the turn ended doesn't wake her into a spurious reply. Phase-change
+        refresh injects the fresh blocks if they differ. Both injections are
+        non-waking: they join the queen's next drain (mid-turn if she is
+        still working, else with the user's next message). Phase-change
         injections and worker-report injections go through
         agent_loop.inject_event() and do NOT publish CLIENT_INPUT_RECEIVED,
         so this runs exactly once per real user turn.
@@ -1487,11 +1325,7 @@ async def create_queen(
         async def _bg_refresh() -> None:
             try:
                 await _refresh_recall_cache(query)
-                from framework.agent_loop.reminders import LoopActivity
-
-                loop = _get_queen_node()
-                if loop is not None and getattr(loop, "activity", None) == LoopActivity.EXECUTING:
-                    await _inject_recall_if_changed()
+                await _inject_recall_if_changed()
             except Exception:
                 logger.debug("background recall refresh failed", exc_info=True)
 
@@ -1520,7 +1354,8 @@ async def create_queen(
         # queen in the UI), use that identity instead of LLM auto-selection.
         # Also skip LLM auto-selection if queen was already selected during
         # session creation (e.g., from home screen classification).
-        if session.queen_name and session.queen_name != "default":
+        preselected = bool(session.queen_name and session.queen_name != "default")
+        if preselected:
             queen_id = session.queen_name
             logger.info("Using pre-selected queen: %s", queen_id)
         else:
@@ -1541,6 +1376,9 @@ async def create_queen(
         phase_state.queen_identity_prompt = identity_prompt
         # Route session storage to ~/.hive/agents/queens/{queen_id}/sessions/
         session.queen_name = queen_id
+        # Picked just now: if she has a model of her own, her running loop switches to it.
+        if not preselected and queen_models.has_own(queen_id):
+            queen_models.apply(session.llm, queen_id, default_model=getattr(session_manager, "_model", None))
 
         # Relocate session dir from default/ to the selected queen's dir
         # so all writes (conversations, events) go to the correct queen.
@@ -1613,9 +1451,7 @@ async def create_queen(
 
         # Seeded recall is delivered by _recall_on_user_input's immediate
         # injection on the first CLIENT_INPUT_RECEIVED; the system prompt
-        # itself stays static. The CRM host queen gets the forced "load the CRM
-        # summary first" directive appended — in her DM, never once bound to a
-        # colony — plus the setup playbook while that handoff is still owed.
+        # itself stays static.
         return HookResult(system_prompt=phase_state.get_current_prompt())
 
     # ---- Colony preparation -------------------------------------------
@@ -1753,8 +1589,8 @@ async def create_queen(
             _iter_cap = _os.environ.get("HIVE_MAX_ITER")
             _default_max_iter = int(_iter_cap) if (_iter_cap and _iter_cap.isdigit()) else 999_999
             from framework.config import (
-                get_max_context_tokens as _get_max_ctx,
                 get_max_tool_result_chars as _get_max_trc,
+                get_queen_max_context_tokens as _get_queen_max_ctx,
             )
 
             queen_loop_config = LoopConfig(
@@ -1764,7 +1600,7 @@ async def create_queen(
                 # Config/catalog first (llm.max_context_tokens, model window),
                 # then the queen profile's legacy literal — a 32k local model
                 # must not run with a 180k compaction budget.
-                max_context_tokens=_get_max_ctx(fallback=lc.get("max_context_tokens", 180_000)),
+                max_context_tokens=_get_queen_max_ctx(session.queen_name, fallback=lc.get("max_context_tokens", 180_000)),
                 max_tool_result_chars=_get_max_trc(fallback=lc.get("max_tool_result_chars", 30_000)),
                 spillover_dir=str(queen_dir / "data"),
                 hooks=lc.get("hooks", {}),
@@ -1779,6 +1615,7 @@ async def create_queen(
                 conversation_store=conversation_store,
             )
 
+            from framework.server.turn_context import for_session as turn_context_for_session
             from framework.tracker.decision_tracker import DecisionTracker
 
             queen_spec = AgentSpec(
@@ -1845,6 +1682,17 @@ async def create_queen(
                 # when no colony runtime has been bound yet (independent
                 # phase or pre-fork).
                 active_workers_provider=lambda: session.colony.get_active_streams() if getattr(session, "colony", None) is not None else [],
+                # Excerpts of this queen's earlier sessions related to the
+                # user's message, injected before each turn so recalling
+                # history doesn't hinge on the queen deciding to search.
+                # Same scope search_messages uses; the live session is
+                # excluded (it's already in context).
+                past_conversation_recall_provider=lambda text: _recall_past_conversations(session, text, queen_dir.name),
+                chat_app_provider=lambda: session.channel,
+                # Whatever installed turn-context packages (e.g. voice
+                # examples) want her to see before she answers; nothing
+                # when none is installed and enabled.
+                turn_context_provider=turn_context_for_session(session),
                 # Resolves the on-disk colony binding for tool-budget
                 # checkpoint reminders (tracker + fleet snapshots).
                 # Returns None for an independent-mode queen (no colony
@@ -2051,14 +1899,35 @@ async def create_queen(
 
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
+            # Memory work runs on the worker model when memory_reflection.model says so.
+            _memory_llm = session_manager.memory_llm(session) if session_manager is not None else session.llm
             _reflection_subs = await subscribe_reflection_triggers(
                 session.event_bus,
                 queen_dir,
-                session.llm,
+                _memory_llm,
                 global_memory_dir=global_dir,
                 queen_memory_dir=queen_mem_dir,
                 queen_id=session.queen_name,
             )
+            # Dated timeline of what the user mentions (search_timeline):
+            # extracted in the background as the session goes, and for a
+            # few recent earlier sessions that predate it.
+            from framework.agents.queen.timeline import subscribe_timeline_triggers
+
+            _reflection_subs += await subscribe_timeline_triggers(session.event_bus, queen_dir, _memory_llm)
+            # Session title, written by the worker model after the first turn.
+            from framework.server.session_titles import subscribe_title_trigger
+
+            _title_llm = (session_manager.build_worker_llm() if session_manager is not None else None) or session.llm
+            _reflection_subs += subscribe_title_trigger(session.event_bus, queen_dir, _title_llm)
+            # Developer option: a judge catches turns that talk about work and stop without doing it.
+            from framework.server.stall_check import subscribe_stall_check
+
+            def _queen_node():
+                executor = session.queen_executor
+                return executor.node_registry.get("queen") if executor is not None else None
+
+            _reflection_subs += subscribe_stall_check(session.event_bus, _queen_node)
             session.memory_reflection_subs = _reflection_subs
 
             # Set initial user message based on mode:

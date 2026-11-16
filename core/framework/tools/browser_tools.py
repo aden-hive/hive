@@ -115,4 +115,8 @@ def register_browser_tools(registry: ToolRegistry, *, role: str = "queen") -> No
     for tool, async_executor in build_browser_tools():
         registry.register(tool.name, tool, _wrap_async_executor(async_executor))
         registered.append(tool.name)
+    # Gateable like the other built-in tools: the browser categories and
+    # allowlists name browser_setup, which they only see when it is
+    # recorded under a group.
+    registry.record_builtin_tools("browser", registered)
     logger.debug("Registered browser tools (role=%s): %s", role, registered)

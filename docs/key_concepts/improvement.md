@@ -10,17 +10,17 @@ Hive improves a colony through four in-band mechanisms — all part of the runni
 
 ### 1. Reflexion
 
-The [agent loop](./the_loop.md) evaluates its own output every turn. When the judge issues a **retry**, its feedback is injected back into the conversation, so on the next turn the agent sees its previous attempt *and* the critique and adjusts. This is in-context learning — the agent gets it right on the second or third try without anyone intervening. It handles the bumps *within* a single run. (See [The Loop → self-correction](./the_loop.md#self-correction-the-reflexion-pattern).)
+The [agent loop](./the_loop.md) sees every tool result and error and adjusts on its next turn. Agents that declare success criteria also get a judge: when it issues a **retry**, its feedback is injected back into the conversation, so on the next turn the agent sees its previous attempt *and* the critique and adjusts. This is in-context learning — the agent gets it right on the second or third try without anyone intervening. It handles the bumps *within* a single run. (See [The Loop → self-correction](./the_loop.md#self-correction-the-reflexion-pattern).)
 
 ## Across sessions
 
 ### 2. Scoped, evolving memory
 
-As a [Queen](./queen.md) works, a cooldown-gated reflection step writes durable notes into scoped markdown memory — per-global, per-colony, per-queen. A recall selector surfaces the relevant notes on later sessions. Over time a Queen accumulates real context about you, your business, and what worked before, and brings it to new work. This is improvement by *remembering*, not by rewriting.
+As a [Queen](./queen.md) works, a cooldown-gated reflection step writes durable notes into scoped markdown memory — global notes about you and your business, and notes per queen. A recall selector surfaces the relevant notes on later sessions, and relevant excerpts of earlier conversations are recalled too. Over time a Queen accumulates real context about you, your business, and what worked before, and brings it to new work. This is improvement by *remembering*, not by rewriting.
 
-### 3. Learned, tool-gated skills
+### 3. Learned skills
 
-When a Queen proves out a way of doing something, it can become a **skill** — a reusable protocol that joins her baseline. Skills are **tool-gated**: a skill only activates when the tools it needs are actually present, so a Queen never tries to run a protocol she isn't equipped for. Learned skills mean the *next* time a similar task shows up, the colony already knows the drill.
+When a Queen proves out a way of doing something during the pilot, she writes it down as a **skill** with `write_skill`: the method, the edge cases she hit, and how to record the result. It lands in the colony's `skills/` directory and shows up in the skill catalog of every worker she spawns afterwards, which loads it on demand. Learned skills mean the *next* unit of work, and the next run, starts from the method that worked instead of rediscovering it.
 
 ### 4. Systematization (the playbook)
 
@@ -32,7 +32,7 @@ The playbook owns no state of its own: the [tracker](./coordination.md#the-track
 
 An important distinction: these mechanisms make a colony more *reliable*, not more generally intelligent. The colony isn't learning to reason better in the abstract — it's remembering what worked, encoding it as skills, and turning proven pilots into repeatable processes. That's improvement on the *kinds* of problems the colony has already encountered.
 
-For genuinely novel situations, that's what [human-in-the-loop](./coordination.md#human-in-the-loop-sentinel) is for — and every time a human steps in, that decision becomes context the Queen can remember and reuse.
+For genuinely novel situations, that's what [human-in-the-loop](./coordination.md#human-in-the-loop) is for — and every time a human steps in, that decision becomes context the Queen can remember and reuse.
 
 ## Learn more
 

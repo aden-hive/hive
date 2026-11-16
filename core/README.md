@@ -1,12 +1,12 @@
 # Core Framework
 
-The core runtime that powers Hive [colonies of agents](../docs/key_concepts/colony.md): the `AgentLoop` primitive, the `ColonyRuntime`, the Queen/worker model, and the HTTP server + CLI that drive them.
+The core runtime that powers Hive [colonies of agents](https://github.com/aden-hive/hive/blob/main/docs/key_concepts/colony.md): the `AgentLoop` primitive, the `ColonyRuntime`, the Queen/worker model, and the HTTP server + CLI that drive them.
 
 ## Overview
 
 Hive has a single execution primitive — the **`AgentLoop`** (`framework/agent_loop/agent_loop.py`), a multi-turn streaming LLM loop. A **Queen** is a long-lived `AgentLoop`; every **worker** is a bounded clone of it. The **`ColonyRuntime`** (`framework/host/colony_runtime.py`) spawns and schedules those clones and collects their results. There are no graphs, nodes, or edges — a colony coordinates through a shared SQLite **tracker**, a persistent **task plan**, an **event bus**, and a **reminder hub**.
 
-For the full design, read the **[Architecture Overview](../docs/architecture/README.md)** and the [key concepts](../docs/key_concepts/colony.md).
+For the full design, read the **[Architecture Overview](https://github.com/aden-hive/hive/blob/main/docs/architecture/README.md)** and the [key concepts](https://github.com/aden-hive/hive/blob/main/docs/key_concepts/colony.md).
 
 ## Setup
 
@@ -79,4 +79,4 @@ A colony is self-contained in its directory, which is what makes it portable (ex
 
 ## Testing
 
-The framework includes a goal-based testing harness for validating agent behavior. See the [Developer Guide](../docs/developer-guide.md) for workflows.
+The framework includes a goal-based testing harness for validating agent behavior. See the [Developer Guide](https://github.com/aden-hive/hive/blob/main/docs/developer-guide.md) for workflows.

@@ -21,13 +21,18 @@ from framework.loader.mcp_errors import MCPToolNotFoundError
 
 logger = logging.getLogger(__name__)
 
+# How long a new connection may take to finish the MCP handshake. Past it the
+# connect fails instead of publishing a session whose calls would all hang.
+_CONNECT_READY_TIMEOUT_S = 10.0
+
 
 @dataclass
 class MCPServerConfig:
     """Configuration for an MCP server connection."""
 
     name: str
-    transport: Literal["stdio", "http", "unix", "sse"]
+    # "harness": an in-process tool group (framework.tools.harness_tools); never connected.
+    transport: Literal["stdio", "http", "unix", "sse", "harness"]
 
     # For STDIO transport
     command: str | None = None
@@ -444,12 +449,17 @@ class MCPClient:
                 raise RuntimeError("Event loop failed to start")
 
             # Wait for connection to be ready
-            connection_ready.wait(timeout=10)
+            connection_ready.wait(timeout=_CONNECT_READY_TIMEOUT_S)
             if connection_error:
                 # The owner's finally already cleaned its contexts; stop the
                 # loop and reap the thread so a failed connect leaks nothing.
                 self._teardown_conn(conn)
                 raise connection_error[0]
+            if not connection_ready.is_set():
+                # A server that never finishes the MCP handshake must fail
+                # here, not be published as a connection whose every call hangs.
+                self._teardown_conn(conn)
+                raise RuntimeError(f"Timed out waiting for MCP stdio connection to initialize (server {self.config.name!r})")
 
             # Publish only a fully-initialized connection.
             self._conn = conn
@@ -565,10 +575,13 @@ class MCPClient:
                 self._teardown_conn(conn)
                 raise RuntimeError("Event loop failed to start")
 
-            connection_ready.wait(timeout=10)
+            connection_ready.wait(timeout=_CONNECT_READY_TIMEOUT_S)
             if connection_error:
                 self._teardown_conn(conn)
                 raise connection_error[0]
+            if not connection_ready.is_set():
+                self._teardown_conn(conn)
+                raise RuntimeError(f"Timed out waiting for MCP SSE connection to initialize (server {self.config.name!r})")
 
             self._conn = conn
             logger.info(f"Connected to MCP server '{self.config.name}' via SSE")

@@ -71,6 +71,10 @@ const MOUTH_PATHS: Record<string, string> = {
   smirk: "M44,76 Q50,79 56,75",
 };
 
+/** A pointy-top hexagon as a clip-path, matching the bee-theme HiveLogo and this glyph's frame:
+ *  clips a queen's avatar into a honeycomb cell instead of a circle. */
+export const HEX_CLIP = "polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%)";
+
 interface QueenPortraitGlyphProps {
   p: PortraitDescriptor;
   className?: string;

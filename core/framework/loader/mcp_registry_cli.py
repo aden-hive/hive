@@ -13,10 +13,13 @@ Commands:
     hive mcp health [name]            Check server health
     hive mcp update                   Refresh index and update installed servers
     hive mcp update <name>            Update a single installed server
+    hive mcp mode <name> cli|tools    Reach a server from the terminal, or as tools
+    hive mcp run <name> [args...]     Run a server's tools as commands (mcp2cli)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -210,7 +213,9 @@ def _render_installed_table(entries: list[dict]) -> None:
     transport_w = max(len(e.get("transport", "")) for e in entries)
     transport_w = max(transport_w, 9)
 
-    header = f"  {'NAME':<{name_w}}  {'TRANSPORT':<{transport_w}}  {'ENABLED':<7}  {'HEALTH':<9}  {'TOOLS':<5}  {'TRUST':<10}  {'SOURCE'}"
+    header = (
+        f"  {'NAME':<{name_w}}  {'TRANSPORT':<{transport_w}}  {'MODE':<5}  {'ENABLED':<7}  {'HEALTH':<9}  {'TOOLS':<5}  {'TRUST':<10}  {'SOURCE'}"
+    )
     print(header)
     print("  " + "─" * (len(header) - 2))
 
@@ -220,11 +225,12 @@ def _render_installed_table(entries: list[dict]) -> None:
         health_sym = {"healthy": "✓", "unhealthy": "✗"}.get(health, "●")
         source = entry.get("source", "")
         manifest = entry.get("manifest", {})
-        tools_count = str(len(manifest.get("tools", [])))
+        tools_count = str(len(manifest.get("tools", [])) or entry.get("last_tool_count") or 0)
         trust_tier = manifest.get("status", "")
         print(
             f"  {entry['name']:<{name_w}}  "
             f"{entry.get('transport', ''):<{transport_w}}  "
+            f"{entry.get('mode', 'tools'):<5}  "
             f"{enabled:<7}  "
             f"{health_sym} {health:<7}  "
             f"{tools_count:<5}  "
@@ -305,8 +311,38 @@ def register_mcp_commands(subparsers) -> None:
     add_p.add_argument("--args", nargs="*", default=None, help="Command arguments (stdio)")
     add_p.add_argument("--socket-path", default=None, help="Unix socket path")
     add_p.add_argument("--description", default="", help="Server description")
+    add_p.add_argument("--env", nargs="+", metavar="KEY=VAL", default=None, help="Environment variables (stdio)")
+    add_p.add_argument("--cwd", default=None, help="Working directory (stdio)")
+    add_p.add_argument(
+        "--as-cli",
+        action="store_true",
+        help="Agents run it from the terminal (hive mcp run) instead of loading its tools",
+    )
     add_p.add_argument("--from", dest="from_manifest", default=None, help="Path to manifest.json")
+    add_p.add_argument(
+        "command_line",
+        nargs="*",
+        metavar="-- COMMAND [ARG ...]",
+        help="The stdio command and its arguments, after --; arguments may start with -",
+    )
     add_p.set_defaults(func=cmd_mcp_add)
+
+    # ── mode ──
+    mode_p = mcp_sub.add_parser("mode", help="Reach a server from the terminal (cli) or as tools")
+    mode_p.add_argument("name", help="Server name")
+    mode_p.add_argument("mode", choices=["cli", "tools"], help="cli: agents run `hive mcp run`; tools: load its tools")
+    mode_p.set_defaults(func=cmd_mcp_mode)
+
+    # ── run ──
+    run_p = mcp_sub.add_parser(
+        "run",
+        help="Run a server's tools as commands",
+        description="Run an installed MCP server's tools as commands, through mcp2cli. "
+        "Examples: hive mcp run NAME --list; hive mcp run NAME TOOL --help; hive mcp run NAME TOOL --flag value",
+    )
+    run_p.add_argument("name", help="Server name")
+    run_p.add_argument("mcp2cli_args", nargs=argparse.REMAINDER, help="mcp2cli arguments (default: --list)")
+    run_p.set_defaults(func=cmd_mcp_run)
 
     # ── remove ──
     remove_p = mcp_sub.add_parser("remove", help="Remove an installed server")
@@ -440,21 +476,32 @@ def cmd_mcp_add(args) -> int:
         )
         return 1
 
+    # The flags added with CLI mode are read with getattr: callers that build
+    # their own namespace (scripts, older tests) need not know about them.
+    as_cli = getattr(args, "as_cli", False)
+    command, command_args = args.command, args.args
+    if getattr(args, "command_line", None):
+        command, *command_args = args.command_line
     try:
+        env = _parse_key_value_pairs(getattr(args, "env", None) or [])
         entry = registry.add_local(
             name=args.name,
             transport=args.transport,
             url=args.url,
-            command=args.command,
-            args=args.args,
+            command=command,
+            args=command_args,
+            env=env,
+            cwd=getattr(args, "cwd", None),
             socket_path=args.socket_path,
             description=args.description,
+            mode="cli" if as_cli else "tools",
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"✓ Registered {args.name} ({entry['transport']})")
+    reached = f"; agents run it with: hive mcp run {args.name} --list" if as_cli else ""
+    print(f"✓ Registered {args.name} ({entry['transport']}{reached})")
     return 0
 
 
@@ -493,6 +540,40 @@ def _cmd_mcp_add_from_manifest(registry, manifest_path: str) -> int:
 
     print(f"✓ Registered {name} from {manifest_path} ({entry['transport']})")
     return 0
+
+
+def cmd_mcp_mode(args) -> int:
+    """Choose how agents reach a server."""
+    registry = _get_registry()
+    try:
+        registry.set_mode(args.name, args.mode)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    how = f"from the terminal: hive mcp run {args.name} --list" if args.mode == "cli" else "as tools"
+    print(f"✓ Agents reach {args.name} {how} (from their next session)")
+    return 0
+
+
+def cmd_mcp_run(args) -> int:
+    """Run an installed server's tools as commands, through mcp2cli."""
+    from framework.loader import mcp_cli
+
+    registry = _get_registry()
+    config = registry.server_config(args.name)
+    if config is None:
+        print(
+            f"Error: no MCP server named '{args.name}'.\nRun: hive mcp list  — to see installed servers.",
+            file=sys.stderr,
+        )
+        return 1
+    args_after = args.mcp2cli_args[1:] if args.mcp2cli_args[:1] == ["--"] else args.mcp2cli_args
+    try:
+        return mcp_cli.run(config, args_after)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_mcp_remove(args) -> int:

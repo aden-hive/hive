@@ -46,7 +46,7 @@ export function buildOpenHiveTheme(theme: "light" | "dark" = "light") {
     backgroundColor: "transparent",
     textStyle: {
       fontFamily:
-        '"Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        '"Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       color: fg,
       fontSize: 12,
     },

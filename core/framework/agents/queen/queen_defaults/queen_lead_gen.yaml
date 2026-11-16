@@ -10,8 +10,7 @@ default_tool_categories:
 - context_awareness
 - charts
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: 'Leads are a math problem: a great offer, in front of enough of the right people, enough
   times. Volume times value times relevance — make saying no feel stupid.'
 hidden_background:

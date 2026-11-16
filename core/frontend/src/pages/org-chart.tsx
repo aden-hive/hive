@@ -4,22 +4,17 @@ import { apiUrl } from "@/api/client";
 import {
   User, Component, X, Calendar, Target, Activity, ArrowRight, Clock,
   Rocket, Globe, Mail, Search, Shield, TrendingUp, Briefcase, Code,
-  Database, FileText, MessageSquare, Zap, BarChart3, Users, Bot, Network,
+  Database, FileText, MessageSquare, Zap, BarChart3, Users, Bot, Network, SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
+import { claudeCodeQueensApi, type ClaudeCodeQueen } from "@/api/claudeCodeQueens";
 import { useColony } from "@/context/ColonyContext";
-import { activateQueen, isQueenDecommissioned, useMe, useQueenDecommission, useSetQueenLead, useSetQueenPosition, useSetQueenPositions, useResetQueenPositions } from "@/lib/me";
+import { isQueenDecommissioned, useMe, useSetQueenPosition, useSetQueenPositions, useResetQueenPositions } from "@/lib/me";
 import { agentsApi } from "@/api/agents";
-import { queensApi } from "@/api/queens";
 import type { QueenProfileSummary, Colony } from "@/types/colony";
-import QueenProfilePanel from "@/components/QueenProfilePanel";
-import QueenPortraitGlyph from "@/components/QueenPortraitGlyph";
-import { orderQueens, QUEEN_DISPLAY_ORDER } from "@/lib/colony-registry";
-import {
-  allPersonaSummaries,
-  queenFunctionLabel,
-  type PersonaSummary,
-} from "@/lib/queen-leaders";
+import QueenPortraitGlyph, { HEX_CLIP } from "@/components/QueenPortraitGlyph";
+import PositionCatalog from "@/components/PositionCatalog";
+import { orderQueens } from "@/lib/colony-registry";
 import { useLiveSessions } from "@/hooks/use-live-sessions";
 import { deriveColonyStatus, describeColonyStatus, STATUS_DOT_CLASS, STATUS_LABEL, STATUS_TEXT_CLASS } from "@/lib/colony-status";
 import { Tooltip } from "@/components/Tooltip";
@@ -40,9 +35,9 @@ const COLONY_ICON_KEYS = Object.keys(COLONY_ICONS);
 const CANVAS_W = 2200;
 const CANVAS_H = 1500;
 const CENTER_X = CANVAS_W / 2;
-const CARD_W = 140; // 8.75rem queen card
+const CARD_W = 160; // 10rem queen card
 const CARD_H = 130; // 8.125rem card body (connector anchor; tags hang below)
-const ROW_GAP = 28;
+const ROW_GAP = 20;
 const CEO_W = 190;
 const CEO_H = 104;
 const CEO_X = CENTER_X - CEO_W / 2;
@@ -58,9 +53,6 @@ function defaultQueenPos(index: number, count: number): { x: number; y: number }
   return { x: startX + index * (CARD_W + ROW_GAP), y: QUEEN_ROW_Y };
 }
 
-/* Pointy-top hexagon matching the bee-theme HiveLogo / QueenPortraitGlyph —
-   used to clip org-chart node avatars into honeycomb cells instead of circles. */
-const HEX_CLIP = "polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%)";
 
 /* ── User avatar (CEO card) ──────────────────────────────────────────── */
 
@@ -289,7 +281,6 @@ function QueenAvatar({ queenId, name, size = "w-11 h-11" }: { queenId: string; n
 function QueenCard({
   queen,
   colonies,
-  selected,
   decommissioned,
   dragging,
   onCardMouseDown,
@@ -297,7 +288,6 @@ function QueenCard({
 }: {
   queen: QueenProfileSummary;
   colonies: Colony[];
-  selected: boolean;
   decommissioned: boolean;
   dragging: boolean;
   onCardMouseDown: (e: React.MouseEvent) => void;
@@ -314,23 +304,19 @@ function QueenCard({
           dragging
             ? "cursor-grabbing shadow-xl ring-2 ring-primary/40"
             : "cursor-grab transition-all duration-200"
-        } ${
-          selected
-            ? "border-primary/40 bg-primary/[0.04] ring-1 ring-primary/20"
-            : "border-border/60 hover:border-primary/30 hover:bg-primary/[0.03]"
-        } ${decommissioned ? "opacity-50 grayscale" : ""}`}
+        } border-border/60 hover:border-primary/30 hover:bg-primary/[0.03] ${decommissioned ? "opacity-50 grayscale" : ""}`}
       >
         <div className="mb-2.5">
           <QueenAvatar queenId={queen.id} name={queen.name} />
         </div>
-        <span className={`text-sm font-semibold transition-colors line-clamp-1 ${
+        <span className={`text-[13px] font-semibold tracking-[-0.01em] transition-colors line-clamp-1 ${
           decommissioned
             ? "text-muted-foreground line-through"
             : "text-foreground group-hover:text-primary"
         }`}>
           {queen.name}
         </span>
-        <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+        <span className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
           {decommissioned ? "Decommissioned" : queen.title}
         </span>
       </div>
@@ -351,328 +337,47 @@ function QueenCard({
   );
 }
 
-/* ── Leader persona card (hireable from the catalog) ─────────────────── */
-
-function PersonaCard({ persona, isCurrent, isSaving, onHire }: {
-  persona: PersonaSummary;
-  isCurrent: boolean;
-  isSaving: boolean;
-  onHire: () => void;
-}) {
-  return (
-    <div
-      className={`flex flex-col items-center w-[7.5rem] flex-shrink-0 rounded-xl border bg-card p-3 text-center ${
-        isCurrent ? "border-primary/40 ring-1 ring-primary/20" : "border-border/60"
-      }`}
-      title={persona.bio}
-    >
-      <div className="w-11 h-11 bg-primary/15 flex items-center justify-center overflow-hidden mb-2" style={{ clipPath: HEX_CLIP }}>
-        <QueenPortraitGlyph p={persona.portrait} frame={false} className="w-full h-full" />
-      </div>
-      <span className="text-xs font-semibold text-foreground line-clamp-1 w-full">
-        {persona.name}
-      </span>
-      <span className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1 w-full">
-        {persona.title}
-      </span>
-      <button
-        onClick={onHire}
-        disabled={isCurrent || isSaving}
-        className={`mt-2 w-full rounded-md border border-primary/30 px-2 py-1 text-[10px] font-medium transition-colors ${
-          isCurrent
-            ? "text-primary cursor-default opacity-80"
-            : "text-primary hover:bg-primary/10 disabled:opacity-50"
-        }`}
-      >
-        {isCurrent ? "Current lead" : isSaving ? "Hiring…" : "Hire"}
-      </button>
-    </div>
-  );
-}
-
-/* ── One function's leaders, with inline decommission/re-enable ──────── */
-
-function FunctionGroup({
-  functionId,
-  label,
-  personas,
-  currentLeaderId,
-  decommissioned,
-  hireSaving,
-  onHire,
+/** A queen run by Claude Code (queen_mail.claude_code): dragged like a queen's card, opened read only. */
+function ClaudeCodeCard({
+  queen,
+  dragging,
+  onCardMouseDown,
 }: {
-  functionId: string;
-  /** Resolved from her profile title — see queenFunctionLabel. */
-  label: string;
-  personas: PersonaSummary[];
-  currentLeaderId: string | null;
-  decommissioned: boolean;
-  hireSaving: boolean;
-  onHire: (functionId: string, persona: PersonaSummary) => void;
+  queen: ClaudeCodeQueen;
+  dragging: boolean;
+  onCardMouseDown: (e: React.MouseEvent) => void;
 }) {
-  const { setDecommissioned, saving } = useQueenDecommission(functionId);
+  const working = queen.conversations.some((c) => c.running);
   return (
-    <div className={decommissioned ? "opacity-60" : ""}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] font-semibold text-foreground/80">
-          {label}
-        </span>
-        {decommissioned && (
-          <>
-            <span className="text-[9px] uppercase tracking-wider text-muted-foreground rounded bg-muted px-1.5 py-0.5">
-              Decommissioned
-            </span>
-            <button
-              onClick={() => void setDecommissioned(false)}
-              disabled={saving}
-              className="rounded-md border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
-            >
-              {saving ? "…" : "Re-enable"}
-            </button>
-          </>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {personas.map((persona) => (
-          <PersonaCard
-            key={persona.id}
-            persona={persona}
-            isCurrent={currentLeaderId === persona.leaderId}
-            isSaving={hireSaving}
-            onHire={() => onHire(functionId, persona)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ── Custom queens (user-created, outside the preset catalog) ────────── */
-
-function CustomQueenRow({ queen }: { queen: QueenProfileSummary }) {
-  const navigate = useNavigate();
-  const { isDecommissioned, setDecommissioned, saving } =
-    useQueenDecommission(queen.id);
-  return (
-    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-      <div className="min-w-0">
-        <div className="text-xs font-semibold text-foreground truncate">
-          {queen.name || queen.id}
-        </div>
-        <div className="text-[10px] text-muted-foreground truncate">
-          {queen.title || queen.id}
-        </div>
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        {isDecommissioned ? (
-          <>
-            <span className="text-[9px] uppercase tracking-wider text-muted-foreground rounded bg-muted px-1.5 py-0.5">
-              Decommissioned
-            </span>
-            <button
-              onClick={() => void setDecommissioned(false)}
-              disabled={saving}
-              className="rounded-md border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
-            >
-              {saving ? "…" : "Re-enable"}
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={() => navigate(`/queen/${queen.id}`)}
-            className="rounded-md border border-border/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/30"
-          >
-            Open DM
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function NewQueenDialog({ onClose }: { onClose: () => void }) {
-  const { refresh } = useColony();
-  const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [title, setTitle] = useState("");
-  const [persona, setPersona] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    if (!name.trim() || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const { queen } = await queensApi.createQueen({
-        name: name.trim(),
-        title: title.trim() || undefined,
-        persona: persona.trim() || undefined,
-      });
-      // Active immediately — a queen created then hidden by the default
-      // roster filter would look like the creation silently failed.
-      activateQueen(queen.id);
-      refresh();
-      onClose();
-      navigate(`/queen/${queen.id}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setSaving(false);
-    }
-  };
-  const inputCls =
-    "w-full mb-3 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50";
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onMouseDown={onClose}
-    >
+    <div className="flex flex-col items-center w-full">
       <div
-        className="w-[26rem] max-w-[92vw] rounded-xl border border-border/60 bg-card p-5 shadow-xl"
-        onMouseDown={(e) => e.stopPropagation()}
+        onMouseDown={onCardMouseDown}
+        title="Run by Claude Code · drag to move · click to see her conversations"
+        className={`group flex flex-col items-center justify-center rounded-xl border border-dashed bg-card p-4 w-full h-[8.125rem] text-center select-none ${
+          dragging ? "cursor-grabbing shadow-xl ring-2 ring-primary/40" : "cursor-grab transition-all duration-200"
+        } border-border/80 hover:border-primary/30 hover:bg-primary/[0.03]`}
       >
-        <div className="text-sm font-semibold text-foreground mb-3">
-          New Queen
-        </div>
-        <label className="block text-[11px] text-muted-foreground mb-1">
-          Name *
-        </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoFocus
-          className={inputCls}
-          placeholder="Display name"
-        />
-        <label className="block text-[11px] text-muted-foreground mb-1">
-          Title
-        </label>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className={inputCls}
-          placeholder="Role / one-line intro"
-        />
-        <label className="block text-[11px] text-muted-foreground mb-1">
-          Persona — free text, becomes her core traits
-        </label>
-        <textarea
-          value={persona}
-          onChange={(e) => setPersona(e.target.value)}
-          rows={4}
-          className={inputCls + " resize-y"}
-          placeholder="Voice, temperament, duties…"
-        />
-        {error && (
-          <div className="mb-3 text-[11px] text-red-500">{error}</div>
-        )}
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => void submit()}
-            disabled={!name.trim() || saving}
-            className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-          >
-            {saving ? "Creating…" : "Create"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Leader catalog grouped by function ──────────────────────────────── */
-
-function LeaderCatalog() {
-  const { me } = useMe();
-  const { refresh: refreshColony, queenProfiles } = useColony();
-  const { setLead, savingQueenId } = useSetQueenLead();
-  const [newQueenOpen, setNewQueenOpen] = useState(false);
-  // User-created queens live outside the preset function slots.
-  const customQueens = queenProfiles.filter((q) => q.custom);
-  const personas = allPersonaSummaries(QUEEN_DISPLAY_ORDER);
-  const groups: { functionId: string; personas: PersonaSummary[] }[] = [];
-  for (const p of personas) {
-    let group = groups[groups.length - 1];
-    if (!group || group.functionId !== p.functionId) {
-      group = { functionId: p.functionId, personas: [] };
-      groups.push(group);
-    }
-    group.personas.push(p);
-  }
-  const handleHire = async (functionId: string, persona: PersonaSummary) => {
-    await setLead(functionId, {
-      leaderId: persona.leaderId,
-      name: persona.name,
-      title: persona.title,
-      bio: persona.bio,
-      portrait: persona.portrait,
-    });
-    // Re-pull /queen/profiles so the chart reflects the new lead's persona.
-    refreshColony();
-  };
-  return (
-    <div className="space-y-4">
-      {groups.map((group) => {
-        // Resolve the current lead: an explicit hire preference wins;
-        // otherwise match the runtime queen's live name to a persona in this
-        // group. Falling back to personas[0] is wrong — for a few functions
-        // the catalog's first persona is NOT the runtime default (e.g.
-        // product_strategy lists Chesky first but defaults to Jobs), which
-        // would falsely disable a hireable card. null → nothing is marked
-        // current, so every persona stays hireable.
-        const currentName = queenProfiles.find(
-          (q) => q.id === group.functionId,
-        )?.name;
-        const currentLeaderId =
-          me?.preferences?.queens?.[group.functionId]?.id ??
-          group.personas.find((p) => p.name === currentName)?.leaderId ??
-          null;
-        return (
-          <FunctionGroup
-            key={group.functionId}
-            functionId={group.functionId}
-            label={queenFunctionLabel(queenProfiles, group.functionId)}
-            personas={group.personas}
-            currentLeaderId={currentLeaderId}
-            decommissioned={isQueenDecommissioned(me, group.functionId)}
-            hireSaving={savingQueenId === group.functionId}
-            onHire={handleHire}
-          />
-        );
-      })}
-
-      {/* Custom queens — user-created, no preset function slot */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] font-semibold text-foreground/80">
-            Custom
-          </span>
-          <button
-            onClick={() => setNewQueenOpen(true)}
-            className="rounded-md border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
-          >
-            + New Queen
-          </button>
-        </div>
-        {customQueens.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {customQueens.map((q) => (
-              <CustomQueenRow key={q.id} queen={q} />
-            ))}
+        <div className="mb-2.5 relative">
+          <div className="w-11 h-11 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+            <SquareTerminal className="w-5 h-5" />
           </div>
-        ) : (
-          <div className="text-[11px] text-muted-foreground">
-            No custom queens yet — create one from scratch.
-          </div>
-        )}
+          {working && (
+            <span className="absolute -right-0.5 -top-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-card" title="Working now" />
+          )}
+        </div>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] line-clamp-1 text-foreground group-hover:text-primary transition-colors">
+          {queen.name}
+        </span>
+        <span className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{queen.title}</span>
       </div>
-
-      {newQueenOpen && <NewQueenDialog onClose={() => setNewQueenOpen(false)} />}
+      <div className="mt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Claude Code · {queen.conversations.length} {queen.conversations.length === 1 ? "chat" : "chats"}
+      </div>
+      {queen.auth === "subscription" && (
+        <div className="text-[10px] text-amber-600" title="Runs on a Claude subscription: at your own risk">
+          subscription · at your own risk
+        </div>
+      )}
     </div>
   );
 }
@@ -681,6 +386,7 @@ function LeaderCatalog() {
 
 // Fixed left-to-right order for queen cards
 export default function OrgChart() {
+  const navigate = useNavigate();
   const { queenProfiles: unsortedQueenProfiles, colonies, userProfile, userAvatarVersion, userHasAvatar } = useColony();
   const { me } = useMe();
   const setQueenPosition = useSetQueenPosition();
@@ -695,7 +401,13 @@ export default function OrgChart() {
   const queenProfiles = orderedQueens.filter(
     (q) => !isQueenDecommissioned(me, q.id),
   );
-  const [selectedQueenId, setSelectedQueenId] = useState<string | null>(null);
+  // Queens run by Claude Code sit on the chart beside the others, after them.
+  const [claudeQueens, setClaudeQueens] = useState<ClaudeCodeQueen[]>([]);
+  useEffect(() => {
+    claudeCodeQueensApi.list().then((r) => setClaudeQueens(r.queens)).catch(() => {});
+  }, []);
+  const claudeIds = new Set(claudeQueens.map((q) => q.id));
+  const cardIds = [...queenProfiles.map((q) => q.id), ...claudeQueens.map((q) => q.id)];
   const [selectedColony, setSelectedColony] = useState<Colony | null>(null);
   const [showDecommissioned, setShowDecommissioned] = useState(false);
 
@@ -718,22 +430,22 @@ export default function OrgChart() {
     origX: number; origY: number; lastX: number; lastY: number; moved: boolean;
   } | null>(null);
 
-  // Effective on-canvas position per visible queen: optimistic > saved > default.
+  // Effective on-canvas position per visible card: optimistic > saved > default.
   const positions: Record<string, { x: number; y: number }> = {};
-  queenProfiles.forEach((q, i) => {
-    const saved = me?.preferences?.queens?.[q.id]?.pos;
-    positions[q.id] =
-      localPositions[q.id] ??
+  cardIds.forEach((id, i) => {
+    const saved = me?.preferences?.queens?.[id]?.pos;
+    positions[id] =
+      localPositions[id] ??
       (saved && typeof saved.x === "number" && typeof saved.y === "number"
         ? { x: saved.x, y: saved.y }
-        : defaultQueenPos(i, queenProfiles.length));
+        : defaultQueenPos(i, cardIds.length));
   });
 
   // True when at least one card has been moved (this session or persisted) —
   // gates the reset control.
   const hasCustomPositions =
     Object.keys(localPositions).length > 0 ||
-    queenProfiles.some((q) => me?.preferences?.queens?.[q.id]?.pos != null);
+    cardIds.some((id) => me?.preferences?.queens?.[id]?.pos != null);
 
   // Positions captured at the moment of reset, so the button can offer "Undo"
   // to put them back. Cleared once the user moves a card again (a new layout).
@@ -741,12 +453,12 @@ export default function OrgChart() {
 
   const handleResetPositions = () => {
     const snapshot: Record<string, { x: number; y: number }> = {};
-    for (const q of queenProfiles) {
-      const saved = me?.preferences?.queens?.[q.id]?.pos;
+    for (const id of cardIds) {
+      const saved = me?.preferences?.queens?.[id]?.pos;
       const hasCustom =
-        localPositions[q.id] != null ||
+        localPositions[id] != null ||
         (saved && typeof saved.x === "number" && typeof saved.y === "number");
-      if (hasCustom) snapshot[q.id] = positions[q.id];
+      if (hasCustom) snapshot[id] = positions[id];
     }
     setUndoSnapshot(Object.keys(snapshot).length > 0 ? snapshot : null);
     setLocalPositions({});
@@ -817,9 +529,8 @@ export default function OrgChart() {
         setUndoSnapshot(null); // a new layout supersedes the post-reset undo
         void setQueenPosition(cd.id, { x: cd.lastX, y: cd.lastY });
       } else {
-        // No movement: treat as a click → toggle the queen's side panel.
-        setSelectedColony(null);
-        setSelectedQueenId((prev) => (prev === cd.id ? null : cd.id));
+        // No movement: a click, which opens her profile (a Claude Code queen's read-only page).
+        navigate(claudeIds.has(cd.id) ? `/claude-code/${cd.id}` : `/queen/${cd.id}/profile`);
       }
       return;
     }
@@ -862,7 +573,6 @@ export default function OrgChart() {
     .slice(0, 2);
 
   const handleSelectColony = (colony: Colony) => {
-    setSelectedQueenId(null);
     setSelectedColony(selectedColony?.id === colony.id ? null : colony);
   };
 
@@ -882,7 +592,7 @@ export default function OrgChart() {
               Org Chart
             </h2>
             <span className="text-xs text-muted-foreground">
-              {queenProfiles.length} queens &middot; {colonies.length} colonies
+              {cardIds.length} queens &middot; {colonies.length} colonies
             </span>
           </div>
         </div>
@@ -917,8 +627,8 @@ export default function OrgChart() {
               width={CANVAS_W}
               height={CANVAS_H}
             >
-              {queenProfiles.map((queen) => {
-                const p = positions[queen.id];
+              {cardIds.map((id) => {
+                const p = positions[id];
                 // Orthogonal "elbow" routing like a classic org chart: drop
                 // straight down from the CEO, run horizontally, then drop into
                 // the queen card's top — right angles instead of a diagonal.
@@ -929,11 +639,12 @@ export default function OrgChart() {
                 const midY = sy + (ey - sy) / 2;
                 return (
                   <path
-                    key={queen.id}
+                    key={id}
                     d={`M ${sx} ${sy} V ${midY} H ${ex} V ${ey}`}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={1}
+                    strokeDasharray={claudeIds.has(id) ? "4 3" : undefined}
                   />
                 );
               })}
@@ -965,11 +676,28 @@ export default function OrgChart() {
                   <QueenCard
                     queen={queen}
                     colonies={coloniesByQueen.get(queen.id) ?? []}
-                    selected={selectedQueenId === queen.id}
                     decommissioned={isQueenDecommissioned(me, queen.id)}
                     dragging={draggingId === queen.id}
                     onCardMouseDown={(e) => startCardDrag(e, queen.id, p)}
                     onSelectColony={handleSelectColony}
+                  />
+                </div>
+              );
+            })}
+
+            {/* Queens run by Claude Code — draggable too, opened read only */}
+            {claudeQueens.map((queen) => {
+              const p = positions[queen.id];
+              return (
+                <div
+                  key={queen.id}
+                  className="absolute"
+                  style={{ left: p.x, top: p.y, width: CARD_W, zIndex: draggingId === queen.id ? 10 : 1 }}
+                >
+                  <ClaudeCodeCard
+                    queen={queen}
+                    dragging={draggingId === queen.id}
+                    onCardMouseDown={(e) => startCardDrag(e, queen.id, p)}
                   />
                 </div>
               );
@@ -987,9 +715,9 @@ export default function OrgChart() {
           {showDecommissioned && (
             <div className="w-[66rem] max-w-[90vw] max-h-[60vh] overflow-y-auto rounded-xl border border-border/60 bg-card shadow-xl p-4">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
-                Leader catalog &middot; hire a lead for any function, or re-enable a decommissioned one
+                Positions &middot; add or remove one, hire its lead, or re-enable one that&apos;s decommissioned
               </div>
-              <LeaderCatalog />
+              <PositionCatalog />
             </div>
           )}
           <div className="flex items-center gap-2">
@@ -1010,15 +738,6 @@ export default function OrgChart() {
           </div>
         </div>
       </div>
-
-      {/* Queen profile side panel */}
-      {selectedQueenId && (
-        <QueenProfilePanel
-          queenId={selectedQueenId}
-          colonies={coloniesByQueen.get(selectedQueenId) ?? []}
-          onClose={() => setSelectedQueenId(null)}
-        />
-      )}
 
       {/* Colony detail side panel */}
       {selectedColony && (

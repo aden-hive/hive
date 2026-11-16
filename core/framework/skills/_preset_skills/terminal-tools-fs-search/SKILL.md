@@ -22,11 +22,17 @@ terminal-tools provides two structured search tools: `terminal_rg` (ripgrep for 
 | Tree view | `terminal_exec("tree -L 2 /path")` |
 | Single-path stat | `terminal_exec("stat /path")` |
 | Disk usage | `terminal_exec("du -sh /path")` or `terminal_exec("du -h --max-depth=2 /")` |
-| Count matches across files | `terminal_rg(pattern, count=True via extra_args=["-c"])` |
+| Count matching lines in returned results | `terminal_rg(...).total` (check `truncated` before treating it as complete) |
 
 ## `terminal_rg` — content search
 
-ripgrep is fast, gitignore-aware, and has a deep flag surface. The structured wrapper exposes the most useful flags directly; `extra_args` covers the rest.
+ripgrep is fast, gitignore-aware, and has a deep flag surface. The structured wrapper exposes common search flags directly; `extra_args` accepts additional flags compatible with JSON output. Output modes such as `--count` and `--files-with-matches` are not compatible with this structured interface; use the CLI when that output is needed.
+
+Quickstart installs and verifies ripgrep. Existing installations can be repaired with `uv run scripts/ensure_ripgrep.py --install` from the repository root. The runtime also checks Windows package-manager locations and current registry PATH entries; `HIVE_RIPGREP_PATH` can select an absolute executable path. Startup logs report the executable and version, or instructions to fix the missing dependency.
+
+If ripgrep is unavailable, `terminal_rg` returns `code="ripgrep_required"` without searching by default. For an approximate search, explicitly set `allow_fallback=True`: this uses Python regex, a limited filetype table, and basename globs, and does **not** honor `.gitignore`. Even with opt-in, context, `extra_args`, unknown filetypes and complex globs require ripgrep and return an error. Inspect `fallback_limitations`; do not treat approximate results as a gitignore-aware inventory.
+
+With `context=N`, surrounding lines are returned in `context`, separate from `matches`. Both contain `path`, `line`, and `text`; `total` counts only match entries.
 
 ### Common patterns
 
@@ -71,6 +77,8 @@ Lists files matching a glob, gitignore-aware (backed by `rg --files`). The patte
 - `lk_scan_post_reactors` → matched as `**/*lk_scan_post_reactors*` (recursive substring)
 - `*.py` → matched as `**/*.py` (recursive by default)
 - `src/**/*.py` → used verbatim
+
+If `rg` is unavailable, filename search retains a best-effort walk with `fallback="python-walk"` and a note that `.gitignore` is not honored.
 
 ```
 # Find a file by stem anywhere under a tree

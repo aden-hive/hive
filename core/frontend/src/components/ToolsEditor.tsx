@@ -89,6 +89,7 @@ function formatCategoryTitle(name: string): string {
 const CATEGORY_LABELS: Record<string, string> = {
   // Built-in, credential-less capabilities
   file_ops: "Files & documents",
+  code_editing: "Read & edit code",
   files_core: "Files & documents",
   terminal_basic: "Terminal & commands",
   terminal_core: "Terminal & commands",

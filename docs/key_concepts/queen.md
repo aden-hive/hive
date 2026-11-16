@@ -4,13 +4,13 @@ Every [colony](./colony.md) has a **Queen** — the persistent, client-facing ag
 
 ## Queens are identities, not generic orchestrators
 
-A Queen isn't an interchangeable "coordinator." She's a persona. Hive ships **13 default Queens**, each a head-of-department with her own expertise and voice:
+A Queen isn't an interchangeable "coordinator." She's a persona. Hive ships **13 Queens**, each a head of department with her own expertise and voice. Six are active out of the box (Growth, RevOps, Content, Lead Generation, Outbound, and Brand & Design); you can hire the rest from the Org Chart, or create your own.
 
 | Domain | Queen role |
 | --- | --- |
-| Sales · Outbound · Lead Gen | pipeline, prospecting, and outreach |
+| RevOps · Outbound · Lead Gen | pipeline, prospecting, and outreach |
 | Growth · Market Research | acquisition, experiments, and market insight |
-| Finance & Fundraising | modeling, budgets, and fundraising |
+| Finance | modeling, budgets, and fundraising |
 | Legal | contracts, compliance, and risk |
 | Talent | recruiting and people ops |
 | Operations | process and back-office |
@@ -20,30 +20,31 @@ A Queen isn't an interchangeable "coordinator." She's a persona. Hive ships **13
 
 Each persona is a YAML profile — traits, background, behavior triggers — injected into her system prompt, so she brings domain judgment to the work, not just task execution.
 
-## CEO-style routing
+## Choosing a Queen
 
-You don't pick a Queen from a menu. When a new request comes in, an LLM **router** reads it and assigns the best-matching Queen — the way a CEO routes work to the right department head. You describe the outcome; the routing is automatic.
+You pick who to hand a request to: type it on the home screen and choose the Queen whose domain fits, or open a Queen directly from the sidebar. A prompt deployed from the Prompt Library goes straight to the Queen it was written for. (An automatic LLM router used to assign Queens; it was retired because a classifier guessing your counterpart was the wrong design for a conversation.)
 
 ## The Queen's phases
 
-A Queen matures a piece of work through three phases (this is how a [colony grows](./colony.md#how-a-colony-grows-execute-first-then-systematize)):
+A Queen moves a piece of work through two phases (this is how a [colony grows](./colony.md#how-a-colony-grows-execute-first-then-systematize)):
 
-1. **Independent** — she works as a standalone agent, doing the task directly. If it turns out to be parallel, recurring, or long-running, she can suggest forming a colony.
-2. **Incubating** — a fail-closed gate confirms the plan is settled before committing, because forking is expensive: it ends the interactive chat and the colony then runs unattended.
-3. **Colony** — she forks the colony to disk and switches into fan-out mode, delegating to worker clones and validating their results through the tracker.
+1. **Independent** — she works as a standalone agent, doing the task directly. If it turns out to be parallel, recurring, or long-running, she proposes a colony.
+2. **Colony** — once you confirm in the Create Colony dialog, she forks the work into a colony on disk and switches into fan-out mode, delegating to worker clones and validating their results through the tracker.
 
 The through-line is **execute first, then systematize**: she proves the path herself, then factors it into a repeatable process. See [How a Colony Improves](./improvement.md).
 
 ## The Queen's memory
 
-A Queen carries **scoped, evolving memory** — markdown memory files kept per-global, per-colony, and per-queen. A cooldown-gated reflection step writes durable notes as she works, and a recall selector surfaces the relevant ones on later sessions. This is how a Queen accumulates context about you and your business over time — not a vector database, just structured files she reflects into and reads back. (Unlike the Queen, workers are memoryless: each starts fresh.)
+A Queen carries **scoped, evolving memory** — markdown notes kept globally (about you and your business) and per queen. A cooldown-gated reflection step writes durable notes as she works, and a recall selector surfaces the relevant ones on later sessions. She also recalls relevant excerpts of earlier conversations automatically, and can search them herself. This is how a Queen accumulates context about you and your business over time — not a vector database, just files she reflects into and reads back. (Unlike the Queen, workers are memoryless: each starts fresh.)
+
+For past conversations: before each of your messages Hive places up to six dated excerpts from related earlier sessions in front of her, and every past session is searchable with `search_messages`. Her instructions tell her to check this memory before asking you about anything you may have told her already. An optional dated timeline of the events and facts you mention (`search_timeline`) can be turned on with the `memory_timeline` feature flag. How well conversation recall works is measured on LongMemEval in [Memory benchmark](../memory-benchmark.md).
 
 ## What the Queen owns
 
 - **The conversation** — she's the single client-facing surface of the colony.
 - **The plan** — a persistent, file-backed [task list](./coordination.md#the-task-plan) that survives reloads.
 - **The tracker** — she sets up the colony's shared [ledger](./coordination.md#the-tracker), assigns work, and validates results with SQL.
-- **Escalation** — when something needs a human, she escalates out-of-band via [Sentinel](./coordination.md#human-in-the-loop-sentinel) and resumes when they reply.
+- **Questions for you** — when a decision is yours, she asks in the chat and waits. In a colony with [Sentinel](./coordination.md#human-in-the-loop) switched on, a parked Queen is nudged along or escalated to you through the Hive inbox, Telegram or Slack, and resumes when you reply.
 
 ## Learn more
 

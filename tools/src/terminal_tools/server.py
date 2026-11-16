@@ -2,7 +2,7 @@
 
 Run via:
     uv run python -m terminal_tools.server --stdio
-    uv run python terminal_tools_server.py --stdio    (preferred, see _DEFAULT_LOCAL_SERVERS)
+    uv run python terminal_tools_server.py --stdio    (standalone MCP; Hive runs these in-process)
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ if "--stdio" in sys.argv:
 from fastmcp import FastMCP  # noqa: E402
 
 from terminal_tools import register_terminal_tools  # noqa: E402
+from terminal_tools.common.ripgrep import ripgrep_status  # noqa: E402
 from terminal_tools.jobs.manager import get_manager  # noqa: E402
 from terminal_tools.pty.tools import get_registry as get_pty_registry  # noqa: E402
 
@@ -58,6 +59,12 @@ async def _lifespan(_server: FastMCP) -> AsyncIterator[dict]:
     loop on graceful shutdown; the atexit hook below catches abrupt
     exits (SIGTERM, etc.) where lifespan teardown may not complete.
     """
+    search_dependency = await asyncio.to_thread(ripgrep_status)
+    if search_dependency["available"]:
+        logger.info("Search ready: %s (%s)", search_dependency["version"], search_dependency["path"])
+    else:
+        logger.warning("Search dependency missing: %s", search_dependency["hint"])
+
     parent_pid_env = os.getenv("HIVE_DESKTOP_PARENT_PID")
     if parent_pid_env:
         try:

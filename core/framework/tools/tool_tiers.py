@@ -20,6 +20,7 @@ Two pieces live here:
       get_current_tools() -> list[Tool]
       unregistered_allowlisted_names() -> set[str]
       promote_searched_tools(names: list[str]) -> list[str]
+      tool_inventory() -> dict[str, list[str]]
 
   (``QueenPhaseState`` and :class:`ToolTierState` both qualify.)
 
@@ -204,6 +205,15 @@ class ToolTierState:
             return set()
         return {n for n in self.enabled_allowlist if n not in self.gateable_names}
 
+    def tool_inventory(self) -> dict[str, list[str]]:
+        """Describe this session without loading tools or probing credentials."""
+        return {
+            "loaded": sorted(t.name for t in self.get_current_tools()),
+            "searchable": sorted(t.name for t in self.get_searchable_tools()),
+            "disabled": sorted(t.name for t in self.pool if not self.passes_allowlist(t.name)),
+            "unavailable": sorted(self.unregistered_allowlisted_names()),
+        }
+
     # ---- promotion / persistence ----------------------------------------
 
     def promote_searched_tools(self, names: list[str]) -> list[str]:
@@ -274,6 +284,17 @@ def build_search_tools(provider: Any) -> tuple[Any, Any]:
     from framework.llm.provider import Tool
 
     async def search_tools(*, query: str, max_results: int = 5) -> str:
+        if query.strip().lower() == "inventory":
+            return json.dumps(
+                {
+                    **provider.tool_inventory(),
+                    "note": (
+                        "Current session configuration only. Loaded tools are callable; searchable tools need loading; "
+                        "disabled tools are excluded by the allowlist; unavailable tools are configured but not registered. "
+                        "This does not verify credentials or service connectivity."
+                    ),
+                }
+            )
         searchable = provider.get_searchable_tools()
         # Names the agent asked for that ARE allowlisted but whose MCP server
         # failed to register this session. Report these as "configured but
@@ -308,9 +329,8 @@ def build_search_tools(provider: Any) -> tuple[Any, Any]:
                         "loaded": [],
                         "unavailable": unavailable,
                         "note": (
-                            f"{', '.join(unavailable)} is configured for you but its MCP server failed to "
-                            "start this session, so it can't be loaded right now — this is a transient "
-                            "startup issue, not a missing tool. Retry shortly or restart the session. "
+                            f"{', '.join(unavailable)} is configured but unavailable: it was not registered "
+                            "in this session. Check runtime configuration, credentials, and server status. "
                             "Every other allowed tool is already loaded."
                         ),
                     }
@@ -342,9 +362,9 @@ def build_search_tools(provider: Any) -> tuple[Any, Any]:
                         "loaded": [],
                         "unavailable": unavailable,
                         "note": (
-                            f"{', '.join(unavailable)} is configured for you but its MCP server failed to "
-                            "start this session, so it's temporarily unavailable (not missing) — retry shortly "
-                            f"or restart the session. Other searchable tools: {available}."
+                            f"{', '.join(unavailable)} is configured but unavailable: it was not registered "
+                            "in this session. Check runtime configuration, credentials, and server status. "
+                            f"Other searchable tools: {available}."
                         ),
                     }
                 )
@@ -378,6 +398,8 @@ def build_search_tools(provider: Any) -> tuple[Any, Any]:
             "here. Once loaded, a tool is callable on your next step exactly like an "
             "always-on tool, and stays loaded for the rest of the session.\n\n"
             "Query forms:\n"
+            '- "inventory" — report loaded, searchable, disabled, and unavailable tools without loading anything. '
+            "Use before describing your capabilities.\n"
             '- "select:name_a,name_b" — load these exact tools by name (no limit). '
             "Preferred: the <searchable_tools> list already gives you the names, so pass "
             "all the ones this task needs in a single call.\n"

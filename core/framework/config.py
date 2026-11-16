@@ -5,6 +5,7 @@ and every agent template share one implementation instead of copy-pasting
 helper functions.
 """
 
+import importlib.util
 import json
 import logging
 import os
@@ -18,6 +19,14 @@ DEFAULT_MAX_TOKENS = 8192
 # Desktop mode — set by Electron shell to skip frontend builds, etc.
 # ---------------------------------------------------------------------------
 DESKTOP_MODE: bool = bool(os.environ.get("HIVE_DESKTOP_MODE"))
+
+# ---------------------------------------------------------------------------
+# Team CRM — the ``framework.crm`` package and the ``hive-crm`` CLI ship only
+# in builds that include them; this repository doesn't. Prompts and tool lists
+# that mention the CRM check this, so agents aren't sent after commands that
+# don't exist.
+# ---------------------------------------------------------------------------
+CRM_IN_THIS_BUILD: bool = importlib.util.find_spec("framework.crm") is not None
 
 # ---------------------------------------------------------------------------
 # Hive home directory structure
@@ -269,7 +278,7 @@ def _get_api_key_from_credential_store(provider: str) -> str | None:
 
 
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-5-5')."""
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         provider = str(llm["provider"])
@@ -279,7 +288,7 @@ def get_preferred_model() -> str:
             model = model[len("openrouter/") :]
         if model:
             return f"{provider}/{model}"
-    return "anthropic/claude-sonnet-4-20250514"
+    return "anthropic/claude-sonnet-5-5"
 
 
 def get_preferred_worker_model() -> str | None:
@@ -323,6 +332,20 @@ def get_vision_fallback_model() -> str | None:
     return None
 
 
+def _endpoint_key(section: dict) -> str | None:
+    """The key for a slot served from a named endpoint (``"endpoint": "<name>"``), else None.
+
+    The endpoint's own key, or a placeholder: never an ambient key such as ``OPENAI_API_KEY``
+    (see :mod:`framework.llm.endpoints`).
+    """
+    name = section.get("endpoint") if isinstance(section, dict) else None
+    if not isinstance(name, str) or not name:
+        return None
+    from framework.llm.endpoints import key_for
+
+    return key_for(name)
+
+
 def get_vision_fallback_api_key() -> str | None:
     """Return the API key for the vision-fallback model.
 
@@ -334,6 +357,9 @@ def get_vision_fallback_api_key() -> str | None:
     vision = get_hive_config().get("vision_fallback", {})
     if not vision:
         return get_api_key()
+    endpoint_key = _endpoint_key(vision)
+    if endpoint_key:
+        return endpoint_key
     if vision.get("api_key"):
         return vision["api_key"]
     api_key_env_var = vision.get("api_key_env_var")
@@ -364,6 +390,9 @@ def get_worker_api_key() -> str | None:
     worker_llm = get_hive_config().get("worker_llm", {})
     if not worker_llm:
         return get_api_key()
+    endpoint_key = _endpoint_key(worker_llm)
+    if endpoint_key:
+        return endpoint_key
 
     # Literal key in the worker section (provider activation writes it).
     literal = worker_llm.get("api_key")
@@ -480,7 +509,8 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
             }
     if worker_llm.get("provider") == "ollama":
         return {"num_ctx": worker_llm.get("num_ctx", 16384)}
-    return {}
+    extra_body = section_extra_body(worker_llm)
+    return {"extra_body": extra_body} if extra_body else {}
 
 
 DEFAULT_MAX_CONTEXT_TOKENS = 32_000
@@ -576,6 +606,87 @@ def get_max_context_tokens(fallback: int = DEFAULT_MAX_CONTEXT_TOKENS) -> int:
     return fallback
 
 
+# ---------------------------------------------------------------------------
+# A queen's own model: configuration.json "queen_llm": {"<queen_id>": <section>}
+# ---------------------------------------------------------------------------
+
+
+def get_queen_llm_section(queen_id: str | None) -> dict[str, Any] | None:
+    """The queen's own model section under ``queen_llm``, in the ``llm`` slot's shape.
+
+    ``None`` when she has none (or it lacks a provider and model): she uses the ``llm`` slot.
+    """
+    if not queen_id:
+        return None
+    sections = get_hive_config().get("queen_llm")
+    if not isinstance(sections, dict):
+        return None
+    section = sections.get(queen_id)
+    if not isinstance(section, dict) or not section.get("provider") or not str(section.get("model") or "").strip():
+        return None
+    return section
+
+
+def section_model(section: dict[str, Any]) -> str:
+    """``provider/model`` for a model section, as LiteLLM takes it."""
+    provider = str(section["provider"])
+    model = str(section["model"]).strip()
+    if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
+        model = model[len("openrouter/") :]
+    return f"{provider}/{model}"
+
+
+def section_extra_body(section: dict[str, Any]) -> dict[str, Any] | None:
+    """A model section's ``extra_body``: fields sent as they are in every request body, such as
+    a provider's thinking switch or ``reasoning_effort``."""
+    extra_body = section.get("extra_body")
+    return dict(extra_body) if isinstance(extra_body, dict) and extra_body else None
+
+
+def get_queen_api_key(queen_id: str | None) -> str | None:
+    """The key for the queen's model: her section's literal key, the credential store for its
+    provider, its ``api_key_env_var``, then the main key. Without her own section, the main key."""
+    section = get_queen_llm_section(queen_id)
+    if section is None:
+        return get_api_key()
+    endpoint_key = _endpoint_key(section)
+    if endpoint_key:
+        return endpoint_key
+    if section.get("api_key"):
+        return section["api_key"]
+    cred_key = _get_api_key_from_credential_store(section.get("provider", ""))
+    if cred_key:
+        return cred_key
+    env_var = section.get("api_key_env_var")
+    if env_var and os.environ.get(env_var):
+        return os.environ[env_var]
+    return get_api_key()
+
+
+def get_queen_api_base(queen_id: str | None) -> str | None:
+    """The endpoint for the queen's model; without her own section, the main one."""
+    section = get_queen_llm_section(queen_id)
+    if section is None:
+        return get_api_base()
+    if section.get("api_base"):
+        return section["api_base"]
+    if str(section.get("provider", "")).lower() == "openrouter":
+        return OPENROUTER_API_BASE
+    return None
+
+
+def get_queen_max_context_tokens(queen_id: str | None, fallback: int = DEFAULT_MAX_CONTEXT_TOKENS) -> int:
+    """The context window to budget the queen's loop by: her section's ``max_context_tokens``,
+    else her model's catalog entry, else :func:`get_max_context_tokens`."""
+    section = get_queen_llm_section(queen_id)
+    if section is None:
+        return get_max_context_tokens(fallback)
+    if "max_context_tokens" in section:
+        return section["max_context_tokens"]
+    catalog = _catalog_limits_for(section)
+    return catalog[1] if catalog is not None else fallback
+
+
 def get_aux_max_tokens() -> int:
     """Output budget for small utility LLM calls (``llm.aux_max_tokens``).
 
@@ -651,6 +762,11 @@ def get_api_key() -> str | None:
     ``HIVE_API_KEY=""`` spawn before the first credentials push).
     """
     provider = ""
+
+    # A main model served from a named endpoint (Magpie, Ollama, ...) uses that endpoint's key.
+    endpoint_key = _endpoint_key(get_hive_config().get("llm", {}))
+    if endpoint_key:
+        return endpoint_key
 
     # If an explicit key pool is configured, use the first key.
     pool_keys = get_api_keys()
@@ -882,6 +998,324 @@ def get_email_senders_enabled() -> bool:
     return False
 
 
+def get_stall_check_enabled() -> bool:
+    """Return whether a judge checks queen turns that talk about work and stop without doing it.
+
+    See ``framework.server.stall_check``; it also needs the ``judge`` slot.
+    Resolution: ``HIVE_STALL_CHECK`` env var when set, else the top-level
+    ``stall_check`` boolean in configuration.json (the features endpoint
+    writes it). Default: off.
+    """
+    raw = os.environ.get("HIVE_STALL_CHECK")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    return bool(get_hive_config().get("stall_check", False))
+
+
+@dataclass(frozen=True)
+class MemoryReflectionConfig:
+    """How often a queen's memory reflection runs, and on which model.
+
+    configuration.json: ``"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "main"}``.
+    """
+
+    #: Reflect after every this many of her answered turns in a session.
+    every_turns: int = 6
+    #: Every this many reflections, also consolidate the memory files (a long reflection).
+    long_every: int = 4
+    #: "main" (the session's model) or "worker" (the worker_llm slot, when set).
+    model: str = "main"
+
+
+def get_memory_reflection_config() -> MemoryReflectionConfig:
+    """The ``memory_reflection`` section, with defaults for anything missing or invalid."""
+    raw = get_hive_config().get("memory_reflection")
+    raw = raw if isinstance(raw, dict) else {}
+    default = MemoryReflectionConfig()
+
+    def positive(key: str, fallback: int) -> int:
+        value = raw.get(key, fallback)
+        is_count = isinstance(value, int) and not isinstance(value, bool)
+        return value if is_count and value >= 1 else fallback
+
+    model = raw.get("model", default.model)
+    return MemoryReflectionConfig(
+        every_turns=positive("every_turns", default.every_turns),
+        long_every=positive("long_every", default.long_every),
+        model=model if model in ("main", "worker") else default.model,
+    )
+
+
+@dataclass(frozen=True)
+class ClaudeCodeQueenConfig:
+    """A queen run by Claude Code, who takes part in queen mail (``framework.server.claude_code_queens``).
+
+    configuration.json: ``queen_mail.claude_code.<id>``, e.g.
+    ``{"name": "Claude", "api_key": "sk-ant-...", "permission_mode": "acceptEdits"}``.
+    """
+
+    queen_id: str
+    #: What the other queens see in list_queens.
+    name: str
+    title: str = "Claude Code"
+    #: The Claude Code program, and any arguments before Hive's.
+    command: tuple[str, ...] = ("claude",)
+    #: How she pays: "api_key" (``api_key``, the supported way) or "subscription" (the Claude plan signed in
+    #: in her config_dir, which you choose at your own risk; see docs/configuration.md).
+    auth: str = "api_key"
+    #: The Anthropic API key her runs use, when ``auth`` is "api_key".
+    api_key: str | None = field(default=None, repr=False)
+    #: ANTHROPIC_BASE_URL for her runs (a gateway in front of the API), when ``auth`` is "api_key".
+    api_base: str | None = None
+    #: Her CLAUDE_CONFIG_DIR: her settings, sessions and any sign-in. None: HIVE_HOME/claude_code/<id>/config.
+    config_dir: str | None = None
+    #: The folder she works in. None: HIVE_HOME/claude_code/<id>/workspace.
+    cwd: str | None = None
+    #: Passed to --permission-mode as is. "default" refuses, in a headless run, any tool that asks first.
+    permission_mode: str = "default"
+    allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
+    add_dirs: tuple[str, ...] = ()
+    #: --model; None leaves her own default.
+    model: str | None = None
+    #: The longest one turn of hers may run.
+    timeout_minutes: int = 30
+    #: Added to her system prompt after Hive's note on how letters reach her and where her replies go.
+    system_prompt: str | None = None
+    #: Extra environment variables for her runs.
+    env: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class QueenMailConfig:
+    """Queens writing to each other with ``message_queen`` (``framework.server.queen_mail``). Off by default.
+
+    configuration.json: ``"queen_mail": {"enabled": true, "queens": ["queen_a", "queen_b"], "daily_limit": 100, "max_depth": 8}``.
+    """
+
+    enabled: bool = False
+    #: The queens who write and are written to; None means every queen not removed from the catalog.
+    queens: tuple[str, ...] | None = None
+    #: Letters one queen may send in a day (replies don't count).
+    daily_limit: int = 100
+    #: Hops (a letter or a reply) in one chain, each set off by the one before; the hop past it isn't made.
+    max_depth: int = 8
+    #: Queens run by Claude Code, by id. They take part whatever ``queens`` says.
+    claude_code: dict[str, ClaudeCodeQueenConfig] = field(default_factory=dict)
+    #: Claude Code turns that may run at once, across those queens (read when the first one runs).
+    max_parallel_turns: int = 2
+
+    def includes(self, queen_id: str) -> bool:
+        """Whether ``queen_id`` may write and be written to (her removal from the catalog aside)."""
+        return self.enabled and (self.queens is None or queen_id in self.queens or queen_id in self.claude_code)
+
+
+def get_queen_mail_config() -> QueenMailConfig:
+    """The ``queen_mail`` section, with defaults for anything missing or invalid."""
+    raw = get_hive_config().get("queen_mail")
+    raw = raw if isinstance(raw, dict) else {}
+    default = QueenMailConfig()
+
+    def positive(key: str, fallback: int) -> int:
+        value = raw.get(key, fallback)
+        is_count = isinstance(value, int) and not isinstance(value, bool)
+        return value if is_count and value >= 1 else fallback
+
+    queens = raw.get("queens")
+    claude_code = raw.get("claude_code")
+    return QueenMailConfig(
+        enabled=raw.get("enabled") is True,
+        queens=tuple(q for q in queens if isinstance(q, str) and q) if isinstance(queens, list) else None,
+        daily_limit=positive("daily_limit", default.daily_limit),
+        max_depth=positive("max_depth", default.max_depth),
+        max_parallel_turns=positive("max_parallel_turns", default.max_parallel_turns),
+        claude_code={
+            queen_id: _claude_code_queen(queen_id, entry)
+            for queen_id, entry in (claude_code.items() if isinstance(claude_code, dict) else ())
+            if isinstance(queen_id, str) and queen_id and isinstance(entry, dict)
+        },
+    )
+
+
+def _claude_code_queen(queen_id: str, raw: dict[str, Any]) -> ClaudeCodeQueenConfig:
+    """One ``queen_mail.claude_code`` entry, with defaults for anything missing or invalid."""
+    default = ClaudeCodeQueenConfig(queen_id=queen_id, name=queen_id)
+
+    def text(key: str, fallback: str | None) -> str | None:
+        value = raw.get(key)
+        return value if isinstance(value, str) and value.strip() else fallback
+
+    def texts(key: str) -> tuple[str, ...]:
+        value = raw.get(key)
+        return tuple(v for v in value if isinstance(v, str) and v) if isinstance(value, list) else ()
+
+    command = raw.get("command")
+    if isinstance(command, str) and command.strip():
+        command_parts: tuple[str, ...] = (command,)
+    else:
+        command_parts = texts("command") or default.command
+    timeout = raw.get("timeout_minutes")
+    env = raw.get("env")
+    auth = raw.get("auth")
+    return ClaudeCodeQueenConfig(
+        queen_id=queen_id,
+        name=text("name", default.name) or queen_id,
+        title=text("title", default.title) or default.title,
+        command=command_parts,
+        auth=auth if auth in ("api_key", "subscription") else default.auth,
+        api_key=text("api_key", None),
+        api_base=text("api_base", None),
+        config_dir=text("config_dir", None),
+        cwd=text("cwd", None),
+        permission_mode=text("permission_mode", default.permission_mode) or default.permission_mode,
+        allowed_tools=texts("allowed_tools"),
+        disallowed_tools=texts("disallowed_tools"),
+        add_dirs=texts("add_dirs"),
+        model=text("model", None),
+        timeout_minutes=timeout if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout >= 1 else default.timeout_minutes,
+        system_prompt=text("system_prompt", None),
+        env=tuple((k, v) for k, v in env.items() if isinstance(k, str) and isinstance(v, str)) if isinstance(env, dict) else (),
+    )
+
+
+@dataclass(frozen=True)
+class SoulSection:
+    """One part of a queen's soul: what it holds, and how much."""
+
+    key: str
+    title: str
+    #: Characters the section may hold, across its items.
+    limit: int
+    #: Items older than this many days are dropped at the next reflection (None: kept).
+    max_age_days: int | None = None
+    #: Verbatim quotes, from different speakers or chats, each change to this section needs.
+    evidence: int = 1
+
+
+_DEFAULT_SOUL_SECTIONS = (
+    SoulSection("now", "Now: what's on my mind, what I'm working on", 300, max_age_days=14),
+    SoulSection("people", "Me and them", 800, evidence=2),
+    SoulSection("threads", "Open threads and promises", 600),
+    SoulSection("views", "What I think, and why", 600, evidence=2),
+    SoulSection("changes", "How I've changed", 400, evidence=2),
+)
+_DEFAULT_SOUL_HEADER = (
+    "These are your own notes about yourself, written by you from what has happened to you. "
+    "Where they disagree with your identity above, your identity comes first."
+)
+
+
+@dataclass(frozen=True)
+class SoulConfig:
+    """A queen's soul: a short self-description she revises once a day from her conversations.
+
+    configuration.json: ``"soul": {"queens": {"<queen_id>": {"enabled": true, "mode": "review", "hour": 4, ...}}}``.
+    """
+
+    queen_id: str
+    #: "review": each day's changes wait for approval; "auto": they apply at once.
+    mode: str = "review"
+    #: Local hour after which the day's reflection runs.
+    hour: int = 4
+    #: "queen" (her own model, else the main one) or "worker" (the worker_llm slot, when set).
+    model: str = "queen"
+    #: Changes one reflection may make.
+    max_edits: int = 5
+    #: Changes the first draft may make.
+    bootstrap_edits: int = 30
+    #: Regular expressions for session titles: only matching sessions are read (none: all).
+    include_titles: tuple[str, ...] = ()
+    #: Regular expressions for session titles that are never read.
+    exclude_titles: tuple[str, ...] = ()
+    #: A JSON file mapping chat keys to session ids, as a channel keeps it (relative paths start at
+    #: HIVE_HOME), e.g. "channels/onebot/sessions.json"; with it, only sessions whose key matches
+    #: ``source_keys`` are read.
+    source_file: str | None = None
+    source_keys: tuple[str, ...] = ()
+    #: Memory files (in her queen scope) the first draft reads.
+    bootstrap_memories: tuple[str, ...] = ()
+    sections: tuple[SoulSection, ...] = _DEFAULT_SOUL_SECTIONS
+    #: The line above the soul in her prompt.
+    header: str = _DEFAULT_SOUL_HEADER
+    #: Characters of one session's new conversation a reflection reads (the latest kept).
+    session_chars: int = 12_000
+    #: Characters of one message a reflection reads.
+    message_chars: int = 400
+
+
+def get_soul_config(queen_id: str | None) -> SoulConfig | None:
+    """The queen's ``soul`` entry, with defaults for anything missing or invalid; None when she has none."""
+    soul = get_hive_config().get("soul")
+    queens = soul.get("queens") if isinstance(soul, dict) else None
+    raw = queens.get(queen_id) if isinstance(queens, dict) and queen_id else None
+    if not isinstance(raw, dict) or raw.get("enabled") is False:
+        return None
+    default = SoulConfig(queen_id=queen_id)
+
+    def count(value: Any, fallback: int, *, low: int = 1, high: int | None = None) -> int:
+        ok = isinstance(value, int) and not isinstance(value, bool) and value >= low and (high is None or value <= high)
+        return value if ok else fallback
+
+    def patterns(key: str) -> tuple[str, ...]:
+        value = raw.get(key)
+        return tuple(str(v) for v in value if isinstance(v, str) and v) if isinstance(value, list) else ()
+
+    sections: list[SoulSection] = []
+    for entry in raw.get("sections") or []:
+        if not isinstance(entry, dict) or not str(entry.get("key") or "").strip() or not str(entry.get("title") or "").strip():
+            continue
+        max_age = entry.get("max_age_days")
+        sections.append(
+            SoulSection(
+                key=str(entry["key"]).strip(),
+                title=str(entry["title"]).strip(),
+                limit=count(entry.get("limit"), 400),
+                max_age_days=max_age if isinstance(max_age, int) and not isinstance(max_age, bool) and max_age >= 1 else None,
+                evidence=count(entry.get("evidence"), 1),
+            )
+        )
+    keys = [s.key for s in sections]
+    sources = raw.get("sources") if isinstance(raw.get("sources"), dict) else {}
+    return SoulConfig(
+        queen_id=queen_id,
+        mode=raw.get("mode") if raw.get("mode") in ("review", "auto") else default.mode,
+        hour=count(raw.get("hour"), default.hour, low=0, high=23),
+        model=raw.get("model") if raw.get("model") in ("queen", "worker") else default.model,
+        max_edits=count(raw.get("max_edits"), default.max_edits),
+        bootstrap_edits=count(raw.get("bootstrap_edits"), default.bootstrap_edits),
+        include_titles=patterns("include_titles"),
+        exclude_titles=patterns("exclude_titles"),
+        source_file=str(sources.get("file") or "") or None,
+        source_keys=tuple(str(k) for k in sources.get("keys") or [] if isinstance(k, str) and k),
+        bootstrap_memories=patterns("bootstrap_memories"),
+        sections=tuple(sections) if sections and len(set(keys)) == len(keys) else default.sections,
+        header=str(raw.get("header") or default.header),
+        session_chars=count(raw.get("session_chars"), default.session_chars),
+        message_chars=count(raw.get("message_chars"), default.message_chars),
+    )
+
+
+def get_memory_timeline_enabled() -> bool:
+    """Return whether queens keep a dated timeline of what the user mentions.
+
+    The timeline (``framework.agents.queen.timeline``) costs a background
+    LLM call every few user messages, plus a catch-up over recent older
+    sessions at each queen boot; ``search_timeline`` is offered only when
+    it is on. Resolution:
+    1. ``HIVE_MEMORY_TIMELINE`` env var, when explicitly set.
+    2. Top-level ``memory_timeline`` boolean in configuration.json (the
+       features endpoint writes it).
+    3. Default: off.
+    """
+    raw = os.environ.get("HIVE_MEMORY_TIMELINE")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    value = get_hive_config().get("memory_timeline")
+    if isinstance(value, bool):
+        return value
+    return False
+
+
 def sync_email_senders_env(enabled: bool | None = None) -> bool:
     """Publish the email-senders flag into ``os.environ``.
 
@@ -980,10 +1414,8 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     # a model's default thinking). Applied to every LLM call, including the
     # small recall/judge aux calls that otherwise burn their token budget on
     # hidden reasoning and return empty.
-    extra_body = llm.get("extra_body")
-    if isinstance(extra_body, dict) and extra_body:
-        return {"extra_body": extra_body}
-    return {}
+    extra_body = section_extra_body(llm)
+    return {"extra_body": extra_body} if extra_body else {}
 
 
 # ---------------------------------------------------------------------------

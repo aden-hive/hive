@@ -6,13 +6,18 @@ import { tasksApi, type TaskRecord } from "@/api/tasks";
 import ChatPanel, {
   type ChatMessage,
   type ImageContent,
+  stripSystemReminders,
+  userInputTimestamp,
 } from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { api } from "@/api/client";
+import { configApi } from "@/api/config";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
+import { resolveAttachmentUrl } from "@/lib/attachments";
 import { queensApi, type PortraitDescriptor } from "@/api/queens";
 import AgentCredentialForm from "@/components/AgentCredentialForm";
+import SkillInstallConsent from "@/components/SkillInstallConsent";
 import type { AgentCredentialFormRequest } from "@/api/credentials";
 import { useMultiSSE } from "@/hooks/use-sse";
 import { usePendingQueue } from "@/hooks/use-pending-queue";
@@ -106,6 +111,15 @@ export default function QueenDM() {
   // in their composer). Reset whenever the route changes so a stale flag
   // can't leak between queens / between bootstrap and resume modes.
   const deferredBootstrapRef = useRef(false);
+  // The session a staged handoff is being delivered into. The bootstrap's own
+  // ?new=1 -> ?session={sid} rewrite re-runs the load effect for that same
+  // session; dropping the handoff there stranded the picked-queen task in the
+  // composer, because auto-send waits for `loading` to clear and the token was
+  // gone by then.
+  const handoffSessionRef = useRef<string | null>(null);
+  // The edited message an "Edit in a new branch" carries into the session it
+  // forked, put in the composer (text and files) once that session loads.
+  const branchDraftRef = useRef<{ sessionId: string; text: string; files: File[] } | null>(null);
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
   const queenInfo = getQueenForAgent(queenId || "");
@@ -136,6 +150,33 @@ export default function QueenDM() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Latest runtime bootstrap stage ("Starting tool servers", …), polled
+  // from /api/startup-status while the loading overlay is up so a slow
+  // `hive open` cold start shows staged progress instead of a bare
+  // spinner (mirroring the desktop shell's loading screen).
+  const [bootStage, setBootStage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loading) {
+      setBootStage(null);
+      return;
+    }
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await configApi.getStartupStatus();
+        if (!alive) return;
+        setBootStage(s.ready ? null : s.stage + (s.detail ? ` — ${s.detail}` : ""));
+      } catch {
+        // Server still coming up — keep whatever we last showed.
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [loading]);
   const [queenReady, setQueenReady] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   // SSE connection state surfaced to the user. "reconnecting" appears
@@ -241,6 +282,7 @@ export default function QueenDM() {
   // into) and handed here to be sent through the real composer. See
   // lib/composerHandoff.
   const [handoff, setHandoff] = useState<ComposerHandoff | null>(null);
+  const [branchFiles, setBranchFiles] = useState<File[] | null>(null);
   const [actionPlanOpen, setActionPlanOpen] = useState(false);
   const [expandedHistoryDays, setExpandedHistoryDays] = useState<Set<string>>(new Set());
   // Sessions whose inline content is currently expanded under the history
@@ -280,6 +322,9 @@ export default function QueenDM() {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   // Secure credential form the queen popped via credentials(action="collect").
   const [credentialForm, setCredentialForm] = useState<AgentCredentialFormRequest | null>(null);
+  // Bumped when the queen files or the user decides a request to add a skill
+  // to the shared library, so SkillInstallConsent reads the list again.
+  const [skillInstallsKey, setSkillInstallsKey] = useState(0);
   const [cloneColonyName, setCloneColonyName] = useState("");
   const [cloneGoal, setCloneGoal] = useState("");
   const [cloneHandover, setCloneHandover] = useState("");
@@ -962,11 +1007,22 @@ export default function QueenDM() {
     log("resetViewState + setLoading(true)");
     resetViewState();
     setLoading(true);
+    if (selectedSessionParam && branchDraftRef.current?.sessionId === selectedSessionParam) {
+      setInitialDraft(branchDraftRef.current.text);
+      setBranchFiles(branchDraftRef.current.files.length ? branchDraftRef.current.files : null);
+      branchDraftRef.current = null;
+    } else {
+      setBranchFiles(null);
+    }
     // Any handoff belongs to the session load that claimed it. Dropping it here
     // means switching sessions can't hand a stale draft to a remounted composer
     // and send it a second time; the branch below re-sets it when this load is
-    // the one delivering it.
-    setHandoff(null);
+    // the one delivering it. The bootstrap's URL rewrite for the session it is
+    // delivering into is the same load, so it keeps the handoff.
+    if (!selectedSessionParam || selectedSessionParam !== handoffSessionRef.current) {
+      setHandoff(null);
+      handoffSessionRef.current = null;
+    }
 
     let cancelled = false;
     const isBootstrap = newSessionFlag === "1";
@@ -1192,6 +1248,7 @@ export default function QueenDM() {
           if (isBootstrap && !cancelled) {
             // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
             // this session instead of creating another new one.
+            if (pendingHandoff) handoffSessionRef.current = sid;
             setSearchParams({ session: sid }, { replace: true });
 
             // Message was passed as initial_prompt so the queen is already
@@ -1398,6 +1455,73 @@ export default function QueenDM() {
     }
   }, [sessionId, compactingAndForking, queenId, setSearchParams]);
 
+  // Fork this conversation into a new session. From a user message: the fork
+  // ends just before it and the message lands in the composer to be edited
+  // and re-sent. From a queen reply: the fork ends with that reply.
+  const [branching, setBranching] = useState(false);
+  const handleBranch = useCallback(
+    async (msg: ChatMessage) => {
+      if (!sessionId || branching) return;
+      let before: string | null;
+      if (msg.type === "user") {
+        before = userInputTimestamp(msg);
+        if (!before) return;
+      } else {
+        const at = combinedMessages.findIndex((m) => m.id === msg.id);
+        if (at < 0) return;
+        before = combinedMessages.slice(at + 1).map(userInputTimestamp).find((ts) => ts !== null) ?? null;
+      }
+      setBranching(true);
+      // Re-arms the composer's draft hand-over even when it's the same text.
+      setInitialDraft(null);
+      try {
+        const { session_id } = await sessionsApi.fork(sessionId, before);
+        if (msg.type === "user") {
+          const fileSession = msg.attachmentSessionId ?? sessionId;
+          // Best effort: a file that can't be fetched is left for the user to re-attach.
+          const files = await Promise.all(
+            (msg.images ?? []).map(async (img, i) => {
+              try {
+                const res = await fetch(resolveAttachmentUrl(img.image_url.url, fileSession));
+                if (!res.ok) return null;
+                const blob = await res.blob();
+                return new File([blob], img._fileName ?? `attachment-${i + 1}`, { type: blob.type });
+              } catch {
+                return null;
+              }
+            }),
+          );
+          branchDraftRef.current = {
+            sessionId: session_id,
+            text: stripSystemReminders(msg.content),
+            files: files.filter((f): f is File => f !== null),
+          };
+        }
+        setSwitchingSessionId(session_id);
+        setSearchParams({ session: session_id });
+      } catch (err) {
+        upsertMessage({
+          id: makeId(),
+          agent: "System",
+          agentColor: "",
+          content: `Couldn't branch the conversation: ${err instanceof Error ? err.message : String(err)}`,
+          timestamp: "",
+          type: "system",
+          thread: "queen-dm",
+          createdAt: Date.now(),
+        });
+      } finally {
+        setBranching(false);
+      }
+    },
+    [sessionId, branching, combinedMessages, setSearchParams, upsertMessage],
+  );
+
+  const handleRenameSession = useCallback(async (sid: string, title: string) => {
+    const { title: stored } = await sessionsApi.setTitle(sid, title);
+    setHistorySessions((prev) => prev.map((s) => (s.session_id === sid ? { ...s, title: stored } : s)));
+  }, []);
+
   const handleSelectHistoricalSession = useCallback(
     (nextSessionId: string) => {
       if (!nextSessionId || nextSessionId === sessionId) return;
@@ -1565,6 +1689,15 @@ export default function QueenDM() {
         const newId = event.data?.new_session_id as string | undefined;
         if (typeof newId === "string" && newId) {
           setSearchParams({ session: newId }, { replace: true });
+        }
+        return;
+      }
+
+      // Not part of the transcript, so also outside the historical guard.
+      if (event.type === "session_title_updated") {
+        const { session_id: titled, title } = (event.data ?? {}) as { session_id?: string; title?: string | null };
+        if (titled) {
+          setHistorySessions((prev) => prev.map((s) => (s.session_id === titled ? { ...s, title: title ?? null } : s)));
         }
         return;
       }
@@ -2007,6 +2140,13 @@ export default function QueenDM() {
           });
           break;
         }
+
+        case "skill_install_requested":
+        case "skill_install_decided":
+          // write_skill(scope="global"). The queen doesn't wait for the
+          // answer; the prompt reads the session's pending requests.
+          setSkillInstallsKey((k) => k + 1);
+          break;
 
         case "colony_created": {
           // Queen called create_colony() — surface a clickable system
@@ -2705,7 +2845,8 @@ export default function QueenDM() {
           onToggleHistorySession={handleToggleHistorySession}
           historySessionMessages={historySessionMessages}
           initialDraft={initialDraft}
-          initialAttachments={handoff?.files ?? null}
+          onBranch={handleBranch}
+          initialAttachments={handoff?.files ?? branchFiles}
           autoSendToken={handoff?.token ?? null}
           queenProfileId={queenId ?? null}
           queenId={queenId}
@@ -2730,6 +2871,7 @@ export default function QueenDM() {
                 creatingNew={creatingNewSession}
                 onSelect={(sid) => setSearchParams({ session: sid })}
                 onCreateNew={handleCreateNewSession}
+                onRename={handleRenameSession}
               />
               <button
                 onClick={() => setActionPlanOpen((open) => !open)}
@@ -2765,8 +2907,11 @@ export default function QueenDM() {
             populated rather than assembled live in front of the user.
             The parent div is `relative`; this sits opaque on top. */}
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/60" />
+            {bootStage && (
+              <p className="text-[11px] text-muted-foreground animate-pulse">{bootStage}…</p>
+            )}
           </div>
         )}
       </div>
@@ -2777,6 +2922,10 @@ export default function QueenDM() {
           request={credentialForm}
           onClose={() => setCredentialForm(null)}
         />
+      )}
+
+      {sessionId && (
+        <SkillInstallConsent sessionId={sessionId} refreshKey={skillInstallsKey} />
       )}
 
       {cloneDialogOpen && (

@@ -73,11 +73,13 @@ export interface FeaturesConfig {
    * from the agent, not just from the UI. See useEmailSendersEnabled.
    */
   email_senders: boolean;
+  /** A judge model reminds a queen who announced work and stopped (needs the judge slot). */
+  stall_check: boolean;
 }
 
 /** One provider slot in configuration.json (llm / worker_llm /
  * vision_fallback) — displayed and saved verbatim, unknown keys included. */
-export type LlmRole = "llm" | "worker_llm" | "vision_fallback";
+export type LlmRole = "llm" | "worker_llm" | "vision_fallback" | "judge";
 export interface LlmSection {
   provider?: string;
   model?: string;
@@ -98,8 +100,21 @@ export interface ExternalSkillSource {
   error?: string;
 }
 
+/** Coarse runtime boot/bootstrap stage, reported by the session bootstrap
+ * path (tool servers, history scan, prompt composition). Polled by loading
+ * overlays so `hive open` shows staged progress instead of a bare spinner. */
+export interface StartupStatus {
+  ready: boolean;
+  stage: string;
+  detail: string;
+  updated_at: number;
+  history: { stage: string; detail: string; at: number }[];
+}
+
 export const configApi = {
   getLLMConfig: () => api.get<LLMConfig>("/config/llm"),
+
+  getStartupStatus: () => api.get<StartupStatus>("/startup-status"),
 
   /** The three provider slots in configuration.json, verbatim. */
   getLlmSections: () =>

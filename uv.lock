@@ -15,8 +15,226 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "framework",
-    "tools",
+    "aden-hive",
+    "aden-tools",
+]
+
+[[package]]
+name = "aden-hive"
+version = "1.0.14"
+source = { editable = "core" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "croniter" },
+    { name = "fastmcp" },
+    { name = "httpx" },
+    { name = "litellm" },
+    { name = "mcp" },
+    { name = "mcp2cli" },
+    { name = "psutil" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+server = [
+    { name = "aiohttp" },
+]
+testing = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+]
+tools = [
+    { name = "aden-tools" },
+]
+webhook = [
+    { name = "aiohttp" },
+]
+
+[package.dev-dependencies]
+app = [
+    { name = "aden-tools" },
+    { name = "aiohttp" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aden-tools", marker = "extra == 'tools'", editable = "tools" },
+    { name = "aiohttp", marker = "extra == 'server'", specifier = ">=3.9.0" },
+    { name = "aiohttp", marker = "extra == 'webhook'", specifier = ">=3.9.0" },
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "croniter", specifier = ">=1.4.0" },
+    { name = "fastmcp", specifier = ">=2.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "litellm", specifier = "==1.83.4" },
+    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "mcp2cli", specifier = ">=3.8,<4" },
+    { name = "psutil", specifier = ">=5.9" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'testing'", specifier = ">=0.23" },
+    { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.0" },
+]
+provides-extras = ["webhook", "server", "tools", "testing"]
+
+[package.metadata.requires-dev]
+app = [
+    { name = "aden-tools", editable = "tools" },
+    { name = "aiohttp", specifier = ">=3.9.0" },
+]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-xdist", specifier = ">=3.0" },
+    { name = "ruff", specifier = ">=0.14.14" },
+    { name = "ty", specifier = ">=0.0.13" },
+]
+
+[[package]]
+name = "aden-tools"
+version = "1.0.14"
+source = { editable = "tools" }
+dependencies = [
+    { name = "aden-hive" },
+    { name = "arxiv" },
+    { name = "asana" },
+    { name = "beautifulsoup4" },
+    { name = "diff-match-patch" },
+    { name = "dnspython" },
+    { name = "fastmcp" },
+    { name = "fpdf2" },
+    { name = "google-analytics-data" },
+    { name = "httpx" },
+    { name = "jsonpath-ng" },
+    { name = "litellm" },
+    { name = "pandas" },
+    { name = "pdfplumber" },
+    { name = "pillow" },
+    { name = "playwright" },
+    { name = "playwright-stealth" },
+    { name = "psycopg2-binary" },
+    { name = "pydantic" },
+    { name = "pypdf" },
+    { name = "pypdfium2" },
+    { name = "pytesseract" },
+    { name = "python-dotenv" },
+    { name = "reportlab" },
+    { name = "requests" },
+    { name = "resend" },
+    { name = "stripe" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "databricks-mcp" },
+    { name = "databricks-sdk" },
+    { name = "duckdb" },
+    { name = "google-cloud-bigquery" },
+    { name = "openpyxl" },
+    { name = "pillow" },
+    { name = "pytesseract" },
+    { name = "restrictedpython" },
+]
+bigquery = [
+    { name = "google-cloud-bigquery" },
+]
+browser = [
+    { name = "pillow" },
+]
+databricks = [
+    { name = "databricks-mcp" },
+    { name = "databricks-sdk" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+excel = [
+    { name = "openpyxl" },
+]
+ocr = [
+    { name = "pillow" },
+    { name = "pytesseract" },
+]
+sandbox = [
+    { name = "restrictedpython" },
+]
+sql = [
+    { name = "duckdb" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "duckdb" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aden-hive", editable = "core" },
+    { name = "arxiv", specifier = ">=2.1.0" },
+    { name = "asana", specifier = ">=3.2.0" },
+    { name = "beautifulsoup4", specifier = ">=4.12.0" },
+    { name = "databricks-mcp", marker = "extra == 'all'", specifier = ">=0.1.0" },
+    { name = "databricks-mcp", marker = "extra == 'databricks'", specifier = ">=0.1.0" },
+    { name = "databricks-sdk", marker = "extra == 'all'", specifier = ">=0.30.0" },
+    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
+    { name = "diff-match-patch", specifier = ">=20230430" },
+    { name = "dnspython", specifier = ">=2.4.0" },
+    { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.0.0" },
+    { name = "duckdb", marker = "extra == 'sql'", specifier = ">=1.0.0" },
+    { name = "fastmcp", specifier = ">=2.0.0" },
+    { name = "fpdf2", specifier = ">=2.7.0" },
+    { name = "google-analytics-data", specifier = ">=0.18.0" },
+    { name = "google-cloud-bigquery", marker = "extra == 'all'", specifier = ">=3.0.0" },
+    { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "jsonpath-ng", specifier = ">=1.6.0" },
+    { name = "litellm", specifier = "==1.83.4" },
+    { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
+    { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.0" },
+    { name = "pandas", specifier = ">=2.0.0" },
+    { name = "pdfplumber", specifier = ">=0.11.9" },
+    { name = "pillow", specifier = ">=10.0.0" },
+    { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
+    { name = "pillow", marker = "extra == 'browser'", specifier = ">=10.0.0" },
+    { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10.0.0" },
+    { name = "playwright", specifier = ">=1.40.0" },
+    { name = "playwright-stealth", specifier = ">=2.0.0" },
+    { name = "psycopg2-binary", specifier = ">=2.9.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pypdf", specifier = ">=4.0.0" },
+    { name = "pypdfium2", specifier = ">=4.0.0" },
+    { name = "pytesseract", specifier = ">=0.3.10" },
+    { name = "pytesseract", marker = "extra == 'all'", specifier = ">=0.3.10" },
+    { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "reportlab", specifier = ">=4.0.0" },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "resend", specifier = ">=2.0.0" },
+    { name = "restrictedpython", marker = "extra == 'all'", specifier = ">=7.0" },
+    { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.0" },
+    { name = "stripe", specifier = ">=14.3.0" },
+    { name = "websockets", specifier = ">=12.0" },
+]
+provides-extras = ["dev", "sandbox", "browser", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "duckdb", specifier = ">=1.4.4" },
+    { name = "ruff", specifier = ">=0.14.14" },
+    { name = "ty", specifier = ">=0.0.13" },
 ]
 
 [[package]]
@@ -783,72 +1001,6 @@ wheels = [
 ]
 
 [[package]]
-name = "framework"
-version = "0.7.1"
-source = { editable = "core" }
-dependencies = [
-    { name = "anthropic" },
-    { name = "croniter" },
-    { name = "fastmcp" },
-    { name = "httpx" },
-    { name = "litellm" },
-    { name = "mcp" },
-    { name = "psutil" },
-    { name = "pydantic" },
-    { name = "tools" },
-]
-
-[package.optional-dependencies]
-server = [
-    { name = "aiohttp" },
-]
-testing = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-]
-webhook = [
-    { name = "aiohttp" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", marker = "extra == 'server'", specifier = ">=3.9.0" },
-    { name = "aiohttp", marker = "extra == 'webhook'", specifier = ">=3.9.0" },
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "croniter", specifier = ">=1.4.0" },
-    { name = "fastmcp", specifier = ">=2.0.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "litellm", specifier = "==1.83.4" },
-    { name = "mcp", specifier = ">=1.0.0" },
-    { name = "psutil", specifier = ">=5.9" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'testing'", specifier = ">=0.23" },
-    { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.0" },
-    { name = "tools", editable = "tools" },
-]
-provides-extras = ["webhook", "server", "testing"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "pytest-xdist", specifier = ">=3.0" },
-    { name = "ruff", specifier = ">=0.14.14" },
-    { name = "ty", specifier = ">=0.0.13" },
-]
-
-[[package]]
 name = "frozenlist"
 version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1610,6 +1762,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fc/6d/62e76bbb8144d6ed86e202b5edd8a4cb631e7c8130f3f4893c3f90262b10/mcp-1.26.0.tar.gz", hash = "sha256:db6e2ef491eecc1a0d93711a76f28dec2e05999f93afd48795da1c1137142c66", size = 608005, upload-time = "2026-01-24T19:40:32.468Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/d9/eaa1f80170d2b7c5ba23f3b59f766f3a0bb41155fbc32a69adfa1adaaef9/mcp-1.26.0-py3-none-any.whl", hash = "sha256:904a21c33c25aa98ddbeb47273033c435e595bbacfdb177f4bd87f6dceebe1ca", size = 233615, upload-time = "2026-01-24T19:40:30.652Z" },
+]
+
+[[package]]
+name = "mcp2cli"
+version = "3.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e1/5a/78799e514fe43c5657c3756967e61935e96b753a2854ef23c8b96d9451b3/mcp2cli-3.8.0.tar.gz", hash = "sha256:232f541eb39de4abdd99e6066d715a42bc392cd78ed0641dccfdca7b50113dee", size = 55967, upload-time = "2026-10-12T06:17:33.771Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/aa/e9/6416f78c4621e8b82bb29d1c1c7e1f02780bbada42c924442772c3657f5f/mcp2cli-3.8.0-py3-none-any.whl", hash = "sha256:de087ca239d06b3104a1b7199a1c1326b5073602ef85b27456335a9099634988", size = 56258, upload-time = "2026-10-12T06:17:32.71Z" },
 ]
 
 [[package]]
@@ -3178,146 +3344,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/18/a545c4ea42af3df6effd7d13d250ba77a0a86fb20393143bbb9a92e434d4/tokenizers-0.22.2-cp39-abi3-win32.whl", hash = "sha256:a6bf3f88c554a2b653af81f3204491c818ae2ac6fbc09e76ef4773351292bc92", size = 2502363, upload-time = "2026-01-05T10:45:20.593Z" },
     { url = "https://files.pythonhosted.org/packages/65/71/0670843133a43d43070abeb1949abfdef12a86d490bea9cd9e18e37c5ff7/tokenizers-0.22.2-cp39-abi3-win_amd64.whl", hash = "sha256:c9ea31edff2968b44a88f97d784c2f16dc0729b8b143ed004699ebca91f05c48", size = 2747786, upload-time = "2026-01-05T10:45:18.411Z" },
     { url = "https://files.pythonhosted.org/packages/72/f4/0de46cfa12cdcbcd464cc59fde36912af405696f687e53a091fb432f694c/tokenizers-0.22.2-cp39-abi3-win_arm64.whl", hash = "sha256:9ce725d22864a1e965217204946f830c37876eee3b2ba6fc6255e8e903d5fcbc", size = 2612133, upload-time = "2026-01-05T10:45:17.232Z" },
-]
-
-[[package]]
-name = "tools"
-version = "0.1.0"
-source = { editable = "tools" }
-dependencies = [
-    { name = "arxiv" },
-    { name = "asana" },
-    { name = "beautifulsoup4" },
-    { name = "diff-match-patch" },
-    { name = "dnspython" },
-    { name = "fastmcp" },
-    { name = "fpdf2" },
-    { name = "framework" },
-    { name = "google-analytics-data" },
-    { name = "httpx" },
-    { name = "jsonpath-ng" },
-    { name = "litellm" },
-    { name = "pandas" },
-    { name = "pdfplumber" },
-    { name = "pillow" },
-    { name = "playwright" },
-    { name = "playwright-stealth" },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "pypdf" },
-    { name = "pypdfium2" },
-    { name = "pytesseract" },
-    { name = "python-dotenv" },
-    { name = "reportlab" },
-    { name = "requests" },
-    { name = "resend" },
-    { name = "stripe" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "databricks-mcp" },
-    { name = "databricks-sdk" },
-    { name = "duckdb" },
-    { name = "google-cloud-bigquery" },
-    { name = "openpyxl" },
-    { name = "pillow" },
-    { name = "pytesseract" },
-    { name = "restrictedpython" },
-]
-bigquery = [
-    { name = "google-cloud-bigquery" },
-]
-browser = [
-    { name = "pillow" },
-]
-databricks = [
-    { name = "databricks-mcp" },
-    { name = "databricks-sdk" },
-]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-excel = [
-    { name = "openpyxl" },
-]
-ocr = [
-    { name = "pillow" },
-    { name = "pytesseract" },
-]
-sandbox = [
-    { name = "restrictedpython" },
-]
-sql = [
-    { name = "duckdb" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "duckdb" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arxiv", specifier = ">=2.1.0" },
-    { name = "asana", specifier = ">=3.2.0" },
-    { name = "beautifulsoup4", specifier = ">=4.12.0" },
-    { name = "databricks-mcp", marker = "extra == 'all'", specifier = ">=0.1.0" },
-    { name = "databricks-mcp", marker = "extra == 'databricks'", specifier = ">=0.1.0" },
-    { name = "databricks-sdk", marker = "extra == 'all'", specifier = ">=0.30.0" },
-    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
-    { name = "diff-match-patch", specifier = ">=20230430" },
-    { name = "dnspython", specifier = ">=2.4.0" },
-    { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.0.0" },
-    { name = "duckdb", marker = "extra == 'sql'", specifier = ">=1.0.0" },
-    { name = "fastmcp", specifier = ">=2.0.0" },
-    { name = "fpdf2", specifier = ">=2.7.0" },
-    { name = "framework", editable = "core" },
-    { name = "google-analytics-data", specifier = ">=0.18.0" },
-    { name = "google-cloud-bigquery", marker = "extra == 'all'", specifier = ">=3.0.0" },
-    { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.0.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "jsonpath-ng", specifier = ">=1.6.0" },
-    { name = "litellm", specifier = "==1.83.4" },
-    { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
-    { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.0" },
-    { name = "pandas", specifier = ">=2.0.0" },
-    { name = "pdfplumber", specifier = ">=0.11.9" },
-    { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
-    { name = "pillow", marker = "extra == 'browser'", specifier = ">=10.0.0" },
-    { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10.0.0" },
-    { name = "playwright", specifier = ">=1.40.0" },
-    { name = "playwright-stealth", specifier = ">=2.0.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pypdf", specifier = ">=4.0.0" },
-    { name = "pypdfium2", specifier = ">=4.0.0" },
-    { name = "pytesseract", specifier = ">=0.3.10" },
-    { name = "pytesseract", marker = "extra == 'all'", specifier = ">=0.3.10" },
-    { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "reportlab", specifier = ">=4.0.0" },
-    { name = "requests", specifier = ">=2.31.0" },
-    { name = "resend", specifier = ">=2.0.0" },
-    { name = "restrictedpython", marker = "extra == 'all'", specifier = ">=7.0" },
-    { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.0" },
-    { name = "stripe", specifier = ">=14.3.0" },
-    { name = "websockets", specifier = ">=12.0" },
-]
-provides-extras = ["dev", "sandbox", "browser", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "duckdb", specifier = ">=1.4.4" },
-    { name = "ruff", specifier = ">=0.14.14" },
-    { name = "ty", specifier = ">=0.0.13" },
 ]
 
 [[package]]

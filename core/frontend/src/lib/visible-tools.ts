@@ -8,25 +8,17 @@
 /** Tool ``provider`` field values that the UI exposes. The provider is
  * the short id from the runtime (``google``, ``github``, …). Used by
  * the tools editor to filter visible tool rows. */
-export const VISIBLE_PROVIDERS: ReadonlySet<string> = new Set([
-  "google",
-  "github",
-  "hubspot",
-  "slack",
-  "notion",
+export const VISIBLE_PROVIDERS: ReadonlySet<string> = new Set<string>([
+  // Empty while no bundled integration ships: the Gmail / Calendar / Docs,
+  // GitHub, HubSpot, Notion and Slack tools left with the bundled
+  // hive_tools MCP server. Add a provider back here when its tools return.
 ]);
 
-/** Credential spec ids that the credentials page renders as cards.
- * A subset of {@link VISIBLE_PROVIDERS}: slack stays a visible *tool*
- * provider but is intentionally omitted here so it isn't surfaced as a
- * (not-yet-connectable) credential card. */
-export const VISIBLE_CREDENTIAL_IDS: ReadonlySet<string> = new Set([
-  "google",
-  "github",
-  "hubspot",
-  "notion",
-  "apollo",
-]);
+/** Credential spec ids that the credentials page renders as Connect cards.
+ * A subset of {@link VISIBLE_PROVIDERS}. Empty for the same reason — a card
+ * for an integration with no tools behind it would connect to nothing. The
+ * API Keys section (BYOK placeholders, user-added providers) is unaffected. */
+export const VISIBLE_CREDENTIAL_IDS: ReadonlySet<string> = new Set<string>([]);
 
 /** Within Google we only ship Gmail, Calendar, and Docs today — Drive
  * and Sheets exist in the runtime but aren't part of the curated set.

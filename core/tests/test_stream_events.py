@@ -246,6 +246,7 @@ class TestEventSerialization:
             "credits": None,
             "model": "gpt-4",
             "thinking_blocks": [],
+            "reasoning_content": "",
         }
 
     @pytest.mark.parametrize("cls", ALL_EVENT_CLASSES, ids=lambda c: c.__name__)

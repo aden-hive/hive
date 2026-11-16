@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from framework.llm.capabilities import filter_tools_for_model, supports_image_tool_results
+from framework.llm.capabilities import (
+    filter_tools_for_model,
+    supports_image_tool_results,
+    supports_images_in_tool_results,
+)
 from framework.llm.provider import Tool
 
 
@@ -107,3 +111,47 @@ class TestFilterToolsForModel:
         filtered, _ = filter_tools_for_model(tools, "gpt-4o")
         filtered.append(Tool(name="extra", description=""))
         assert len(tools) == 1
+
+
+class TestSupportsImagesInToolResults:
+    """Which APIs carry an image inside a tool-role message.
+
+    Distinct from ``supports_image_tool_results`` (can the model see images
+    at all): a vision-capable OpenAI model still needs its screenshots
+    hoisted into a user message, because the tool result drops them.
+    """
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "anthropic/claude-opus-4-6",
+            "claude-sonnet-4-5-20250929",
+            "openrouter/anthropic/claude-sonnet-4.6",
+            # Anthropic-compatible proxies, rewritten to anthropic/ downstream
+            "hive/claude-opus-4-6",
+            "kimi/kimi-k2.6",
+            # Case-insensitive
+            "Anthropic/Claude-Opus-4-6",
+        ],
+    )
+    def test_anthropic_routed_models_keep_images_in_tool_results(self, model: str):
+        assert supports_images_in_tool_results(model) is True
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            # The regression: vision-capable, but silently drops tool-result
+            # images, so the agent reports it cannot see its own screenshot.
+            "openai/gpt-6-astra",
+            "gpt-5.5",
+            "openrouter/openai/gpt-5.4",
+            "gemini/gemini-3-flash-preview",
+            "azure/gpt-5",
+        ],
+    )
+    def test_other_apis_need_images_hoisted(self, model: str):
+        assert supports_images_in_tool_results(model) is False
+
+    def test_empty_model_leaves_messages_alone(self):
+        """No provider selected yet — don't reshape the payload."""
+        assert supports_images_in_tool_results("") is True

@@ -203,6 +203,17 @@ export const sessionsApi = {
   history: () =>
     api.get<{ sessions: HistorySession[] }>("/sessions/history"),
 
+  /** Fork a queen conversation into a new session: cut just before the user
+   *  message sent at ``beforeInputAt`` (its event timestamp), or copy it whole. */
+  fork: (sessionId: string, beforeInputAt?: string | null) =>
+    api.post<{ session_id: string; queen_id: string }>(`/sessions/${sessionId}/fork`, {
+      before_input_at: beforeInputAt ?? null,
+    }),
+
+  /** Name a conversation; an empty title clears it. */
+  setTitle: (sessionId: string, title: string) =>
+    api.patch<{ session_id: string; title: string | null }>(`/sessions/${sessionId}/title`, { title }),
+
   /** Permanently delete a history session (stops live session + removes disk files). */
   deleteHistory: (sessionId: string) =>
     api.delete<{ deleted: string }>(`/sessions/history/${sessionId}`),

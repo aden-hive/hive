@@ -503,7 +503,7 @@ class TestSessionCRUD:
             trigger_type="timer",
             trigger_config={"cron": "0 5 * * *"},
             task="Run task",
-            active=True,
+            enabled=True,
         )
         session.active_trigger_ids.add("daily")
         session.active_timer_tasks["daily"] = asyncio.create_task(asyncio.sleep(60))
@@ -936,6 +936,26 @@ class TestConfigRoutes:
         assert subscriptions["codex"]["api_base"] == "https://chatgpt.com/backend-api/codex"
         assert subscriptions["kimi_code"]["default_model"] == "kimi-k2.6"
 
+    @pytest.mark.asyncio
+    async def test_a_key_written_in_the_config_counts_as_configured(self, monkeypatch):
+        # A custom endpoint whose key lives in configuration.json, with no
+        # provider env var: the runtime calls it fine, so the UI must not
+        # ask for a key.
+        import framework.config as hive_config
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        llm = {"provider": "openai", "model": "local-qwen", "api_base": "http://127.0.0.1:9/v1", "api_key": "sk-in-config"}
+        monkeypatch.setattr(hive_config, "get_hive_config", lambda: {"llm": llm})
+        monkeypatch.setattr("framework.server.routes_config.get_hive_config", lambda: {"llm": llm})
+        app = create_app()
+        app["credential_store"] = MagicMock()
+        app["credential_store"].get.return_value = None
+
+        async with TestClient(TestServer(app)) as client:
+            data = await (await client.get("/api/config/llm")).json()
+
+        assert data["has_api_key"] is True
+
 
 class TestSSEFormat:
     """Tests for SSE event wire format -- events must be unnamed (data-only)
@@ -988,11 +1008,21 @@ class TestSSEFormat:
 
 class TestErrorMiddleware:
     @pytest.mark.asyncio
-    async def test_unknown_api_route_falls_back_to_frontend(self):
+    async def test_unknown_api_route_falls_back_to_frontend(self, tmp_path, monkeypatch):
+        # The SPA catch-all only exists when a built frontend does. Provide one
+        # (the server checks ./frontend/dist first) rather than depend on a
+        # local `npm run build`, which CI runners don't have.
+        dist = tmp_path / "frontend" / "dist"
+        dist.mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html><title>Hive</title>")
+        monkeypatch.chdir(tmp_path)
+
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")
             assert resp.status == 200
+            # The fallback must never be cached for an /api/* URL.
+            assert resp.headers["Cache-Control"] == "no-store"
 
 
 class TestCleanupStaleActiveSessions:

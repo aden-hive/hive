@@ -573,6 +573,33 @@ async def test_task_source_stop_emits_untracked_drift(task_store) -> None:
     assert body is not None and "haven't created any tasks" in body
 
 
+@pytest.mark.asyncio
+async def test_task_source_does_not_push_the_panel_on_a_chat_app(task_store) -> None:
+    """Nobody on a chat app sees the panel, so she isn't nudged to keep it current."""
+    src = TaskReminderSource()
+    for _ in range(UNTRACKED_TURNS):
+        src.observe_turn(["browser_click"])
+
+    on_chat_app = SimpleNamespace(session_id="s1", chat_app_provider=lambda: "onebot")
+    assert await src.render(ReminderContext(ReminderPoint.STOP, on_chat_app)) is None
+    assert await src.render(ReminderContext(ReminderPoint.POST_TOOL_USE, on_chat_app)) is None
+
+    on_dashboard = SimpleNamespace(session_id="s1", chat_app_provider=lambda: None)
+    body = await src.render(ReminderContext(ReminderPoint.STOP, on_dashboard))
+    assert body is not None and "haven't created any tasks" in body
+
+
+@pytest.mark.asyncio
+async def test_task_source_still_shows_the_list_she_keeps_on_a_chat_app(task_store) -> None:
+    await task_store.create_task("s1", subject="long job")
+    src = TaskReminderSource()
+    ctx = SimpleNamespace(session_id="s1", chat_app_provider=lambda: "onebot")
+
+    body = await src.render(ReminderContext(ReminderPoint.SESSION_START, ctx))
+
+    assert body is not None and "long job" in body
+
+
 async def _seed_completed_pile(task_store, session_id: str, completed: int, open_: int = 1) -> None:
     """Create ``completed`` completed + ``open_`` pending tasks in one batch."""
     specs = [{"subject": f"done {i}"} for i in range(1, completed + 1)]

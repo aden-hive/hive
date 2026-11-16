@@ -1,3 +1,3 @@
 {
-  "include": ["hive_tools", "terminal-tools", "chart-tools"]
+  "include": ["files-tools", "hive_tools", "terminal-tools", "chart-tools", "memory-tools"]
 }

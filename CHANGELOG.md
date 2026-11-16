@@ -2,15 +2,77 @@
 
 > Full, detailed release notes live in [`docs/releases/`](docs/releases/). The entries below summarize the architecturally significant releases; older entries follow.
 
+## v1.0.14 — Models and Skills
+
+**New:** Configuration → Models chooses the models in use, adds Magpie or any OpenAI-compatible endpoint and manages API keys; `write_skill` takes a `scope` and works when a queen is alone with you, so she can write skills for herself, and one for every queen and colony (`scope="global"`) waits for your consent in that session's chat page. **Changed:** recall quotes the window carrying the most of the query, gives replies 500 characters and brings back more matching turns from a conversation that placed a hit. **Fixed:** a conversation's final reply reaches `search_messages` and recall; the stall check catches a queen who agrees to a change and doesn't make it; compaction summarises both halves of a split at once; `hive serve` on its own keeps the browser bridge alive; a chat channel's thread stays in its session; a model's key or `extra_body` no longer carries over to the next model picked for a slot. See [docs/releases/v1.0.14.md](docs/releases/v1.0.14.md).
+
+## v1.0.13 — Letters Between Queens
+
+**New:** queens write to each other with `message_queen`, each in a conversation that lasts, with chains of letters kept to `max_depth` hops and every hop logged in `queens/mail.jsonl` (`queen_mail`); a queen can be Claude Code itself, with all its tools, writing and written to like any other, paid for with an API key and shown read only on the org chart (`queen_mail.claude_code`). Running her on a Claude subscription takes `"auth": "subscription"` and is at your own risk. See [docs/releases/v1.0.13.md](docs/releases/v1.0.13.md).
+
+## v1.0.12 — A Soul of Her Own
+
+**New:** a queen keeps a soul, a short first-person record of who she has become, which she revises once a day from her chats and you approve change by change (`soul.queens.<id>`); her profile is a page of her own, where her persona is edited chapter by chapter; the org chart's positions can be added, removed and restored. **Changed:** a queen you made is on the team from the start. **Fixed:** a colony's queen no longer wakes up without her colony tools after her DM page is opened; a test run can no longer write into a real Hive home. See [docs/releases/v1.0.12.md](docs/releases/v1.0.12.md).
+
+## v1.0.11 — MCP from the Terminal
+
+**New:** agents can run an MCP server from the terminal (`hive mcp add --as-cli`, then `hive mcp run <server> ...`) instead of carrying its tools in every prompt, through [mcp2cli](https://github.com/knowsuchagency/mcp2cli) by Stephan Fitzpatrick (MIT); `worker_llm` and each queen's own model take `extra_body`. **Changed:** queens reflect on memory every few replies, not after every model call. **Fixed:** MCP servers on another Python version no longer crash when Hive runs from a uv-made virtualenv on Windows; Hive moved off the retired `claude-sonnet-4-20250514` (thanks, Omar Shalaby). See [docs/releases/v1.0.11.md](docs/releases/v1.0.11.md).
+
+## v1.0.10 — Her Own Model
+
+**New:** a queen can run on a model of her own (`queen_llm`), set from her profile in the dashboard; her running chats switch at once. **Fixed:** `hive serve` stops within seconds instead of waiting on last reflections and open dashboard streams. See [docs/releases/v1.0.10.md](docs/releases/v1.0.10.md).
+
+## v1.0.9 — Ask the Judge
+
+**New:** `ChannelHost.judge`, so a channel can ask the judge (the `judge` slot, e.g. TypeSafe Jev) its own yes/no question, for example whether the queen should speak up in a group where nobody addressed her. **Changed:** the stall check asks the judge through the same code; its behavior is unchanged. See [docs/releases/v1.0.9.md](docs/releases/v1.0.9.md).
+
+## v1.0.8 — Turn Context
+
+**New:** turn context, so an installed package can show a queen something before each of her turns (the `hive.turn_context` entry point). **Fixed:** recall of past conversations reads Chinese instead of matching time stamps and sender headers; a failed model call that a gateway returns as a reply stays out of chat apps and the stall check. See [docs/releases/v1.0.8.md](docs/releases/v1.0.8.md).
+
+## v1.0.7 — Follow Through
+
+**New:** the stall check (Settings → Developer, off by default): a judge model catches a queen who announced an action and ended her turn without it, and reminds her once; the Judge slot for it under AI Model; the Runtime logs drawer shows the server's log. **Changed:** no first-run wizard; without a model, the chat links to the model settings. **Fixed:** a key saved in `configuration.json` is no longer asked for on every refresh. See [docs/releases/v1.0.7.md](docs/releases/v1.0.7.md).
+
+## v1.0.6 — Channels
+
+**New:** channels, so a chat app can talk to queens from inside `hive serve` (each chat is a queen session, and the queen's replies, questions and attached files flow back); `hive-cred`, so a script fetches a credential when it uses it. **Changed:** the `credentials` tool no longer reveals secrets into the conversation. **Fixed:** a message that reached a queen while she was starting no longer starts a second one. See [docs/releases/v1.0.6.md](docs/releases/v1.0.6.md).
+
+## v1.0.5 — Branch Anywhere
+
+**New:** branch a conversation at any message: from a queen reply, or by editing a message you sent in a new branch; conversations title themselves with the worker model, and you can rename them. **Fixed:** creating a queen no longer answers with an error. See [docs/releases/v1.0.5.md](docs/releases/v1.0.5.md).
+
+## v1.0.4 — Reasoning Remembered
+
+**Fixed:** Qwen, DeepSeek and GLM get their own `reasoning_content` back on the later steps of a turn, so a tool loop no longer loses its thread; saving a provider in an installed Hive no longer fails with `ModuleNotFoundError`. See [docs/releases/v1.0.4.md](docs/releases/v1.0.4.md).
+
+## v1.0.3 — The Right Version
+
+**Fixed:** the dashboard showed `v0.1.0` whatever Hive was installed; it now shows Hive's version, from `core/pyproject.toml`. **New:** `hive --version`. See [docs/releases/v1.0.3.md](docs/releases/v1.0.3.md).
+
+## v1.0.2 — The Whole App from PyPI
+
+**Highlights:** `pip install "aden-hive[tools]"` installs all of Hive: `aden-tools` now ships the terminal, memory and chart tools that only worked from a checkout, and `aden-hive` ships the dashboard. Run `hive open`. Projects built on Hive get a starter [AGENTS.md](templates/derivative/AGENTS.md) for their coding agents. See [docs/releases/v1.0.2.md](docs/releases/v1.0.2.md).
+
+## v1.0.1 — Build on Hive
+
+**Highlights:** projects can build on Hive's primitives: depend on `aden-hive` and `from hive import AgentLoop, LiteLLMProvider, EventBus, ...`, with each name imported when first used. `AgentLoop(on_report=...)` lets any agent hand back a structured report. Hive's built-in tools moved to the `tools` extra, so a dependent project installs 83 packages instead of 123.
+
+**Changed:** the packages are renamed `aden-hive` (was `framework`) and `aden-tools` (was `tools`); import names are unchanged. See [docs/releases/v1.0.1.md](docs/releases/v1.0.1.md).
+
+## v1.0.0 — Colonies, Built-in Tools, and Measured Memory
+
+**Highlights:** colonies rebuilt around execute-first: a queen does the work herself, then forks a **colony** that coordinates through a shared SQLite **tracker**, spawns worker clones with `run_worker`, and runs at scale with resumable **playbooks** and colony **skills**; **thirteen queens** (five new), and you choose who takes a job; Hive's own tools now **run in-process**, with no tool servers, plus your own Chrome through the `hive-browser` CLI; **bring-your-own-key** model setup with separate worker and vision models; **Sentinel** to keep colonies moving while you're away; a new dashboard; and Hive's first published **memory benchmark**: on [LongMemEval](docs/memory-benchmark.md), V1 answers 88.4% on S (up from 77.0%) and 82.0% on M, and we also report that the same model given the whole LongMemEval-S history scores 96.8%.
+
+**Breaking:** V1 replaces v0.11's incubation phases, `run_parallel_workers` and `progress.db`, retires the bundled MCP server subprocesses (including `gcu-tools` and its `browser_*` tools), stops loading the bundled third-party integrations, and requires ripgrep. Sessions and the `~/.hive` layout migrate automatically. See [docs/releases/v1.0.0.md](docs/releases/v1.0.0.md).
+
 ## v0.11.0 — Action Plans, Charts, and a Cleaner Queen
 
 **Highlights:** a persistent, file-backed **task plan** gives every Queen a structured plan that survives session reload; inline **charting** (ECharts/Mermaid via a new `chart_tools` MCP server); colony import/export; and a major consolidation of the Queen's tool surface (`file_ops`, `shell_tools`) and prompt. See [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md).
 
 ## v0.10.0 — The Colony
 
-**Breaking, ground-up architectural rewrite.** Old agents are not compatible. Hive moved from a compiled graph/DAG of nodes to **colonies of agents**: a persistent **Queen** (one of 13 domain personas, picked by a CEO-style router) leads a **colony** of **worker clones**. There are no graphs, edges, nodes, or data buffers — the Queen fans out workers with `run_worker` and coordinates them through a shared SQLite **tracker**. The framework, agent loop, runtime, and worker layers were rewritten from the ground up. See [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (and v0.10.1–v0.10.5 for follow-ups).
-
-> The architecture has continued to evolve past v0.11.0 (a large runtime sync brought in the tracker-based coordination, the reminder/nudge hub, the incubating phase, and Sentinel escalation). The [Architecture Overview](docs/architecture/README.md) is the current source of truth.
+**Breaking, ground-up architectural rewrite.** Old agents are not compatible. Hive moved from a compiled graph/DAG of nodes to **colonies of agents**: a persistent **Queen** (one of eight personas, picked by an LLM router) leads a **colony** of workers. There are no graphs, edges, nodes, or data buffers. The framework, agent loop, runtime, and worker layers were rewritten from the ground up. See [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (and v0.10.1–v0.10.5 for follow-ups).
 
 ---
 

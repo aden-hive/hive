@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
+import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
-from fastmcp import FastMCP
+# Before the imports below, which load Hive: keep its import-time paths (the
+# credential key among them) out of any real Hive home, including the one the
+# repository's .env names, which litellm's import would otherwise apply. See
+# core/conftest.py.
+_IMPORT_TIME_HIVE_HOME = tempfile.mkdtemp(prefix="hive-tests-")
+os.environ["HIVE_HOME"] = _IMPORT_TIME_HIVE_HOME
+atexit.register(shutil.rmtree, _IMPORT_TIME_HIVE_HOME, ignore_errors=True)
 
-from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter
-from aden_tools.credentials.store_adapter import _reset_default_adapter_cache
+import pytest  # noqa: E402 - after the HIVE_HOME guard
+from fastmcp import FastMCP  # noqa: E402 - after the HIVE_HOME guard
+
+from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402 - after the HIVE_HOME guard
+from aden_tools.credentials.store_adapter import _reset_default_adapter_cache  # noqa: E402 - after the HIVE_HOME guard
 
 logger = logging.getLogger(__name__)
 

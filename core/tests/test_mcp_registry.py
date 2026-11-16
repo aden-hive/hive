@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from framework.loader.mcp_registry import _DEFAULT_LOCAL_SERVERS, MCPRegistry
+from framework.loader.mcp_registry import MCPRegistry
+from framework.tools.harness_tools import HARNESS_GROUP_NAMES
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -502,8 +503,10 @@ def test_resolve_max_tools(tmp_path: Path):
     data["servers"]["github"]["manifest"]["tools"] = [{"name": "e"}]
     registry._write_installed(data)
     configs = registry.resolve_for_agent(profile="all", max_tools=3)
-    total = sum(len(registry._read_installed()["servers"][c.name]["manifest"].get("tools", [])) for c in configs)
-    assert total <= 3 and len(configs) >= 1
+    # Harness groups are Hive's own tools: always resolved, never capped.
+    installed = [c for c in configs if c.transport != "harness"]
+    total = sum(len(registry._read_installed()["servers"][c.name]["manifest"].get("tools", [])) for c in installed)
+    assert total <= 3 and len(installed) >= 1
 
 
 def test_resolve_skips_disabled(tmp_path: Path):
@@ -1081,11 +1084,54 @@ def test_disable_nonexistent_raises(tmp_path: Path):
 
 
 def test_list_installed_fresh_registry(tmp_path: Path):
-    """A fresh registry contains exactly the bundled default servers — nothing more, nothing less."""
+    """Hive's own tools are in-process harness groups, so nothing is seeded."""
     registry = MCPRegistry(base_path=tmp_path / "mcp_registry")
     registry.initialize()
-    names = {s["name"] for s in registry.list_installed()}
-    assert names == set(_DEFAULT_LOCAL_SERVERS)
+    assert registry.list_installed() == []
+
+
+def test_initialize_retires_previously_seeded_bundled_servers(tmp_path: Path):
+    """Entries older versions seeded would otherwise be listed and health-checked
+    as MCP servers. A user server that merely shares a name is left alone."""
+    base = tmp_path / "mcp_registry"
+    base.mkdir(parents=True)
+
+    def entry(*target: str) -> dict:
+        return {"source": "local", "enabled": True, "manifest": {"stdio": {"command": "uv", "args": ["run", "python", *target, "--stdio"]}}}
+
+    (base / "installed.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "hive_tools": entry("mcp_server.py"),
+                    "terminal-tools": entry("terminal_tools_server.py"),
+                    "shell-tools": entry("shell_tools_server.py"),
+                    "chart-tools": entry("my_own_charts.py"),
+                    # The browser MCP server the hive-browser CLI replaced, run as a module.
+                    "gcu-tools": entry("-m", "gcu.server"),
+                    "jira": entry("jira_server.py"),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry = MCPRegistry(base_path=base)
+    registry.initialize()
+
+    assert {s["name"] for s in registry.list_installed()} == {"chart-tools", "jira"}
+
+
+def test_resolve_for_agent_synthesises_harness_groups(tmp_path: Path):
+    """Bundled names resolve with no installed entry, and never to a subprocess."""
+    registry = MCPRegistry(base_path=tmp_path / "mcp_registry")
+    registry.initialize()
+
+    configs = registry.resolve_for_agent(include=["terminal-tools", "hive_tools"])
+    assert [(c.name, c.transport) for c in configs] == [("terminal-tools", "harness"), ("hive_tools", "harness")]
+
+    every = registry.resolve_for_agent(profile="all", exclude=["memory-tools"])
+    assert {c.name for c in every} == HARNESS_GROUP_NAMES - {"memory-tools"}
 
 
 def test_list_available_empty_index(tmp_path: Path):

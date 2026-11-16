@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import faulthandler
 import json
 import logging
 import os
@@ -26,6 +27,13 @@ import threading
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror, parse as urlparse, request as urlrequest
+
+# On stop: how long the sessions' last reflections may run, how long open connections get to
+# finish, and how long the process may linger after that. Together under a service manager's
+# usual wait (NSSM: 15 s after Ctrl+C).
+_SHUTDOWN_GRACE_S = 6.0
+_CONNECTION_CLOSE_S = 3.0
+_EXIT_WATCHDOG_S = 5.0
 
 # ---------------------------------------------------------------------------
 # Public registration
@@ -147,6 +155,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # process, so there is no window in which this names a port nobody is on.
     os.environ["HIVE_RUNTIME_PORT"] = str(args.port)
 
+    # Before anything spawns too: the browser bridge and its gcu clients (and the tool servers' parent
+    # watch) learn from this whose life bounds theirs.
+    owner_pid = _runtime_owner_pid()
+
     async def run_server() -> None:
         manager = app["manager"]
         shutdown_event = asyncio.Event()
@@ -189,19 +201,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 # handlers (KeyboardInterrupt for SIGINT; SIGTERM kills).
                 pass
 
-        # Desktop-mode keepalive: hold a single control-RPC connection
-        # open to the bridge_host for the runtime's lifetime. Without
-        # this, the bridge_host's idle watchdog self-exits 30s after
-        # any window where no gcu MCP is connected — which is the steady
-        # state immediately after app startup (user opened Hive but
-        # hasn't triggered an agent yet). The Chrome extension then
-        # tells the user "Hive isn't running" against a fully alive
-        # runtime. Identifying via client_hello(electron_pid) lets the
-        # bridge's reaper distinguish a healthy keepalive from a zombie
+        # Keepalive: hold a single control-RPC connection open to the
+        # bridge_host for the runtime's lifetime, desktop or `hive serve`
+        # alone (a service, say). Without this, the bridge_host's idle
+        # watchdog self-exits 30s after any window where no gcu MCP is
+        # connected — which is the steady state immediately after startup
+        # (Hive is up but no agent has used the browser yet). The Chrome
+        # extension then tells the user "Hive isn't running" against a
+        # fully alive runtime. Identifying via client_hello(owner_pid) lets
+        # the bridge's reaper distinguish a healthy keepalive from a zombie
         # if this runtime ever crashes mid-connection.
-        bridge_keepalive_task: asyncio.Task | None = None
-        if os.environ.get("HIVE_DESKTOP_MODE") == "1":
-            bridge_keepalive_task = asyncio.create_task(_bridge_keepalive_loop(manager))
+        bridge_keepalive_task = asyncio.create_task(_bridge_keepalive_loop(owner_pid, manager))
 
         # Preload colonies specified via --colony
         for colony_arg in getattr(args, "colony", []) or []:
@@ -215,10 +225,16 @@ def cmd_serve(args: argparse.Namespace) -> int:
             except Exception as e:  # noqa: BLE001
                 print(f"Error loading colony {colony_arg}: {e}")
 
-        runner = web.AppRunner(app, access_log=None)
+        # Dashboard event streams never end on their own: on shutdown, don't wait the default
+        # minute for them (a service manager kills the process long before).
+        runner = web.AppRunner(app, access_log=None, shutdown_timeout=_CONNECTION_CLOSE_S)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
         await site.start()
+        # A Claude Code queen's runs write their letters back to this address (framework.server.queen_mail).
+        if manager.queen_mail is not None:
+            host = "127.0.0.1" if args.host in ("0.0.0.0", "::", "") else args.host
+            manager.queen_mail.base_url = f"http://[{host}]:{args.port}" if ":" in host else f"http://{host}:{args.port}"
 
         # Sentinel: colony-queen autopilot. The manager owns outbound
         # escalation delivery + the inbound Telegram/Slack listeners and
@@ -271,8 +287,18 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     set_sentinel_manager(None)
                 except Exception:  # noqa: BLE001
                     pass
+            # Before the sessions stop: what queens say as they stop must not start new letters or
+            # Claude Code runs, and running ones are killed.
+            if manager.queen_mail is not None:
+                manager.queen_mail.close()
             await manager.shutdown_all()
+            # Stopping sessions starts a last reflection each; give them a short grace.
+            await manager.finish_background_tasks(_SHUTDOWN_GRACE_S)
             await runner.cleanup()
+            # Shutdown is done. If the process is still here a while later, something (a thread
+            # that never ends, a native library) is holding it: write every thread's stack to
+            # stderr, so the log shows what, and exit.
+            faulthandler.dump_traceback_later(_EXIT_WATCHDOG_S, exit=True)
 
     try:
         asyncio.run(run_server())
@@ -281,7 +307,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _bridge_keepalive_loop(manager: Any = None) -> None:
+def _runtime_owner_pid() -> int:
+    """The PID the runtime's helper processes live and die with: the desktop's when it launched us, else ours.
+
+    Kept in ``HIVE_DESKTOP_PARENT_PID``, the variable the desktop sets, which every child inherits. Without
+    one (``hive serve`` on its own), the bridge's reaper closes each gcu connection 30s in for never
+    identifying, and the bridge exits once idle; the extension then reports "Hive isn't running".
+    """
+    raw = os.environ.get("HIVE_DESKTOP_PARENT_PID", "")
+    if not raw.isdigit():
+        raw = str(os.getpid())
+        os.environ["HIVE_DESKTOP_PARENT_PID"] = raw
+    return int(raw)
+
+
+async def _bridge_keepalive_loop(owner_pid: int, manager: Any = None) -> None:
     """Hold a control-RPC connection open to bridge_host for our lifetime.
 
     See call site in cmd_serve for the motivation. Reconnects with
@@ -304,22 +344,6 @@ async def _bridge_keepalive_loop(manager: Any = None) -> None:
         from gcu.browser.bridge_rpc import BridgeClient, BridgeClientError
     except ImportError:
         return
-
-    pid_str = os.environ.get("HIVE_DESKTOP_PARENT_PID")
-    if not pid_str or not pid_str.isdigit():
-        # No owner PID → we can't run the identified keepalive (client_hello
-        # needs it). But this loop is also the sole startup bridge ensurer in
-        # desktop mode, so bailing here without ensuring would leave the bridge
-        # unspawned — narrowing parity with the old synchronous cmd_serve call
-        # (which ensured whenever HIVE_DESKTOP_MODE==1, regardless of PARENT_PID).
-        # Do a best-effort one-shot ensure before returning. Off-thread because
-        # ensure_bridge_host_running blocks on Popen + an up-to-8s poll.
-        try:
-            await asyncio.to_thread(ensure_bridge_host_running)
-        except Exception:  # noqa: BLE001
-            pass
-        return
-    owner_pid = int(pid_str)
 
     logger = logging.getLogger(__name__)
 
@@ -879,8 +903,10 @@ def _http_delete(url: str, timeout: float = 10.0) -> dict:
 
 
 def _frontend_dist_exists() -> bool:
-    candidates = [Path("frontend/dist"), Path("core/frontend/dist")]
-    return any((c / "index.html").exists() for c in candidates if c.is_dir())
+    # The same lookup the server serves from, so an installed package's dashboard counts too.
+    from framework.server.app import frontend_dist_dir
+
+    return frontend_dist_dir() is not None
 
 
 def _find_chrome_bin() -> str | None:

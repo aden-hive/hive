@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from framework.config import CRM_IN_THIS_BUILD
 from framework.llm.provider import Tool
 from framework.tasks.events import (
     emit_task_created,
@@ -256,6 +257,9 @@ _UPDATE_DESC = (
     "- Mark it `completed` AS SOON as you finish it — do not let "
     "multiple finished tasks pile up unmarked before flushing them at "
     "the end of the run.\n"
+    "- Send these in the same response as your next real tool call (one "
+    "response can carry several calls): a response that only updates "
+    "tasks makes the user wait a whole model turn for nothing.\n"
     "- Archive tasks: when the user asks you to refresh/tidy the plan, set "
     "status='archived' on finished or no-longer-relevant tasks to move "
     "them out of the active plan into the user's History. Archived tasks "
@@ -289,6 +293,14 @@ _GET_DESC = (
     "task before updating it if you're not sure of current fields."
 )
 
+# Only builds that ship the team CRM ask for CRM tasks (see CRM_IN_THIS_BUILD).
+_CREATE_DESC_CRM = (
+    "**GTM work:** if the plan is about people / leads / accounts / "
+    "outreach, include a CLAIM task (dedup leads in the global CRM before "
+    "outreach) and a PROMOTE task (write results to the CRM after) — the "
+    "shared CRM is a planned deliverable, not an afterthought.\n\n"
+)
+
 _CREATE_DESC = (
     "Use this tool to create a structured task list for your current "
     "session. The list renders as a live widget in the user's right-rail "
@@ -298,10 +310,10 @@ _CREATE_DESC = (
     "atomically (all-or-none).** Replying to 5 posts is ONE `task_create` "
     "with 5 entries. A single one-off mid-run addition is ONE "
     "`task_create` with a 1-entry array.\n\n"
-    "**GTM work:** if the plan is about people / leads / accounts / "
-    "outreach, include a CLAIM task (dedup leads in the global CRM before "
-    "outreach) and a PROMOTE task (write results to the CRM after) — the "
-    "shared CRM is a planned deliverable, not an afterthought.\n\n"
+)
+if CRM_IN_THIS_BUILD:
+    _CREATE_DESC += _CREATE_DESC_CRM
+_CREATE_DESC += (
     "## When to use this tool\n\n"
     "Use this tool proactively in these scenarios:\n"
     "- **Multi-step requests** — when a request requires 2+ distinct "

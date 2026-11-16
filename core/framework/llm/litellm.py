@@ -37,13 +37,15 @@ except ImportError:
     RateLimitError = Exception  # type: ignore[assignment, misc]
     CustomLogger = object  # type: ignore[assignment, misc]
 
-from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
-from framework.config import get_aux_max_tokens, get_max_tokens
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE, get_aux_max_tokens, get_max_tokens
 from framework.llm.model_catalog import get_model_pricing
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+# reconfigure(): "leave the key resolver as it is" (None means "no resolver").
+_KEEP = object()
 
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -1469,6 +1471,9 @@ class LiteLLMProvider(LLMProvider):
         )
     """
 
+    # Set once a backend refuses the parameter, so only the first request pays for finding out.
+    _parallel_tools_refused = False
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
@@ -1573,13 +1578,32 @@ class LiteLLMProvider(LLMProvider):
             eh = self.extra_kwargs.setdefault("extra_headers", {})
             eh["Authorization"] = f"Bearer {fresh}"
 
-    def reconfigure(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+    def reconfigure(
+        self,
+        model: str,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        *,
+        api_key_resolver: Callable[[], str | None] | None | object = _KEEP,
+        extra_body: dict[str, Any] | None | object = _KEEP,
+    ) -> None:
         """Hot-swap the model, API key, and/or base URL on this provider instance.
 
         Since the same LiteLLMProvider object is shared by reference across the
         session, queen runner, agent runtime, and execution streams, mutating
         these attributes in-place propagates to all callers on the next LLM call.
+        ``api_key_resolver``, when given, replaces the callable that re-resolves
+        the key before each call (a model with its own key needs its own).
+        ``extra_body``, when given, replaces the fields sent in every request
+        body; ``None`` drops them.
         """
+        if api_key_resolver is not _KEEP:
+            self._api_key_resolver = api_key_resolver  # type: ignore[assignment]  # narrowed by the sentinel check
+        if extra_body is not _KEEP:
+            if extra_body:
+                self.extra_kwargs["extra_body"] = extra_body
+            else:
+                self.extra_kwargs.pop("extra_body", None)
         _original_model = model
         self._hive_proxy_auth = bool(model.lower().startswith("hive/"))
         if _is_ollama_model(model):
@@ -3008,6 +3032,10 @@ class LiteLLMProvider(LLMProvider):
                 # See `complete()` for the rationale: GLM behind the Hive
                 # proxy needs forcing or it goes chat-mode on long contexts.
                 kwargs.setdefault("tool_choice", "required")
+            # One response per tool call means one model turn per tool call. Anthropic
+            # models batch by default; OpenAI-style backends may need asking.
+            if not self._is_anthropic_model() and not self._parallel_tools_refused:
+                kwargs["parallel_tool_calls"] = True
         if response_format:
             kwargs["response_format"] = response_format
         if logger.isEnabledFor(logging.DEBUG):
@@ -3071,6 +3099,9 @@ class LiteLLMProvider(LLMProvider):
             # block still being assembled from deltas.
             thinking_acc: list[dict[str, Any]] = []
             _thinking_current: dict[str, Any] | None = None
+            # Reasoning streamed as the OpenAI-compatible ``reasoning_content``
+            # string (Qwen, DeepSeek, GLM): unsigned, sent back as it came.
+            reasoning_acc = ""
             _saw_reasoning = False  # logged once when reasoning deltas first appear
             input_tokens = 0
             output_tokens = 0
@@ -3156,6 +3187,7 @@ class LiteLLMProvider(LLMProvider):
                         _rc = getattr(delta, "reasoning_content", None) if delta else None
                         if _rc:
                             _reason_chunk += _rc
+                            reasoning_acc += _rc
 
                     if _reason_chunk:
                         if not _saw_reasoning:
@@ -3302,6 +3334,7 @@ class LiteLLMProvider(LLMProvider):
                                 credits=credits,
                                 model=self.model,
                                 thinking_blocks=list(thinking_acc),
+                                reasoning_content=reasoning_acc,
                             )
                         )
 
@@ -3367,6 +3400,7 @@ class LiteLLMProvider(LLMProvider):
                                         credits=credits if credits is not None else _ev.credits,
                                         model=_ev.model,
                                         thinking_blocks=_ev.thinking_blocks,
+                                        reasoning_content=_ev.reasoning_content,
                                     )
                                     break
                     except Exception as _e:
@@ -3507,6 +3541,11 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                if "parallel_tool_calls" in kwargs and "parallel_tool_calls" in str(e):
+                    logger.warning("[stream] %s refused parallel_tool_calls; going on without it: %s", self.model, e)
+                    self._parallel_tools_refused = True
+                    del kwargs["parallel_tool_calls"]
+                    continue
                 # Some providers return non-standard finish_reason values
                 # (e.g., Kimi K2.x sends 'pause_turn') that LiteLLM's
                 # internal stream_chunk_builder rejects via Pydantic

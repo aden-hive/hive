@@ -232,4 +232,4 @@ See [BUILDING_TOOLS.md](BUILDING_TOOLS.md) for the full guide.
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](../LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](https://github.com/aden-hive/hive/blob/main/LICENSE) file for details.

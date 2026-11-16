@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, GitBranch, Loader2, Pencil } from "lucide-react";
 import type { HistorySession } from "@/api/types";
 
 interface QueenSessionSwitcherProps {
@@ -10,6 +10,8 @@ interface QueenSessionSwitcherProps {
   creatingNew?: boolean;
   onSelect: (sessionId: string) => void;
   onCreateNew: () => void;
+  /** Name a session; an empty title clears it. Omit to hide renaming. */
+  onRename?: (sessionId: string, title: string) => Promise<void>;
 }
 
 const PAGE_SIZE = 5;
@@ -34,13 +36,26 @@ export default function QueenSessionSwitcher({
   creatingNew = false,
   onSelect,
   onCreateNew,
+  onRename,
 }: QueenSessionSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
+  const [renaming, setRenaming] = useState<{ sessionId: string; text: string } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   // Reset page when dropdown opens or sessions change
-  useEffect(() => { if (open) setPage(0); }, [open]);
+  useEffect(() => {
+    if (open) setPage(0);
+    else setRenaming(null);
+  }, [open]);
+
+  const commitRename = () => {
+    if (!renaming || !onRename) return;
+    const { sessionId, text } = renaming;
+    const before = sessions.find((s) => s.session_id === sessionId)?.title ?? "";
+    setRenaming(null);
+    if (text.trim() !== before) void onRename(sessionId, text).catch(() => {});
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -81,8 +96,11 @@ export default function QueenSessionSwitcher({
         disabled={loading}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border border-transparent hover:border-border/40 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <span className="max-w-[160px] truncate">
-          {currentSession ? formatSessionDate(currentSession.created_at) : "Sessions"}
+        {currentSession?.forked_from && <GitBranch className="w-3 h-3 flex-shrink-0" />}
+        <span className="max-w-[220px] truncate" title={currentSession?.title ?? undefined}>
+          {currentSession
+            ? currentSession.title || formatSessionDate(currentSession.created_at)
+            : "Sessions"}
         </span>
         {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ChevronDown className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} />}
       </button>
@@ -110,14 +128,25 @@ export default function QueenSessionSwitcher({
           {paged.map((session) => {
             const isActive = session.session_id === currentSessionId;
             const isSwitching = session.session_id === switchingSessionId;
+            const isRenaming = renaming?.sessionId === session.session_id;
+            const select = () => {
+              if (isRenaming) return;
+              setOpen(false);
+              if (!isActive && !isSwitching) onSelect(session.session_id);
+            };
             return (
-              <button
+              <div
                 key={session.session_id}
-                onClick={() => {
-                  setOpen(false);
-                  if (!isActive && !isSwitching) onSelect(session.session_id);
+                role="button"
+                tabIndex={0}
+                onClick={select}
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    select();
+                  }
                 }}
-                className={`w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-border/30 last:border-b-0 ${
+                className={`group w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-border/30 last:border-b-0 cursor-pointer outline-none focus-visible:bg-muted/30 ${
                   isActive
                     ? "bg-primary/10 text-foreground"
                     : "text-foreground hover:bg-muted/30"
@@ -131,9 +160,52 @@ export default function QueenSessionSwitcher({
                   ) : (
                     <span className="w-3 h-3 flex-shrink-0" />
                   )}
-                  <span className="font-medium truncate">{formatSessionDate(session.created_at)}</span>
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renaming.text}
+                      maxLength={60}
+                      placeholder={formatSessionDate(session.created_at)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setRenaming({ sessionId: session.session_id, text: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setRenaming(null);
+                        }
+                      }}
+                      onBlur={commitRename}
+                      className="min-w-0 flex-1 rounded border border-primary/40 bg-background px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
+                    />
+                  ) : (
+                    <>
+                      <span className="font-medium truncate" title={session.title ?? undefined}>
+                        {session.title || formatSessionDate(session.created_at)}
+                      </span>
+                      {session.forked_from && (
+                        <GitBranch
+                          className="w-3 h-3 flex-shrink-0 text-muted-foreground"
+                          aria-label="Branched from another session"
+                        />
+                      )}
+                      {onRename && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRenaming({ sessionId: session.session_id, text: session.title ?? "" });
+                          }}
+                          className="p-0.5 rounded text-muted-foreground/60 hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
+                          title="Rename"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                    </>
+                  )}
                   <span
-                    className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                    className={`ml-auto flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                       session.live
                         ? "bg-primary/10 text-primary"
                         : "bg-muted text-muted-foreground"
@@ -143,9 +215,12 @@ export default function QueenSessionSwitcher({
                   </span>
                 </div>
                 <div className="mt-1 pl-5 text-[11px] text-muted-foreground truncate">
+                  {session.title && (
+                    <span className="mr-1.5 tabular-nums">{formatSessionDate(session.created_at)} ·</span>
+                  )}
                   {session.last_message || "No assistant reply yet"}
                 </div>
-              </button>
+              </div>
             );
           })}
 

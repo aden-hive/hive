@@ -86,6 +86,19 @@ export interface SkillPatchPayload {
   all_defaults_disabled?: boolean;
 }
 
+/** A queen's request to add a skill to the shared library, waiting for the user.
+ *  It carries the skill exactly as approving would install it. */
+export interface SkillInstallRequest {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  files: Array<{ path: string; content: string }>;
+  requested_at: string;
+  /** The shared library already has a skill of this name, which approving replaces. */
+  replaces: boolean;
+}
+
 const queenPath = (queenId: string) =>
   `/queen/${encodeURIComponent(queenId)}/skills`;
 
@@ -139,6 +152,24 @@ export const skillsApi = {
 
   reload: (queenId: string) =>
     api.post<{ ok: boolean }>(`${queenPath(queenId)}/reload`),
+
+  // A queen's requests (write_skill(scope="global")) to add a skill to the
+  // shared library. Approving installs the stored copy; either way the queen
+  // is told.
+  listInstallRequests: (sessionId: string) =>
+    api.get<{ requests: SkillInstallRequest[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/skill-installs`,
+    ),
+
+  decideInstallRequest: (
+    sessionId: string,
+    requestId: string,
+    decision: "approve" | "deny",
+  ) =>
+    api.post<{ name: string; decision: string; queen_told: boolean }>(
+      `/sessions/${encodeURIComponent(sessionId)}/skill-installs/${encodeURIComponent(requestId)}`,
+      { decision },
+    ),
 
   // Multipart upload. File may be a SKILL.md or a .zip bundle.
   upload: (formData: FormData) =>

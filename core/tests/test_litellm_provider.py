@@ -795,6 +795,73 @@ class TestMiniMaxStreamFallback:
         assert not LiteLLMProvider(model="gpt-4o-mini", api_key="x")._is_minimax_model()
 
 
+class TestParallelToolCalls:
+    """Asking for several tool calls per response, so one tool call isn't one model turn."""
+
+    TOOLS = [Tool(name="web_search", description="Search the web", parameters={"properties": {}, "required": []})]
+
+    @staticmethod
+    def _sent(mock_acompletion, *, error: str = "the model call failed") -> list[dict]:
+        """Have every model call fail, and return the requests made."""
+        sent: list[dict] = []
+
+        async def side_effect(*args, **kwargs):
+            sent.append(kwargs)
+            raise RuntimeError(error)
+
+        mock_acompletion.side_effect = side_effect
+        return sent
+
+    @staticmethod
+    async def _stream(provider: LiteLLMProvider, tools: list[Tool] | None) -> None:
+        async for _ in provider.stream(messages=[{"role": "user", "content": "hi"}], tools=tools):
+            pass
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_an_openai_style_model_is_asked_to_batch_tool_calls(self, mock_acompletion):
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1"), self.TOOLS)
+        assert sent[0]["parallel_tool_calls"] is True
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_a_request_without_tools_does_not_mention_it(self, mock_acompletion):
+        # OpenAI rejects parallel_tool_calls on a request with no tools.
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1"), None)
+        assert "parallel_tool_calls" not in sent[0]
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_an_anthropic_model_already_batches(self, mock_acompletion):
+        sent = self._sent(mock_acompletion)
+        await self._stream(LiteLLMProvider(model="anthropic/claude-x", api_key="test-key"), self.TOOLS)
+        assert "parallel_tool_calls" not in sent[0]
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_a_gateway_that_refuses_it_is_asked_once_and_never_again(self, mock_acompletion):
+        sent: list[dict] = []
+
+        async def side_effect(*args, **kwargs):
+            sent.append(kwargs)
+            if "parallel_tool_calls" in kwargs:
+                raise RuntimeError("400: unknown parameter parallel_tool_calls")
+            raise RuntimeError("the model call failed")
+
+        mock_acompletion.side_effect = side_effect
+        provider = LiteLLMProvider(model="openai/gpt-x", api_key="test-key", api_base="http://gateway.test/v1")
+
+        await self._stream(provider, self.TOOLS)
+        assert "parallel_tool_calls" in sent[0]
+        assert "parallel_tool_calls" not in sent[1]
+
+        sent.clear()
+        await self._stream(provider, self.TOOLS)
+        assert all("parallel_tool_calls" not in kwargs for kwargs in sent)
+
+
 class TestOpenRouterToolCompatFallback:
     """OpenRouter models should fall back when native tool use is unavailable."""
 
@@ -1180,6 +1247,37 @@ class TestThinkingBlockStreaming:
 
         finish = next(e for e in events if isinstance(e, FinishEvent))
         assert finish.thinking_blocks == []
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_reasoning_content_lands_on_finish_event(self, mock_acompletion):
+        """Qwen/DeepSeek/GLM stream reasoning as a plain ``reasoning_content``
+        string. It is shown live and must also reach FinishEvent, so the
+        agent loop can send it back on the turn's next step."""
+        from framework.llm.stream_events import FinishEvent, ReasoningDeltaEvent
+
+        def chunk(*, reasoning=None, content=None, finish_reason=None, usage=None):
+            delta = SimpleNamespace(content=content, tool_calls=None, thinking_blocks=None, reasoning_content=reasoning)
+            return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)], usage=usage)
+
+        provider = LiteLLMProvider(model="openai/qwen3", api_key="test-key", api_base="http://localhost/v1")
+        chunks = [
+            chunk(reasoning="First the map, "),
+            chunk(reasoning="then the people."),
+            chunk(content="Done."),
+            chunk(finish_reason="stop", usage=SimpleNamespace(prompt_tokens=5, completion_tokens=7)),
+        ]
+
+        async def _side_effect(*args, **kwargs):
+            return self._fake_stream(chunks)
+
+        mock_acompletion.side_effect = _side_effect
+
+        events = [e async for e in provider.stream(messages=[{"role": "user", "content": "hi"}])]
+
+        assert "".join(e.content for e in events if isinstance(e, ReasoningDeltaEvent)) == "First the map, then the people."
+        finish = next(e for e in events if isinstance(e, FinishEvent))
+        assert finish.reasoning_content == "First the map, then the people." and finish.thinking_blocks == []
 
 
 # ---------------------------------------------------------------------------

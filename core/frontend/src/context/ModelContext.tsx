@@ -200,6 +200,12 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** The model context, or null outside a ModelProvider (for components that
+ *  also render in isolation, like the chat's notices). */
+export function useModelOptional(): ModelContextValue | null {
+  return useContext(ModelContext);
+}
+
 export function useModel() {
   const context = useContext(ModelContext);
   if (!context) {

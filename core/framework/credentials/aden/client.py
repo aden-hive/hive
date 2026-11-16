@@ -2,7 +2,8 @@
 Aden Credential Client.
 
 HTTP client for the Aden authentication server.
-Aden holds all OAuth secrets; agents receive only short-lived access tokens.
+Aden holds OAuth secrets; runtime credential providers fetch short-lived access
+tokens internally. Agent-facing code selects accounts by alias instead.
 
 API (all endpoints authenticated with Bearer {api_key}):
 
@@ -23,9 +24,6 @@ Usage:
     for info in client.list_integrations():
         print(f"{info.provider}/{info.alias}: {info.status}")
 
-    # Get an access token
-    cred = client.get_credential(info.integration_id)
-    print(cred.access_token)
 """
 
 from __future__ import annotations

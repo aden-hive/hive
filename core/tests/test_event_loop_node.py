@@ -479,6 +479,37 @@ class TestQueenInteractionBlocking:
         assert result.success is True
 
     @pytest.mark.asyncio
+    async def test_shutdown_while_parking_is_not_lost(self, runtime, buffer, client_spec):
+        """A shutdown that lands after the loop's last shutdown check but before
+        the park (here, while the park-time cursor is written) must still end
+        the wait. It used to be wiped by the park's ``_input_ready.clear()``,
+        so the node waited forever: the rare hang under machine load."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user",
+                    {"questions": [{"id": "q1", "prompt": "Waiting...", "options": ["Continue", "Stop"]}]},
+                    tool_use_id="ask_1",
+                ),
+            ]
+        )
+        node = EventLoopNode(event_bus=EventBus(), config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
+
+        write_cursor = node._write_cursor
+
+        async def write_cursor_then_shutdown(*args, **kwargs):
+            await write_cursor(*args, **kwargs)
+            if kwargs.get("pending_input"):
+                node.signal_shutdown()
+
+        node._write_cursor = write_cursor_then_shutdown
+
+        result = await asyncio.wait_for(node.execute(ctx), timeout=10)
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
     async def test_client_input_requested_event_published(self, runtime, buffer, client_spec):
         """CLIENT_INPUT_REQUESTED should be published when ask_user blocks."""
         llm = MockStreamingLLM(
@@ -1221,6 +1252,32 @@ class TestEventInjection:
             all_messages.extend(call["messages"])
         injected_found = any("[External event]" in str(m.get("content", "")) for m in all_messages)
         assert injected_found
+
+    @pytest.mark.asyncio
+    async def test_passive_context_reaches_the_next_turn(self, runtime, node_spec, buffer):
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
+        llm = MockStreamingLLM(scenarios=[text_scenario("ok")])
+        node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
+
+        await node.inject_event("<system-reminder>recalled: likes tea</system-reminder>", wake=False)
+        result = await node.execute(build_ctx(runtime, node_spec, buffer, llm))
+
+        assert result.success is True
+        sent = [str(m.get("content", "")) for call in llm.stream_calls for m in call["messages"]]
+        assert any("recalled: likes tea" in content for content in sent)
+
+    @pytest.mark.asyncio
+    async def test_passive_context_does_not_wake_a_parked_loop(self):
+        # Regression: recalled memories landing just after the queen replied
+        # woke her parked loop, and she answered the same message twice.
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+
+        await node.inject_event("<system-reminder>recalled</system-reminder>", wake=False)
+
+        assert not node._input_ready.is_set()
+        assert node._injection_queue.empty()
 
 
 # ===========================================================================

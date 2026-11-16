@@ -10,12 +10,14 @@ Implements the multi-level compaction strategy:
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import logging
 import os
 import re
 import time
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +33,16 @@ logger = logging.getLogger(__name__)
 LLM_COMPACT_MAX_DEPTH: int = 10
 
 
+def compaction_target_chars(formatted_chars: int, max_context_tokens: int) -> int:
+    """Return the length (chars) to ask a compaction summary for.
+
+    Half the window, but never more than half of what is being compacted:
+    a target longer than the input makes the model pad its "summary", which
+    both fails to reduce context and takes minutes to generate.
+    """
+    return min((max_context_tokens // 2) * 4, max(2_000, formatted_chars // 2))
+
+
 def llm_compact_char_limit(max_context_tokens: int) -> int:
     """Input-size ceiling (chars) for one compaction-summary call.
 
@@ -41,6 +53,8 @@ def llm_compact_char_limit(max_context_tokens: int) -> int:
     keeps tiny windows from splitting into confetti.
     """
     return max(20_000, (max_context_tokens * 4) // 3)
+
+
 # Max output tokens for a single compaction summary call. A summary must be a
 # small fraction of the window — using ``max_context_tokens // 2`` (e.g. 90k on a
 # 180k window) lets the model emit a "summary" nearly as large as the input, which
@@ -618,6 +632,9 @@ async def llm_compact(
             # summary stays well under the window — keeping each call fast and
             # guaranteeing real reduction on small and large windows alike.
             summary_budget = min(LLM_COMPACT_SUMMARY_MAX_TOKENS, max(1024, max_context_tokens // 8))
+        # Never budget far past the length the prompt asks for (2x headroom).
+        target_tokens = compaction_target_chars(len(formatted), max_context_tokens) // 4
+        summary_budget = min(summary_budget, max(1024, target_tokens * 2))
         try:
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
@@ -665,31 +682,49 @@ async def _llm_compact_split(
     max_context_tokens: int = 128_000,
     preserve_user_messages: bool = False,
 ) -> str:
-    """Split messages in half and summarise each half independently."""
+    """Split messages in half and summarise both halves at once."""
     if char_limit is None:
         char_limit = llm_compact_char_limit(max_context_tokens)
     mid = max(1, len(messages) // 2)
-    s1 = await llm_compact(
-        ctx,
-        messages[:mid],
-        None,
-        _depth + 1,
-        char_limit=char_limit,
-        max_depth=max_depth,
-        max_context_tokens=max_context_tokens,
-        preserve_user_messages=preserve_user_messages,
-    )
-    s2 = await llm_compact(
-        ctx,
-        messages[mid:],
-        accumulator,
-        _depth + 1,
-        char_limit=char_limit,
-        max_depth=max_depth,
-        max_context_tokens=max_context_tokens,
-        preserve_user_messages=preserve_user_messages,
+    s1, s2 = await await_both(
+        llm_compact(
+            ctx,
+            messages[:mid],
+            None,
+            _depth + 1,
+            char_limit=char_limit,
+            max_depth=max_depth,
+            max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
+        ),
+        llm_compact(
+            ctx,
+            messages[mid:],
+            accumulator,
+            _depth + 1,
+            char_limit=char_limit,
+            max_depth=max_depth,
+            max_context_tokens=max_context_tokens,
+            preserve_user_messages=preserve_user_messages,
+        ),
     )
     return s1 + "\n\n" + s2
+
+
+async def await_both(first: Awaitable[str], second: Awaitable[str]) -> tuple[str, str]:
+    """Await two summaries at once, in order.
+
+    A summary can take minutes on a reasoning model, and the agent's turn waits for the
+    compaction, so the halves of a split aren't summarised one after the other. If one fails,
+    the other is cancelled and that error is raised as it is (not inside an ExceptionGroup).
+    """
+    try:
+        async with asyncio.TaskGroup() as group:
+            a = group.create_task(first)
+            b = group.create_task(second)
+    except ExceptionGroup as failed:
+        raise failed.exceptions[0] from None
+    return a.result(), b.result()
 
 
 # --- Compaction helpers ------------------------------------------------
@@ -745,8 +780,8 @@ def build_llm_compaction_prompt(
     elif spec.output_keys:
         ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
-    target_tokens = max_context_tokens // 2
-    target_chars = target_tokens * 4
+    target_chars = compaction_target_chars(len(formatted_messages), max_context_tokens)
+    target_tokens = target_chars // 4
     node_ctx = "\n".join(ctx_lines)
 
     user_messages_section = (

@@ -131,6 +131,7 @@ RPC_METHODS: frozenset[str] = frozenset(
         "select_option",
         # inspection
         "screenshot",
+        "screenshot_region",  # interact --action zoom
         "snapshot",
         "evaluate",
         "get_text",
@@ -855,7 +856,9 @@ class RemoteBridge:
         # attributes (is_connected, connection_help, connect, stop,
         # _client, …) never reach here.
         if name not in RPC_METHODS:
-            raise AttributeError(name)
+            # Spell it out: a bare AttributeError(name) reached CLI users as
+            # the error "screenshot_region", which explains nothing.
+            raise AttributeError(f"{name!r} is not a bridge RPC method (add it to RPC_METHODS)")
 
         async def _forward(*args, **kwargs):
             return await self._client.call(name, *args, **kwargs)

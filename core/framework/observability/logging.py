@@ -23,6 +23,8 @@ import logging
 import os
 import re
 import sys
+import uuid
+from collections import deque
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -159,6 +161,42 @@ class HumanReadableFormatter(logging.Formatter):
         return f"{timestamp} {color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
 
 
+class RecentLogs(logging.Handler):
+    """The last ``capacity`` log lines, kept for the dashboard's Runtime logs drawer.
+
+    Each line gets a sequence number so a reader can ask only for what is new.
+    ``boot`` changes with every process, so a reader that saw an earlier
+    server knows its sequence numbers no longer apply.
+    """
+
+    def __init__(self, capacity: int = 500) -> None:
+        super().__init__()
+        self.boot = uuid.uuid4().hex[:12]
+        self._entries: deque[dict[str, Any]] = deque(maxlen=capacity)
+        self._seq = 0
+        # Plain text, with the traceback the console formatter leaves out.
+        self.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            text = strip_ansi_codes(self.format(record))
+        except Exception:
+            self.handleError(record)
+            return
+        # Called with ``self.lock`` held (``Handler.handle``).
+        self._seq += 1
+        stream = "stderr" if record.levelno >= logging.WARNING else "stdout"
+        self._entries.append({"seq": self._seq, "stream": stream, "text": text})
+
+    def since(self, after: int) -> list[dict[str, Any]]:
+        """Lines with a sequence number above ``after``, oldest first."""
+        with self.lock:
+            return [e for e in self._entries if e["seq"] > after]
+
+
+recent_logs = RecentLogs()
+
+
 def configure_logging(
     level: str = "INFO",
     format: str = "auto",  # "json", "human", or "auto"
@@ -241,6 +279,7 @@ def configure_logging(
     root_logger.handlers.clear()
     root_logger.addHandler(stdout_handler)
     root_logger.addHandler(stderr_handler)
+    root_logger.addHandler(recent_logs)
 
     # Persistent diagnostics: without a file handler, every traceback and
     # access line lives only in whichever console launched the process —

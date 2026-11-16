@@ -226,8 +226,8 @@ def test_full_mcp_catalog_omits_tools_shadowed_by_earlier_server(monkeypatch):
 
         def list_tools(self):
             names = {
-                "files-tools": ["read_file", "write_file"],
-                "hive_tools": ["read_file", "write_file", "pdf_read"],
+                "alpha-tools": ["read_file", "write_file"],
+                "beta-tools": ["read_file", "write_file", "pdf_read"],
             }[self.config.name]
             return [
                 SimpleNamespace(
@@ -244,19 +244,19 @@ def test_full_mcp_catalog_omits_tools_shadowed_by_earlier_server(monkeypatch):
     monkeypatch.setattr("framework.loader.mcp_client.MCPClient", FakeClient)
 
     registry.register_mcp_server(
-        {"name": "files-tools", "transport": "stdio", "command": "echo"},
+        {"name": "alpha-tools", "transport": "stdio", "command": "echo"},
         use_connection_manager=False,
     )
     registry.register_mcp_server(
-        {"name": "hive_tools", "transport": "stdio", "command": "echo"},
+        {"name": "beta-tools", "transport": "stdio", "command": "echo"},
         use_connection_manager=False,
     )
 
     catalog = registry.get_full_mcp_catalog()
-    assert [t["name"] for t in catalog["files-tools"]] == ["read_file", "write_file"]
-    assert [t["name"] for t in catalog["hive_tools"]] == ["pdf_read"]
-    assert registry.get_server_tool_names("files-tools") == {"read_file", "write_file"}
-    assert registry.get_server_tool_names("hive_tools") == {"pdf_read"}
+    assert [t["name"] for t in catalog["alpha-tools"]] == ["read_file", "write_file"]
+    assert [t["name"] for t in catalog["beta-tools"]] == ["pdf_read"]
+    assert registry.get_server_tool_names("alpha-tools") == {"read_file", "write_file"}
+    assert registry.get_server_tool_names("beta-tools") == {"pdf_read"}
 
 
 def test_load_registry_servers_retries_when_registration_returns_zero(monkeypatch):

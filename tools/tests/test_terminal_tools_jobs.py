@@ -95,3 +95,29 @@ def test_list_action(job_tools):
 def test_unknown_job_id(job_tools):
     result = job_tools["logs"](job_id="job_doesnotexist", wait_until_exit=False)
     assert "error" in result
+
+
+def test_capabilities_report_platform_and_list_metadata(job_tools):
+    capabilities = job_tools["manage"](action="capabilities")
+    assert capabilities["platform"] == ("windows" if sys.platform == "win32" else "posix")
+    assert {"stdin", "close_stdin", "signal_term", "signal_kill"} <= set(capabilities["supported_actions"])
+    assert job_tools["manage"](action="list")["capabilities"] == capabilities
+    if sys.platform != "win32":
+        assert "signal_int" in capabilities["signals"]
+
+
+@pytest.mark.parametrize("action", ["signal_int", "signal_hup", "signal_usr1", "signal_usr2"])
+def test_windows_unsupported_signal_does_not_reach_process(job_tools, monkeypatch, action):
+    from terminal_tools.jobs import tools
+
+    monkeypatch.setattr(tools, "_PLATFORM", "win32")
+
+    def unexpected_signal(*args, **kwargs):
+        pytest.fail("Unsupported Windows actions must not signal a process")
+
+    monkeypatch.setattr(tools.get_registered_manager(), "signal", unexpected_signal)
+    result = job_tools["manage"](action=action, job_id="job_placeholder")
+    assert result["code"] == "unsupported_action"
+    assert set(result["capabilities"]["signals"]) == {"signal_term", "signal_kill"}
+    assert "Forcefully" in result["capabilities"]["signals"]["signal_term"]
+    assert action not in result["capabilities"]["supported_actions"]

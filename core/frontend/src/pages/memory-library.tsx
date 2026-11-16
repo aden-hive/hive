@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Brain,
   Crown,
@@ -257,8 +258,11 @@ export default function MemoryLibrary() {
     [unsortedQueens, me],
   );
 
-  const [tab, setTab] = useState<MemoryTab>("global");
-  const [selectedQueenId, setSelectedQueenId] = useState<string | null>(null);
+  // A queen's profile links here with ?queen=<id>: open on her memories.
+  const [searchParams] = useSearchParams();
+  const queenParam = searchParams.get("queen");
+  const [tab, setTab] = useState<MemoryTab>(queenParam ? "queens" : "global");
+  const [selectedQueenId, setSelectedQueenId] = useState<string | null>(queenParam);
 
   useEffect(() => {
     if (tab !== "queens") return;

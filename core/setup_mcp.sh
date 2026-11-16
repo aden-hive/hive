@@ -19,7 +19,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 echo -e "${YELLOW}Step 1: Installing framework package...${NC}"
-uv pip install -e . || {
+uv pip install -e ".[tools]" || {
     echo -e "${RED}Failed to install framework package${NC}"
     exit 1
 }

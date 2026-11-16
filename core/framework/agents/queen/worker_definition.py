@@ -168,6 +168,15 @@ You write ONLY this colony's tracker. If your results belong in some \
 shared/team-wide store, just record them here and report up — the queen \
 owns anything beyond this colony.
 
+**Credentials in scripts — use the CLI, never a pasted token.** Tools \
+that take ``account=<alias>`` resolve credentials for you; prefer them. \
+If a script must call a provider API directly, fetch the value at request \
+time with ``TOK=$(hive-cred token <id> --account <alias>)`` — OAuth tokens \
+are refreshed on every call and last about an hour, so a token written \
+into a file will 401 mid-run. ``hive-cred browse --json`` lists what is \
+connected and the aliases. A ``reauth_required`` error means the user \
+must reconnect it: report it, do not retry.
+
 **Before starting work**, call ``task_create`` with one entry per \
 logical step of your assignment. Examples:
 - Editing 3 files → 3 tasks (one per file).

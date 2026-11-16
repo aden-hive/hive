@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
   Network,
   KeyRound,
+  Cpu,
   Send,
   ChevronDown,
   Plus,
@@ -38,6 +39,7 @@ import type { Colony } from "@/types/colony";
 import { deriveColonyStatus, describeColonyStatus, STATUS_DOT_CLASS } from "@/lib/colony-status";
 import { useTutorial } from "./Tutorial/TutorialOverlay";
 import { DEMO_COLONY_TITLE } from "./Tutorial/demoColony";
+import { RollingNumber } from "./fx/RollingNumber";
 
 function CollapsedColonyAvatar({
   colony,
@@ -328,6 +330,10 @@ export default function Sidebar() {
           </button>
           {libraryExpanded && (
             <>
+              <button onClick={() => navigate("/models")} title="Models"
+                className="w-6 h-6 rounded-md flex items-center justify-center text-foreground/50 hover:text-foreground hover:bg-sidebar-item-hover transition-colors">
+                <Cpu className="w-3.5 h-3.5" />
+              </button>
               <button onClick={() => navigate("/credentials")} title="Credentials"
                 className="w-6 h-6 rounded-md flex items-center justify-center text-foreground/50 hover:text-foreground hover:bg-sidebar-item-hover transition-colors">
                 <KeyRound className="w-3.5 h-3.5" />
@@ -432,6 +438,13 @@ export default function Sidebar() {
         {libraryExpanded && (
           <div className="ml-[22px] pl-2.5 border-l border-border/40 flex flex-col gap-px mt-px mb-0.5">
             <button
+              onClick={() => navigate("/models")}
+              className="flex items-center gap-2 px-2.5 py-[4px] rounded-md text-[12px] text-foreground/55 hover:bg-sidebar-item-hover hover:text-foreground transition-all duration-150"
+            >
+              <Cpu className="w-3.5 h-3.5 opacity-60" />
+              <span>Models</span>
+            </button>
+            <button
               onClick={() => navigate("/credentials")}
               className="flex items-center gap-2 px-2.5 py-[4px] rounded-md text-[12px] text-foreground/55 hover:bg-sidebar-item-hover hover:text-foreground transition-all duration-150"
             >
@@ -470,9 +483,10 @@ export default function Sidebar() {
               <span>Colonies</span>
               {colonies.length > 0 && (
                 <span className="text-[10px] bg-sidebar-item-hover rounded-full px-1.5 py-0.5 font-medium">
-                  {colonies.length}
+                  <RollingNumber value={colonies.length} />
                 </span>
               )}
+              <span aria-hidden className="fx-ruler flex-1 ml-1 mr-2" />
             </button>
             <button
               onClick={() => setCreateColonyOpen(true)}
@@ -483,7 +497,7 @@ export default function Sidebar() {
             </button>
           </div>
           {coloniesExpanded && (
-            <div className="flex flex-col gap-0.5 mt-0.5">
+            <div className="fx-cascade flex flex-col gap-0.5 mt-0.5">
               {showDemoColonyInSidebar ? (
                 // Scripted colony row for the tutorial demo steps — rendered as
                 // if selected, matching the mock filling the content pane. Not a
@@ -524,9 +538,10 @@ export default function Sidebar() {
               className={`w-3 h-3 transition-transform ${queensExpanded ? "" : "-rotate-90"}`}
             />
             <span>Queen Bees</span>
+            <span aria-hidden className="fx-ruler flex-1 ml-1" />
           </button>
           {queensExpanded && (
-            <div className="flex flex-col gap-0.5 mt-0.5">
+            <div className="fx-cascade flex flex-col gap-0.5 mt-0.5">
               {sortedQueenProfiles.map((queen) => (
                 <SidebarQueenItem
                   key={queen.id}
@@ -565,8 +580,8 @@ export default function Sidebar() {
     {/* Create Colony modal */}
     {createColonyOpen && (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/40" onClick={() => !creatingColony && setCreateColonyOpen(false)} />
-        <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => !creatingColony && setCreateColonyOpen(false)} />
+        <div className="fx-panel-in relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Create Colony</h2>
             <button onClick={() => setCreateColonyOpen(false)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">

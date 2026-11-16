@@ -1,78 +1,48 @@
 # Tools
 
-Hive agents interact with external services through **tools** — functions exposed via MCP (Model Context Protocol) servers. The main tool server lives at `tools/mcp_server.py` and registers integrations from the `aden_tools` package.
+Hive agents work through **built-in tools** that run inside the Hive process, plus any **external MCP servers** you add. Agents never see the difference: every tool reaches the model as an ordinary function call.
 
-## Verified vs Unverified
+## Built-in tools
 
-Tools are split into two tiers:
+The built-in tools are grouped by what they do. Each group runs in-process (no subprocess, no MCP session) and is defined in [`core/framework/tools/harness_tools.py`](../core/framework/tools/harness_tools.py).
 
-| Tier | Description | Default |
-|------|-------------|---------|
-| **Verified** | Stable integrations tested on main. Always loaded. | On |
-| **Unverified** | New or community integrations pending full review. | Off |
+| Group | Tools |
+|---|---|
+| `terminal-tools` | `terminal_exec`, background jobs (`terminal_job_*`), PTY sessions (`terminal_pty_*`, POSIX only), `terminal_rg`, `terminal_glob`, `terminal_output_get` |
+| `files-tools` | `read_file`, `write_file`, `edit_file`, `search_files` |
+| `chart-tools` | `chart_render` (ECharts and Mermaid to PNG) |
+| `memory-tools` | `search_messages` (regex over past conversations); `search_timeline` (dated events, facts and plans the user mentioned) when the `memory_timeline` feature flag is on |
+| `hive_tools` | `attach_file`, `pdf_read`, `web_scrape`, `get_current_time`, `get_account_info`, `image_generate`, the `csv_*` tools; the `excel_*` tools when `openpyxl` is installed (`tools[excel]` extra); the email-senders suite when `HIVE_EMAIL_SENDERS` is on |
 
-Verified tools include core capabilities like web search, GitHub, email, file system operations, and security scanners. Unverified tools cover newer integrations like Jira, Notion, Salesforce, Snowflake, and others that are functional but haven't completed the full review process.
+The browser is driven through the `hive-browser` CLI from `terminal_exec`; the in-process `browser_setup` tool makes it discoverable.
 
-## Enabling Unverified Tools
+Group names work anywhere a server name does: allowlists, `@server:<name>` references in tool categories, and the Tool Library, which lists the groups as non-removable built-in rows.
 
-Set the `INCLUDE_UNVERIFIED_TOOLS` environment variable to opt in:
+## External MCP servers
 
-```bash
-# Shell
-INCLUDE_UNVERIFIED_TOOLS=true uv run python tools/mcp_server.py --stdio
-```
-
-### In `mcp_servers.json`
-
-When configuring an agent's MCP server, pass the env var in the server config:
-
-```json
-{
-  "servers": [
-    {
-      "name": "tools",
-      "transport": "stdio",
-      "command": "uv",
-      "args": ["run", "python", "tools/mcp_server.py", "--stdio"],
-      "env": {
-        "INCLUDE_UNVERIFIED_TOOLS": "true"
-      }
-    }
-  ]
-}
-```
-
-### In Docker
+Anything else comes from MCP servers you add:
 
 ```bash
-docker run -e INCLUDE_UNVERIFIED_TOOLS=true ...
+hive mcp add          # register a local or running server
+hive mcp install <n>  # install one from the registry
+hive mcp list         # see what's installed
 ```
 
-### In Python
+Servers you add are started for queens and workers automatically, and their tools join the same allowlists as the built-in ones. An agent package can also list servers in its own `mcp_servers.json`.
 
-If calling `register_all_tools` directly (e.g., in a custom server):
+## The `aden_tools` integration catalog
 
-```python
-from aden_tools.tools import register_all_tools
-
-register_all_tools(mcp, credentials=credentials, include_unverified=True)
-```
-
-Accepted values: `true`, `1`, `yes` (case-insensitive). Any other value or unset means off.
-
-## Listing Available Tools
-
-The MCP server logs registered tools at startup (HTTP mode):
+`tools/src/aden_tools/tools/` still holds the full integration catalog (GitHub, Gmail, HubSpot, Notion, Slack, security scanners and more), but Hive no longer loads it: only the `hive_tools` subset above ships in-process. To use the full catalog, run it as an external server:
 
 ```bash
-uv run python tools/mcp_server.py
-# [MCP] Registered 47 tools: [...]
+uv run python tools/mcp_server.py --stdio                                # verified integrations
+INCLUDE_UNVERIFIED_TOOLS=true uv run python tools/mcp_server.py --stdio  # plus unverified ones
 ```
 
-In STDIO mode, logs go to stderr to keep stdout clean for JSON-RPC.
+and register it with `hive mcp add`. Most integrations need credentials configured in Settings first.
 
-## Adding a New Tool
+## Adding a built-in tool
 
-New tool integrations are added to `tools/src/aden_tools/tools/` and registered in `_register_unverified()` in `tools/src/aden_tools/tools/__init__.py`. Once reviewed and stabilized, they graduate to `_register_verified()`.
+Write the tool as a function decorated with `@mcp.tool()` inside a `register_tools(mcp)` function, as the existing modules under `tools/src/` do, then call that function from the matching group builder in `harness_tools.py`. The harness builds the JSON schema from the type annotations and `Field` descriptions, validates arguments, and passes framework context (session working directory, agent identity) to parameters that declare it.
 
 See the [developer guide](developer-guide.md) for the full contribution workflow.

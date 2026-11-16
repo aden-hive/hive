@@ -72,7 +72,6 @@ hive/                                    # Repository root
 │   │   ├── release.yml                  # Runs on tags
 │   │   ├── pr-requirements.yml          # PR requirement checks
 │   │   ├── pr-check-command.yml         # PR check commands
-│   │   ├── claude-issue-triage.yml      # Automated issue triage
 │   │   └── auto-close-duplicates.yml    # Close duplicate issues
 │   ├── ISSUE_TEMPLATE/                  # Bug report & feature request templates
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
@@ -113,7 +112,7 @@ hive/                                    # Repository root
 │   │       │   ├── web_scrape_tool/
 │   │       │   ├── file_system_toolkits/
 │   │       │   └── ...                  # Additional tools
-│   │       ├── mcp_server.py            # HTTP MCP server
+│   │       ├── mcp_server.py            # Standalone MCP server (IDE / external use)
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
 │   └── README.md                        # Tools documentation
@@ -121,8 +120,8 @@ hive/                                    # Repository root
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
 │   └── your_agent_name/                 # Created via files-tools workflow
 │
-├── examples/                            # Example agents
-│   └── templates/                       # Pre-built template agents
+├── examples/                            # Example prompts
+│   └── recipes/                         # Prompt-only agent recipes
 │
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide

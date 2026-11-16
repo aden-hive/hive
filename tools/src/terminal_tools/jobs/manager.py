@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from terminal_tools.common.process_tree import close_process_tree, signal_process_tree, spawn_process, terminate_process_tree
 from terminal_tools.common.ring_buffer import RingBuffer
 
 _MAX_JOBS_DEFAULT = 32
@@ -56,6 +57,8 @@ class JobRecord:
     # Adopted=True when the job started life as a foreground terminal_exec
     # and was promoted past the auto-background budget.
     adopted: bool = False
+    deadline: float | None = None
+    timed_out: bool = False
 
     @property
     def status(self) -> str:
@@ -79,6 +82,7 @@ class JobRecord:
             "stdout_bytes": (self.stdout_buf.total_written if self.stdout_buf else 0),
             "stderr_bytes": (self.stderr_buf.total_written if self.stderr_buf else 0),
             "adopted": self.adopted,
+            "timed_out": self.timed_out,
         }
 
 
@@ -131,6 +135,8 @@ class JobManager:
         existing_stdout_buf: RingBuffer | None = None,
         existing_stderr_buf: RingBuffer | None = None,
         existing_pumps: list[threading.Thread] | None = None,
+        started_at: float | None = None,
+        deadline: float | None = None,
     ) -> JobRecord:
         """Adopt a Popen that's already running with pumps in flight.
 
@@ -142,7 +148,7 @@ class JobManager:
         if self.active_count() >= self._max_jobs:
             # Mid-call cap exceeded — kill and report.
             try:
-                proc.terminate()
+                terminate_process_tree(proc)
             except Exception:
                 pass
             raise JobLimitExceeded(f"terminal-tools job cap reached ({self._max_jobs}); foreground exec was killed during auto-promotion.")
@@ -155,6 +161,8 @@ class JobManager:
             stderr_buf=existing_stderr_buf,
             pumps=existing_pumps,
             adopted=True,
+            started_at=started_at,
+            deadline=deadline,
         )
         with self._lock:
             self._jobs[record.job_id] = record
@@ -180,7 +188,10 @@ class JobManager:
         if record is None or record.exited_at is not None:
             return False
         try:
-            record.proc.send_signal(signum)
+            if signum == signal.SIGTERM:
+                terminate_process_tree(record.proc)
+            else:
+                signal_process_tree(record.proc, signum)
             return True
         except (ProcessLookupError, OSError):
             return False
@@ -236,7 +247,7 @@ class JobManager:
             running = [j for j in self._jobs.values() if j.exited_at is None]
         for record in running:
             try:
-                record.proc.terminate()
+                signal_process_tree(record.proc, signal.SIGTERM)
             except Exception:
                 pass
         deadline = time.monotonic() + grace_sec
@@ -245,9 +256,10 @@ class JobManager:
         for record in running:
             if record.proc.poll() is None:
                 try:
-                    record.proc.kill()
+                    terminate_process_tree(record.proc, grace_sec=0)
                 except Exception:
                     pass
+            close_process_tree(record.proc)
 
     # ── Internals ─────────────────────────────────────────────────
 
@@ -284,7 +296,7 @@ class JobManager:
             argv = list(command) if isinstance(command, (list, tuple)) else command  # type: ignore[assignment]
             shell_arg = False
 
-        return subprocess.Popen(
+        return spawn_process(
             argv,
             cwd=cwd,
             env=env,
@@ -350,23 +362,34 @@ class JobManager:
         stderr_buf: RingBuffer | None = None,
         pumps: list[threading.Thread] | None = None,
         adopted: bool = False,
+        started_at: float | None = None,
+        deadline: float | None = None,
     ) -> JobRecord:
         return JobRecord(
             job_id="job_" + secrets.token_hex(6),
             pid=proc.pid,
             name=name or _default_name(command),
             command=list(command) if isinstance(command, (list, tuple)) else str(command),
-            started_at=time.monotonic(),
+            started_at=started_at if started_at is not None else time.monotonic(),
             proc=proc,
             stdout_buf=stdout_buf,
             stderr_buf=stderr_buf,
             merged=merged,
             pumps=pumps or [],
             adopted=adopted,
+            deadline=deadline,
         )
 
     def _watch_for_exit(self, record: JobRecord) -> None:
-        rc = record.proc.wait()
+        remaining = None if record.deadline is None else max(0, record.deadline - time.monotonic())
+        try:
+            rc = record.proc.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            record.timed_out = True
+            terminate_process_tree(record.proc)
+            rc = record.proc.returncode
+        finally:
+            close_process_tree(record.proc)
         # Drain any final bytes — pump threads exit on EOF, so this is
         # mostly a join; we don't need to actively pull.
         for pump in record.pumps:

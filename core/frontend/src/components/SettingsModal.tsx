@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  X, Eye, EyeOff, Check, Pencil, ChevronDown, Zap, ThumbsUp, Loader2,
+  X, Check, Pencil, ChevronDown, Zap, ThumbsUp, Loader2,
   AlertCircle, Camera, LogOut, ExternalLink, CreditCard, BarChart3,
-  Link2, KeyRound, Users, Shield, Bell, Gift, User, PlayCircle, Sparkles,
+  Link2, Users, Shield, Bell, Gift, PlayCircle, Sparkles,
 } from "lucide-react";
 import { useTutorial } from "./Tutorial/TutorialOverlay";
 import { apiUrl } from "@/api/client";
@@ -10,13 +10,18 @@ import { useColony } from "@/context/ColonyContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useMe } from "@/lib/me";
 import { useModel, LLM_PROVIDERS } from "@/context/ModelContext";
-import ProviderManager from "./ProviderManager";
-import { credentialsApi } from "@/api/credentials";
 import { configApi, type ModelOption, type RateLimitEntry } from "@/api/config";
 import { compressImage } from "@/lib/image-utils";
 import { useShowRuntimeLogs } from "@/hooks/use-show-runtime-logs";
 import McpServersPanel from "./McpServersPanel";
 import { Switch } from "./Switch";
+import type { MotionPref } from "@/lib/motion";
+
+const MOTION_LABELS: Record<MotionPref, string> = {
+  system: "System",
+  full: "Full",
+  reduced: "Reduced",
+};
 
 interface SettingsModalProps {
   open: boolean;
@@ -39,11 +44,11 @@ function StatusText({ icon, color, title, children }: { icon: React.ReactNode; c
 
 export default function SettingsModal({ open, onClose, initialSection }: SettingsModalProps) {
   const { userProfile, setUserProfile, userAvatarVersion, bumpUserAvatar, userHasAvatar } = useColony();
-  const { theme, setTheme, density, setDensity } = useTheme();
+  const { theme, setTheme, density, setDensity, motion, setMotion } = useTheme();
   const { me, refresh: refreshMe } = useMe();
   const {
     currentProvider, currentModel, connectedProviders, availableModels,
-    setModel, saveProviderKey, subscriptions, detectedSubscriptions,
+    subscriptions, detectedSubscriptions,
     activeSubscription, activateSubscription, apiBase,
   } = useModel();
 
@@ -58,13 +63,29 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   // null = not yet loaded from the runtime (Switch renders disabled until
   // the GET resolves). Loaded lazily on first visit to the Developer tab.
   const [adaptiveBudget, setAdaptiveBudget] = useState<boolean | null>(null);
+  const [stallCheck, setStallCheck] = useState<boolean | null>(null);
+  // Whether the judge slot is set: the stall check can't run without it.
+  const [judgeSet, setJudgeSet] = useState<boolean | null>(null);
   useEffect(() => {
     if (!open || activeSection !== "developer" || adaptiveBudget !== null) return;
     configApi
       .getFeatures()
-      .then((r) => setAdaptiveBudget(r.features.adaptive_tool_budget))
-      .catch(() => setAdaptiveBudget(true));
+      .then((r) => {
+        setAdaptiveBudget(r.features.adaptive_tool_budget);
+        setStallCheck(Boolean(r.features.stall_check));
+      })
+      .catch(() => {
+        setAdaptiveBudget(true);
+        setStallCheck(false);
+      });
   }, [open, activeSection, adaptiveBudget]);
+  useEffect(() => {
+    if (!open || activeSection !== "developer") return;
+    configApi
+      .getLlmSections()
+      .then((s) => setJudgeSet(Boolean(s.judge)))
+      .catch(() => setJudgeSet(false));
+  }, [open, activeSection]);
   const [rateLimits, setRateLimits] = useState<RateLimitEntry[] | null>(null);
   const [rateLimitDirty, setRateLimitDirty] = useState<Record<string, number>>({});
   const [rateLimitSaving, setRateLimitSaving] = useState(false);
@@ -77,14 +98,9 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
       .catch(() => setRateLimits([]));
   }, [open, activeSection, rateLimits]);
   const { start: startTour } = useTutorial();
-  const [editingProvider, setEditingProvider] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [validation, setValidation] = useState<Record<string, "validating" | { valid: boolean | null; message: string }>>({});
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const [densityDropdownOpen, setDensityDropdownOpen] = useState(false);
+  const [motionDropdownOpen, setMotionDropdownOpen] = useState(false);
   const avatarUrl = apiUrl(`/config/profile/avatar?v=${userAvatarVersion}`);
   // Start "failed" when the runtime says no avatar exists — that way we
   // render initials immediately without firing an `<img>` request.
@@ -96,6 +112,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const themeDropdownRef = useRef<HTMLDivElement>(null);
   const densityDropdownRef = useRef<HTMLDivElement>(null);
+  const motionDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!themeDropdownOpen) return;
@@ -116,6 +133,16 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [densityDropdownOpen]);
+
+  useEffect(() => {
+    if (!motionDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (motionDropdownRef.current && !motionDropdownRef.current.contains(e.target as Node))
+        setMotionDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [motionDropdownOpen]);
 
   useEffect(() => {
     if (open) {
@@ -172,48 +199,6 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     setUploadingAvatar(false);
   };
 
-  const clearValidation = (providerId: string) => {
-    setTimeout(() => setValidation((v) => { const next = { ...v }; delete next[providerId]; return next; }), 4000);
-  };
-
-  const handleSaveKey = async (providerId: string) => {
-    const trimmedKey = keyInput.trim();
-    if (!trimmedKey) return;
-    setSaving(true);
-    setValidation((v) => ({ ...v, [providerId]: "validating" }));
-
-    const validateResult = await credentialsApi
-      .validateKey(providerId, trimmedKey)
-      .catch(() => ({ valid: null as boolean | null, message: "Could not verify key" }));
-
-    if (validateResult.valid === false) {
-      setSaving(false);
-      setValidation((v) => ({ ...v, [providerId]: { valid: false, message: validateResult.message } }));
-      clearValidation(providerId);
-      return;
-    }
-
-    try {
-      await saveProviderKey(providerId, trimmedKey);
-    } catch {
-      setSaving(false);
-      setValidation((v) => ({ ...v, [providerId]: { valid: false, message: "Failed to save key" } }));
-      clearValidation(providerId);
-      return;
-    }
-
-    setSaving(false);
-    setEditingProvider(null);
-    setKeyInput("");
-    setShowKey(false);
-    setValidation((v) => ({ ...v, [providerId]: { valid: validateResult.valid, message: validateResult.message } }));
-    clearValidation(providerId);
-  };
-
-  const handleSelectModel = async (provider: string, modelId: string) => {
-    try { await setModel(provider, modelId); setModelDropdownOpen(false); } catch {}
-  };
-
   const handleActivateSubscription = async (subId: string) => {
     try { await activateSubscription(subId); } catch {}
   };
@@ -246,17 +231,6 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const selectableProviders = LLM_PROVIDERS.filter(
     (p) => connectedProviders.has(p.id) && availableModels[p.id]?.length,
   );
-
-  const startEditing = (providerId: string) => {
-    setEditingProvider(providerId);
-    setKeyInput("");
-    setShowKey(false);
-  };
-
-  const cancelEditing = () => {
-    setEditingProvider(null);
-    setKeyInput("");
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -432,6 +406,28 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                       )}
                     </div>
                   </div>
+
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <span className="text-[13px] text-foreground">Motion</span>
+                    <div className="relative" ref={motionDropdownRef}>
+                      <button onClick={() => setMotionDropdownOpen(!motionDropdownOpen)}
+                        className="flex items-center gap-1.5 h-7 bg-muted/30 border border-border/50 rounded-md px-2.5 text-xs text-foreground hover:bg-muted/40">
+                        {MOTION_LABELS[motion]}
+                        <ChevronDown className={`w-3 h-3 text-muted-foreground ${motionDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {motionDropdownOpen && (
+                        <div className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-md shadow-lg z-10 min-w-[140px] overflow-hidden">
+                          {(["system", "full", "reduced"] as const).map((option) => (
+                            <button key={option} onClick={() => { setMotion(option); setMotionDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${motion === option ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted/30"}`}>
+                              {motion === option ? <Check className="w-3 h-3 flex-shrink-0" /> : <span className="w-3" />}
+                              <span>{MOTION_LABELS[option]}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
               </>
@@ -474,7 +470,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                   <div className="min-w-0 pr-3">
                     <p className="text-[12px] font-medium text-foreground">Runtime logs</p>
                     <p className="text-[11px] text-muted-foreground leading-snug">
-                      Show the floating drawer in the bottom-right that streams stdout/stderr from the Electron main process.
+                      Show a floating drawer in the bottom-right with the Hive server's log (last 500 lines), updated every few seconds.
                     </p>
                   </div>
                   <Switch checked={showRuntimeLogs} onChange={setShowRuntimeLogs} />
@@ -496,6 +492,34 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                       configApi
                         .setFeatures({ adaptive_tool_budget: next })
                         .catch(() => setAdaptiveBudget(!next));
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-md border border-border/50 bg-muted/10 px-3 py-2.5">
+                  <div className="min-w-0 pr-3">
+                    <p className="text-[12px] font-medium text-foreground">Stall check</p>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      When a queen ends a turn, a judge model checks whether she announced an action, or agreed to a
+                      change you asked for, and stopped without doing it, and if so reminds her once to do it. Applies
+                      to running sessions.
+                    </p>
+                    {judgeSet === false && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection("byok")}
+                        className="mt-1 text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Needs a judge: set up AI Model → Judge →
+                      </button>
+                    )}
+                  </div>
+                  <Switch
+                    checked={stallCheck ?? false}
+                    disabled={stallCheck === null || (judgeSet !== true && !stallCheck)}
+                    onChange={(next) => {
+                      setStallCheck(next);
+                      configApi.setFeatures({ stall_check: next }).catch(() => setStallCheck(!next));
                     }}
                   />
                 </div>
@@ -635,129 +659,26 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
             )}
 
             {activeSection === "byok" && (
-              <>
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">AI Model</h3>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    Connect an LLM provider with your own API key, then choose the model that powers your hive.
-                    {currentModel
-                      ? ` Currently using ${currentProviderName} · ${currentModelLabel}.`
-                      : " No model configured yet."}
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {/* User-defined providers — one config = one JSON entry
-                      (providers.json). The standalone runtime's own
-                      credential management; built-in BYOK cards follow. */}
-                  <ProviderManager />
-                  {LLM_PROVIDERS.map((provider) => {
-                    const connected = connectedProviders.has(provider.id);
-                    const editing = editingProvider === provider.id;
-                    const models = availableModels[provider.id] || [];
-                    const isActiveProvider = currentProvider === provider.id;
-                    const v = validation[provider.id];
-                    return (
-                      <div key={provider.id} className="rounded-lg border border-border/60 bg-card p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[13px] font-semibold text-foreground">{provider.name}</span>
-                              {connected && (
-                                <span className="text-[9.5px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 inline-flex items-center gap-1">
-                                  <Check className="w-2.5 h-2.5" /> Connected
-                                </span>
-                              )}
-                              {isActiveProvider && (
-                                <span className="text-[9.5px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/15 text-primary">
-                                  Active
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11.5px] leading-relaxed text-muted-foreground mt-0.5">{provider.description}</p>
-                          </div>
-                          <button
-                            onClick={() => (editing ? setEditingProvider(null) : startEditing(provider.id))}
-                            className="flex-shrink-0 text-[11px] font-medium px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors inline-flex items-center gap-1"
-                          >
-                            <KeyRound className="w-3 h-3" />
-                            {connected ? "Update key" : "Add key"}
-                          </button>
-                        </div>
-
-                        {editing && (
-                          <div className="mt-2.5 flex items-center gap-1.5">
-                            <div className="relative flex-1">
-                              <input
-                                type={showKey ? "text" : "password"}
-                                value={keyInput}
-                                onChange={(e) => setKeyInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") handleSaveKey(provider.id);
-                                }}
-                                placeholder={`Paste your ${provider.envVar} key`}
-                                autoFocus
-                                className="w-full text-xs rounded-md border border-border/60 bg-background px-2.5 py-1.5 pr-8 outline-none focus:border-primary/40"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowKey((s) => !s)}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                              >
-                                {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                            <button
-                              onClick={() => handleSaveKey(provider.id)}
-                              disabled={saving || !keyInput.trim()}
-                              className="text-[11px] font-medium px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-1"
-                            >
-                              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                              Save
-                            </button>
-                          </div>
-                        )}
-
-                        {v === "validating" && (
-                          <p className="mt-1.5 text-[11px] text-muted-foreground inline-flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Validating…
-                          </p>
-                        )}
-                        {v && typeof v === "object" && (
-                          <p
-                            className={`mt-1.5 text-[11px] inline-flex items-center gap-1 ${
-                              v.valid === false ? "text-red-500" : "text-emerald-500"
-                            }`}
-                          >
-                            <AlertCircle className="w-3 h-3" /> {v.message}
-                          </p>
-                        )}
-
-                        {connected && models.length > 0 && (
-                          <div className="mt-2.5 flex flex-wrap gap-1.5">
-                            {models.map((m) => {
-                              const selected = isActiveProvider && currentModel === m.id;
-                              return (
-                                <button
-                                  key={m.id}
-                                  onClick={() => handleSelectModel(provider.id, m.id)}
-                                  className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
-                                    selected
-                                      ? "border-primary/40 bg-primary/[0.08] text-primary font-medium"
-                                      : "border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/20"
-                                  }`}
-                                >
-                                  {m.label || m.id}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
+              <div>
+                <h3 className="text-base font-semibold text-foreground">AI Model</h3>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {currentModel ? `Currently using ${currentProviderName} · ${currentModelLabel}.` : "No model configured yet."}
+                </p>
+                <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
+                  Models now have a page of their own: the main model, the workers&apos; and the vision fallback, picked from searchable
+                  lists; API keys; endpoints such as Magpie and Ollama, listed live; and detected subscriptions.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    window.location.hash = "#/models";
+                  }}
+                  className="mt-4 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                >
+                  Open the Models page
+                </button>
+              </div>
             )}
           </div>
         </div>

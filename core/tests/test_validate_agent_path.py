@@ -195,7 +195,10 @@ class TestValidateAgentPathNegative:
         outside = tmp_path / "outside"
         outside.mkdir()
         link = allowed / "sneaky"
-        link.symlink_to(outside)
+        try:
+            link.symlink_to(outside)
+        except OSError as exc:  # Windows without Developer Mode / admin
+            pytest.skip(f"cannot create symlinks here: {exc}")
         app_module._ALLOWED_AGENT_ROOTS = (allowed,)
         # The symlink resolves to outside the allowed root
         with pytest.raises(ValueError, match="allowed directory"):

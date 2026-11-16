@@ -11,6 +11,7 @@ from pathlib import Path
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
 
+from framework.server.routes_logs import PATH as RUNTIME_LOGS_PATH
 from framework.server.session_manager import Session, SessionManager
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,9 @@ _EXPECTED_DESKTOP_TOKEN: str | None = os.environ.get("HIVE_DESKTOP_TOKEN") or No
 
 @web.middleware
 async def desktop_auth_middleware(request: web.Request, handler):
-    if _EXPECTED_DESKTOP_TOKEN is None:
+    # A Claude Code queen's runs carry a token of their own conversation instead
+    # (framework.server.queen_mail), so the desktop's secret never has to be written down for them.
+    if _EXPECTED_DESKTOP_TOKEN is None or request.path.startswith("/api/queen-mail/"):
         return await handler(request)
     provided = request.headers.get("X-Hive-Token", "")
     if not hmac.compare_digest(provided, _EXPECTED_DESKTOP_TOKEN):
@@ -311,10 +314,15 @@ async def access_log_middleware(request: web.Request, handler):
     event-loop-stalling work) are logged at WARNING so they stand out.
     """
     started = time.monotonic()
+    # The Runtime logs drawer polls every few seconds; logging each poll would
+    # fill the very log it shows.
+    quiet = request.path == RUNTIME_LOGS_PATH
 
     def _line(status: int) -> None:
         elapsed = time.monotonic() - started
         slow = elapsed > 1.0
+        if quiet and status < 400 and not slow:
+            return
         logger.log(
             logging.WARNING if (status >= 400 or slow) else logging.INFO,
             "[access] %s %s -> %d (%.0fms)%s",
@@ -470,10 +478,13 @@ def _atexit_reap_browsers() -> None:
 async def _on_shutdown(app: web.Application) -> None:
     """Gracefully unload all agents on server shutdown, then reap any browser
     tab groups the session/colony reapers didn't cover."""
-    sampler = app.get("resource_sampler")
-    if sampler is not None:
-        sampler.cancel()
+    for name in ("resource_sampler", "soul_scheduler"):
+        task = app.get(name)
+        if task is not None:
+            task.cancel()
     manager: SessionManager = app["manager"]
+    if manager.queen_mail is not None:
+        manager.queen_mail.close()
     await manager.shutdown_all()
     await _reap_browser_contexts()
     # Tear down the request executor last: shutting it down before
@@ -539,6 +550,23 @@ async def start_resource_sampler(app: web.Application) -> None:
     logger.info("resource sampler started")
 
 
+async def start_soul_scheduler(app: web.Application) -> None:
+    """aiohttp on_startup hook: run each queen's daily soul reflection (``soul_reflection``) when it is due."""
+    from framework.agents.queen.soul_reflection import scheduler, soul_queens
+
+    app["soul_scheduler"] = asyncio.create_task(scheduler(app["manager"]))
+    queens = soul_queens()
+    if queens:
+        logger.info("soul: daily reflection scheduled for %s", ", ".join(queens))
+
+
+async def start_queen_mail(app: web.Application) -> None:
+    """aiohttp on_startup hook: carry letters between queens. Their tools appear only while ``queen_mail`` is on."""
+    from framework.server.queen_mail import QueenMail
+
+    app["manager"].queen_mail = QueenMail(app["manager"])
+
+
 async def handle_health(request: web.Request) -> web.Response:
     """GET /api/health — simple health check (+ a resource-health rollup)."""
     from framework.host.runtime_resources import get_monitor
@@ -566,6 +594,20 @@ async def handle_health(request: web.Request) -> web.Response:
             "request_executor": executor_state,
         }
     )
+
+
+async def handle_startup_status(request: web.Request) -> web.Response:
+    """GET /api/startup-status — coarse boot/bootstrap stage for the web UI.
+
+    The frontend's loading overlay polls this while it waits on a slow
+    session bootstrap (queen tool servers, history scan) so `hive open`
+    shows staged progress like the desktop's loading screen instead of a
+    bare spinner. Stages are reported by the bootstrap path via
+    framework.server.boot_status.
+    """
+    from framework.server import boot_status
+
+    return web.json_response(boot_status.get_status())
 
 
 async def handle_resources(request: web.Request) -> web.Response:
@@ -803,9 +845,7 @@ async def handle_browser_status(request: web.Request) -> web.Response:
     sockets; the stream endpoint remains for the desktop shell, whose SSE
     rides IPC and is exempt from that cap).
     """
-    return web.json_response(
-        await _browser_status_payload(request.query.get("session_id"))
-    )
+    return web.json_response(await _browser_status_payload(request.query.get("session_id")))
 
 
 async def handle_browser_status_stream(request: web.Request) -> web.StreamResponse:
@@ -1034,6 +1074,10 @@ def create_app(model: str | None = None) -> web.Application:
     # system memory every ~15s into a rolling history, exposed at
     # /api/health/resources, with an early-warning log on verdict degradation.
     app.on_startup.append(start_resource_sampler)
+    # Each queen with a soul revises it once a day; see framework.agents.queen.soul_reflection.
+    app.on_startup.append(start_soul_scheduler)
+    # Letters between queens; see framework.server.queen_mail.
+    app.on_startup.append(start_queen_mail)
     app.on_shutdown.append(_on_shutdown)
     # Last-ditch browser cleanup for a non-graceful exit that skips on_shutdown.
     import atexit
@@ -1043,11 +1087,14 @@ def create_app(model: str | None = None) -> web.Application:
     # Health check
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/health/resources", handle_resources)
+    app.router.add_get("/api/startup-status", handle_startup_status)
     app.router.add_get("/api/browser/status", handle_browser_status)
     app.router.add_get("/api/browser/status/stream", handle_browser_status_stream)
     app.router.add_post("/api/browser/tab/reveal", handle_browser_tab_reveal)
 
     # Register route modules
+    from framework.server.queen_mail import register_routes as register_queen_mail_routes
+    from framework.server.routes_claude_code_queens import register_routes as register_claude_code_queen_routes
     from framework.server.routes_colonies import register_routes as register_colonies_routes
     from framework.server.routes_colony_tools import register_routes as register_colony_tools_routes
     from framework.server.routes_colony_workers import register_routes as register_colony_worker_routes
@@ -1055,16 +1102,19 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
+    from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_maintenance import register_routes as register_maintenance_routes
     from framework.server.routes_mcp import register_routes as register_mcp_routes
     from framework.server.routes_memories import register_routes as register_memory_routes
     from framework.server.routes_messages import register_routes as register_message_routes
+    from framework.server.routes_models import register_routes as register_model_routes
     from framework.server.routes_prompts import register_routes as register_prompt_routes
     from framework.server.routes_queen_tools import register_routes as register_queen_tools_routes
     from framework.server.routes_queens import register_routes as register_queen_routes
     from framework.server.routes_sentinel import register_routes as register_sentinel_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
     from framework.server.routes_skills import register_routes as register_skills_routes
+    from framework.server.routes_soul import register_routes as register_soul_routes
     from framework.server.routes_tasks import register_routes as register_task_routes
     from framework.server.routes_workers import register_routes as register_worker_routes
 
@@ -1076,16 +1126,28 @@ def create_app(model: str | None = None) -> web.Application:
     register_session_routes(app)
     register_worker_routes(app)
     register_queen_routes(app)
+    register_soul_routes(app)
+    register_queen_mail_routes(app)
+    register_model_routes(app)
+    register_claude_code_queen_routes(app)
     register_queen_tools_routes(app)
     register_colonies_routes(app)
     register_colony_tools_routes(app)
     register_sentinel_routes(app)
+
+    from framework.server.channels import register as register_channels
+
+    register_channels(app)
+    from framework.server.turn_context import register as register_turn_context
+
+    register_turn_context(app)
     register_mcp_routes(app)
     register_colony_worker_routes(app)
     register_memory_routes(app)
     register_prompt_routes(app)
     register_skills_routes(app)
     register_task_routes(app)
+    register_log_routes(app)
     # Manual-trigger data-retention janitor (no background scheduler).
     # started_at lets tier 1 skip log files the live process holds open;
     # the server marker lets an offline CLI janitor detect that a live
@@ -1129,22 +1191,28 @@ def create_app(model: str | None = None) -> web.Application:
     return app
 
 
-def _setup_static_serving(app: web.Application) -> None:
-    """Serve frontend static files if the dist directory exists."""
-    # Try: CWD/frontend/dist, core/frontend/dist, repo_root/frontend/dist
+def frontend_dist_dir() -> Path | None:
+    """The built dashboard, if there is one.
+
+    A checkout serves ``core/frontend/dist`` (built by the quickstart); an installed
+    package serves the copy its wheel ships in ``framework/server/frontend``.
+    """
     _here = Path(__file__).resolve().parent  # core/framework/server/
     candidates = [
         Path("frontend/dist"),
         _here.parent.parent / "frontend" / "dist",  # core/frontend/dist
         _here.parent.parent.parent / "frontend" / "dist",  # repo_root/frontend/dist
+        _here / "frontend",  # the wheel's copy
     ]
-
-    dist_dir: Path | None = None
     for candidate in candidates:
         if candidate.is_dir() and (candidate / "index.html").exists():
-            dist_dir = candidate.resolve()
-            break
+            return candidate.resolve()
+    return None
 
+
+def _setup_static_serving(app: web.Application) -> None:
+    """Serve frontend static files if the dist directory exists."""
+    dist_dir = frontend_dist_dir()
     if dist_dir is None:
         logger.debug("No frontend/dist found — skipping static file serving")
         return

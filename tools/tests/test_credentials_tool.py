@@ -1,8 +1,11 @@
 """Tests for the single CLI-style ``credentials`` synthetic tool helpers.
 
-Covers the security boundary (browse/inspect never leak secrets, collect only
-carries field specs), the help/schema surface, session attachments round-trip,
-and the compact prompt summary.
+Covers what is left in-process after browse/inspect/reveal were retired to the
+``hive-cred`` CLI: collect only carries field specs, the schema no longer offers
+the retired actions and the help teaches the CLI, retired calls return the
+replacement command, session attachments round-trip, and the compact prompt
+summary. The secret boundary of browse/inspect/token is tested with the CLI in
+``core/tests/test_hive_cred_cli.py``.
 """
 
 from __future__ import annotations
@@ -11,7 +14,8 @@ import json
 
 import pytest
 from framework.agent_loop.internals import credential_tool as ct
-from framework.orchestrator.prompting import build_credentials_summary
+from framework.credentials.catalog import format_account_line
+from framework.orchestrator.prompting import build_accounts_prompt, build_credentials_summary
 
 from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
@@ -26,14 +30,37 @@ def test_build_tool_shape():
     props = tool.parameters["properties"]
     assert set(tool.parameters.get("required", [])) == set()  # action defaults to help
     actions = props["action"]["enum"]
-    for a in ("help", "browse", "inspect", "collect", "attach", "detach", "reveal"):
-        assert a in actions
+    assert set(actions) == {"help", "collect", "attach", "detach"}
+    # The retired actions must not be offered in the schema at all — an LLM
+    # picks from the enum, so leaving them there keeps teaching the old path.
+    for retired in ct.RETIRED_ACTIONS:
+        assert retired not in actions
+    assert "key" not in props and "query" not in props
 
 
-def test_help_lists_every_action():
+def test_help_lists_every_action_and_teaches_the_cli():
     text = ct.render_help()
-    for a in ("browse", "inspect", "collect", "attach", "detach", "reveal"):
+    for a in ("collect", "attach", "detach"):
         assert a in text
+    # Discovery: the tool's own help is where an agent learns the CLI surface.
+    assert "hive-cred browse" in text
+    assert "hive-cred inspect" in text
+    assert "hive-cred token" in text
+    assert "never paste" in text.lower()
+
+
+def test_description_points_at_cli():
+    assert "hive-cred" in ct.CREDENTIALS_TOOL_DESCRIPTION
+
+
+def test_retired_actions_return_the_replacement_command():
+    """A stale reveal call gets the exact CLI command back, never a value."""
+    msg = ct.retired_action_message("reveal", "google", "email3", "access_token")
+    assert msg.startswith("ERROR")
+    assert "hive-cred token google --account email3 --key access_token" in msg
+    assert "never paste" in msg
+    assert "hive-cred browse --json" in ct.retired_action_message("browse")
+    assert "hive-cred inspect google --account email3 --json" in ct.retired_action_message("inspect", "google", "email3")
 
 
 # ---------------------------------------------------------------------------
@@ -161,27 +188,8 @@ def test_add_attachment_without_session():
 
 
 # ---------------------------------------------------------------------------
-# browse / reveal — secret boundary
+# local-account resolution (the paths tools use)
 # ---------------------------------------------------------------------------
-
-
-def test_browse_never_leaks_secret(monkeypatch):
-    adapter = CredentialStoreAdapter.for_testing({"brave_search": "supersecret-value"})
-    monkeypatch.setattr(ct, "_get_adapter", lambda: adapter)
-    out = ct.browse(None)
-    assert "supersecret-value" not in out
-    assert "# Available credentials" in out
-
-
-def test_reveal_returns_value(monkeypatch):
-    adapter = CredentialStoreAdapter.for_testing({"brave_search": "supersecret-value"})
-    monkeypatch.setattr(ct, "_get_adapter", lambda: adapter)
-    out = ct.reveal("brave_search")
-    assert "supersecret-value" in out
-
-
-def test_reveal_requires_id():
-    assert "ERROR" in ct.reveal("")
 
 
 def _inmemory_registry_with(credential_id: str, alias: str, key: str):
@@ -191,19 +199,6 @@ def _inmemory_registry_with(credential_id: str, alias: str, key: str):
     reg = LocalCredentialRegistry(InMemoryStorage())
     reg.save_account(credential_id, alias, key, run_health_check=False)
     return reg
-
-
-def test_reveal_falls_back_to_local_default_account(monkeypatch):
-    """A collected local account resolves via reveal even without account=."""
-    from framework.credentials.local.registry import LocalCredentialRegistry
-
-    reg = _inmemory_registry_with("stripe", "default", "sk_reveal_local")
-    monkeypatch.setattr(LocalCredentialRegistry, "default", staticmethod(lambda: reg))
-    adapter = CredentialStoreAdapter.for_testing({})  # empty store → forces local fallback
-    monkeypatch.setattr(ct, "_get_adapter", lambda: adapter)
-
-    assert "sk_reveal_local" in ct.reveal("stripe")  # no account given
-    assert "sk_reveal_local" in ct.reveal("stripe", "default")
 
 
 def test_adapter_resolves_collected_local_account(monkeypatch):
@@ -268,3 +263,18 @@ def test_summary_counts_providers_without_leaking_aliases():
     # Compact summary must not dump per-account aliases / identities.
     assert "work" not in text
     assert "a@b.com" not in text
+
+
+def test_account_line_renderer_serves_cli_and_prompt_shapes():
+    account = {
+        "provider": "github",
+        "alias": "work",
+        "identity": {"email": "a@b.com"},
+        "source": "local",
+        "status": "failed",
+    }
+
+    assert format_account_line(account) == '- github "work" (a@b.com) [local] — failed'
+    prompt = build_accounts_prompt([account])
+    assert '- "work" (a@b.com) [local]' in prompt
+    assert "— failed" not in prompt

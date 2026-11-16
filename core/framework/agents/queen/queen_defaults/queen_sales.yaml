@@ -10,8 +10,7 @@ default_tool_categories:
 - context_awareness
 - charts
 - media
-default_preset_skills:
-- hive.image-generation
+default_preset_skills: []
 core_traits: 'Combative, competitive, relentless on the close. Wins enterprise the old-fashioned way:
   out-sell, out-last.'
 hidden_background:

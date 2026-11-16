@@ -155,7 +155,10 @@ export function resolvePreferredQueenId(
 /** True iff this queen should be hidden from the active roster. */
 export function isQueenDecommissioned(me: MeSnapshot | null, queenId: string): boolean {
   if (!hasConfiguredQueens(me)) {
-    return !DEFAULT_ACTIVE_QUEEN_IDS.includes(queenId);
+    // Before the user has chosen anything, only the shipped functions outside the starting team
+    // wait in the catalog. A queen the user made is on the team from the start, as she is once
+    // any choice is saved (she has no entry, so nothing hides her).
+    return DEFAULT_HIDDEN_QUEEN_IDS.includes(queenId);
   }
   return !!me?.preferences?.queens?.[queenId]?.decommissioned;
 }

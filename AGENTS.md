@@ -13,6 +13,12 @@ Shared agent instructions for this workspace.
 - Use `uv` for Python execution and package management. Do not use `python` or `python3` directly unless the user explicitly asks for it.
 - Prefer `uv run` for scripts and tests, and `uv pip` for package operations.
 
+## Projects Built on Hive
+
+- A derivative project lives in its own repository and depends on the published `aden-hive` package; it does not fork or copy this one.
+- Start one from `templates/derivative/AGENTS.md`: copy it to the new repository's root and fill in its overview and commands. `docs/building-on-hive.md` is the full guide.
+- The `hive` package (`core/hive/`) is what derivative projects import, and its names follow semantic versioning. Do not rename or remove an export, or change its behaviour incompatibly, outside a major release.
+
 
 ## Multi-Agent Safety
 

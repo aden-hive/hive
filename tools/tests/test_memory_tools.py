@@ -61,7 +61,7 @@ def _write_session(
     spilled_files: dict[str, str] | None = None,
 ) -> Path:
     """Materialize a synthetic queen session under HIVE_HOME."""
-    sdir = hive_home / "agents" / "queens" / queen / "sessions" / session
+    sdir = hive_home / "queens" / queen / "sessions" / session
     sdir.mkdir(parents=True, exist_ok=True)
     events_path = sdir / "events.jsonl"
     with events_path.open("w", encoding="utf-8") as f:
@@ -241,7 +241,7 @@ def test_sync_indexes_spilled_tool_result(hive_home: Path):
     from memory_tools import index, paths as P
 
     spill_name = "browser_snapshot_4.txt"
-    sdir = hive_home / "agents" / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
+    sdir = hive_home / "queens" / "queen_x" / "sessions" / "session_20260501_100000_aaaa"
     spill_abs = sdir / "data" / spill_name
     full_body = "needle_in_a_haystack " + ("x" * 200)
     placeholder = (
@@ -440,3 +440,181 @@ def test_search_messages_context_narrow_only_hit(hive_home: Path, bind_queen):
     m = res["matches"][0]
     assert len(m["turn"]) == 1
     assert m["turn"][0]["is_hit"] is True
+
+
+# ── Colony scope (v3: colonies/<c>/queens/<q>/sessions/<s>) ────────────
+
+
+def _write_colony_session(hive_home: Path, *, colony: str, queen: str, session: str, events: list[dict]) -> None:
+    sdir = hive_home / "colonies" / colony / "queens" / queen / "sessions" / session
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+
+
+def test_colony_search_spans_every_overseer_queen(hive_home: Path, bind_colony):
+    """A colony can be overseen by more than one queen; its memory is all of them."""
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("kick off the COLONY_NEEDLE migration"), *_assistant_deltas("Starting it.")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_tech",
+        session="session_20260602_090000_bbbb",
+        events=[_user_event("status of COLONY_NEEDLE?"), *_assistant_deltas("Done.")],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="COLONY_NEEDLE")
+
+    assert "error" not in result, result
+    assert {m["session"] for m in result["matches"]} == {"session_20260601_090000_aaaa", "session_20260602_090000_bbbb"}
+
+
+def test_colony_search_finds_worker_tool_results(hive_home: Path, bind_colony):
+    """Workers' tool results are logged in the overseer session's events."""
+    worker_result = _tool_event(tool_name="terminal_exec", result="deployed build WORKER_NEEDLE-42 to staging")
+    worker_result["stream_id"] = "worker:session_20260601_091500_cccc"
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("ship it"), worker_result],
+    )
+    bind_colony("acme")
+
+    result = _make_tool()(pattern="WORKER_NEEDLE-42", role="tool")
+
+    assert result.get("total_matches") == 1, result
+
+
+def test_colony_and_queen_memories_stay_separate(hive_home: Path, bind_colony, bind_queen):
+    _write_session(
+        hive_home,
+        queen="queen_ops",
+        session="session_20260601_080000_dddd",
+        events=[_user_event("private DM about DM_ONLY_NEEDLE")],
+    )
+    _write_colony_session(
+        hive_home,
+        colony="acme",
+        queen="queen_ops",
+        session="session_20260601_090000_aaaa",
+        events=[_user_event("colony work on COLONY_ONLY_NEEDLE")],
+    )
+
+    bind_colony("acme")
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 1
+
+    bind_queen("queen_ops")
+    assert _make_tool()(pattern="COLONY_ONLY_NEEDLE")["total_matches"] == 0
+    assert _make_tool()(pattern="DM_ONLY_NEEDLE")["total_matches"] == 1
+
+
+def test_since_until_filter_results_not_just_indexing(hive_home: Path, bind_queen):
+    """A session indexed by an earlier unfiltered search must still be filtered out."""
+    for session in ("session_20260110_100000_aaaa", "session_20260505_100000_bbbb"):
+        _write_session(hive_home, queen="queen_x", session=session, events=[_user_event("NEEDLE_DATED")])
+    bind_queen("queen_x")
+    fn = _make_tool()
+
+    assert fn(pattern="NEEDLE_DATED")["total_matches"] == 2  # indexes both sessions
+
+    after = fn(pattern="NEEDLE_DATED", since="2026-04-01")
+    assert [m["session"] for m in after["matches"]] == ["session_20260505_100000_bbbb"]
+    before = fn(pattern="NEEDLE_DATED", until="2026-04-01")
+    assert [m["session"] for m in before["matches"]] == ["session_20260110_100000_aaaa"]
+
+
+# ── A session's final assistant reply ─────────────────────────────────
+#
+# A conversation ends on the assistant's last reply: no event follows it. The
+# indexer used to hold that snapshot in cursor.pending_assistant and wait for a
+# later event to flush it, so the last thing the queen said in any finished
+# session never became searchable. These three tests pin the fix.
+
+
+def test_sync_indexes_the_final_assistant_reply_of_a_finished_session(hive_home: Path):
+    from memory_tools import index, paths as P
+
+    events = [
+        _user_event("tell me about the plesiosaur"),
+        *_assistant_deltas("The Plesiosaur has a blue scaly body."),
+    ]
+    _write_session(hive_home, queen="queen_fin", session="session_20230523_064400_aaaa", events=events)
+
+    index.sync_session("queens", "queen_fin", "session_20230523_064400_aaaa")
+
+    idx = P.events_index_dir("queens", "queen_fin", "session_20230523_064400_aaaa")
+    names = sorted(p.name for p in idx.iterdir() if p.suffix == ".txt")
+    assert names == ["000000.user.txt", "000001.assistant.txt"]
+    assert "blue scaly body" in (idx / "000001.assistant.txt").read_text(encoding="utf-8")
+
+
+def test_sync_rewrites_a_still_streaming_turn_in_place(hive_home: Path):
+    """Resuming a turn extends one cache file; it does not append a second."""
+    from memory_tools import index, paths as P
+
+    session = "session_20230524_100000_bbbb"
+    first_delta = {"type": "client_output_delta", "data": {"snapshot": "the whole", "iteration": 0, "inner_turn": 0}}
+    sdir = _write_session(hive_home, queen="queen_fin", session=session, events=[_user_event("start"), first_delta])
+    index.sync_session("queens", "queen_fin", session)
+
+    idx = P.events_index_dir("queens", "queen_fin", session)
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the whole"
+
+    # The same turn keeps streaming, then the user speaks again.
+    with (sdir / "events.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "client_output_delta", "data": {"snapshot": "the whole reply", "iteration": 0, "inner_turn": 0}}) + "\n")
+        f.write(json.dumps(_user_event("and another thing")) + "\n")
+    index.sync_session("queens", "queen_fin", session)
+
+    assert sorted(p.name for p in idx.iterdir() if p.suffix == ".txt") == [
+        "000000.user.txt",
+        "000001.assistant.txt",
+        "000002.user.txt",
+    ]
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the whole reply"
+
+
+def test_sync_materializes_a_pending_snapshot_left_by_an_older_cache(hive_home: Path):
+    """An existing cache gains the reply it dropped, without a full rebuild."""
+    from memory_tools import index, paths as P
+
+    session = "session_20230525_100000_cccc"
+    events = [_user_event("question"), *_assistant_deltas("the answer was forty five")]
+    _write_session(hive_home, queen="queen_fin", session=session, events=events)
+    index.sync_session("queens", "queen_fin", session)
+
+    # Rewind to what the previous build left behind: the whole file consumed,
+    # the trailing snapshot parked in the cursor with no ordinal and no file.
+    idx = P.events_index_dir("queens", "queen_fin", session)
+    (idx / "000001.assistant.txt").unlink()
+    cursor = json.loads(P.cursor_path("queens", "queen_fin", session).read_text(encoding="utf-8"))
+    cursor["next_ordinal"] = 1
+    cursor["pending_assistant"] = {"iteration": 1, "inner_turn": 0, "snapshot": "the answer was forty five"}
+    P.cursor_path("queens", "queen_fin", session).write_text(json.dumps(cursor), encoding="utf-8")
+
+    index.sync_session("queens", "queen_fin", session)
+
+    assert (idx / "000001.assistant.txt").read_text(encoding="utf-8") == "the answer was forty five"
+
+
+def test_search_messages_finds_the_last_thing_the_assistant_said(hive_home: Path, bind_queen):
+    events = [
+        _user_event("write me a children's book about dinosaurs"),
+        *_assistant_deltas("Chapter three: the Plesiosaur, with its blue scaly body, glided past."),
+    ]
+    _write_session(hive_home, queen="queen_books", session="session_20230523_064400_dddd", events=events)
+    bind_queen("queen_books")
+
+    out = _make_tool()(pattern="(?i)plesiosaur")
+
+    assert out["total_matches"] == 1
+    assert "blue scaly body" in json.dumps(out["matches"], ensure_ascii=False)

@@ -2,6 +2,11 @@ import { api } from "./client";
 
 export type McpTransport = "stdio" | "http" | "sse" | "unix";
 
+/** How agents reach a server. "tools": its tools load into their tool list.
+ * "cli": they run it from the terminal with `hive mcp run`, so its tool
+ * schemas cost no context until a command is used. */
+export type McpMode = "tools" | "cli";
+
 export interface McpServer {
   name: string;
   /** "local": added via UI/CLI (user-editable). "registry": installed from
@@ -9,6 +14,8 @@ export interface McpServer {
    * visible but not removable from the UI. */
   source: "local" | "registry" | "built-in";
   transport: McpTransport | string;
+  /** Absent on built-in harness groups. */
+  mode?: McpMode;
   description: string;
   enabled: boolean;
   last_health_status: "healthy" | "unhealthy" | null;
@@ -33,6 +40,7 @@ export interface AddMcpServerBody {
   /** unix */
   socket_path?: string;
   description?: string;
+  mode?: McpMode;
 }
 
 export interface McpHealthResult {
@@ -60,6 +68,11 @@ export const mcpApi = {
   setEnabled: (name: string, enabled: boolean) =>
     api.post<{ name: string; enabled: boolean }>(
       `/mcp/servers/${encodeURIComponent(name)}/${enabled ? "enable" : "disable"}`,
+    ),
+  setMode: (name: string, mode: McpMode) =>
+    api.post<{ name: string; mode: McpMode; hint: string }>(
+      `/mcp/servers/${encodeURIComponent(name)}/mode`,
+      { mode },
     ),
   checkHealth: (name: string) =>
     api.post<McpHealthResult>(`/mcp/servers/${encodeURIComponent(name)}/health`),

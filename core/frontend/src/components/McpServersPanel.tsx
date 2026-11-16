@@ -11,10 +11,12 @@ import {
   CircleCheck,
   CircleAlert,
   CircleDashed,
+  SquareTerminal,
 } from "lucide-react";
 import {
   mcpApi,
   type McpServer,
+  type McpMode,
   type McpTransport,
   type AddMcpServerBody,
 } from "@/api/mcp";
@@ -66,6 +68,7 @@ interface AddFormState {
   headers: string;
   socketPath: string;
   description: string;
+  mode: McpMode;
 }
 
 const EMPTY_FORM: AddFormState = {
@@ -79,7 +82,11 @@ const EMPTY_FORM: AddFormState = {
   headers: "",
   socketPath: "",
   description: "",
+  mode: "tools",
 };
+
+// The "From the terminal" choice: mcp2cli can't reach a unix socket.
+const CLI_TRANSPORTS: TransportKey[] = ["stdio", "http", "sse"];
 
 function parseKeyValueLines(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -102,6 +109,7 @@ function buildAddBody(form: AddFormState): AddMcpServerBody {
     name: form.name.trim(),
     transport: form.transport,
     description: form.description.trim() || undefined,
+    mode: CLI_TRANSPORTS.includes(form.transport) ? form.mode : "tools",
   };
   if (form.transport === "stdio") {
     body.command = form.command.trim();
@@ -165,6 +173,19 @@ export default function McpServersPanel({ addOpen, setAddOpen }: { addOpen?: boo
       await refresh();
     } catch (e: unknown) {
       setError((e as Error)?.message || "Toggle failed");
+    } finally {
+      setBusy(server.name, false);
+    }
+  };
+
+  const handleMode = async (server: McpServer) => {
+    setBusy(server.name, true);
+    try {
+      await mcpApi.setMode(server.name, server.mode === "cli" ? "tools" : "cli");
+      await refresh();
+    } catch (e: unknown) {
+      const body = (e as { body?: { error?: string } }).body;
+      setError(body?.error || (e as Error)?.message || "Mode change failed");
     } finally {
       setBusy(server.name, false);
     }
@@ -273,6 +294,7 @@ export default function McpServersPanel({ addOpen, setAddOpen }: { addOpen?: boo
                   onToggle={() => handleToggle(s)}
                   onRemove={() => handleRemove(s)}
                   onHealth={() => handleHealth(s)}
+                  onMode={() => handleMode(s)}
                   isLocal
                 />
               ))}
@@ -292,6 +314,7 @@ export default function McpServersPanel({ addOpen, setAddOpen }: { addOpen?: boo
                   onToggle={() => handleToggle(s)}
                   onRemove={() => handleRemove(s)}
                   onHealth={() => handleHealth(s)}
+                  onMode={() => handleMode(s)}
                 />
               ))
             )}
@@ -441,6 +464,42 @@ export default function McpServersPanel({ addOpen, setAddOpen }: { addOpen?: boo
               </FieldRow>
             )}
 
+            {CLI_TRANSPORTS.includes(form.transport) && (
+              <FieldRow
+                label="Agents use it"
+                hint={
+                  form.mode === "cli"
+                    ? (
+                        <>
+                          They run{" "}
+                          <code className="font-mono text-foreground/80">
+                            hive mcp run {form.name || "<name>"} …
+                          </code>{" "}
+                          in the terminal. Its tools stay out of every prompt until a command is
+                          used: best for servers with many tools.
+                        </>
+                      )
+                    : "Its tools load into every agent's tool list."
+                }
+              >
+                <div className="flex gap-1">
+                  {(["tools", "cli"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setForm((f) => ({ ...f, mode: m }))}
+                      className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium border ${
+                        form.mode === m
+                          ? "bg-primary/15 text-primary border-primary/40"
+                          : "text-muted-foreground hover:text-foreground border-border/60 hover:bg-muted/30"
+                      }`}
+                    >
+                      {m === "tools" ? "As tools" : "From the terminal"}
+                    </button>
+                  ))}
+                </div>
+              </FieldRow>
+            )}
+
             <FieldRow label="Description">
               <input
                 value={form.description}
@@ -497,7 +556,7 @@ function FieldRow({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -536,6 +595,7 @@ function ServerRow({
   onToggle,
   onRemove,
   onHealth,
+  onMode,
   isLocal,
 }: {
   server: McpServer;
@@ -543,12 +603,14 @@ function ServerRow({
   onToggle: () => void;
   onRemove: () => void;
   onHealth: () => void;
+  onMode: () => void;
   isLocal?: boolean;
 }) {
   // Package-baked servers live in the repo and aren't managed by
   // MCPRegistry, so toggling / removing / health-checking them would
   // fail against the backend. Show them as read-only.
   const isBuiltIn = server.source === "built-in";
+  const isCli = server.mode === "cli";
   return (
     <div className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-muted/20">
       <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -569,7 +631,15 @@ function ServerRow({
           )}
           {server.tool_count !== null && server.tool_count !== undefined && (
             <span className="text-[11px] text-muted-foreground">
-              {server.tool_count} tools
+              {server.tool_count} {isCli ? "commands" : "tools"}
+            </span>
+          )}
+          {isCli && (
+            <span
+              className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded"
+              title={`Agents run "hive mcp run ${server.name} …" in the terminal`}
+            >
+              <SquareTerminal className="w-3 h-3" /> CLI
             </span>
           )}
         </div>
@@ -584,6 +654,20 @@ function ServerRow({
       </div>
       {!isBuiltIn && (
         <>
+          {server.transport !== "unix" && (
+            <button
+              onClick={onMode}
+              disabled={busy}
+              className="px-2.5 py-1 rounded-md text-[11px] font-medium text-muted-foreground border border-border/60 hover:text-foreground hover:bg-muted/30 disabled:opacity-50"
+              title={
+                isCli
+                  ? "Load its tools into agents' tool lists instead"
+                  : "Keep its tools out of prompts; agents run it from the terminal"
+              }
+            >
+              {isCli ? "Use as tools" : "Use from terminal"}
+            </button>
+          )}
           <button
             onClick={onHealth}
             disabled={busy}

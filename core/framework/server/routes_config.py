@@ -23,7 +23,6 @@ from framework.agents.queen.queen_memory_v2 import (
 from framework.config import (
     _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
-    HIVE_HOME,
     OPENROUTER_API_BASE,
     get_hive_config,
 )
@@ -287,7 +286,7 @@ def _get_subscription_token(sub_id: str) -> str | None:
     return None
 
 
-def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | None, api_base: str | None) -> int:
+def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | None, api_base: str | None, **reconfigure: Any) -> int:
     """Hot-swap the LLM on all running sessions. Returns count of swapped providers.
 
     Walks every long-lived LLM holder reachable from a session:
@@ -305,6 +304,8 @@ def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | Non
     Also refreshes the SessionManager's default model so that subsequent
     one-shot LLM consumers (e.g. /messages/classify, new session bootstrap)
     pick up the new provider/model instead of the stale startup override.
+
+    ``reconfigure`` is passed on to each provider's ``reconfigure`` (``extra_body``, say).
     """
     from framework.server.session_manager import SessionManager
 
@@ -314,11 +315,16 @@ def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | Non
 
     def _reconfigure_if_possible(prov: Any) -> bool:
         if prov and hasattr(prov, "reconfigure"):
-            prov.reconfigure(full_model, api_key=api_key, api_base=api_base)
+            prov.reconfigure(full_model, api_key=api_key, api_base=api_base, **reconfigure)
             return True
         return False
 
+    from framework.server import queen_models
+
     for session in manager.list_sessions():
+        # A queen with a model of her own (queen_llm) keeps it when the main model changes.
+        if queen_models.has_own(getattr(session, "queen_name", None)):
+            continue
         if _reconfigure_if_possible(getattr(session, "llm", None)):
             swapped += 1
         # ColonyRuntime holds its own worker LLM; expose attribute may be
@@ -342,48 +348,11 @@ async def _validate_provider_key(
 
     Runs the check in a thread pool to avoid blocking the event loop.
     """
-    from scripts.check_llm_key import (
-        PROVIDERS as CHECK_PROVIDERS,
-        check_anthropic_compatible,
-        check_minimax,
-        check_openai_compatible,
-        check_openrouter,
-        check_openrouter_model,
-    )
+    from framework.llm.key_check import check_key
 
     def _check() -> dict:
-        pid = provider.lower()
         try:
-            # Subscription providers with custom api_base
-            if pid == "openrouter" and model:
-                return check_openrouter_model(api_key, model=model, api_base=api_base or "https://openrouter.ai/api/v1")
-            if api_base and pid == "minimax":
-                return check_minimax(api_key, api_base)
-            if api_base and pid == "openrouter":
-                return check_openrouter(api_key, api_base)
-            if api_base and pid == "kimi":
-                return check_anthropic_compatible(
-                    api_key,
-                    api_base.rstrip("/") + "/v1/messages",
-                    "Kimi",
-                    model=model or "kimi-k2.6",
-                )
-            if api_base and pid == "hive":
-                return check_anthropic_compatible(
-                    api_key,
-                    api_base.rstrip("/") + "/v1/messages",
-                    "Hive",
-                    model=model or "queen",
-                    bearer_auth=True,
-                )
-            if api_base:
-                endpoint = api_base.rstrip("/") + "/models"
-                name = {"zai": "ZAI"}.get(pid, "Custom provider")
-                return check_openai_compatible(api_key, endpoint, name)
-            if pid in CHECK_PROVIDERS:
-                return CHECK_PROVIDERS[pid](api_key)
-            # No check available — assume valid
-            return {"valid": True, "message": f"No health check for {pid}"}
+            return check_key(provider.lower(), api_key, api_base=api_base, model=model)
         except Exception as exc:
             return {"valid": None, "message": f"Validation error: {exc}"}
 
@@ -402,8 +371,12 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
     provider = llm.get("provider", "")
     model = llm.get("model", "")
 
-    # Check if an API key is available for the current provider
-    has_key = _resolve_api_key(provider, request) is not None
+    # Whether the runtime can call the active model: the key it would actually use
+    # (configuration.json's own llm.api_key, a key pool, a subscription token,
+    # the credential store or the env var), not only the provider's default env var.
+    from framework.config import get_api_key
+
+    has_key = bool(get_api_key()) or _resolve_api_key(provider, request) is not None
 
     # Check ALL providers for key availability (env vars + credential store)
     connected = []
@@ -469,16 +442,9 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
             return web.json_response({"error": "'model' is required"}, status=400)
         config = get_hive_config()
         llm_section = config.setdefault("llm", {})
-        provider = str(
-            body.get("provider") or llm_section.get("provider") or "openai"
-        )
-        api_base = (
-            str(body.get("api_base") or llm_section.get("api_base") or "").strip()
-            or None
-        )
-        env_var = str(
-            body.get("api_key_env_var") or llm_section.get("api_key_env_var") or ""
-        ).strip()
+        provider = str(body.get("provider") or llm_section.get("provider") or "openai")
+        api_base = str(body.get("api_base") or llm_section.get("api_base") or "").strip() or None
+        env_var = str(body.get("api_key_env_var") or llm_section.get("api_key_env_var") or "").strip()
         api_key = os.environ.get(env_var) if env_var else None
         if api_key is None:
             api_key = _resolve_api_key(provider, request)
@@ -498,12 +464,9 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         _write_config_atomic(config)
 
         full_model = f"{provider}/{model}"
-        swapped = _hot_swap_sessions(
-            request, full_model, api_key=api_key, api_base=api_base
-        )
+        swapped = _hot_swap_sessions(request, full_model, api_key=api_key, api_base=api_base)
         logger.info(
-            "LLM config updated (custom endpoint): provider=%s model=%s base=%s, "
-            "hot-swapped %d session(s)",
+            "LLM config updated (custom endpoint): provider=%s model=%s base=%s, hot-swapped %d session(s)",
             provider,
             model,
             api_base,
@@ -893,7 +856,7 @@ async def handle_update_sentinel_config(request: web.Request) -> web.Response:
 # Whitelisted top-level boolean keys in configuration.json that the
 # features endpoint may read/write. Keep this in sync with the getters
 # in framework.config (e.g. get_adaptive_tool_budget_enabled).
-_FEATURE_KEYS = ("adaptive_tool_budget", "email_senders")
+_FEATURE_KEYS = ("adaptive_tool_budget", "email_senders", "memory_timeline", "stall_check")
 
 
 def _apply_adaptive_budget_flag(request: web.Request, enabled: bool) -> int:
@@ -939,6 +902,8 @@ async def handle_get_features(request: web.Request) -> web.Response:
     from framework.config import (
         get_adaptive_tool_budget_enabled,
         get_email_senders_enabled,
+        get_memory_timeline_enabled,
+        get_stall_check_enabled,
     )
 
     return web.json_response(
@@ -946,6 +911,8 @@ async def handle_get_features(request: web.Request) -> web.Response:
             "features": {
                 "adaptive_tool_budget": get_adaptive_tool_budget_enabled(),
                 "email_senders": get_email_senders_enabled(),
+                "memory_timeline": get_memory_timeline_enabled(),
+                "stall_check": get_stall_check_enabled(),
             }
         }
     )
@@ -1149,20 +1116,17 @@ async def handle_update_rate_limits(request: web.Request) -> web.Response:
 # as typed. Absolute accuracy by construction.
 # ---------------------------------------------------------------------------
 
-_ROLE_SECTIONS = ("llm", "worker_llm", "vision_fallback")
+# "judge" holds the stall check's judge (framework.server.stall_check); it is not a chat model.
+_ROLE_SECTIONS = ("llm", "worker_llm", "vision_fallback", "judge")
 
 
 async def handle_get_llm_sections(request: web.Request) -> web.Response:
     """GET /api/config/llm-sections — the three provider slots, verbatim."""
     cfg = get_hive_config()
-    return web.json_response(
-        {role: (cfg.get(role) or None) for role in _ROLE_SECTIONS}
-    )
+    return web.json_response({role: (cfg.get(role) or None) for role in _ROLE_SECTIONS})
 
 
-async def _write_role_section(
-    request: web.Request, role: str, section: dict, validate: bool
-) -> web.Response:
+async def _write_role_section(request: web.Request, role: str, section: dict, validate: bool) -> web.Response:
     """Validate + commit one provider section into a slot, verbatim.
 
     Shared by the direct slot editor (PUT /llm-sections) and the library
@@ -1180,14 +1144,12 @@ async def _write_role_section(
         if env_var:
             api_key = os.environ.get(str(env_var), "")
 
-    if validate and api_key and api_base:
-        check = await _validate_provider_key(
-            provider, api_key, api_base=api_base, model=str(section["model"])
-        )
+    # A judge isn't a chat model, so the chat key check doesn't apply; it is tried when it judges.
+    if validate and api_key and api_base and role != "judge":
+        check = await _validate_provider_key(provider, api_key, api_base=api_base, model=str(section["model"]))
         if check.get("valid") is False:
             return web.json_response(
-                {"error": f"Key check failed against {api_base}: "
-                          f"{check.get('message', 'unknown error')}"},
+                {"error": f"Key check failed against {api_base}: {check.get('message', 'unknown error')}"},
                 status=400,
             )
 
@@ -1198,9 +1160,7 @@ async def _write_role_section(
     swapped = 0
     if role == "llm":
         full_model = f"{provider}/{section['model']}"
-        swapped = _hot_swap_sessions(
-            request, full_model, api_key=api_key or None, api_base=api_base
-        )
+        swapped = _hot_swap_sessions(request, full_model, api_key=api_key or None, api_base=api_base)
     logger.info(
         "Provider slot %s written: %s/%s @ %s, hot-swapped %d session(s)",
         role,
@@ -1209,9 +1169,7 @@ async def _write_role_section(
         api_base,
         swapped,
     )
-    return web.json_response(
-        {"role": role, "section": section, "sessions_swapped": swapped}
-    )
+    return web.json_response({"role": role, "section": section, "sessions_swapped": swapped})
 
 
 async def handle_put_llm_section(request: web.Request) -> web.Response:
@@ -1231,7 +1189,7 @@ async def handle_put_llm_section(request: web.Request) -> web.Response:
     role = str(body.get("role") or "")
     if role not in _ROLE_SECTIONS:
         return web.json_response(
-            {"error": "'role' must be llm | worker_llm | vision_fallback"},
+            {"error": "'role' must be llm | worker_llm | vision_fallback | judge"},
             status=400,
         )
     section = body.get("section", None)
@@ -1239,8 +1197,7 @@ async def handle_put_llm_section(request: web.Request) -> web.Response:
     if section is None:
         if role == "llm":
             return web.json_response(
-                {"error": "The llm slot cannot be cleared - the runtime "
-                          "always needs a main model."},
+                {"error": "The llm slot cannot be cleared - the runtime always needs a main model."},
                 status=400,
             )
         config = get_hive_config()
@@ -1251,12 +1208,8 @@ async def handle_put_llm_section(request: web.Request) -> web.Response:
         return web.json_response({"role": role, "section": None})
 
     if not isinstance(section, dict):
-        return web.json_response(
-            {"error": "'section' must be a JSON object or null"}, status=400
-        )
-    return await _write_role_section(
-        request, role, section, validate=bool(body.get("validate", True))
-    )
+        return web.json_response({"error": "'section' must be a JSON object or null"}, status=400)
+    return await _write_role_section(request, role, section, validate=bool(body.get("validate", True)))
 
 
 # ---------------------------------------------------------------------------
@@ -1312,9 +1265,7 @@ async def handle_put_provider_library(request: web.Request) -> web.Response:
         return web.json_response({"name": name, "section": None})
 
     if not isinstance(section, dict):
-        return web.json_response(
-            {"error": "'section' must be a JSON object or null"}, status=400
-        )
+        return web.json_response({"error": "'section' must be a JSON object or null"}, status=400)
     if not str(section.get("model") or "").strip():
         return web.json_response({"error": "'model' is required"}, status=400)
 
@@ -1345,18 +1296,14 @@ async def handle_apply_provider_library(request: web.Request) -> web.Response:
     role = str(body.get("role") or "")
     if role not in _ROLE_SECTIONS:
         return web.json_response(
-            {"error": "'role' must be llm | worker_llm | vision_fallback"},
+            {"error": "'role' must be llm | worker_llm | vision_fallback | judge"},
             status=400,
         )
     name = str(body.get("name") or "").strip()
     section = _get_provider_library().get(name)
     if section is None:
-        return web.json_response(
-            {"error": f"No provider library entry named '{name}'"}, status=404
-        )
-    return await _write_role_section(
-        request, role, section, validate=bool(body.get("validate", True))
-    )
+        return web.json_response({"error": f"No provider library entry named '{name}'"}, status=404)
+    return await _write_role_section(request, role, section, validate=bool(body.get("validate", True)))
 
 
 # ---------------------------------------------------------------------------
@@ -1378,9 +1325,7 @@ def _resolve_external_skills(paths: list) -> list[dict]:
             ext = Path(os.path.expandvars(str(raw))).expanduser()
             entry["resolved"] = str(ext)
             entry["exists"] = ext.is_dir()
-            entry["skills"] = (
-                len(d._scan_scope(ext, "user")) if ext.is_dir() else 0
-            )
+            entry["skills"] = len(d._scan_scope(ext, "user")) if ext.is_dir() else 0
         except Exception as exc:
             entry["exists"] = False
             entry["skills"] = 0
@@ -1394,16 +1339,17 @@ def _resolve_external_skills(paths: list) -> list[dict]:
 # AND contain at least one parseable skill are surfaced. ~/.agents/skills
 # is absent on purpose — Hive scans it natively already.
 _KNOWN_AGENT_SKILL_DIRS = (
-    "~/.claude/skills",     # Claude Code
-    "~/.codex/skills",      # OpenAI Codex CLI
-    "~/.cursor/skills",     # Cursor
-    "~/.openclaw/skills",   # OpenClaw
-    "~/.gemini/skills",     # Gemini CLI
+    "~/.claude/skills",  # Claude Code
+    "~/.codex/skills",  # OpenAI Codex CLI
+    "~/.cursor/skills",  # Cursor
+    "~/.openclaw/skills",  # OpenClaw
+    "~/.gemini/skills",  # Gemini CLI
 )
 
 
 def _suggest_external_skills(configured: list[str]) -> list[dict]:
     """Probe known agent skill dirs not yet configured; keep real finds only."""
+
     def _norm(raw: str) -> str:
         try:
             return str(Path(os.path.expandvars(raw)).expanduser().resolve())
@@ -1430,9 +1376,7 @@ async def handle_get_external_skills(request: web.Request) -> web.Response:
     # parses (up to ~10 roots including the auto-discovery probes).
     resolved = await asyncio.to_thread(_resolve_external_skills, paths)
     suggestions = await asyncio.to_thread(_suggest_external_skills, paths)
-    return web.json_response(
-        {"paths": paths, "resolved": resolved, "suggestions": suggestions}
-    )
+    return web.json_response({"paths": paths, "resolved": resolved, "suggestions": suggestions})
 
 
 async def handle_put_external_skills(request: web.Request) -> web.Response:
@@ -1447,9 +1391,7 @@ async def handle_put_external_skills(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
     paths = body.get("paths")
     if not isinstance(paths, list) or not all(isinstance(x, str) for x in paths):
-        return web.json_response(
-            {"error": "'paths' must be a list of strings"}, status=400
-        )
+        return web.json_response({"error": "'paths' must be a list of strings"}, status=400)
     paths = [x.strip() for x in paths if x.strip()]
     config = get_hive_config()
     if paths:

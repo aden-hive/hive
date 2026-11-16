@@ -125,7 +125,7 @@ hive/
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
-│   ├── mcp_server.py       # MCP server entry point
+│   ├── mcp_server.py       # Standalone MCP server (agents use the tools in-process)
 │   └── src/aden_tools/     # Tools for agent capabilities
 │       └── tools/          # Individual tool implementations
 │           ├── web_search_tool/
@@ -136,7 +136,7 @@ hive/
 │   └── your_agent/         # Your agents created via files-tools workflow
 │
 ├── examples/
-│   └── templates/          # Pre-built template agents
+│   └── recipes/            # Prompt-only agent recipes
 │
 └── docs/                   # Documentation
 ```
@@ -170,7 +170,7 @@ Get your API keys:
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
-- **Hive LLM**: [Hive Discord](https://discord.com/invite/hQdU7QDkgR)
+- **Hive LLM**: [Hive Discord](https://discord.com/invite/MXE49hrKDk)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
 Quickstart can configure OpenRouter and Hive LLM for you interactively. See [configuration.md](./configuration.md) for the full configuration examples.

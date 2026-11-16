@@ -10,13 +10,22 @@ lean (mirrors ``synthetic_tools.py``). Each non-blocking action returns a
 plain string; the agent loop wraps it in a ``ToolResult``. The blocking
 ``collect`` action is validated here and parked by the agent loop.
 
+What this tool still does, and why the rest moved to the ``hive-cred`` CLI:
+- ``collect`` parks the loop and pops a secure form — an in-process concern.
+- ``attach`` / ``detach`` pin credentials to THIS session's prompt — the
+  session id only exists in-process.
+- ``browse`` / ``inspect`` / ``reveal`` were RETIRED (2026-08-25) in favour of
+  ``hive-cred browse|inspect|token``. ``reveal`` in particular dropped a raw,
+  un-refreshed OAuth access token into the conversation; agents pasted it into
+  scripts and every run longer than the token's lifetime died with a 401.
+  ``hive-cred token`` refreshes on every call, so scripts fetch at call time
+  and never hold a token. Calling a retired action returns the CLI equivalent.
+
 Security model:
-- ``browse`` / ``inspect`` return METADATA ONLY — never secret values.
-- ``reveal`` is the only path that returns a decrypted secret. It is explicit,
-  logged, and its output DOES enter the conversation history.
 - ``collect`` never returns secrets to the loop. It parks the loop and emits a
   form-request event; the frontend POSTs the secret straight to the encrypted
   store via ``POST /api/sessions/{id}/credential-form``.
+- No action of this tool returns a secret value any more.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from framework.credentials.catalog import account_provider, credential_specs
 from framework.llm.provider import Tool
 
 logger = logging.getLogger(__name__)
@@ -34,8 +44,15 @@ logger = logging.getLogger(__name__)
 # field's masked-input flag when the agent doesn't say.
 _SECRET_NAME_HINTS = ("api_key", "apikey", "token", "access_token", "secret", "password", "key")
 
-_MAX_BROWSE_PROVIDERS = 40
 _MAX_FIELDS = 8
+
+# Actions that used to live here. Each maps to the terminal command that
+# replaced it, so a stale call still teaches the agent the new surface.
+RETIRED_ACTIONS: dict[str, str] = {
+    "browse": "hive-cred browse [query] --json",
+    "inspect": "hive-cred inspect <credential_id> [--account <alias>] --json",
+    "reveal": "hive-cred token <credential_id> [--account <alias>] [--key <name>]",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -43,34 +60,24 @@ _MAX_FIELDS = 8
 # ---------------------------------------------------------------------------
 
 CREDENTIALS_TOOL_DESCRIPTION = (
-    "Manage credentials (a CLI-style tool). Call with no arguments (or "
-    'action="help") to see the available actions and their parameters. '
-    "Actions: help, browse, inspect, reveal, collect, attach, detach. Use "
-    "this to discover what credentials are available, pop a secure form to "
-    "the user to collect a new API key / login, attach a credential to this "
-    "session so you remember it's available, or read a secret value."
+    "Collect a new credential from the user via a secure form, or pin one to "
+    "this session (a CLI-style tool; call with no arguments for usage). "
+    "Actions: help, collect, attach, detach. To SEE what is connected or to "
+    "USE a credential value in a script, run the `hive-cred` CLI in the "
+    "terminal instead: `hive-cred browse --json`, `hive-cred inspect <id> --json`, "
+    "`hive-cred token <id> --account <alias>`."
 )
 
 CREDENTIALS_HELP = """\
-`credentials` — manage credentials for this session.
+`credentials` — collect or pin credentials for this session.
 
 Call this tool with an `action`. With no action (or action="help") you get this
-usage text. Secrets you collect are stored encrypted; you never need to handle
-raw secret values yourself unless you explicitly `reveal` one.
+usage text. Secrets you collect are stored encrypted and are never shown to you.
 
 Actions:
 
 - help
     Show this usage text.
-
-- browse  [query]
-    List what credentials are available: connected accounts you can use now,
-    plus providers you could connect. Metadata only — no secret values.
-    Optional `query` filters by provider name / description.
-
-- inspect  credential_id  [account]
-    Show details for one credential (type, key names, identity, status).
-    Metadata only — no secret values.
 
 - collect  credential_id  [account]  [title]  [fields]  [instructions]
     Pop a SECURE FORM to the user to collect a credential, then store it
@@ -91,14 +98,27 @@ Actions:
 - detach  credential_id  [account]
     Remove a pinned credential from this session.
 
-- reveal  credential_id  [account]  [key]
-    Return the DECRYPTED secret value. Use ONLY when you must place the secret
-    somewhere a tool can't resolve it for you. The value WILL appear in this
-    conversation, so prefer letting tools resolve credentials by account=alias
-    instead.
+Everything else is the `hive-cred` CLI, run with terminal_exec (always --json
+when you will parse it):
+
+  hive-cred browse [query] --json               what is connected (aliases,
+                                                identities) and what could be
+  hive-cred inspect <id> [--account <alias>] --json
+                                                one credential: accounts, key
+                                                names, type — no values
+  hive-cred token <id> --account <alias>        a FRESH value for a script.
+                                                OAuth tokens are refreshed on
+                                                every call; add --json for
+                                                expires_at
+
+Rules for token values: never paste one into a script or file. OAuth access
+tokens last about an hour; a script that embeds one will 401 mid-run. Call
+`hive-cred token` right before each request instead:
+  TOK=$(hive-cred token google --account email3)
+Prefer letting tools resolve credentials by account=<alias> whenever a tool
+exists for the job.
 
 Examples:
-  credentials({"action": "browse"})
   credentials({"action": "collect", "credential_id": "stripe", "account": "work",
                "title": "Connect Stripe",
                "fields": [{"name": "api_key", "label": "Secret key", "secret": true}]})
@@ -118,26 +138,19 @@ def build_credentials_tool() -> Tool:
                     "type": "string",
                     "enum": [
                         "help",
-                        "browse",
-                        "inspect",
                         "collect",
                         "attach",
                         "detach",
-                        "reveal",
                     ],
                     "description": ('What to do. Defaults to "help", which returns full usage. Call help first if unsure.'),
                 },
                 "credential_id": {
                     "type": "string",
-                    "description": ("Logical credential / provider id (e.g. 'stripe', 'github'). Required for inspect/collect/attach/detach/reveal."),
+                    "description": ("Logical credential / provider id (e.g. 'stripe', 'github'). Required for collect/attach/detach."),
                 },
                 "account": {
                     "type": "string",
                     "description": ("Account alias for multi-account providers (e.g. 'work'). Defaults to 'default'."),
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Optional filter for browse.",
                 },
                 "title": {
                     "type": "string",
@@ -146,10 +159,6 @@ def build_credentials_tool() -> Tool:
                 "instructions": {
                     "type": "string",
                     "description": "Optional help text shown above the collect form.",
-                },
-                "key": {
-                    "type": "string",
-                    "description": ("Specific key name for reveal (e.g. 'access_token'). Defaults to the primary key."),
                 },
                 "fields": {
                     "type": "array",
@@ -177,207 +186,23 @@ def render_help() -> str:
     return CREDENTIALS_HELP
 
 
-# ---------------------------------------------------------------------------
-# Adapter / store access
-# ---------------------------------------------------------------------------
-
-
-def _get_adapter() -> Any | None:
-    """Return the default CredentialStoreAdapter, or None if unavailable."""
-    try:
-        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
-
-        return CredentialStoreAdapter.default()
-    except Exception:
-        logger.debug("credentials tool: adapter unavailable", exc_info=True)
-        return None
+def retired_action_message(action: str, credential_id: str = "", account: str = "", key: str = "") -> str:
+    """The reply to a retired action: the exact CLI call to make instead."""
+    cid = credential_id or "<credential_id>"
+    acct = f" --account {account}" if account else ""
+    cmd = {
+        "browse": "hive-cred browse --json",
+        "inspect": f"hive-cred inspect {cid}{acct} --json",
+        "reveal": f"hive-cred token {cid}{acct}" + (f" --key {key}" if key else ""),
+    }[action]
+    why = ""
+    if action == "reveal":
+        why = " It returns a fresh, refreshed value each call; never paste the output into a script — call it at request time."
+    return f"ERROR: `credentials` action '{action}' was retired. Run this in the terminal instead: `{cmd}`.{why}"
 
 
 def _credential_specs() -> dict[str, Any]:
-    try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
-
-        return CREDENTIAL_SPECS
-    except Exception:
-        return {}
-
-
-def _account_provider(acct: dict) -> str:
-    return str(acct.get("provider") or acct.get("credential_id") or "").strip()
-
-
-def _format_identity(identity: Any) -> str:
-    if not isinstance(identity, dict):
-        return ""
-    parts = [str(v) for v in identity.values() if v]
-    return f" ({', '.join(parts)})" if parts else ""
-
-
-def _format_account_line(acct: dict) -> str:
-    provider = _account_provider(acct)
-    alias = acct.get("alias", "") or "default"
-    source = acct.get("source", "aden")
-    status = acct.get("status")
-    tag = " [local]" if source == "local" else ""
-    status_tag = f" — {status}" if status and status != "active" else ""
-    return f'- {provider} "{alias}"{_format_identity(acct.get("identity"))}{tag}{status_tag}'
-
-
-# ---------------------------------------------------------------------------
-# browse / inspect / reveal
-# ---------------------------------------------------------------------------
-
-
-def browse(query: str | None = None) -> str:
-    """List available credentials — metadata only, never secret values."""
-    adapter = _get_adapter()
-    accounts: list[dict] = []
-    if adapter is not None:
-        try:
-            accounts = adapter.get_all_account_info()
-        except Exception:
-            logger.debug("credentials.browse: get_all_account_info failed", exc_info=True)
-            accounts = []
-
-    q = (query or "").strip().lower()
-    connected_providers = {_account_provider(a) for a in accounts}
-
-    lines: list[str] = ["# Available credentials", ""]
-
-    if accounts:
-        shown = [a for a in accounts if not q or q in _format_account_line(a).lower()]
-        if shown:
-            lines.append("Connected (usable now via account=<alias>):")
-            lines.extend(_format_account_line(a) for a in shown)
-            lines.append("")
-    else:
-        lines.append("No credentials are connected yet.")
-        lines.append("")
-
-    # Connectable providers from the spec catalog (not yet connected).
-    specs = _credential_specs()
-    connectable: list[str] = []
-    for name, spec in specs.items():
-        cred_id = getattr(spec, "credential_id", None) or name
-        provider = getattr(spec, "aden_provider_name", "") or cred_id
-        if provider in connected_providers or cred_id in connected_providers:
-            continue
-        desc = getattr(spec, "description", "") or ""
-        text = f"- {cred_id} — {desc}".rstrip(" —")
-        if q and q not in text.lower():
-            continue
-        connectable.append(text)
-
-    if connectable:
-        lines.append("Connectable providers (use action=collect to add):")
-        lines.extend(sorted(connectable)[:_MAX_BROWSE_PROVIDERS])
-        if len(connectable) > _MAX_BROWSE_PROVIDERS:
-            lines.append(f"… and {len(connectable) - _MAX_BROWSE_PROVIDERS} more (use a query to filter).")
-        lines.append("")
-
-    lines.append("Use action=inspect for details, action=attach to pin one to this session, or action=collect to add a new one.")
-    return "\n".join(lines)
-
-
-def inspect(credential_id: str, account: str = "") -> str:
-    """Show metadata for one credential. Never returns secret values."""
-    credential_id = (credential_id or "").strip()
-    if not credential_id:
-        return "ERROR: inspect requires credential_id."
-
-    adapter = _get_adapter()
-    out: list[str] = [f"# {credential_id}" + (f' (account "{account}")' if account else "")]
-
-    # Connected account metadata.
-    accounts: list[dict] = []
-    if adapter is not None:
-        try:
-            accounts = [a for a in adapter.get_all_account_info() if _account_provider(a) == credential_id or a.get("credential_id") == credential_id]
-        except Exception:
-            accounts = []
-    if account:
-        accounts = [a for a in accounts if (a.get("alias") or "default") == account]
-
-    if accounts:
-        out.append("Accounts:")
-        out.extend(_format_account_line(a) for a in accounts)
-    else:
-        out.append("No connected account found for this id.")
-
-    # Key names from the underlying store (names only — no values).
-    if adapter is not None:
-        try:
-            cred = adapter.store.get_credential(credential_id, refresh_if_needed=False)
-            if cred is not None:
-                public_keys = [k for k in cred.keys.keys() if not k.startswith("_")]
-                if public_keys:
-                    out.append(f"Keys: {', '.join(sorted(public_keys))}")
-                out.append(f"Type: {cred.credential_type}")
-        except Exception:
-            logger.debug("credentials.inspect: store lookup failed", exc_info=True)
-
-    out.append("")
-    out.append("To use it, pass account=<alias> to the relevant tool. Use action=reveal only if you must read the raw value.")
-    return "\n".join(out)
-
-
-def reveal(credential_id: str, account: str = "", key: str = "") -> str:
-    """Return a DECRYPTED secret value. Explicit + logged; enters the chat."""
-    credential_id = (credential_id or "").strip()
-    if not credential_id:
-        return "ERROR: reveal requires credential_id."
-
-    adapter = _get_adapter()
-    if adapter is None:
-        return "ERROR: credential store unavailable."
-
-    logger.warning(
-        "credentials.reveal: decrypted secret requested for %s/%s key=%s",
-        credential_id,
-        account or "default",
-        key or "(default)",
-    )
-
-    value: str | None = None
-    try:
-        if account:
-            try:
-                from framework.credentials.local.registry import LocalCredentialRegistry
-
-                value = LocalCredentialRegistry.default().get_key(credential_id, account, key or "api_key")
-            except Exception:
-                value = None
-            if value is None:
-                cred = adapter.store.get_credential_by_alias(credential_id, account)
-                if cred is not None:
-                    value = cred.get_key(key) if key else cred.get_default_key()
-        else:
-            # No account: try the un-aliased store credential, then fall back
-            # to a collected local account (sole account, or one aliased
-            # "default") so the agent doesn't have to guess the alias.
-            cred = adapter.store.get_credential(credential_id)
-            if cred is not None:
-                value = cred.get_key(key) if key else cred.get_default_key()
-            if value is None:
-                from framework.credentials.local.registry import LocalCredentialRegistry
-
-                registry = LocalCredentialRegistry.default()
-                accounts = registry.list_accounts(credential_id)
-                target = None
-                if len(accounts) == 1:
-                    target = accounts[0].alias
-                elif any(a.alias == "default" for a in accounts):
-                    target = "default"
-                if target is not None:
-                    value = registry.get_key(credential_id, target, key or "api_key")
-    except Exception as exc:
-        return f"ERROR: could not read credential: {exc}"
-
-    if value is None:
-        return f"No value found for {credential_id}" + (f"/{account}" if account else "") + (f" key '{key}'" if key else "") + "."
-
-    label = f"{credential_id}" + (f"/{account}" if account else "") + (f" [{key}]" if key else "")
-    return f"⚠️ Decrypted secret for {label} (now visible in this conversation):\n{value}"
+    return credential_specs()
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +368,7 @@ def remove_attachment(session_id: str | None, credential_id: str, account: str =
 
 def attachment_matches(acct: dict, refs: list[dict]) -> bool:
     """True if a connected-account dict matches any attached ref."""
-    provider = _account_provider(acct)
+    provider = account_provider(acct)
     cred_id = acct.get("credential_id") or provider
     alias = acct.get("alias") or "default"
     for r in refs:

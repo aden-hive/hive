@@ -1,6 +1,6 @@
 ---
 name: hive.terminal-tools-job-control
-description: Use when launching anything that runs longer than a minute, anything that streams logs, anything you want to keep running while doing other work — or when terminal_exec auto-backgrounded on you and returned a job_id. Teaches the start→poll→wait pattern with terminal_job_logs offset bookkeeping, the `wait_until_exit=True` blocking-poll idiom, the truncated_bytes_dropped resumption signal, the merge_stderr decision, the SIGINT→SIGTERM→SIGKILL escalation ladder via terminal_job_manage, and the hard rule that jobs die when the terminal-tools server restarts. Read before calling terminal_job_start, or right after terminal_exec auto-backgrounded.
+description: Use when launching anything that runs longer than a minute, anything that streams logs, anything you want to keep running while doing other work — or when terminal_exec auto-backgrounded on you and returned a job_id. Teaches the start→poll→wait pattern with terminal_job_logs offset bookkeeping, bounded blocking polls, platform-specific process control via terminal_job_manage capabilities, and the hard rule that jobs die when the terminal-tools server restarts. Read before calling terminal_job_start, or right after terminal_exec auto-backgrounded.
 metadata:
   author: hive
   type: preset-skill
@@ -29,9 +29,9 @@ terminal_job_logs(job_id, since_offset=0, max_bytes=64000)
   → { data, offset, next_offset, status: "running"|"exited", exit_code, ... }
 
 # Repeat with since_offset = previous next_offset until status == "exited"
-# Or block once with wait_until_exit=True:
-terminal_job_logs(job_id, since_offset=N, wait_until_exit=True, wait_timeout_sec=60)
-  → blocks server-side until exit or timeout
+# Or, better when you have nothing else to do, wait once with wait_until_exit=True:
+terminal_job_logs(job_id, since_offset=N, wait_until_exit=True)
+  → waits until exit, a new message for you, or wait_timeout_sec (at most 600, the default)
 ```
 
 After exit, the job is retained for inspection (`terminal_job_manage(action="list")`) until evicted by FIFO (50 most recent exits kept).
@@ -65,13 +65,16 @@ Pick `merge_stderr=False` when:
 
 ## Signal escalation
 
+First query the actions implemented on the server's platform:
+
 ```
-terminal_job_manage(action="signal_int",  job_id=...)   # graceful (Ctrl-C-equivalent)
-terminal_job_manage(action="signal_term", job_id=...)   # polite kill (SIGTERM)
-terminal_job_manage(action="signal_kill", job_id=...)   # forced kill (SIGKILL, uncatchable)
+terminal_job_manage(action="capabilities")
+# Returns platform, supported_actions, signals (action → semantics), note.
 ```
 
-The idiom: `signal_int` → wait 2-5s → `signal_term` → wait 2-5s → `signal_kill`. Most well-behaved processes handle SIGINT (graceful) and SIGTERM (cleanup, then exit). SIGKILL bypasses cleanup — use only when the process is truly unresponsive.
+On POSIX, request `signal_int`, wait and inspect the job, then use `signal_term` if needed. `signal_term` gives the process group up to 2 seconds before forced cleanup; `signal_kill` forces termination immediately. Cleanup in response to SIGINT/SIGTERM depends on the application.
+
+On Windows, `signal_term` and `signal_kill` both forcefully terminate the job process tree. Neither invokes application cleanup handlers. `signal_int` / Ctrl-C and the other POSIX signals are unsupported and return `unsupported_action` with the supported actions. If a program has a documented shutdown command on stdin, that can be used before forced termination.
 
 After signaling, check exit with `terminal_job_logs(job_id, wait_until_exit=True, wait_timeout_sec=2)`.
 
@@ -98,12 +101,12 @@ terminal_job_logs(job_id="job_xxx", tail=True, max_bytes=64000)
 Or block until exit and grab everything:
 
 ```
-terminal_job_logs(job_id="job_xxx", since_offset=0, wait_until_exit=True, wait_timeout_sec=120)
+terminal_job_logs(job_id="job_xxx", since_offset=0, wait_until_exit=True)
 ```
 
 ## Hard rules
 
-- **Jobs die when the server restarts.** The desktop runtime restarts terminal-tools when Hive restarts. There's no re-attach. If you need durability, use `nohup` + `terminal_exec` to detach into the system's process tree and track the PID yourself.
+- **Jobs die when the server restarts.** The desktop runtime restarts terminal-tools when Hive restarts. There's no re-attach. `nohup` does not escape managed process-tree cleanup; durable services need a separate service manager.
 - **Server-wide hard cap on concurrent jobs** (`TERMINAL_TOOLS_MAX_JOBS`, default 32). Past the cap, `terminal_job_start` returns an error. Wait for jobs to exit or kill old ones.
 - **No cross-restart output.** Output handles and ring buffers are in-memory only.
 

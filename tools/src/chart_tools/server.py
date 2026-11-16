@@ -2,7 +2,7 @@
 
 Run via:
     uv run python -m chart_tools.server --stdio
-    uv run python chart_tools_server.py --stdio    (preferred, see _DEFAULT_LOCAL_SERVERS)
+    uv run python chart_tools_server.py --stdio    (standalone MCP; Hive runs these in-process)
 """
 
 from __future__ import annotations

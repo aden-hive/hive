@@ -515,7 +515,10 @@ class CredentialStoreAdapter:
                 key = (acct.get("provider", ""), acct.get("alias", ""))
                 if key not in seen_accounts:
                     seen_accounts.add(key)
-                    accounts.append(acct)
+                    # The id `hive-cred token` takes; the account's own `id` is
+                    # an opaque backend handle it rejects. Copy, don't mutate —
+                    # these dicts come from the store.
+                    accounts.append({**acct, "credential_id": cred_id})
 
         # Diagnostic: per-provider account counts. A provider that should
         # be connected but shows 0 here points at a provider-index key
@@ -528,7 +531,8 @@ class CredentialStoreAdapter:
             key = (acct.get("provider", ""), acct.get("alias", ""))
             if key not in seen_accounts:
                 seen_accounts.add(key)
-                accounts.append(acct)
+                # Local accounts already key by credential_id as ``provider``.
+                accounts.append({**acct, "credential_id": acct.get("provider", "")})
 
         return accounts
 

@@ -86,6 +86,13 @@ class FinishEvent:
     message and echoes them back on every follow-up request; reasoning
     models reject the next request with a 400 if a prior assistant turn is
     missing them. Empty for non-reasoning models.
+
+    ``reasoning_content`` is the reasoning a model streamed as the
+    OpenAI-compatible ``reasoning_content`` string instead of signed blocks
+    (Qwen, DeepSeek, GLM on their own endpoints). The agent loop stores it on
+    the assistant message and sends it back for the steps of the current
+    turn, where these models' chat templates read it. Empty when the model
+    streamed none.
     """
 
     type: Literal["finish"] = "finish"
@@ -98,6 +105,7 @@ class FinishEvent:
     credits: float | None = None
     model: str = ""
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
+    reasoning_content: str = ""
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 ---
 name: hive.terminal-tools-foundations
-description: Required reading whenever any shell_* tool is available. Teaches the foreground/background dichotomy (terminal_exec auto-promotes past 30s, returns a job_id you poll with terminal_job_logs), the standard envelope shape (exit_code, stdout, stdout_truncated_bytes, output_handle, semantic_status, warning, auto_backgrounded, job_id), output handle pagination via terminal_output_get, when to read semantic_status instead of raw exit_code (grep/rg/find/diff/test exit 1 is NOT an error), the destructive-warning surface (rm -rf, git push --force, DROP TABLE), tool preference (the terminal handles ALL file read/write/edit/search; use gcu-tools / hive_tools where they fit), and the bash-only-on-macOS policy. Skipping this leads to "tool returned no output" surprises, orphaned jobs, and panic over benign grep exit codes.
+description: Required when terminal_* tools are available. Explains foreground execution, outer collect_result handles, promoted job IDs and their retrieval/cancellation, deadlines, output retention, platform shell selection, and structured editing when enabled.
 metadata:
   author: hive
   type: preset-skill
@@ -9,18 +9,18 @@ metadata:
 
 # terminal-tools — foundations
 
-These tools give you a real terminal: foreground exec with smart envelopes, background jobs with offset-based log streaming, persistent PTY shells, and filesystem search. Bash-only on POSIX.
+These tools provide command execution, background jobs, log streaming, filesystem search, and optional PTY sessions. POSIX uses bash for shell commands; Windows selects Git Bash, PowerShell, then cmd. Inspect `shell_kind` in results.
 
 ## Tool preference (read first)
 
-The terminal is your file system: reading, writing, editing, and searching files all go through terminal-tools. Reach for a higher-level tool only where it clearly fits (browser, web search). Terminal tools default their cwd/path to your **session workdir** when you omit it — relative paths Just Work; pass an absolute path to operate elsewhere.
+Use `search_tools(query="inventory")` before describing capabilities. It reports this session's loaded, searchable, disabled, and configured-but-unavailable tools. Load searchable tools by exact name. An absent schema alone does not prove a capability is missing; configuration does not prove credentials or connectivity work. Terminal tools and coding file tools default to the injected session workdir; an explicit absolute path overrides it.
 
-- **Reading files** → `terminal_exec("cat PATH")` (page large output with `terminal_output_get`)
-- **Editing files** → `terminal_exec("sed -i ...")` / awk, or rewrite the whole file with a heredoc
+- **Reading files** → use `read_file` before `edit_file` when the coding tools are enabled; it records file state for the stale-edit guard. Otherwise use a command appropriate to `shell_kind`.
+- **Editing files** → prefer `edit_file` when enabled. Replacement mode requires a unique match unless `replace_all=true`; patch mode validates all operations before writing. Inspect its changed-file summary and diff. Re-read files after external changes. Terminal editing remains available when coding tools are disabled.
 - **Writing files** → heredoc: `terminal_exec("cat > PATH <<'EOF' ... EOF")`
 - **Searching** → `terminal_rg` (content / regex grep) and `terminal_glob` (find files by name)
-- **Browser / web pages** → `gcu-tools.browser_*` for rendered pages — NOT `terminal_exec("curl ...")`
-- **Web search** → `hive_tools.web_search` — NOT scraping
+- **Browser / web pages** → call `browser_setup`, read the browser skill, then run `hive-browser <command> --json` through `terminal_exec`.
+- **Web search** → check the inventory for `web_search` and load it if available; verify required credentials. Do not invent a callable tool name.
 - **System operations** (process exec, jobs, PTYs) → terminal-tools. This is its territory.
 
 ## The standard envelope
@@ -49,22 +49,24 @@ Every spawn-style call (`terminal_exec`, the auto-promoted job state) returns th
 
 ## Auto-promotion (the core mental model)
 
-`terminal_exec` runs commands in the foreground until the **auto-background budget** (default 30s) elapses. Past that point, the process is silently transferred to a background job and the call returns immediately with:
+The agent loop first waits up to five seconds for `terminal_exec`. A slower call returns a `bg_*` handle; redeem it with `collect_result`. The terminal's own **promotion threshold** defaults to 30 seconds. Past that threshold it transfers the process to its job manager and returns:
 
 ```jsonc
 { "auto_backgrounded": true, "exit_code": null, "job_id": "job_<hex>", ... }
 ```
 
-When you see `auto_backgrounded: true`, **pivot to polling**. The job is still running:
+When you see `auto_backgrounded: true`, the job is still running. When you have nothing else to do meanwhile, wait for it:
 
 ```
-terminal_job_logs(job_id, since_offset=0, wait_until_exit=true, wait_timeout_sec=60)
-  → blocks server-side until the job exits or the timeout, returns logs + status
+terminal_job_logs(job_id, since_offset=0, wait_until_exit=true)
+  → waits until the job exits or a new message for you arrives, returns logs + status
 ```
 
 You're not failing — you're freed up to do other work while the long task runs.
 
-To force pure-foreground (kill on `timeout_sec`), pass `auto_background_after_sec=0`. Use this when you genuinely don't want a background job (small commands where promotion would surprise you).
+`collect_result` does not redeem `job_id`: after collecting a promoted call, use `terminal_job_logs` until status is `exited`. Track separate stdout/stderr offsets; use `terminal_job_manage(action="signal_term", job_id=...)` to cancel. One wait lasts up to `wait_timeout_sec` (at most 600, the default); prefer one long wait to repeated short ones, each of which costs a whole model turn. A wait does not extend the execution deadline. Job retrieval/management ship with basic exec; explicit job creation and PTYs require the advanced category.
+
+`timeout_sec` defaults to 60 seconds **from command start**, including time after promotion. Expiry terminates the owned process tree; final logs report `timed_out=true`. A deadline at or before promotion kills inline. Set `timeout_sec=0` for unlimited execution with promotion enabled. To keep execution foreground, set `auto_background_after_sec=0` and a finite timeout of at most 220 seconds (or less if the caller has a smaller budget). Use managed jobs for longer waits. Jobs belong to the terminal server and do not survive its restart.
 
 ## Semantic exit codes — read `semantic_status`, not raw `exit_code`
 
@@ -87,24 +89,24 @@ The envelope's `warning` field is set when the command matches a known destructi
 
 If a `warning` appears unexpectedly, stop and verify: was the destructive action intended, or did a path/glob slip in?
 
-## Output handles — never lose output
+## Output handles and retention
 
-When `stdout_truncated_bytes > 0` or `stderr_truncated_bytes > 0`, the inline output was capped at `max_output_kb` (default 256 KB). The full bytes are stashed under `output_handle` for **5 minutes**. Paginate with:
+When `stdout_truncated_bytes > 0` or `stderr_truncated_bytes > 0`, retained output exceeded the inline cap (default 256 KiB per stream). An `output_handle` retrieves the retained bytes for **5 minutes**, subject to earlier eviction. Paginate with:
 
 ```
 terminal_output_get(output_handle, since_offset=0, max_kb=64)
   → { data, offset, next_offset, eof, expired }
 ```
 
-Track `next_offset` across calls. If `expired: true`, re-run the command (the handle's TTL has lapsed).
+Track `next_offset` across calls. If `expired: true`, inspect saved log files first. Repeat a command only if replaying its side effects is appropriate.
 
-The store has a 64 MB cap with LRU eviction. For huge outputs, prefer `terminal_job_start` + `terminal_job_logs` polling (4 MB ring buffer per stream, infinite total throughput).
+The store has a 64 MiB cap with LRU eviction. Process output passes through a 4 MiB ring per stream; old bytes can be overwritten. Poll job logs promptly and check `truncated_bytes_dropped`. For complete build logs, redirect output to a file and inspect that file as well as the exit status.
 
 ## Bash, not zsh — even on macOS
 
-On POSIX, `terminal_exec` and `terminal_pty_open` always invoke `/bin/bash` (on Windows see the section below). The user's `$SHELL` is ignored. Explicit `shell="/bin/zsh"` is **rejected** with a clear error. This is a deliberate security stance, not aesthetic — zsh has command/builtin classes (`zmodload`, `=cmd` expansion, `zpty`, `ztcp`, `zf_*`) that bypass bash-shaped checks. The `terminal-tools-pty-sessions` skill explains the implications for PTY sessions specifically.
+On POSIX, `terminal_exec` uses direct argv execution for simple commands and `/bin/bash` for shell syntax or `shell=True`. The user's `$SHELL` does not select the interpreter. zsh is refused by the shell resolver. PTY sessions are POSIX-only.
 
-`ZDOTDIR` and `ZSH_*` env vars are stripped before exec to prevent zsh dotfiles leaking in. Bash dotfiles still apply when invoked interactively (e.g. PTY sessions use `bash --norc --noprofile` to keep things predictable).
+Foreground commands and explicit background jobs inherit ordinary environment variables, with `ZDOTDIR` and `ZSH_*` removed from the inherited base even when `env` is omitted. Explicit `env` values are then merged and take precedence; framework-injected identity wins over an agent-supplied identity. Noninteractive shell configuration may differ from the user's interactive terminal.
 
 ## Windows — check `shell_kind` before assuming bash
 

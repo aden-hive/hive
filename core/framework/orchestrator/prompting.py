@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from framework.credentials.catalog import format_account_line
+
 if TYPE_CHECKING:
     from framework.orchestrator.edge import GraphSpec
     from framework.orchestrator.node import DataBuffer
@@ -115,16 +117,6 @@ def build_accounts_prompt(
     if not accounts:
         return ""
 
-    def _format_identity(acct: dict[str, Any]) -> str:
-        identity = acct.get("identity", {})
-        parts = [str(v) for v in identity.values() if v]
-        return f" ({', '.join(parts)})" if parts else ""
-
-    def _format_account_line(acct: dict[str, Any]) -> str:
-        alias = acct.get("alias", "unknown")
-        source_tag = " [local]" if acct.get("source") == "local" else ""
-        return f'- "{alias}"{_format_identity(acct)}{source_tag}'
-
     provider_accounts: dict[str, list[dict[str, Any]]] = {}
     for acct in accounts:
         provider_accounts.setdefault(acct.get("provider", "unknown"), []).append(acct)
@@ -139,7 +131,7 @@ def build_accounts_prompt(
         for provider, acct_list in provider_accounts.items():
             sections.append(f"\n{provider}")
             for acct in acct_list:
-                sections.append(_format_account_line(acct))
+                sections.append(format_account_line(acct, include_provider=False, include_status=False, default_alias="unknown"))
         if any(len(acct_list) > 1 for acct_list in provider_accounts.values()):
             sections.append(multi_account_note)
         return "\n".join(sections)
@@ -172,7 +164,7 @@ def build_accounts_prompt(
 
         sections.append(f"\n{provider}{header_suffix}")
         for acct in acct_list:
-            sections.append(_format_account_line(acct))
+            sections.append(format_account_line(acct, include_provider=False, include_status=False, default_alias="unknown"))
         if len(acct_list) > 1:
             has_multi_account = True
 
@@ -199,7 +191,8 @@ def build_credentials_summary(accounts: list[dict[str, Any]]) -> str:
         return (
             "# Credentials\n"
             "No credentials are connected yet. Use the `credentials` tool "
-            "(action=collect) to add one, or action=browse to see what's available."
+            "(action=collect) to add one, or run `hive-cred browse --json` in the "
+            "terminal to see what could be connected."
         )
 
     counts: dict[str, int] = {}
@@ -211,8 +204,11 @@ def build_credentials_summary(accounts: list[dict[str, Any]]) -> str:
     return (
         "# Credentials\n"
         f"Connected: {summary}.\n"
-        "Use the `credentials` tool (action=browse) for details or to collect "
-        "new ones, and action=attach to pin the ones you'll reuse this session."
+        "In the terminal: `hive-cred browse --json` lists aliases and identities, "
+        "`hive-cred token <id> --account <alias>` gives a script a FRESH value "
+        "(call it at request time; never paste a token into a file). Use the "
+        "`credentials` tool to collect new ones (action=collect) and to pin the "
+        "ones you'll reuse this session (action=attach)."
     )
 
 

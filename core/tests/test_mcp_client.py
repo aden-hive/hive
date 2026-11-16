@@ -327,3 +327,29 @@ def test_split_mcp_content_mixed_text_image_pdf():
     assert [b["type"] for b in images] == ["image_url", "file"]
     assert images[0]["image_url"]["url"] == "data:image/jpeg;base64,img1"
     assert images[1]["file"]["file_data"] == "data:application/pdf;base64,pdf1"
+
+
+def test_connect_stdio_fails_when_the_server_never_initializes(monkeypatch):
+    """A server that starts but never answers the MCP handshake must fail the
+    connect, not be published as a live connection whose every call hangs."""
+    import sys
+    import time
+
+    monkeypatch.setattr(mcp_client_module, "_CONNECT_READY_TIMEOUT_S", 1.0)
+    client = MCPClient(
+        MCPServerConfig(
+            name="silent-server",
+            transport="stdio",
+            command=sys.executable,
+            # A credential in the arguments must not leak into the error.
+            args=["-c", "import time; time.sleep(30)", "--api-key=s3cret"],
+        )
+    )
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="Timed out waiting for MCP stdio connection") as excinfo:
+        client.connect()
+
+    assert time.monotonic() - started < 15
+    assert client._conn is None
+    assert "s3cret" not in str(excinfo.value)

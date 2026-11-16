@@ -14,6 +14,8 @@
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,9 @@ from framework.agents.queen.queen_profiles import (
     default_profile_persona,
     ensure_default_queens,
     list_queens,
+    list_removed_queens,
     load_queen_profile,
+    set_queen_removed,
     update_queen_profile,
 )
 from framework.cloud_sync_hooks import schedule_push
@@ -122,6 +126,29 @@ async def handle_list_profiles(request: web.Request) -> web.Response:
     return web.json_response({"queens": queens})
 
 
+async def handle_list_removed(request: web.Request) -> web.Response:
+    """GET /api/queen/removed — the queens taken out of the catalog, to put back."""
+    return web.json_response({"queens": list_removed_queens()})
+
+
+async def handle_remove_queen(request: web.Request) -> web.Response:
+    """POST /api/queen/{queen_id}/remove — take her out of the catalog. Her files stay, for a restore."""
+    return _set_removed(request.match_info["queen_id"], True)
+
+
+async def handle_restore_queen(request: web.Request) -> web.Response:
+    """POST /api/queen/{queen_id}/restore — put a removed queen back in the catalog, as she was."""
+    return _set_removed(request.match_info["queen_id"], False)
+
+
+def _set_removed(queen_id: str, removed: bool) -> web.Response:
+    try:
+        set_queen_removed(queen_id, removed)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    return web.json_response({"queen_id": queen_id, "removed": removed})
+
+
 async def handle_create_queen(request: web.Request) -> web.Response:
     """POST /api/queen/create — create a custom queen from scratch.
 
@@ -146,10 +173,8 @@ async def handle_create_queen(request: web.Request) -> web.Response:
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     except FileExistsError as e:
-        return web.json_response(
-            {"error": f"queen id already exists: {e}"}, status=409
-        )
-    schedule_push()
+        return web.json_response({"error": f"queen id already exists: {e}"}, status=409)
+    schedule_push("queen_profile", entry["id"])
     return web.json_response({"queen": entry}, status=201)
 
 
@@ -214,6 +239,84 @@ async def handle_get_profile(request: web.Request) -> web.Response:
 
     api_profile = _transform_profile_for_api(profile)
     return web.json_response({"id": queen_id, "has_avatar": _has_avatar(queen_id), **api_profile})
+
+
+async def handle_get_queen_llm(request: web.Request) -> web.Response:
+    """GET /api/queen/{queen_id}/llm — her own model (``queen_llm``), or null when she uses the main one."""
+    from framework.config import get_hive_config, get_preferred_model
+
+    queen_id = request.match_info["queen_id"]
+    try:
+        load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    sections = get_hive_config().get("queen_llm")
+    section = sections.get(queen_id) if isinstance(sections, dict) else None
+    manager = request.app["manager"]
+    return web.json_response(
+        {
+            "queen_id": queen_id,
+            "section": section if isinstance(section, dict) else None,
+            "default_model": getattr(manager, "_model", None) or get_preferred_model(),
+        }
+    )
+
+
+async def handle_put_queen_llm(request: web.Request) -> web.Response:
+    """PUT /api/queen/{queen_id}/llm — give her a model of her own, or return her to the main one.
+
+    Body: ``{"section": {...} | null, "validate"?: true}``. The section has the ``llm`` slot's
+    shape and gets the same key check; ``null`` removes it. Her running sessions switch at once.
+    """
+    from framework.config import get_hive_config
+    from framework.server import queen_models
+    from framework.server.routes_config import _validate_provider_key, _write_config_atomic
+
+    queen_id = request.match_info["queen_id"]
+    try:
+        load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    section = body.get("section") if isinstance(body, dict) else None
+    if section is not None:
+        if not isinstance(section, dict):
+            return web.json_response({"error": "'section' must be a JSON object or null"}, status=400)
+        if not str(section.get("provider") or "").strip() or not str(section.get("model") or "").strip():
+            return web.json_response({"error": "'provider' and 'model' are required"}, status=400)
+        api_key = str(section.get("api_key") or "") or os.environ.get(str(section.get("api_key_env_var") or ""), "")
+        api_base = str(section.get("api_base") or "").strip() or None
+        if body.get("validate", True) and api_key and api_base:
+            check = await _validate_provider_key(str(section["provider"]), api_key, api_base=api_base, model=str(section["model"]))
+            if check.get("valid") is False:
+                return web.json_response(
+                    {"error": f"Key check failed against {api_base}: {check.get('message', 'unknown error')}"},
+                    status=400,
+                )
+
+    config = get_hive_config()
+    sections = config.get("queen_llm") if isinstance(config.get("queen_llm"), dict) else {}
+    if section is None:
+        sections.pop(queen_id, None)
+    else:
+        sections[queen_id] = section  # verbatim, like the llm slot
+    if sections:
+        config["queen_llm"] = sections
+    else:
+        config.pop("queen_llm", None)
+    _write_config_atomic(config)
+
+    manager = request.app["manager"]
+    switched = sum(
+        1
+        for s in manager.list_sessions()
+        if getattr(s, "queen_name", None) == queen_id and queen_models.apply(s.llm, queen_id, default_model=getattr(manager, "_model", None))
+    )
+    logger.info("Queen %s model %s; %d running session(s) switched", queen_id, "set" if section else "cleared", switched)
+    return web.json_response({"queen_id": queen_id, "section": section, "sessions_switched": switched})
 
 
 def _has_avatar(queen_id: str) -> bool:
@@ -306,6 +409,114 @@ async def handle_update_profile(request: web.Request) -> web.Response:
     await _refresh_live_queen_identity(request.app["manager"], queen_id, updated)
     api_profile = _transform_profile_for_api(updated)
     return web.json_response({"id": queen_id, "has_avatar": _has_avatar(queen_id), **api_profile})
+
+
+def _persona_view(profile: dict[str, Any]) -> dict[str, Any]:
+    from framework.agents.queen.queen_profiles import PERSONA_FIELDS
+
+    return {k: profile[k] for k in PERSONA_FIELDS if k in profile}
+
+
+def _persona_problem(fields: dict[str, Any]) -> str:
+    """Why these persona fields can't be saved, or ""."""
+    from framework.agents.queen.queen_profiles import PERSONA_MAP_FIELDS, PERSONA_TEXT_FIELDS
+
+    for key, value in fields.items():
+        if key in PERSONA_TEXT_FIELDS:
+            if not isinstance(value, str):
+                return f"'{key}' must be text"
+            if key in ("name", "title") and not value.strip():
+                return f"'{key}' can't be empty"
+        elif key in PERSONA_MAP_FIELDS:
+            if value is not None and not (isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())):
+                return f"'{key}' must map names to text"
+        elif key == "behavior_triggers":
+            # The identity prompt reads each item's trigger and reaction.
+            if value is not None and not (
+                isinstance(value, list)
+                and all(isinstance(t, dict) and isinstance(t.get("trigger"), str) and isinstance(t.get("reaction"), str) for t in value)
+            ):
+                return "'behavior_triggers' must be a list of {trigger, reaction} texts"
+        else:
+            return f"Unknown persona field '{key}'"
+    return ""
+
+
+async def handle_get_persona(request: web.Request) -> web.Response:
+    """GET /api/queen/{queen_id}/persona — her persona fields as profile.yaml holds them."""
+    queen_id = request.match_info["queen_id"]
+    try:
+        profile = load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    return web.json_response({"queen_id": queen_id, "persona": _persona_view(profile)})
+
+
+async def handle_put_persona(request: web.Request) -> web.Response:
+    """PUT /api/queen/{queen_id}/persona — replace persona fields whole: ``{"persona": {field: value}}``.
+
+    Text fields (name, title, core_traits, skills), maps of text (hidden_background, psychological_profile,
+    world_lore) and behavior_triggers, a list of ``{trigger, reaction}``; ``null`` removes a map or the list.
+    The file as it was goes to ``_profile_snapshots/``, and her running sessions take the new persona on their
+    next turn.
+    """
+    from framework.agents.queen.queen_profiles import replace_queen_persona
+
+    queen_id = request.match_info["queen_id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    fields = body.get("persona") if isinstance(body, dict) else None
+    if not isinstance(fields, dict) or not fields:
+        return web.json_response({"error": "Body must be {'persona': {field: value}}"}, status=400)
+    problem = _persona_problem(fields)
+    if problem:
+        return web.json_response({"error": problem}, status=400)
+    try:
+        updated = replace_queen_persona(queen_id, fields)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    schedule_push("queen_profile", queen_id)
+    await _refresh_live_queen_identity(request.app["manager"], queen_id, updated)
+    return web.json_response({"queen_id": queen_id, "persona": _persona_view(updated)})
+
+
+async def handle_get_overview(request: web.Request) -> web.Response:
+    """GET /api/queen/{queen_id}/overview — what her profile page counts.
+
+    Her memories (by type, and the most she keeps), her sessions, and when she was last active.
+    """
+    from collections import Counter
+    from datetime import datetime
+
+    from framework.agents.queen.queen_memory_v2 import MAX_FILES, queen_memory_dir, scan_memory_files
+
+    queen_id = request.match_info["queen_id"]
+    try:
+        load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+    memories = scan_memory_files(queen_memory_dir(queen_id))
+    root = QUEENS_DIR / queen_id / "sessions"
+    sessions = [d for d in root.iterdir() if d.is_dir()] if root.is_dir() else []
+    started = sorted(m.group(1) for d in sessions if (m := re.match(r"session_(\d{8})_", d.name)))
+    active = [(d / "events.jsonl").stat().st_mtime for d in sessions if (d / "events.jsonl").is_file()]
+    return web.json_response(
+        {
+            "queen_id": queen_id,
+            "memory": {
+                "count": len(memories),
+                "limit": MAX_FILES,
+                "by_type": dict(Counter((m.type or "other") for m in memories)),
+            },
+            "sessions": {
+                "count": len(sessions),
+                "first": f"{started[0][:4]}-{started[0][4:6]}-{started[0][6:]}" if started else None,
+                "last_active": datetime.fromtimestamp(max(active)).astimezone().isoformat(timespec="minutes") if active else None,
+            },
+        }
+    )
 
 
 async def handle_initialize_preferences(request: web.Request) -> web.Response:
@@ -416,11 +627,12 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     # When multiple DM sessions for this queen are live at once (e.g. the
     # user created a new session, then navigated away and back), return
     # the most recently loaded one so we don't resurrect a stale older
-    # session ahead of a freshly created one.
+    # session ahead of a freshly created one. A channel's sessions (a QQ
+    # group, say) are its own conversations, not the user's DM.
     live_matches = [
         s
         for s in manager.list_sessions()
-        if s.queen_name == queen_id and s.colony_id is None and s.worker_path is None and not getattr(s, "superseded_by", None)
+        if s.queen_name == queen_id and s.colony_id is None and s.worker_path is None and not getattr(s, "superseded_by", None) and s.channel is None
     ]
     if live_matches:
         latest = max(live_matches, key=lambda s: s.loaded_at)
@@ -463,10 +675,12 @@ async def handle_queen_session(request: web.Request) -> web.Response:
                         meta = json.loads(meta_path.read_text(encoding="utf-8"))
                     except (json.JSONDecodeError, OSError):
                         meta = {}
-                # Skip colony-fork duplicates and sessions retired by a
-                # task_create(new_session=true) fork — the successor
-                # session is the one to resume.
-                if meta.get("colony_fork") or meta.get("superseded_by"):
+                # Skip colony-fork duplicates, sessions retired by a
+                # task_create(new_session=true) fork (the successor session is
+                # the one to resume), and a DM that became a colony: it is
+                # locked, and its agent_path would open the colony's own session
+                # here as if it were this queen's DM.
+                if meta.get("colony_fork") or meta.get("superseded_by") or meta.get("colony_spawned") or meta.get("channel"):
                     continue
                 resume_from = candidate.name
                 break
@@ -634,7 +848,8 @@ async def handle_new_queen_session(request: web.Request) -> web.Response:
         )
 
     # Park any previously-live DM sessions for this queen before minting a
-    # fresh one. Without this, every click of "New Session" leaks a live
+    # fresh one. A channel's sessions (a QQ group, say) are other people's
+    # chats and are never parked. Without this, every click of "New Session" leaks a live
     # entry into manager._sessions and the session-switcher dropdown shows
     # duplicate "Live" badges for sessions whose UI has already moved on
     # (the SSE stream + URL follow the fresh session id; the old one is
@@ -651,7 +866,7 @@ async def handle_new_queen_session(request: web.Request) -> web.Response:
         [
             s
             for s in manager.list_sessions()
-            if s.queen_name == queen_id and getattr(s, "colony_id", None) is None and getattr(s, "worker_path", None) is None
+            if s.queen_name == queen_id and getattr(s, "colony_id", None) is None and getattr(s, "worker_path", None) is None and s.channel is None
         ]
         if park_others
         else []
@@ -825,7 +1040,15 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/queen/profiles", handle_list_profiles)
     app.router.add_get("/api/queen/{queen_id}/profile", handle_get_profile)
     app.router.add_patch("/api/queen/{queen_id}/profile", handle_update_profile)
+    app.router.add_get("/api/queen/{queen_id}/llm", handle_get_queen_llm)
+    app.router.add_put("/api/queen/{queen_id}/llm", handle_put_queen_llm)
+    app.router.add_get("/api/queen/{queen_id}/persona", handle_get_persona)
+    app.router.add_put("/api/queen/{queen_id}/persona", handle_put_persona)
+    app.router.add_get("/api/queen/{queen_id}/overview", handle_get_overview)
     app.router.add_post("/api/queen/create", handle_create_queen)
+    app.router.add_get("/api/queen/removed", handle_list_removed)
+    app.router.add_post("/api/queen/{queen_id}/remove", handle_remove_queen)
+    app.router.add_post("/api/queen/{queen_id}/restore", handle_restore_queen)
     app.router.add_post("/api/queen/initialize-preferences", handle_initialize_preferences)
     app.router.add_post("/api/queen/{queen_id}/avatar", handle_upload_avatar)
     app.router.add_get("/api/queen/{queen_id}/avatar", handle_get_avatar)

@@ -1,0 +1,244 @@
+<!doctype html>
+<!--
+  Source for banner-light.webp, banner-dark.webp and social-preview.png in this folder.
+  Open it in Chromium and screenshot the #banner element with a transparent background:
+
+    banner-light.webp   ?theme=light&radius=18&r=39&qx=0.74   at device scale 2
+    banner-dark.webp    ?theme=dark&radius=18&r=39&qx=0.74    at device scale 2
+    social-preview.png  ?theme=dark&w=1280&h=640&s=1.32&r=52&qx=0.775&qy=0.53&pad=92&subw=600&glowx=78%&fadefrom=0.5
+                        at device scale 1
+
+  The cell roles around the queen live in `roles` below; the status line counts them.
+  Colors, Geist type and the logo come from the dashboard (core/frontend).
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* light (the product's light theme) */
+    --bg: #f6f4f0;
+    --fg: #14110d;
+    --muted: #7a7064;
+    --faint: #d9d1c6;
+    --primary: #b5691c;
+    --primary-soft: rgba(181, 105, 28, 0.13);
+    --glow: rgba(181, 105, 28, 0.10);
+    --on-primary: #f6f4f0;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0b0b;
+    --fg: #ededed;
+    --muted: #8a8a8a;
+    --faint: #262626;
+    --primary: #e7b008;
+    --primary-soft: rgba(231, 176, 8, 0.14);
+    --glow: rgba(231, 176, 8, 0.11);
+    --on-primary: #0b0b0b;
+  }
+  html, body { margin: 0; background: transparent; }
+  #banner {
+    position: relative;
+    width: var(--w, 1280px);
+    height: var(--h, 320px);
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 520px 300px at var(--glow-x, 76%) 50%, var(--glow), transparent 70%),
+      var(--bg);
+    font-family: "Geist", system-ui, sans-serif;
+    color: var(--fg);
+    border-radius: var(--radius, 0px);
+    zoom: 1;
+  }
+  svg.cells { position: absolute; inset: 0; }
+  .copy {
+    position: absolute;
+    left: var(--pad, 72px);
+    top: 0; bottom: 0;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .kicker {
+    display: flex; align-items: center; gap: 14px;
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: calc(15 * var(--s, 1) * 1px); letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: calc(22 * var(--s, 1) * 1px);
+  }
+  .kicker .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+  .ruler {
+    width: 120px; height: 9px;
+    background-image: repeating-linear-gradient(90deg, var(--muted) 0 1px, transparent 1px 8px);
+    opacity: 0.55;
+    -webkit-mask: linear-gradient(90deg, #000, transparent);
+  }
+  .brand { display: flex; align-items: center; gap: calc(16 * var(--s, 1) * 1px); }
+  .brand svg { width: calc(62 * var(--s, 1) * 1px); height: calc(62 * var(--s, 1) * 1px); color: var(--primary); }
+  .word { font-size: calc(64 * var(--s, 1) * 1px); font-weight: 640; letter-spacing: -0.035em; line-height: 1; }
+  .word .hive { color: var(--primary); }
+  .headline { margin-top: calc(26 * var(--s, 1) * 1px); font-size: calc(31 * var(--s, 1) * 1px); font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+  .sub { margin-top: calc(8 * var(--s, 1) * 1px); font-size: calc(21 * var(--s, 1) * 1px); font-weight: 420; letter-spacing: -0.01em; color: var(--muted); max-width: var(--subw, none); line-height: 1.3; text-wrap: balance; }
+  .status {
+    position: absolute; right: 40px; top: 28px;
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: calc(14 * var(--s, 1) * 1px); letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .status b { color: var(--primary); font-weight: 600; }
+  .status .cursor { width: calc(8 * var(--s, 1) * 1px); height: calc(15 * var(--s, 1) * 1px); background: var(--primary); }
+</style>
+</head>
+<body>
+<div id="banner">
+  <svg class="cells" id="cells"></svg>
+  <div class="copy">
+    <div class="kicker"><span class="dot"></span><span id="kicker">Open-source agent colonies</span><span class="ruler"></span></div>
+    <div class="brand">
+      <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round">
+        <g transform="translate(32,32) scale(1.15) translate(-32,-27)">
+          <polygon points="20,14 25.2,17 25.2,23 20,26 14.8,23 14.8,17" />
+          <polygon points="32,7 37.2,10 37.2,16 32,19 26.8,16 26.8,10" />
+          <polygon points="44,14 49.2,17 49.2,23 44,26 38.8,23 38.8,17" />
+          <polygon points="44,28 49.2,31 49.2,37 44,40 38.8,37 38.8,31" />
+          <polygon points="32,35 37.2,38 37.2,44 32,47 26.8,44 26.8,38" />
+          <polygon points="20,28 25.2,31 25.2,37 20,40 14.8,37 14.8,31" />
+          <polygon points="32,21 37.2,24 37.2,30 32,33 26.8,30 26.8,24" />
+        </g>
+      </svg>
+      <div class="word">Open<span class="hive">Hive</span></div>
+    </div>
+    <div class="headline" id="headline">Describe the outcome.</div>
+    <div class="sub" id="sub">A queen agent grows the colony that gets it done.</div>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get("theme") === "dark") document.documentElement.dataset.theme = "dark";
+  const W = +(q.get("w") || 1280), H = +(q.get("h") || 320);
+  const banner = document.getElementById("banner");
+  banner.style.setProperty("--w", W + "px");
+  banner.style.setProperty("--h", H + "px");
+  if (q.get("pad")) banner.style.setProperty("--pad", q.get("pad") + "px");
+  if (q.get("glowx")) banner.style.setProperty("--glow-x", q.get("glowx"));
+  if (q.get("radius")) banner.style.setProperty("--radius", q.get("radius") + "px");
+  if (q.get("s")) banner.style.setProperty("--s", q.get("s"));
+  if (q.get("subw")) banner.style.setProperty("--subw", q.get("subw") + "px");
+  if (q.get("nostatus")) document.getElementById("status").remove();
+
+  // Pointy-top honeycomb, like the logo and the home screen's hive map.
+  const R = +(q.get("r") || 33);              // center to vertex
+  const DX = Math.sqrt(3) * R, DY = 1.5 * R;
+  const qx = +(q.get("qx") || 0.735) * W, qy = +(q.get("qy") || 0.5) * H;
+  const svg = document.getElementById("cells");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const NS = "http://www.w3.org/2000/svg";
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  function hexPoints(cx, cy, r) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 180 * (60 * i - 90);
+      pts.push(`${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`);
+    }
+    return pts.join(" ");
+  }
+  // axial (q, r) -> pixel, queen at (0, 0)
+  const toPx = (aq, ar) => [qx + DX * (aq + ar / 2), qy + DY * ar];
+  const dist = (aq, ar) => (Math.abs(aq) + Math.abs(ar) + Math.abs(aq + ar)) / 2;
+
+  // Cell roles around the queen (axial coords). Everything else is faint grid.
+  const roles = {
+    "0,0": "queen",
+    "1,0": "done", "0,1": "done", "-1,1": "running", "-1,0": "done", "0,-1": "running", "1,-1": "running",
+    "2,-1": "queued", "-2,1": "running", "1,1": "queued", "2,0": "done", "-1,2": "queued", "-2,0": "queued",
+  };
+
+  const leftEdge0 = +(q.get("fadefrom") || 0.42) * W;
+  const defs = document.createElementNS(NS, "defs");
+  defs.innerHTML = `<linearGradient id="fade" x1="0" x2="${W}" y1="0" y2="0" gradientUnits="userSpaceOnUse"><stop offset="${(leftEdge0 / W).toFixed(3)}" stop-color="#fff" stop-opacity="0"/><stop offset="${((leftEdge0 + 0.26 * W) / W).toFixed(3)}" stop-color="#fff" stop-opacity="1"/></linearGradient><mask id="fademask" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="url(#fade)"/></mask>`;
+  svg.appendChild(defs);
+  const grid = document.createElementNS(NS, "g");
+  grid.setAttribute("mask", "url(#fademask)");
+  svg.appendChild(grid);
+  const g = document.createElementNS(NS, "g");
+  svg.appendChild(g);
+  const crown = "M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294zM5 21h14";
+  const check = "M20 6 9 17l-5-5";
+
+  function icon(path, cx, cy, size, color, width) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", path);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", color);
+    p.setAttribute("stroke-width", width);
+    p.setAttribute("stroke-linecap", "round");
+    p.setAttribute("stroke-linejoin", "round");
+    const s = size / 24;
+    p.setAttribute("transform", `translate(${cx - 12 * s},${cy - 12 * s}) scale(${s})`);
+    g.appendChild(p);
+  }
+
+  const leftEdge = leftEdge0;
+  for (let ar = -6; ar <= 6; ar++) {
+    for (let aq = -14; aq <= 14; aq++) {
+      const [cx, cy] = toPx(aq, ar);
+      if (cx < leftEdge - DX || cx > W + DX || cy < -R || cy > H + R) continue;
+      const role = roles[`${aq},${ar}`];
+      const poly = document.createElementNS(NS, "polygon");
+      const inset = role ? 3.5 : 3;
+      poly.setAttribute("points", hexPoints(cx, cy, R - inset));
+      poly.setAttribute("stroke-linejoin", "round");
+      if (role === "queen") {
+        poly.setAttribute("fill", css("--primary"));
+        poly.setAttribute("stroke", css("--primary"));
+        poly.setAttribute("stroke-width", "2");
+      } else if (role === "done") {
+        poly.setAttribute("fill", css("--primary-soft"));
+        poly.setAttribute("stroke", css("--primary"));
+        poly.setAttribute("stroke-width", "1.6");
+      } else if (role === "running") {
+        poly.setAttribute("fill", "none");
+        poly.setAttribute("stroke", css("--primary"));
+        poly.setAttribute("stroke-width", "2");
+      } else if (role === "queued") {
+        poly.setAttribute("fill", "none");
+        poly.setAttribute("stroke", css("--muted"));
+        poly.setAttribute("stroke-width", "1.4");
+        poly.setAttribute("stroke-dasharray", "3 4");
+        poly.setAttribute("opacity", "0.75");
+      } else {
+        // faint grid: the mask fades it in from the copy, and it thins out away from the queen
+        const d = dist(aq, ar);
+        const op = Math.max(0.3, 1 - (d - 2) * 0.11);
+        poly.setAttribute("fill", "none");
+        poly.setAttribute("stroke", css("--faint"));
+        poly.setAttribute("stroke-width", "1.2");
+        poly.setAttribute("opacity", op.toFixed(2));
+        grid.appendChild(poly);
+        continue;
+      }
+      g.appendChild(poly);
+      const k = R / 33;  // icons scale with the cells
+      if (role === "queen") icon(crown, cx, cy + k, 26 * k, css("--on-primary"), 2.1);
+      if (role === "done") icon(check, cx, cy, 18 * k, css("--primary"), 2.4);
+      if (role === "running") {
+        for (let i = -1; i <= 1; i++) {
+          const c = document.createElementNS(NS, "circle");
+          c.setAttribute("cx", cx + i * 7 * k); c.setAttribute("cy", cy); c.setAttribute("r", 2.3 * k);
+          c.setAttribute("fill", css("--primary"));
+          c.setAttribute("opacity", [0.45, 0.75, 1][i + 1]);
+          g.appendChild(c);
+        }
+      }
+    }
+  }
+  const counts = { running: 0, done: 0 };
+  for (const r of Object.values(roles)) if (r in counts) counts[r]++;
+  const st = document.getElementById("status");
+  if (st) st.innerHTML = `<span>1 queen</span>·<span><b>${counts.running}</b> working</span>·<span>${counts.done} done</span><span class="cursor"></span>`;
+</script>
+</body>
+</html>

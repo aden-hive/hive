@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """memory-tools MCP server entry point.
 
-Wired into _DEFAULT_LOCAL_SERVERS in core/framework/loader/mcp_registry.py
-so that running ``uv run python memory_tools_server.py --stdio`` from this
-directory starts the server.
+Hive itself runs these tools in-process (core/framework/tools/harness_tools.py);
+this entry point serves them over MCP for standalone use: running
+``uv run python memory_tools_server.py --stdio`` from this directory starts
+the server.
 """
 
 from __future__ import annotations

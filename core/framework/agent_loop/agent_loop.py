@@ -102,7 +102,7 @@ from framework.agent_loop.reminders import (
     ReminderPoint,
     wrap_reminder,
 )
-from framework.agent_loop.types import AgentContext, AgentProtocol, AgentResult
+from framework.agent_loop.types import AgentContext, AgentProtocol, AgentReport, AgentResult
 from framework.config import get_vision_fallback_model
 from framework.host.event_bus import EventBus
 from framework.llm.capabilities import filter_tools_for_model, supports_image_tool_results
@@ -352,6 +352,19 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     if "ContextWindow" in cls:
         return True
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
+
+
+# How often a waiting tool call checks on what it waits for, and for new messages.
+_WAIT_TICK_S = 1.0
+
+
+def _job_status(result: ToolResult) -> str | None:
+    """The ``status`` in a ``terminal_job_logs`` result; None if it isn't one (an error, say)."""
+    try:
+        payload = json.loads(result.content)
+    except (TypeError, ValueError):
+        return None
+    return payload.get("status") if isinstance(payload, dict) else None
 
 
 def _queen_account_preflight(tc: Any) -> ToolResult | None:
@@ -744,17 +757,36 @@ class AgentLoop(AgentProtocol):
         config: LoopConfig | None = None,
         tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
         conversation_store: ConversationStore | None = None,
+        *,
+        on_report: Callable[[AgentReport], None] | None = None,
     ) -> None:
+        """Set up a loop; ``execute(ctx)`` runs it.
+
+        Args:
+            on_report: Called with the agent's ``AgentReport`` when it calls ``report_to_parent``.
+                Passing it gives the agent that tool, whatever its stream, and the loop ends once
+                the agent reports. Colony workers get the tool through their ``worker:`` stream.
+        """
         self._event_bus = event_bus
         self._judge = judge
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
+        self._on_report = on_report
         # Tuple: (content, is_client_input, image_content, correlation_id).
         # correlation_id ties a queued message back to the CLIENT_INPUT_RECEIVED
         # event emitted at receive time, so the drain can emit a matching
         # CLIENT_INPUT_COMMITTED carrying the true injection time.
         self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None, str | None]] = asyncio.Queue()
+        # True while the conversation holds an injected message the model hasn't
+        # responded to yet: tools running right now shouldn't wait on anything.
+        self._input_unread = False
+        # Text of real user messages queued but not yet drained, so the
+        # USER_PROMPT_SUBMIT reminders can see what the user is asking.
+        self._pending_user_texts: list[str] = []
+        # Context injected with ``wake=False``: it joins the next drain but
+        # never unparks the loop by itself.
+        self._passive_injections: list[str] = []
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Queen input blocking state
         self._input_ready = asyncio.Event()
@@ -869,6 +901,7 @@ class AgentLoop(AgentProtocol):
             ColonyWorkerSnapshotReminderSource,
         )
         from framework.agent_loop.idle_nudge import IdleNudgeSource
+        from framework.agent_loop.past_conversations_reminder import PastConversationsReminderSource
         from framework.agent_loop.stream_stall import StreamStallSource
         from framework.agent_loop.tool_skill_reminders import (
             SearchableToolsReminderSource,
@@ -878,12 +911,15 @@ class AgentLoop(AgentProtocol):
             TrackerSnapshotReminderSource,
             WorkerTrackerSnapshotReminderSource,
         )
+        from framework.agent_loop.turn_context_reminder import TurnContextReminderSource
         from framework.tasks.reminders import TaskReminderSource
 
         self._reminder_hub = ReminderHub()
         self._reminder_hub.register(TaskReminderSource())
         self._reminder_hub.register(ColonyParallelNudgeSource())
         self._reminder_hub.register(ActiveWorkersReminderSource())
+        self._reminder_hub.register(PastConversationsReminderSource())
+        self._reminder_hub.register(TurnContextReminderSource())
         # Queen-only: the searchable-tools manifest + skills catalog ride the
         # conversation as <system-reminder>s Self-skip for non-queen streams.
         self._reminder_hub.register(SearchableToolsReminderSource())
@@ -1512,7 +1548,7 @@ class AgentLoop(AgentProtocol):
             # fires before the injection queue is drained) — "cowork style":
             # the queen reads the frame first, then the user's latest message.
             await self._run_hooks("session_start", conversation, trigger=initial_message)
-            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation)
+            await self._fire_reminder(ReminderPoint.SESSION_START, ctx, conversation, user_text=initial_message or None)
 
             if initial_message:
                 # Stamp with arrival time so the conversation has a
@@ -1546,7 +1582,7 @@ class AgentLoop(AgentProtocol):
             tools.append(build_collect_result_tool())
         if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
-            # Single CLI-style credentials tool — browse/collect/attach/reveal.
+            # Single CLI-style credentials tool — help/collect/attach/detach.
             # Queen-facing: it parks the loop for the secure collect form and
             # writes session attachments, both of which need loop internals.
             tools.append(build_credentials_tool())
@@ -1568,10 +1604,11 @@ class AgentLoop(AgentProtocol):
         # (stream_id="worker", no colon — run_agent_with_input style),
         # which still uses it for credential / ambiguity handoffs back
         # to the queen.
-        is_parallel_worker = isinstance(stream_id, str) and stream_id.startswith("worker:")
+        is_parallel_worker = self._reports_to_parent(stream_id)
         if stream_id not in ("queen", "judge", "overseer") and not is_parallel_worker:
             tools.append(self._build_escalate_tool())
-        # Only parallel workers (stream_id="worker:{uuid}") get report_to_parent.
+        # Only parallel workers (stream_id="worker:{uuid}") and loops given
+        # ``on_report`` get report_to_parent.
         # report_schema is optional and not present on every spec type
         # (NodeSpec etc.), so read it defensively — absent means no schema.
         if is_parallel_worker:
@@ -1812,7 +1849,9 @@ class AgentLoop(AgentProtocol):
             # ordering is async-single-loop so there is no real race.
             will_drain = not self._injection_queue.empty()
             if will_drain:
-                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation)
+                user_text = "\n".join(self._pending_user_texts) or None
+                self._pending_user_texts.clear()
+                await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation, user_text=user_text)
             logger.debug("[AgentLoop.execute] iteration=%d: draining injection queue...", iteration)
             drained_injections = await self._drain_injection_queue(conversation, ctx)
             logger.debug(
@@ -2032,9 +2071,7 @@ class AgentLoop(AgentProtocol):
             # prune/summary budgets instead of collapsing to 32k under them.
             from framework.config import get_max_context_tokens as _live_mct
 
-            conversation._max_context_tokens = _live_mct(
-                fallback=self._config.max_context_tokens
-            )
+            conversation._max_context_tokens = _live_mct(fallback=self._config.max_context_tokens)
 
             await self._publish_context_usage(ctx, conversation, "iteration_start", tools=tools)
 
@@ -2305,7 +2342,9 @@ class AgentLoop(AgentProtocol):
                             )
                         # Emit the error via SSE so the frontend renders
                         # it in the chat, then persist it in the conversation.
-                        visible_error = f"[Error: {error_msg}. Please try again.]"
+                        from framework.agent_loop.visible_error import visible_error as _visible_error
+
+                        visible_error = _visible_error(error_msg)
                         if self._event_bus and ctx.emits_client_io:
                             await self._event_bus.emit_client_output_delta(
                                 stream_id=stream_id,
@@ -2697,8 +2736,14 @@ class AgentLoop(AgentProtocol):
             #       ESCALATION_REQUESTED and pause for queen guidance.
             #       Kept so existing run_agent_with_input flows that
             #       depend on credential/ambiguity handoffs don't break.
-            _is_worker = stream_id not in ("queen", "judge") and not False and not ctx.supports_direct_user_io and self._event_bus is not None
-            _is_parallel_worker = isinstance(stream_id, str) and stream_id.startswith("worker:")
+            # A loop given ``on_report`` is held to reporting with or without an
+            # event bus; legacy escalation (path b) still needs the bus.
+            _is_worker = (
+                stream_id not in ("queen", "judge")
+                and not ctx.supports_direct_user_io
+                and (self._event_bus is not None or self._on_report is not None)
+            )
+            _is_parallel_worker = self._reports_to_parent(stream_id)
             _worker_no_tool_turn = not real_tool_results and not outputs_set and not queen_input_requested and not user_input_requested
             if _is_worker and _worker_no_tool_turn:
                 _worker_text_only_streak += 1
@@ -2775,13 +2820,11 @@ class AgentLoop(AgentProtocol):
                     }
                     handle_report_to_parent(_synthetic_input)
                     _normalised = _synthetic_input.get("_normalised", {})
-                    _owner = getattr(self, "_owner_worker", None)
-                    if _owner is not None:
-                        _owner.record_explicit_report(
-                            status=_normalised.get("status", "failed"),
-                            summary=_normalised.get("summary", _summary),
-                            data=_normalised.get("data", {}),
-                        )
+                    self._record_report(
+                        status=_normalised.get("status", "failed"),
+                        summary=_normalised.get("summary", _summary),
+                        data=_normalised.get("data", {}),
+                    )
                     self._report_terminated = True
                     if ctx.runtime_logger:
                         iter_latency_ms = int((time.time() - iter_start) * 1000)
@@ -3452,7 +3495,18 @@ class AgentLoop(AgentProtocol):
                     await conversation.add_user_message(f"[Judge feedback]: {fb}")
                 continue
 
-        # 7. Max iterations exhausted
+        # 7. Max iterations exhausted. A report made on the last iteration still
+        # ends the run cleanly: 6a-pre would have exited with it next time round.
+        if self._report_terminated:
+            logger.info("[%s] terminated via report_to_parent on the last iteration", node_id)
+            await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations, execution_id)
+            return AgentResult(
+                success=True,
+                output=accumulator.to_dict(),
+                tokens_used=total_input_tokens + total_output_tokens,
+                latency_ms=int((time.time() - start_time) * 1000),
+                conversation=None,
+            )
         await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations, execution_id)
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
@@ -3492,15 +3546,15 @@ class AgentLoop(AgentProtocol):
         is_client_input: bool = False,
         image_content: list[dict[str, Any]] | None = None,
         correlation_id: str | None = None,
+        wake: bool = True,
     ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
-        Always unblocks _await_user_input() so the node processes the
-        message promptly — both real user input and external events
-        (e.g. worker ask_user forwarded via queenContext) need to wake
-        the node.
+        Unblocks _await_user_input() so the node processes the message
+        promptly — both real user input and external events (e.g. worker
+        ask_user forwarded via queenContext) need to wake the node.
 
         Args:
             content: The message text.
@@ -3513,7 +3567,16 @@ class AgentLoop(AgentProtocol):
                 CLIENT_INPUT_RECEIVED event already emitted for it, so the
                 drain can emit a matching CLIENT_INPUT_COMMITTED (true
                 injection time) the UI can reconcile against.
+            wake: False for context that should ride along rather than
+                demand a turn (e.g. recalled memories): it joins the next
+                drain — the next iteration if the turn is still running,
+                else the user's next message — and never wakes a parked
+                loop. Waking on it made the queen answer the same message
+                twice when it landed just after her reply.
         """
+        if not wake:
+            self._passive_injections.append(content)
+            return
         logger.debug(
             "[AgentLoop.inject_event] content_len=%d, is_client_input=%s, has_images=%s, queue_size_before=%d",
             len(content) if content else 0,
@@ -3533,6 +3596,8 @@ class AgentLoop(AgentProtocol):
             # answered (in-app or via a routed messaging reply).
             self._escalation_source.reset()
             self._notify_sentinel_local_resume()
+            if content:
+                self._pending_user_texts.append(content)
         try:
             await self._injection_queue.put((content, is_client_input, image_content, correlation_id))
             logger.debug("[AgentLoop.inject_event] Message queued successfully")
@@ -3727,6 +3792,12 @@ class AgentLoop(AgentProtocol):
         # Same after emit (sync handlers may inject during the emit).
         if not self._injection_queue.empty() or not self._trigger_queue.empty():
             return True
+
+        # The same window for shutdown: signal_shutdown() sets _input_ready, so a
+        # shutdown that landed before this park (say, while the cursor was being
+        # written) was just erased by the clear(). _shutdown is sticky; honor it.
+        if self._shutdown:
+            return False
 
         if emit_client_request and self._event_bus:
             if colony_pivot is not None:
@@ -3955,6 +4026,9 @@ class AgentLoop(AgentProtocol):
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
+            # Everything injected so far is in the conversation this stream reads.
+            self._input_unread = False
+
             # Mid-turn dynamic tool refresh. The outer loop's 6b2 refresh runs
             # only once per iteration, BEFORE this inner loop — but a
             # search_tools call here loads a tool into the phase state mid-loop.
@@ -3976,7 +4050,7 @@ class AgentLoop(AgentProtocol):
                 )
                 await self._compact(ctx, conversation, accumulator)
 
-            messages = conversation.to_llm_messages()
+            messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
 
             # Defensive guard: ensure messages don't end with an assistant
             # message.  The Anthropic API rejects "assistant message prefill"
@@ -3990,7 +4064,7 @@ class AgentLoop(AgentProtocol):
                     node_id,
                 )
                 await conversation.add_user_message("[Continue working on your current task.]")
-                messages = conversation.to_llm_messages()
+                messages = conversation.to_llm_messages(getattr(ctx.llm, "model", None))
             final_system_prompt = conversation.system_prompt
             final_messages = messages
 
@@ -4002,6 +4076,9 @@ class AgentLoop(AgentProtocol):
             # echoed back on every follow-up request (reasoning models 400
             # otherwise). See Message.thinking_blocks.
             _thinking_blocks: list[dict[str, Any]] = []
+            # The same for reasoning streamed as ``reasoning_content`` (Qwen,
+            # DeepSeek, GLM): sent back for the steps of the current turn.
+            _reasoning_content = ""
 
             # Gap 1 - Streaming tool execution. Any tool flagged as
             # concurrency_safe is kicked off the moment its ToolCallEvent
@@ -4084,7 +4161,7 @@ class AgentLoop(AgentProtocol):
                 _partial_dicts: list[dict[str, Any]] = _partial_tc_dicts,  # noqa: B006,B008
             ) -> None:
                 nonlocal accumulated_text, _stream_error, _stream_last_event_at
-                nonlocal _first_event_at, _thinking_blocks
+                nonlocal _first_event_at, _thinking_blocks, _reasoning_content
                 _clean_snapshot = ""  # visible-only text for the frontend
                 _reasoning_emitted = ""  # last reasoning emitted via CLIENT_REASONING (dedup)
                 _reasoning_native = ""  # accumulated native reasoning-delta text (thinking models)
@@ -4272,6 +4349,8 @@ class AgentLoop(AgentProtocol):
                         # being persisted, so overwrite rather than extend.
                         if event.thinking_blocks:
                             _thinking_blocks = list(event.thinking_blocks)
+                        if event.reasoning_content:
+                            _reasoning_content = event.reasoning_content
 
                         # Tell the conversation the size of THIS request's
                         # prompt. ``max_context_tokens`` is a single-prompt
@@ -4622,6 +4701,7 @@ class AgentLoop(AgentProtocol):
                     content=accumulated_text,
                     tool_calls=tc_dicts,
                     thinking_blocks=_thinking_blocks or None,
+                    reasoning_content=_reasoning_content or None,
                 )
 
             # Reminder bookkeeping: one inner turn = one model stream +
@@ -4648,42 +4728,9 @@ class AgentLoop(AgentProtocol):
 
             # Priority drain: if user sent a message while the LLM was
             # streaming, inject it into the conversation NOW -- before tool
-            # execution.  The LLM will see it on the next inner turn.
-            # Mirrors drain_injection_queue() in cursor_persistence.py:
-            # same timestamp prefix, is_client_input, and image_content
-            # so steered messages enter the conversation identically to
-            # messages drained at the outer-loop boundary.
-            if not self._injection_queue.empty():
-                while not self._injection_queue.empty():
-                    _inj_content, _inj_client, _inj_images, _inj_corr = self._injection_queue.get_nowait()
-                    _inj_stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
-                    if _inj_client:
-                        _inj_stamped = f"[{_inj_stamp}] {_inj_content}" if _inj_content else f"[{_inj_stamp}]"
-                    else:
-                        _inj_stamped = f"[{_inj_stamp}] [External event] {_inj_content}"
-                    _inj_msg = await conversation.add_user_message(
-                        _inj_stamped,
-                        is_client_input=_inj_client,
-                        image_content=_inj_images if _inj_images else None,
-                    )
-                    if _inj_client:
-                        logger.info(
-                            "[%s] Priority-injected user message mid-turn (%d chars)",
-                            node_id,
-                            len(_inj_content),
-                        )
-                        # The message truly enters the conversation HERE (mid-turn,
-                        # before tool execution), not at receive time. Announce the
-                        # real injection moment + seq so the UI can place the bubble
-                        # after the in-flight turn's deltas. See emit docstring.
-                        if self._event_bus and ctx.emits_client_io:
-                            await self._event_bus.emit_client_input_committed(
-                                stream_id=stream_id,
-                                node_id=node_id,
-                                execution_id=execution_id,
-                                seq=_inj_msg.seq,
-                                correlation_id=_inj_corr,
-                            )
+            # execution.  The LLM will see it on the next inner turn, so a
+            # tool in this batch mustn't sit waiting on anything meanwhile.
+            self._input_unread = await self._inject_queued_input(conversation, ctx, stream_id, node_id, execution_id)
 
             # Execute tool calls -- framework tools (set_output, ask_user)
             # run inline; real MCP tools run in parallel.
@@ -4935,11 +4982,12 @@ class AgentLoop(AgentProtocol):
 
                 elif tc.tool_name == "credentials":
                     # --- Single CLI-style credentials tool ---
-                    # All actions except `collect` are non-blocking and
-                    # resolve synchronously via credential_tool helpers.
                     # `collect` stashes a no-secret form spec and parks the
                     # loop (mirrors ask_user) so the user can submit secrets
-                    # that go straight to the encrypted store.
+                    # that go straight to the encrypted store. attach/detach
+                    # are session pins. browse/inspect/reveal were retired in
+                    # favour of the `hive-cred` CLI; a stale call gets the
+                    # replacement command back rather than a value.
                     from framework.agent_loop.internals import (
                         credential_tool as _credtool,
                     )
@@ -4976,12 +5024,9 @@ class AgentLoop(AgentProtocol):
                     else:
                         if _action in ("", "help"):
                             _content = _credtool.render_help()
-                        elif _action == "browse":
-                            _content = _credtool.browse(_ci.get("query"))
-                        elif _action == "inspect":
-                            _content = _credtool.inspect(_cred_id, _cred_account)
-                        elif _action == "reveal":
-                            _content = _credtool.reveal(
+                        elif _action in _credtool.RETIRED_ACTIONS:
+                            _content = _credtool.retired_action_message(
+                                _action,
                                 _cred_id,
                                 _cred_account,
                                 str(_ci.get("key", "") or ""),
@@ -5332,8 +5377,9 @@ class AgentLoop(AgentProtocol):
                     # SUBAGENT_REPORT and terminate cleanly. The worker
                     # owner (Worker instance) records the explicit report
                     # via ``record_explicit_report`` so Worker.run()'s
-                    # terminal event emission picks it up.
-                    if not (isinstance(stream_id, str) and stream_id.startswith("worker:")):
+                    # terminal event emission picks it up; a loop given
+                    # ``on_report`` hands it to that callback.
+                    if not self._reports_to_parent(stream_id):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
                             content=(
@@ -5345,22 +5391,27 @@ class AgentLoop(AgentProtocol):
                         )
                         results_by_id[tc.tool_use_id] = result
                         continue
+                    if self._report_terminated:
+                        # One terminal report per run: a second call in the
+                        # same batch is refused, not delivered twice.
+                        results_by_id[tc.tool_use_id] = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content="ERROR: you have already reported; this run is over.",
+                            is_error=True,
+                        )
+                        continue
 
                     report_tc_input = dict(tc.tool_input)
                     report_tc_input["tool_use_id"] = tc.tool_use_id
                     result = handle_report_to_parent(report_tc_input)
                     results_by_id[tc.tool_use_id] = result
 
-                    # Record on the owning Worker so its terminal event
-                    # emission picks up the explicit report.
-                    owner_worker = getattr(self, "_owner_worker", None)
-                    if owner_worker is not None:
-                        normalised = report_tc_input.get("_normalised", {})
-                        owner_worker.record_explicit_report(
-                            status=normalised.get("status", "success"),
-                            summary=normalised.get("summary", ""),
-                            data=normalised.get("data", {}),
-                        )
+                    normalised = report_tc_input.get("_normalised", {})
+                    self._record_report(
+                        status=normalised.get("status", "success"),
+                        summary=normalised.get("summary", ""),
+                        data=normalised.get("data", {}),
+                    )
 
                     # Terminate the loop cleanly after this turn. Set the
                     # same completion flag path that set_output used so
@@ -6060,8 +6111,64 @@ class AgentLoop(AgentProtocol):
                     False,
                 )
 
+            # A message that arrived while the tools ran goes in now, so the next
+            # response answers it instead of the one after that.
+            await self._inject_queued_input(conversation, ctx, stream_id, node_id, execution_id)
+
             # Tool calls processed -- loop back to stream with updated conversation
             inner_turn += 1
+
+    async def _inject_queued_input(
+        self,
+        conversation: NodeConversation,
+        ctx: AgentContext,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None,
+    ) -> bool:
+        """Move queued messages into the conversation mid-turn; True if there were any.
+
+        Mirrors drain_injection_queue() in cursor_persistence.py: same timestamp
+        prefix, is_client_input, and image_content so steered messages enter the
+        conversation identically to messages drained at the outer-loop boundary,
+        with the context a turn's first message gets (past conversations, ...).
+        """
+        if self._injection_queue.empty():
+            return False
+        user_text = "\n".join(self._pending_user_texts) or None
+        self._pending_user_texts.clear()
+        await self._fire_reminder(ReminderPoint.USER_PROMPT_SUBMIT, ctx, conversation, user_text=user_text)
+        while not self._injection_queue.empty():
+            content, is_client, images, correlation_id = self._injection_queue.get_nowait()
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            if is_client:
+                stamped = f"[{stamp}] {content}" if content else f"[{stamp}]"
+            else:
+                stamped = f"[{stamp}] [External event] {content}"
+            msg = await conversation.add_user_message(
+                stamped,
+                is_client_input=is_client,
+                image_content=images if images else None,
+            )
+            if is_client:
+                logger.info(
+                    "[%s] Priority-injected user message mid-turn (%d chars)",
+                    node_id,
+                    len(content),
+                )
+                # The message truly enters the conversation HERE (mid-turn),
+                # not at receive time. Announce the real injection moment + seq
+                # so the UI can place the bubble after the in-flight turn's
+                # deltas. See emit docstring.
+                if self._event_bus and ctx.emits_client_io:
+                    await self._event_bus.emit_client_input_committed(
+                        stream_id=stream_id,
+                        node_id=node_id,
+                        execution_id=execution_id,
+                        seq=msg.seq,
+                        correlation_id=correlation_id,
+                    )
+        return True
 
     # -------------------------------------------------------------------
     # Synthetic tools: set_output, ask_user, escalate
@@ -6076,6 +6183,17 @@ class AgentLoop(AgentProtocol):
     def _build_escalate_tool(self) -> Tool:
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         return build_escalate_tool()
+
+    def _reports_to_parent(self, stream_id: Any) -> bool:
+        """Whether this agent ends by calling report_to_parent: a colony worker, or a loop given ``on_report``."""
+        return self._on_report is not None or (isinstance(stream_id, str) and stream_id.startswith("worker:"))
+
+    def _record_report(self, *, status: str, summary: str, data: dict[str, Any]) -> None:
+        """Hand a report to whoever receives it: the owning Worker, and ``on_report``."""
+        if self._owner_worker is not None:
+            self._owner_worker.record_explicit_report(status=status, summary=summary, data=data)
+        if self._on_report is not None:
+            self._on_report(AgentReport(status=status, summary=summary, data=data))
 
     # -------------------------------------------------------------------
     # Judge evaluation
@@ -6491,6 +6609,9 @@ class AgentLoop(AgentProtocol):
         if tc.tool_name in (getattr(self._config, "background_tools", None) or set()):
             return await self._start_background_tool(tc)
 
+        if tc.tool_name == "terminal_job_logs" and (tc.tool_input or {}).get("wait_until_exit"):
+            return await self._wait_for_job(tc)
+
         return await self._execute_tool_inner(tc, self._resolve_tool_timeout(tc.tool_name))
 
     async def _execute_tool_inner(self, tc: ToolCallEvent, timeout: float) -> ToolResult:
@@ -6545,6 +6666,22 @@ class AgentLoop(AgentProtocol):
         timeout, resetting the MCP connection.)
         """
         timeout = float(getattr(self._config, "background_tool_timeout_seconds", 235.0))
+        if tc.tool_name == "terminal_exec":
+            inputs = tc.tool_input or {}
+            try:
+                waits = [float(inputs.get("timeout_sec", 60)), float(inputs.get("auto_background_after_sec", 30))]
+                inline_wait = min(value for value in waits if value > 0)
+            except (TypeError, ValueError):
+                inline_wait = float("inf")
+            if inline_wait + 5 >= timeout:
+                return ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=(
+                        "Terminal foreground wait exceeds the tool-call budget. Use a shorter "
+                        "auto_background_after_sec or terminal_job_start, then poll terminal_job_logs."
+                    ),
+                    is_error=True,
+                )
 
         def _retrieve(t: asyncio.Task) -> None:
             # Retrieve any exception so a never-collected task doesn't log
@@ -6575,7 +6712,7 @@ class AgentLoop(AgentProtocol):
                 # shield: a grace-window timeout must not cancel the in-flight
                 # work — it still has the full `timeout` budget to finish in.
                 result = await asyncio.wait_for(asyncio.shield(task), timeout=grace)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # genuinely slow — fall through and hand back the handle
             except Exception:
                 # Failed fast. Let collect_result surface it rather than
@@ -6594,8 +6731,9 @@ class AgentLoop(AgentProtocol):
             "tool": tc.tool_name,
             "note": (
                 f"'{tc.tool_name}' is running in the background (can take a few "
-                f'minutes). Call collect_result(handle="{handle}") to fetch it; '
-                'it returns {"status":"pending"} until done, then the real result.'
+                f'minutes). Call collect_result(handle="{handle}") to fetch it: '
+                "it waits for the work and returns the real result, or "
+                '{"status":"pending"} if a new message for you arrives first.'
             ),
         }
         return ToolResult(tool_use_id=tc.tool_use_id, content=json.dumps(payload), is_error=False)
@@ -6613,27 +6751,27 @@ class AgentLoop(AgentProtocol):
                 ),
                 is_error=True,
             )
-        try:
-            wait_seconds = int(tool_input.get("wait_seconds", 30))
-        except (TypeError, ValueError):
-            wait_seconds = 30
-        wait_seconds = max(1, min(wait_seconds, 45))
         task: asyncio.Task = entry["task"]
+        deadline = time.monotonic() + self._wait_budget(tool_input.get("wait_seconds"))
+        while not task.done():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self._input_waiting():
+                return ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=json.dumps(
+                        {
+                            "status": "pending",
+                            "handle": handle,
+                            "elapsed_seconds": int(time.time() - entry["started"]),
+                        }
+                    ),
+                    is_error=False,
+                )
+            self._mark_session_progress()
+            # asyncio.wait, unlike wait_for: running out of time leaves the work running.
+            await asyncio.wait({task}, timeout=min(_WAIT_TICK_S, remaining))
         try:
-            # shield: a poll-wait timeout must not cancel the in-flight work.
-            result = await asyncio.wait_for(asyncio.shield(task), timeout=wait_seconds)
-        except TimeoutError:
-            return ToolResult(
-                tool_use_id=tc.tool_use_id,
-                content=json.dumps(
-                    {
-                        "status": "pending",
-                        "handle": handle,
-                        "elapsed_seconds": int(time.time() - entry["started"]),
-                    }
-                ),
-                is_error=False,
-            )
+            result = task.result()
         except Exception as exc:  # noqa: BLE001
             self._background_calls.pop(handle, None)
             return ToolResult(
@@ -6651,6 +6789,46 @@ class AgentLoop(AgentProtocol):
             image_content=getattr(result, "image_content", None),
             is_skill_content=getattr(result, "is_skill_content", False),
         )
+
+    async def _wait_for_job(self, tc: ToolCallEvent) -> ToolResult:
+        """Wait for a terminal job here, in quick status checks, then read its output.
+
+        A wait inside the tool call would hold the connection every other terminal
+        call shares (MCP calls run one at a time on Windows), so it has to stay
+        short; and a short wait the model repeats costs a whole model turn per
+        repeat. Waiting here costs neither, and a new message can end it.
+        """
+        inputs = tc.tool_input or {}
+        deadline = time.monotonic() + self._wait_budget(inputs.get("wait_timeout_sec"))
+        timeout = self._resolve_tool_timeout(tc.tool_name)
+        status_check = ToolCallEvent(
+            tool_use_id=tc.tool_use_id,
+            tool_name=tc.tool_name,
+            tool_input={"job_id": inputs.get("job_id"), "max_bytes": 0},
+        )
+        while time.monotonic() < deadline and not self._input_waiting():
+            if _job_status(await self._execute_tool_inner(status_check, timeout)) != "running":
+                break
+            self._mark_session_progress()
+            await asyncio.sleep(_WAIT_TICK_S)
+        read = ToolCallEvent(
+            tool_use_id=tc.tool_use_id,
+            tool_name=tc.tool_name,
+            tool_input={**inputs, "wait_until_exit": False},
+        )
+        return await self._execute_tool_inner(read, timeout)
+
+    def _wait_budget(self, requested: Any) -> float:
+        """Seconds a waiting tool call may wait: what it asked for, up to the limit."""
+        limit = float(self._config.tool_wait_limit_seconds)
+        try:
+            return max(0.0, min(float(requested), limit))
+        except (TypeError, ValueError):
+            return limit
+
+    def _input_waiting(self) -> bool:
+        """Is there a message for this agent that the model hasn't seen yet?"""
+        return self._input_unread or not self._injection_queue.empty()
 
     def _next_spill_filename(self, tool_name: str) -> str:
         """Return a short, monotonic filename for a tool result spill."""
@@ -6892,6 +7070,11 @@ class AgentLoop(AgentProtocol):
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: AgentContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
+        # Passive context joins whichever drain comes next; it never woke the
+        # loop itself. Queued after anything already waiting.
+        for content in self._passive_injections:
+            self._injection_queue.put_nowait((content, False, None, None))
+        self._passive_injections.clear()
         on_committed = None
         if self._event_bus is not None and ctx.emits_client_io:
             stream_id = ctx.stream_id or ctx.agent_id
@@ -6964,6 +7147,8 @@ class AgentLoop(AgentProtocol):
         point: ReminderPoint,
         ctx: AgentContext,
         conversation: NodeConversation,
+        *,
+        user_text: str | None = None,
     ) -> bool:
         """Fire a reminder lifecycle point that injects as a user message.
 
@@ -6978,7 +7163,7 @@ class AgentLoop(AgentProtocol):
         reminder the agent would not read until the user next speaks.
         """
         try:
-            block, energized = await self._reminder_hub.fire_energized(point, ctx)
+            block, energized = await self._reminder_hub.fire_energized(point, ctx, user_text=user_text)
             if block:
                 await conversation.add_user_message(block)
                 self._bump("reminders_injected")

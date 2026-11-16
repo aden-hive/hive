@@ -235,11 +235,11 @@ def _register_verified(
     register_account_info(mcp, credentials=credentials)
 
     # --- File system + shell ---
-    # The read/write/edit/search file tools were removed from the agent
-    # surface in favor of the terminal tools (terminal_exec / terminal_rg /
-    # terminal_glob), which default their cwd to the session workdir.
-    # file_ops.py stays for internal helpers (_FilePolicy, V4A patch) and the
-    # standalone files_server.py, but is no longer registered here.
+    # Coding roles can opt into structured edits. read_file ships alongside
+    # edit_file because it records the state used by the stale-edit guard.
+    from aden_tools.file_ops import register_file_tools
+
+    register_file_tools(mcp, tool_names={"read_file", "edit_file"})
     register_csv(mcp)
     register_excel(mcp)
 

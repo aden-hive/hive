@@ -13,31 +13,6 @@ from framework.server.app import get_request_executor, resolve_session, validate
 
 logger = logging.getLogger(__name__)
 
-_llm_key_providers_cache: dict | None = None
-
-
-def _get_llm_key_providers() -> dict:
-    """Lazily load the PROVIDERS dict from scripts/check_llm_key.py (cached)."""
-    global _llm_key_providers_cache
-    if _llm_key_providers_cache is None:
-        import importlib.util
-        from pathlib import Path as _Path
-
-        script = _Path(__file__).resolve().parents[3] / "scripts" / "check_llm_key.py"
-        if not script.exists():
-            logger.warning("check_llm_key.py not found at %s — key validation disabled", script)
-            _llm_key_providers_cache = {}
-            return _llm_key_providers_cache
-        spec = importlib.util.spec_from_file_location("check_llm_key", script)
-        if spec is None or spec.loader is None:
-            logger.warning("Failed to load spec for %s — key validation disabled", script)
-            _llm_key_providers_cache = {}
-            return _llm_key_providers_cache
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _llm_key_providers_cache = mod.PROVIDERS
-    return _llm_key_providers_cache
-
 
 def _get_store(request: web.Request) -> CredentialStore:
     return request.app["credential_store"]
@@ -688,8 +663,8 @@ async def handle_validate_key(request: web.Request) -> web.Response:
     Body: {"provider_id": "anthropic", "api_key": "sk-..."}
     Returns: {"valid": bool|null, "message": str}
 
-    Runs the same checks as ``quickstart.sh`` (scripts/check_llm_key.py)
-    but in-process — no subprocess overhead.
+    Runs the same checks as quickstart (``framework.llm.key_check``), in
+    process.
     """
     try:
         body = await request.json()
@@ -703,7 +678,9 @@ async def handle_validate_key(request: web.Request) -> web.Response:
         return web.json_response({"error": "provider_id and api_key are required"}, status=400)
 
     try:
-        checker = _get_llm_key_providers().get(provider_id)
+        from framework.llm.key_check import PROVIDERS
+
+        checker = PROVIDERS.get(provider_id)
         if not checker:
             return web.json_response({"valid": True, "message": f"No health check for {provider_id}"})
 

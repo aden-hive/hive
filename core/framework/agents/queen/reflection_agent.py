@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -589,6 +588,12 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
+# How many conversation parts each session had when it was last reflected on: a session that
+# hasn't grown since (a shutdown right after a reflection, or a restart nobody spoke after)
+# isn't reflected on again.
+_reflected_parts: dict[str, int] = {}
+
+
 async def _read_conversation_parts(session_dir: Path) -> list[dict[str, Any]]:
     """Read conversation parts from the queen session directory."""
     from framework.storage.conversation_store import FileConversationStore
@@ -678,6 +683,9 @@ async def _run_short_reflection_with_prompt(
     if not messages:
         logger.info("reflect: no conversation parts found in %s, skipping", session_dir)
         return
+    if _reflected_parts.get(str(session_dir)) == len(messages):
+        logger.info("reflect: nothing new in %s since the last reflection, skipping", session_dir)
+        return
 
     transcript_lines: list[str] = []
     for msg in messages[-50:]:
@@ -704,6 +712,7 @@ async def _run_short_reflection_with_prompt(
         mem_dir,
         queen_id=queen_id,
     )
+    _reflected_parts[str(session_dir)] = len(messages)
     if changed:
         logger.info("reflect: %s short reflection done, changed files: %s", log_label, changed)
     else:
@@ -823,10 +832,6 @@ async def run_shutdown_reflection(
 # Event-bus integration
 # ---------------------------------------------------------------------------
 
-_LONG_REFLECT_INTERVAL = 5
-_SHORT_REFLECT_TURN_INTERVAL = 3
-_SHORT_REFLECT_COOLDOWN_SEC = 300.0
-
 
 async def subscribe_reflection_triggers(
     event_bus: Any,
@@ -846,9 +851,8 @@ async def subscribe_reflection_triggers(
     global_mem_dir = global_memory_dir or _default_global_memory_dir()
     queen_mem_dir = queen_memory_dir
     _lock = asyncio.Lock()
-    _short_count = 0
-    _short_has_run = False
-    _last_short_time: float = 0.0
+    _turns = 0
+    _reflections = 0
     _background_tasks: set[asyncio.Task] = set()
 
     async def _run_with_error_capture(coro: Any, *, context: str, memory_dir: Path) -> None:
@@ -902,49 +906,26 @@ async def subscribe_reflection_triggers(
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
-    async def _on_turn_complete(event: Any) -> None:
-        nonlocal _short_count, _short_has_run, _last_short_time
+    async def _on_turn_done(event: Any) -> None:
+        """One of her turns answered the user: reflect every ``every_turns`` of them."""
+        nonlocal _turns, _reflections
+        from framework.config import get_memory_reflection_config
 
         if getattr(event, "stream_id", None) != "queen":
             return
-
-        _short_count += 1
-
-        event_data = getattr(event, "data", {}) or {}
-        stop_reason = event_data.get("stop_reason", "")
-        is_tool_turn = stop_reason in ("tool_use", "tool_calls")
-        is_interval = _short_count % _LONG_REFLECT_INTERVAL == 0
-
-        if is_tool_turn and not is_interval:
-            logger.debug("reflect: skipping tool turn (count=%d)", _short_count)
+        if (getattr(event, "data", {}) or {}).get("park_reason") not in ("turn_done", "ask_user"):
             return
-
-        # Apply turn-interval and cooldown gates after the first reflection.
-        if _short_has_run:
-            now = time.monotonic()
-            turn_ok = _short_count % _SHORT_REFLECT_TURN_INTERVAL == 0
-            cooldown_ok = (now - _last_short_time) >= _SHORT_REFLECT_COOLDOWN_SEC
-            if not turn_ok and not cooldown_ok:
-                logger.debug(
-                    "reflect: skipping, below turn/cooldown threshold (count=%d)",
-                    _short_count,
-                )
-                return
-
+        _turns += 1
+        cfg = get_memory_reflection_config()
+        if _turns % cfg.every_turns != 0:
+            return
         if _lock.locked():
-            logger.debug("reflect: skipping, already running (count=%d)", _short_count)
+            logger.debug("reflect: skipping, already running (turn=%d)", _turns)
             return
-
-        _short_has_run = True
-        _last_short_time = time.monotonic()
-
-        logger.debug(
-            "reflect: triggered (count=%d, interval=%s, stop_reason=%s)",
-            _short_count,
-            is_interval,
-            stop_reason,
-        )
-        _fire_and_forget(_do_turn_reflect(is_interval, _short_count))
+        _reflections += 1
+        is_long = _reflections % cfg.long_every == 0
+        logger.debug("reflect: triggered (turn=%d, long=%s)", _turns, is_long)
+        _fire_and_forget(_do_turn_reflect(is_long, _turns))
 
     async def _on_compaction(event: Any) -> None:
         if getattr(event, "stream_id", None) != "queen":
@@ -955,11 +936,15 @@ async def subscribe_reflection_triggers(
         logger.debug("reflect: compaction triggered long reflection")
         _fire_and_forget(_do_compaction_reflect())
 
+    # What the session already holds was reflected on by an earlier run, or will be by the next
+    # reflection, which reads the recent conversation: being restored isn't a reason to reflect.
+    _reflected_parts.setdefault(str(session_dir), len(await _read_conversation_parts(session_dir)))
+
     sub_ids: list[str] = []
 
     sub1 = event_bus.subscribe(
-        event_types=[EventType.LLM_TURN_COMPLETE],
-        handler=_on_turn_complete,
+        event_types=[EventType.CLIENT_INPUT_REQUESTED],
+        handler=_on_turn_done,
     )
     sub_ids.append(sub1)
 

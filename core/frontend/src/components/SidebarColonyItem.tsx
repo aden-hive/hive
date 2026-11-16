@@ -185,7 +185,7 @@ export default function SidebarColonyItem({ colony, liveness }: SidebarColonyIte
         <NavLink
           to={`/colony/${colony.id}`}
           className={({ isActive }) =>
-            `flex items-center gap-2 px-3 py-1.5 rounded-md text-[12.5px] transition-colors flex-1 min-w-0 ${
+            `fx-rail flex items-center gap-2 px-3 py-1.5 rounded-md text-[12.5px] transition-colors flex-1 min-w-0 ${
               isActive
                 ? "bg-sidebar-active-bg text-foreground font-medium"
                 : "text-foreground/70 hover:bg-sidebar-item-hover hover:text-foreground"

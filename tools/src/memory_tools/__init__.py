@@ -18,10 +18,12 @@ if TYPE_CHECKING:
 
 def register_memory_tools(mcp: FastMCP) -> list[str]:
     """Register every memory-tools tool with the FastMCP server."""
+    from memory_tools.timeline import register_search_timeline
     from memory_tools.tool import register_search_messages
 
     register_search_messages(mcp)
-    return [name for name in mcp._tool_manager._tools.keys() if name in {"search_messages"}]
+    register_search_timeline(mcp)
+    return [name for name in mcp._tool_manager._tools.keys() if name in {"search_messages", "search_timeline"}]
 
 
 __all__ = ["register_memory_tools"]

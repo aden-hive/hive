@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -75,8 +76,8 @@ _QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
         # Phase-transition wrappers (method variants are on QueenPhaseState
         # but the queen also sees them as tools).
         "switch_to_independent",
-        # Frontend helpers that live outside phase lists.
-        "list_credentials",
+        # Frontend helpers that live outside phase lists. (list_credentials
+        # used to be here; it was retired in favour of the `hive-cred` CLI.)
         "get_worker_health_summary",
     }
 )
@@ -172,6 +173,42 @@ async def handle_chat(request: web.Request) -> web.Response:
     display_message = body.get("display_message")
     image_content = body.get("images") or None  # list[dict] | None
 
+    message, image_content, saved_image_paths = await prepare_queen_input(session, message, image_content)
+
+    logger.debug(
+        "[handle_chat] session_id=%s, message_len=%d, has_images=%s",
+        session.id,
+        len(message),
+        bool(image_content),
+    )
+    logger.debug("[handle_chat] session.queen_executor=%s", session.queen_executor)
+
+    if not message and not image_content:
+        return web.json_response({"error": "message is required"}, status=400)
+
+    try:
+        status = await deliver_to_queen(
+            request.app["manager"],
+            session,
+            message,
+            image_content=image_content,
+            display_message=display_message,
+            saved_image_paths=saved_image_paths,
+        )
+    except QueenUnavailableError:
+        return web.json_response({"error": "Queen not available"}, status=503)
+    return web.json_response({"status": status, "delivered": True})
+
+
+async def prepare_queen_input(session: Any, message: str, image_content: list[dict] | None) -> tuple[str, list[dict] | None, list[str]]:
+    """Save a user message's attachments into the session and shape them for the queen.
+
+    ``image_content`` holds OpenAI ``image_url`` blocks (data URIs, or
+    ``hive-attachment://`` refs to files already uploaded). Returns the
+    message (with extracted file text and the saved-attachments listing
+    appended), the blocks the queen should see, and the saved files' paths
+    relative to the session directory.
+    """
     # Persist uploaded attachments to disk and separate PDFs from images.
     # PDFs are emitted as OpenAI-native `file` blocks so LiteLLM auto-remaps
     # them per provider (Anthropic document, Gemini inline_data, OpenAI
@@ -354,9 +391,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # pure CPU that used to freeze the whole server for up to
                 # minutes. Page cap bounds the extraction (a 9.9 MB
                 # 1000-page PDF is still megabytes of text otherwise).
-                _pdf_bytes = raw_bytes
-
-                def _inspect_pdf() -> tuple[int, list[str]]:
+                def _inspect_pdf(_pdf_bytes: bytes | None, pdf_filepath: Path, is_large: bool) -> tuple[int, list[str]]:
                     page_count = 0
                     parts: list[str] = []
                     try:
@@ -384,7 +419,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                         logger.debug("[handle_chat] PDF inspection failed", exc_info=True)
                     return page_count, parts
 
-                pdf_page_count, _pdf_parts = await asyncio.to_thread(_inspect_pdf)
+                pdf_page_count, _pdf_parts = await asyncio.to_thread(_inspect_pdf, raw_bytes, pdf_filepath, is_large)
                 attachment_text_parts.extend(_pdf_parts)
 
                 if not is_large:
@@ -468,9 +503,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # first 200 rows, count the rest row-by-row (O(1) memory).
                 # Runs in a worker thread: the full-file row count over a
                 # 100 MB CSV is seconds of loop-stalling work otherwise.
-                _csv_bytes = raw_bytes
-
-                def _parse_csv() -> tuple[int, str | None]:
+                def _parse_csv(_csv_bytes: bytes | None, csv_filepath: Path, csv_filename: str) -> tuple[int, str | None]:
                     row_count = 0
                     text_part: str | None = None
                     try:
@@ -503,7 +536,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                         logger.debug("[handle_chat] CSV parse failed", exc_info=True)
                     return row_count, text_part
 
-                csv_row_count, _csv_part = await asyncio.to_thread(_parse_csv)
+                csv_row_count, _csv_part = await asyncio.to_thread(_parse_csv, raw_bytes, csv_filepath, csv_filename)
                 if _csv_part is not None:
                     attachment_text_parts.append(_csv_part)
 
@@ -536,9 +569,8 @@ async def handle_chat(request: web.Request) -> web.Response:
                 # Runs in a worker thread (chunked newline count over a
                 # 100 MB file is loop-stalling work).
                 is_large = attachment_size > LARGE_TEXT_THRESHOLD_BYTES
-                _text_bytes = raw_bytes
 
-                def _read_text_attachment() -> tuple[str, int]:
+                def _read_text_attachment(_text_bytes: bytes | None, text_filepath: Path, is_large: bool) -> tuple[str, int]:
                     if _text_bytes is not None:
                         t = _text_bytes.decode("utf-8", errors="replace")
                         return t, (t.count("\n") + 1 if t else 0)
@@ -555,7 +587,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     return t, (t.count("\n") + 1 if t else 0)
 
                 try:
-                    text, line_count = await asyncio.to_thread(_read_text_attachment)
+                    text, line_count = await asyncio.to_thread(_read_text_attachment, raw_bytes, text_filepath, is_large)
                 except OSError as exc:
                     logger.warning(
                         "[handle_chat] text attachment read failed (%s): %s",
@@ -627,13 +659,11 @@ async def handle_chat(request: web.Request) -> web.Response:
                 try:
                     from PIL import Image
 
-                    _img_bytes = raw_bytes
-
-                    def _probe_dims() -> str:
+                    def _probe_dims(_img_bytes: bytes) -> str:
                         with Image.open(io.BytesIO(_img_bytes)) as im:
                             return f"{im.size[0]}×{im.size[1]}, "
 
-                    dims_str = await asyncio.to_thread(_probe_dims)
+                    dims_str = await asyncio.to_thread(_probe_dims, raw_bytes)
                 except Exception:
                     pass
                 saved_attachment_info.append(
@@ -689,17 +719,42 @@ async def handle_chat(request: web.Request) -> web.Response:
         # `file` blocks rather than rendered page images).
         image_content = images_only if images_only else None
 
-    logger.debug(
-        "[handle_chat] session_id=%s, message_len=%d, has_images=%s",
-        session.id,
-        len(message),
-        bool(image_content),
-    )
-    logger.debug("[handle_chat] session.queen_executor=%s", session.queen_executor)
+    return message, image_content, saved_image_paths
 
-    if not message and not image_content:
-        return web.json_response({"error": "message is required"}, status=400)
 
+# How long deliver_to_queen waits for a starting queen, in 0.1 s ticks.
+_QUEEN_START_WAIT_TICKS = 300
+
+
+class QueenUnavailableError(RuntimeError):
+    """The session's queen is dead and could not be revived."""
+
+
+async def deliver_to_queen(
+    manager: Any,
+    session: Any,
+    message: str,
+    *,
+    image_content: list[dict] | None = None,
+    display_message: str | None = None,
+    saved_image_paths: list[str] | None = None,
+    correlation_id: str | None = None,
+) -> str:
+    """Hand a user message to the session's queen, reviving her if she is dead.
+
+    ``correlation_id`` marks the CLIENT_INPUT_RECEIVED event this publishes (a new one when not
+    given), so a listener can tell which message it was.
+
+    Returns ``"queen"``, or ``"queen_revived"`` when she had to be revived.
+    Raises :class:`QueenUnavailableError` when she can't be.
+    """
+    # A queen whose task is running but who has no executor yet is still starting (a session
+    # just created or resumed), not dead: wait for her rather than start a second queen.
+    queen_task = session.queen_task
+    for _ in range(_QUEEN_START_WAIT_TICKS):
+        if session.queen_executor is not None or queen_task is None or queen_task.done():
+            break
+        await asyncio.sleep(0.1)
     queen_executor = session.queen_executor
     if queen_executor is not None:
         logger.debug("[handle_chat] Queen executor exists, looking for 'queen' node...")
@@ -746,7 +801,7 @@ async def handle_chat(request: web.Request) -> web.Response:
 
             from framework.host.event_bus import AgentEvent, EventType
 
-            input_correlation_id = uuid.uuid4().hex
+            input_correlation_id = correlation_id or uuid.uuid4().hex
 
             await session.event_bus.publish(
                 AgentEvent(
@@ -778,12 +833,7 @@ async def handle_chat(request: web.Request) -> web.Response:
             except Exception as e:
                 logger.exception("[handle_chat] inject_event() failed: %s", e)
                 raise
-            return web.json_response(
-                {
-                    "status": "queen",
-                    "delivered": True,
-                }
-            )
+            return "queen"
         else:
             if node is None:
                 logger.error(
@@ -801,7 +851,6 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     # Queen is dead — try to revive her
     logger.warning("[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id)
-    manager: Any = request.app["manager"]
     try:
         logger.debug("[handle_chat] Calling manager.revive_queen()...")
         await manager.revive_queen(session)
@@ -811,16 +860,11 @@ async def handle_chat(request: web.Request) -> web.Response:
         _revived_executor = session.queen_executor
         _revived_node = _revived_executor.node_registry.get("queen") if _revived_executor else None
         if _revived_node is not None and hasattr(_revived_node, "inject_event"):
-            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content)
-        return web.json_response(
-            {
-                "status": "queen_revived",
-                "delivered": True,
-            }
-        )
+            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content, correlation_id=correlation_id)
+        return "queen_revived"
     except Exception as e:
         logger.exception("[handle_chat] Failed to revive queen: %s", e)
-        return web.json_response({"error": "Queen not available"}, status=503)
+        raise QueenUnavailableError(session.id) from e
 
 
 async def handle_queen_context(request: web.Request) -> web.Response:
@@ -1188,10 +1232,7 @@ async def _compact_queen_conversation_in_place(
     if not messages:
         return None
 
-    max_ctx_tokens = 180_000
-    loop_cfg = getattr(queen_loop, "_config", None)
-    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
-        max_ctx_tokens = int(loop_cfg.max_context_tokens)
+    max_ctx_tokens = _queen_window_tokens(queen_loop)
 
     summary = await llm_compact(
         queen_ctx,
@@ -1375,6 +1416,17 @@ async def fork_queen_session_for_split(
     # ``tasks`` discriminates the two modes: the new_session tool path
     # always carries a plan; the HTTP compact-and-fork path never does.
     handoff_mode = bool(tasks)
+
+    # A chat app's thread (a QQ group, say) is one long conversation, and the channel would follow
+    # the queen into a session carrying only her handoff: everything said there so far would be lost.
+    # Her plan belongs in the session the thread is in.
+    if handoff_mode and getattr(session, "channel", None):
+        raise ForkSessionError(
+            f"This conversation comes from the {session.channel} chat channel and stays in this session: "
+            "a new one would leave behind everything said here. Create the plan in this session "
+            "(task_create without new_session).",
+            status=409,
+        )
 
     # The queen context (and its LLM) is only needed to compact — i.e.
     # the HTTP path. The handoff path writes a queen-authored brief and
@@ -1622,6 +1674,30 @@ async def handle_compact_and_fork(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+# An inherited DM transcript below this share of the colony queen's window is
+# carried over verbatim instead of being compacted.
+_INHERITED_COMPACTION_MIN_WINDOW_SHARE = 0.25
+
+
+def _queen_window_tokens(queen_loop: Any) -> int:
+    """The queen's context window, as compaction sizes it (180k fallback)."""
+    loop_cfg = getattr(queen_loop, "_config", None)
+    if loop_cfg is not None and getattr(loop_cfg, "max_context_tokens", None):
+        return int(loop_cfg.max_context_tokens)
+    return 180_000
+
+
+async def _inherited_transcript_size(queen_dir: Any) -> tuple[int, int]:
+    """(content chars, message count) of the conversation in ``queen_dir``."""
+    from framework.storage.conversation_store import FileConversationStore
+
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return 0, 0
+    parts = await FileConversationStore(convs_dir).read_parts()
+    return sum(len(str(p.get("content") or "")) for p in parts), len(parts)
+
+
 async def _compact_inherited_conversation(
     *,
     dest_queen_dir: Any,
@@ -1648,31 +1724,52 @@ async def _compact_inherited_conversation(
     import json as _json
     from datetime import UTC as _UTC, datetime as _datetime
 
-    try:
-        result = await _compact_queen_conversation_in_place(
-            queen_dir=dest_queen_dir,
-            queen_ctx=queen_ctx,
-            queen_loop=queen_loop,
-            inherited_from=source_session_id,
-        )
-    except Exception:
-        logger.warning(
-            "compact_inherited: compaction failed; leaving raw transcript",
-            exc_info=True,
-        )
-        return
-
-    if result is None:
-        # No queen ctx, no parts on disk, or empty conversation. Nothing
-        # to compact and nothing to mark — the colony will just open with
-        # an empty chat (or whatever raw state was copied).
+    inherited_chars, inherited_count = await _inherited_transcript_size(dest_queen_dir)
+    inherited_tokens = inherited_chars // 4
+    window_tokens = _queen_window_tokens(queen_loop)
+    small_enough_to_keep = inherited_count > 0 and inherited_tokens < window_tokens * _INHERITED_COMPACTION_MIN_WINDOW_SHARE
+    if small_enough_to_keep:
+        # Compacting it would only lose detail, and the colony opening
+        # waits on compaction (up to 180s).
         logger.info(
-            "compact_inherited: nothing to compact for colony forked from %s",
+            "compact_inherited: keeping %d message(s) (~%d tokens) verbatim for colony forked from %s",
+            inherited_count,
+            inherited_tokens,
             source_session_id,
         )
-        return
+        messages_compacted, summary_text = inherited_count, ""
+    else:
+        try:
+            result = await _compact_queen_conversation_in_place(
+                queen_dir=dest_queen_dir,
+                queen_ctx=queen_ctx,
+                queen_loop=queen_loop,
+                inherited_from=source_session_id,
+            )
+        except Exception:
+            logger.warning(
+                "compact_inherited: compaction failed; leaving raw transcript",
+                exc_info=True,
+            )
+            return
 
-    messages_compacted, summary_chars, summary_text = result
+        if result is None:
+            # No queen ctx, no parts on disk, or empty conversation. Nothing
+            # to compact and nothing to mark — the colony will just open with
+            # an empty chat (or whatever raw state was copied).
+            logger.info(
+                "compact_inherited: nothing to compact for colony forked from %s",
+                source_session_id,
+            )
+            return
+
+        messages_compacted, summary_chars, summary_text = result
+        logger.info(
+            "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
+            messages_compacted,
+            summary_chars,
+            source_session_id,
+        )
 
     # Append the boundary marker to the colony's events.jsonl so the
     # frontend can group + collapse everything that came before.  The
@@ -1702,13 +1799,6 @@ async def _compact_inherited_conversation(
         await asyncio.to_thread(_append_marker)
     except OSError:
         logger.warning("compact_inherited: failed to append fork marker", exc_info=True)
-
-    logger.info(
-        "compact_inherited: compacted %d parent message(s) -> 1 summary (%d chars) for colony forked from %s",
-        messages_compacted,
-        summary_chars,
-        source_session_id,
-    )
 
 
 async def fork_session_into_colony(

@@ -47,8 +47,7 @@ def needs_migration() -> bool:
     """True only when genuine v2 layout artifacts are present.
 
     Detection must be v2-*exclusive*: v3 reuses ``$HIVE_HOME/agents/``
-    for live agent storage (e.g. ``agents/credential_tester/``, worker
-    session dirs), so the bare existence of ``agents/`` is NOT a v2
+    for live agent storage (e.g. worker session dirs), so the bare existence of ``agents/`` is NOT a v2
     signal. v2 queens, however, always live at ``agents/queens/`` (v3
     uses ``queens/``) and v2 trackers at ``colonies/<c>/data/`` (v3 uses
     ``tracker/``) -- both are exclusive to v2 and safe to key on.

@@ -13,8 +13,10 @@ retirement / resolution behavior around it:
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -172,6 +174,59 @@ async def test_queen_session_skips_superseded_on_cold_resume(monkeypatch, tmp_pa
     assert data["session_id"] == "sess_new"
     assert data["status"] == "resumed"
     assert manager.create_session.await_args.kwargs["queen_resume_from"] == "sess_new"
+
+
+@pytest.mark.asyncio
+async def test_queen_session_skips_the_dm_that_became_a_colony(monkeypatch, tmp_path):
+    """The DM that spawned a colony is locked, and its agent_path points at the
+    colony: resuming it from the queen's DM page would open the colony's own
+    session in DM mode. The page resumes the DM before it instead."""
+    _patch_all_queen_storage(monkeypatch, tmp_path)
+    _write_queen_session(tmp_path, QUEEN, "session_20261019_090000_aaaa1111", {"queen_id": QUEEN})
+    _write_queen_session(
+        tmp_path,
+        QUEEN,
+        "session_20261020_090000_bbbb2222",
+        {"queen_id": QUEEN, "agent_path": str(tmp_path / "colonies" / "atlas"), "colony_spawned": True},
+    )
+
+    app = create_app()
+    manager = app["manager"]
+    resumed = _make_session(agent_id="session_20261019_090000_aaaa1111", with_queen=False)
+    resumed.queen_name = QUEEN
+    manager.create_session = AsyncMock(return_value=resumed)
+
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.post(f"/api/queen/{QUEEN}/session", json={"initial_phase": "independent"})
+        assert resp.status == 200
+
+    assert manager.create_session.await_args.kwargs["queen_resume_from"] == "session_20261019_090000_aaaa1111"
+    assert manager.create_session.await_args.kwargs["colony_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_resume_redirected_into_a_colony_keeps_the_colonys_own_phase(monkeypatch, tmp_path):
+    """A resume of another session that lands in a colony's own session must not
+    carry the caller's phase there: a DM page's "independent" would leave the
+    colony's queen without run_worker, triggers or the tracker."""
+    from framework.server import compaction_status
+
+    colonies = tmp_path / "colonies"
+    (colonies / "atlas").mkdir(parents=True)
+    (colonies / "atlas" / "metadata.json").write_text(json.dumps({"queen_name": QUEEN, "queen_session_id": "session_colony"}))
+    monkeypatch.setattr(session_manager_module, "COLONIES_DIR", colonies)
+    monkeypatch.setattr(compaction_status, "await_completion", AsyncMock(return_value=None))
+    manager = create_app()["manager"]
+    session = SimpleNamespace(id="session_colony", queen_resume_from=None, queen_name=None)
+    monkeypatch.setattr(manager, "_create_session_core", AsyncMock(return_value=session))
+    monkeypatch.setattr(manager, "_load_worker_core", AsyncMock())
+    start = AsyncMock()
+    monkeypatch.setattr(manager, "_start_queen", start)
+
+    await manager.create_session(colony_id="atlas", queen_resume_from="session_dm", queen_name=QUEEN, initial_phase="independent")
+
+    assert session.queen_resume_from == "session_colony"
+    assert start.await_args.kwargs["initial_phase"] is None
 
 
 # ---------------------------------------------------------------------------

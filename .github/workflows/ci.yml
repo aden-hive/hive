@@ -65,12 +65,21 @@ jobs:
           uv sync
           uv run pytest tests/ -v --ignore=tests/dummy_agents
 
+      - name: Run framework unit tests
+        working-directory: core
+        # The suites that live next to the code (framework/*/tests).
+        # framework/testing is a library whose modules are named test_*.py.
+        run: uv run pytest framework/ -v --ignore=framework/testing
+
   test-tools:
     name: Test Tools (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # ubuntu-24.04, not ubuntu-latest: on ubuntu-26.04 `playwright install chromium`
+        # fails ("Playwright does not support chromium on ubuntu26.04-x64"). Back to
+        # ubuntu-latest once the Playwright in uv.lock supports it.
+        os: [ubuntu-24.04, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -84,14 +93,63 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies and run tests
+      - name: Install dependencies
+        working-directory: tools
+        run: uv sync --extra dev
+
+      - name: Install and verify ripgrep
+        run: uv run --no-sync scripts/ensure_ripgrep.py --install
+
+      - name: Install browser and run tests
         working-directory: tools
         run: |
-          uv sync --extra dev
           # chart_tools renders ECharts/Mermaid via Playwright (headless
           # Chromium); install the browser so those smoke tests can run.
           uv run playwright install chromium
           uv run pytest tests/ -v
+
+  package:
+    name: Package (installs and runs from PyPI-style wheels)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: core/frontend/package-lock.json
+
+      - name: Build the dashboard
+        working-directory: core/frontend
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
+
+      - name: Build aden-hive and aden-tools
+        run: |
+          uv build --package aden-hive --out-dir dist
+          uv build --package aden-tools --out-dir dist
+
+      - name: Install them into a clean virtualenv, outside the workspace
+        run: |
+          uv venv /tmp/hive-pkg --python 3.11
+          uv pip install --python /tmp/hive-pkg --no-sources --find-links dist "aden-hive[tools]"
+
+      - name: Check the installed Hive works as the whole app
+        working-directory: /tmp
+        run: /tmp/hive-pkg/bin/python -I "$GITHUB_WORKSPACE/scripts/check_installed_package.py"
 
   validate:
     name: Validate Agent Exports

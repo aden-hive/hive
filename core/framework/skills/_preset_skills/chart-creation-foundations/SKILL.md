@@ -79,6 +79,13 @@ The default font (`-apple-system, "Inter Tight", system-ui`) is already wired in
 ### 6. One message per chart
 Every chart goes in its own assistant message (or its own `chart_render` call). Do not pile 4 charts into one wall of tool calls — the user can't focus and the chat gets noisy.
 
+### 7. Notes and caveats live outside the plot
+The theme fixes the grid, so there is no free space inside the chart for extra text. Text you add there lands on top of the axis name or the tick labels.
+- One short qualifier (under ~90 characters) can go in `option.title.subtext`. Never a second subtext line.
+- Do **not** add `graphic` text elements for footnotes, sources or exclusions. Put those in the message that carries the chart.
+- To flag a qualified data point, mark its category label (`"Supabase*"`) and explain the asterisk in the message.
+- Show a missing value as a gap with `(N/A)` in its category label, not as a zero-length bar.
+
 ## Calling `chart_render` — the canonical pattern
 
 ```

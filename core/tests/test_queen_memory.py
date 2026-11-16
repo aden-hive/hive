@@ -238,6 +238,35 @@ async def test_select_memories_with_files(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_profiles_never_crowd_out_relevant_memories(tmp_path: Path):
+    """A scope with max_results profile memories still returns relevant picks.
+
+    One live queen had 10 character sheets typed "profile"; with pins first,
+    every recall returned the same 3 sheets and never what was relevant.
+    """
+    for i in range(5):
+        (tmp_path / f"character-{i}.md").write_text(f"---\nname: c{i}\ndescription: character {i}\ntype: profile\n---\nbody")
+    (tmp_path / "deploy-window.md").write_text("---\nname: d\ndescription: Acme deploy window\ntype: preference\n---\nbody")
+
+    llm = AsyncMock()
+    llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": ["deploy-window.md"]}))
+
+    result = await select_memories("when can we deploy to Acme?", llm, memory_dir=tmp_path, max_results=3)
+
+    assert result[0] == "deploy-window.md"
+    assert len(result) == 3  # profiles back-fill the remaining slots
+
+
+@pytest.mark.asyncio
+async def test_profiles_fill_in_when_nothing_is_selected(tmp_path: Path):
+    (tmp_path / "user-profile.md").write_text("---\nname: u\ndescription: the user\ntype: profile\n---\nbody")
+    llm = AsyncMock()
+    llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": []}))
+
+    assert await select_memories("who is my partner?", llm, memory_dir=tmp_path) == ["user-profile.md"]
+
+
+@pytest.mark.asyncio
 async def test_select_memories_error_returns_empty(tmp_path: Path):
     (tmp_path / "a.md").write_text("---\nname: a\n---\nbody")
 
@@ -566,6 +595,11 @@ async def test_subscribe_reflection_triggers_runs_housekeeping_for_both_scopes(
     monkeypatch.setattr(ra, "run_unified_short_reflection", unified_short)
     monkeypatch.setattr(ra, "run_unified_long_reflection", unified_long)
 
+    monkeypatch.setattr(
+        "framework.config.get_hive_config",
+        lambda: {"memory_reflection": {"every_turns": 2, "long_every": 2}},
+    )
+
     sub_ids = await ra.subscribe_reflection_triggers(
         bus,
         session_dir,
@@ -575,23 +609,107 @@ async def test_subscribe_reflection_triggers_runs_housekeeping_for_both_scopes(
         queen_id="queen_technology",
     )
 
-    for _ in range(5):
-        await bus.publish(
-            AgentEvent(
-                type=EventType.LLM_TURN_COMPLETE,
-                stream_id="queen",
-                data={"stop_reason": "stop"},
-            )
-        )
+    async def park(reason: str, stream_id: str = "queen") -> None:
+        await bus.publish(AgentEvent(type=EventType.CLIENT_INPUT_REQUESTED, stream_id=stream_id, data={"park_reason": reason}))
+        await asyncio.sleep(0.01)
 
-    await asyncio.sleep(0.05)
+    # Five replies to the user; a park for another reason and a worker's park don't count.
+    for reason in ("turn_done", "ask_user", "llm_error", "turn_done", "turn_done", "turn_done"):
+        await park(reason)
+    await park("turn_done", stream_id="worker")
 
     assert len(sub_ids) == 2
-    # With 5 turns and _SHORT_REFLECT_TURN_INTERVAL=3 plus the 5-minute
-    # cooldown, reflections fire on count=1 (first run, no gate) and
-    # count=3 (turn interval hit). Counts 2, 4, 5 are all gated out.
+    # Replies 2 and 4 reflect; the second reflection also tidies.
     assert unified_short.await_count == 2
-    unified_long.assert_not_awaited()
+    assert unified_long.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_short_reflection_skips_a_conversation_that_has_not_grown(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import run_shutdown_reflection
+
+    parts_dir = tmp_path / "session" / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+
+    def say(i: int) -> None:
+        role = "user" if i % 2 == 0 else "assistant"
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
+
+    for i in range(2):
+        say(i)
+    global_dir = tmp_path / "global_memory"
+    global_dir.mkdir()
+    llm = AsyncMock()
+    llm.acomplete.return_value = _make_litellm_response(content="Nothing to save.")
+
+    async def reflect() -> None:
+        await run_shutdown_reflection(tmp_path / "session", llm, global_memory_dir_override=global_dir)
+
+    await reflect()
+    assert llm.acomplete.await_count == 1
+
+    await reflect()
+    assert llm.acomplete.await_count == 1
+
+    say(2)
+    await reflect()
+    assert llm.acomplete.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_restored_session_is_not_reflected_on_until_someone_speaks(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import run_shutdown_reflection, subscribe_reflection_triggers
+    from framework.host.event_bus import EventBus
+
+    session_dir = tmp_path / "session"
+    parts_dir = session_dir / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+
+    def say(i: int) -> None:
+        role = "user" if i % 2 == 0 else "assistant"
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps({"role": role, "content": f"message {i}"}))
+
+    for i in range(2):
+        say(i)
+    global_dir = tmp_path / "global_memory"
+    global_dir.mkdir()
+    llm = AsyncMock()
+    llm.acomplete.return_value = _make_litellm_response(content="Nothing to save.")
+    await subscribe_reflection_triggers(EventBus(), session_dir, llm, global_memory_dir=global_dir)
+
+    await run_shutdown_reflection(session_dir, llm, global_memory_dir_override=global_dir)
+    assert llm.acomplete.await_count == 0
+
+    say(2)
+    await run_shutdown_reflection(session_dir, llm, global_memory_dir_override=global_dir)
+    assert llm.acomplete.await_count == 1
+
+
+def test_memory_llm_is_the_worker_model_when_configured(monkeypatch):
+    from framework.server.session_manager import Session, SessionManager
+
+    queen_llm, worker_llm = object(), object()
+    session = Session(id="session_memory_llm", event_bus=None, llm=queen_llm, loaded_at=0.0)
+    manager = SessionManager()
+    monkeypatch.setattr(manager, "build_worker_llm", lambda: worker_llm)
+
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: {"memory_reflection": {"model": "worker"}})
+    assert manager.memory_llm(session) is worker_llm
+
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: {})
+    assert manager.memory_llm(session) is queen_llm
+
+
+def test_memory_llm_falls_back_to_her_model_without_a_worker_model(monkeypatch):
+    from framework.server.session_manager import Session, SessionManager
+
+    queen_llm = object()
+    session = Session(id="session_memory_llm", event_bus=None, llm=queen_llm, loaded_at=0.0)
+    manager = SessionManager()
+    monkeypatch.setattr(manager, "build_worker_llm", lambda: None)
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: {"memory_reflection": {"model": "worker"}})
+
+    assert manager.memory_llm(session) is queen_llm
 
 
 @pytest.mark.asyncio

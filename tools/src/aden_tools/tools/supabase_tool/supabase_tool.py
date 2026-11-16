@@ -306,14 +306,14 @@ def register_tools(
         password: str,
     ) -> dict[str, Any]:
         """
-        Sign in a user via Supabase Auth and get an access token.
+        Verify a user's Supabase Auth credentials.
 
         Args:
             email: User's email address
             password: User's password
 
         Returns:
-            Dict with access_token, user_id, email, and expires_in
+            Authentication status and non-secret session metadata
         """
         key, url = _get_config(credentials)
         if not key or not url:
@@ -333,7 +333,7 @@ def register_tools(
             data = resp.json()
             user = data.get("user", {})
             return {
-                "access_token": data.get("access_token", ""),
+                "authenticated": True,
                 "user_id": user.get("id", ""),
                 "email": user.get("email", ""),
                 "expires_in": data.get("expires_in", 0),

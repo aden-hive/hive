@@ -3,14 +3,14 @@ import { useRuntimeLogs } from "@/hooks/use-runtime-logs";
 import { useShowRuntimeLogs } from "@/hooks/use-show-runtime-logs";
 
 /**
- * Floating bottom-right drawer that displays the last 500 lines of runtime
- * stdout/stderr streamed from the Electron main process. Collapsed by
- * default; shows a badge with the count of captured lines and a red
- * indicator when the most-recent entry came from stderr.
+ * Floating bottom-right drawer that displays the last 500 lines of the Hive
+ * server's log. Collapsed by default; shows a badge with the count of
+ * captured lines and a red indicator when the most-recent line is a warning
+ * or error.
  */
 export default function RuntimeLogsDrawer() {
   const [visible] = useShowRuntimeLogs();
-  const { logs, clear } = useRuntimeLogs();
+  const { logs, clear } = useRuntimeLogs(visible);
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);

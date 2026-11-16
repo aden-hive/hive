@@ -537,6 +537,11 @@ class _FilePolicy:
             raise ValueError(f"write denied: '{original}' is outside the configured write_safe_root(s) ({roots})")
 
 
+# Binary formats attach_file can turn into content the model can look at
+# (images and PDFs). Mirrors _BINARY_PREVIEW_EXT_TO_MIME in attach_file_tool.
+_VIEWABLE_BINARY_EXT = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf"})
+
+
 def _is_binary(filepath: str) -> bool:
     """Detect binary files by extension and content sampling."""
     _, ext = os.path.splitext(filepath)
@@ -660,6 +665,8 @@ def _fuzzy_find_candidates(content: str, old_text: str):
     # "\t", "\r" sequences instead of actual control chars.
     if "\\n" in old_text or "\\t" in old_text or "\\r" in old_text:
         unescaped = old_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+        if "\r\n" in content:
+            unescaped = unescaped.replace("\r\n", "\n").replace("\n", "\r\n")
         if unescaped != old_text and unescaped in content:
             yield unescaped
 
@@ -764,7 +771,8 @@ def _compute_diff(old: str, new: str, path: str) -> str:
 _BEGIN_RE = re.compile(r"^\*\*\*\s*Begin\s+Patch\s*$")
 _END_RE = re.compile(r"^\*\*\*\s*End\s+Patch\s*$")
 _OP_RE = re.compile(r"^\*\*\*\s+(Update|Add|Delete|Move)\s+File:\s*(.+)$")
-_HUNK_HINT_RE = re.compile(r"^@@\s*(.*?)\s*@@\s*$")
+_HUNK_HINT_RE = re.compile(r"^@@(?:\s*(.*?)\s*@@)?\s*$")
+_HUNK_EXAMPLE = "Use '@@' or '@@ hint @@' followed by context/removal/addition lines. Example:\n@@\n-old text\n+new text"
 
 
 @dataclass
@@ -824,12 +832,15 @@ def _parse_v4a(text: str) -> tuple[list[_PatchOp], str | None]:
             while i < len(lines):
                 if _is_op_marker(lines[i]) or _END_RE.match(lines[i].strip()):
                     break
+                if lines[i].startswith("@@") and not _HUNK_HINT_RE.fullmatch(lines[i]):
+                    return [], f"Update {rest}, line {i + 1}: invalid hunk header {lines[i]!r}. {_HUNK_EXAMPLE}"
+                hunk_start = i
                 hunk, i = _parse_hunk(lines, i)
                 if hunk is None:
-                    break
+                    return [], f"Update {rest}, line {hunk_start + 1}: expected hunk content. {_HUNK_EXAMPLE}"
                 hunks.append(hunk)
             if not hunks:
-                return [], f"Update {rest}: no hunks parsed"
+                return [], f"Update {rest}: missing hunk. {_HUNK_EXAMPLE}"
             ops.append(_PatchOp(kind="update", path=rest, hunks=hunks))
         elif kind_word == "Add":
             content_lines: list[str] = []
@@ -870,13 +881,15 @@ def _parse_hunk(lines: list[str], start_idx: int) -> tuple[_Hunk | None, int]:
     context_hint: str | None = None
     m = _HUNK_HINT_RE.match(lines[i])
     if m:
-        context_hint = m.group(1).strip() or None
+        context_hint = (m.group(1) or "").strip() or None
         i += 1
     hunk_lines: list[tuple[str, str]] = []
     started = False
     while i < len(lines):
         line = lines[i]
-        if _is_op_marker(line) or _END_RE.match(line.strip()) or _HUNK_HINT_RE.match(line):
+        # Stop on malformed headers too, so the caller rejects the whole patch
+        # rather than swallowing a broken second hunk as implicit context.
+        if _is_op_marker(line) or _END_RE.match(line.strip()) or line.startswith("@@"):
             break
         if line.startswith("\\"):
             # Git-diff artifact like "\ No newline at end of file" — skip
@@ -904,11 +917,12 @@ def _apply_hunk(content: str, hunk: _Hunk) -> tuple[str, str | None]:
     """Apply one hunk to ``content``. Returns ``(new_content, error)``."""
     search_lines = [c for p, c in hunk.lines if p in (" ", "-")]
     replace_lines = [c for p, c in hunk.lines if p in (" ", "+")]
+    newline = "\r\n" if "\r\n" in content else "\n"
 
     # Pure addition (no - or context lines, only +). Insert at hint or
     # append to EOF if the hint is missing or unique.
     if not search_lines and replace_lines:
-        addition = "\n".join(replace_lines)
+        addition = newline.join(replace_lines)
         if hunk.context_hint:
             count = content.count(hunk.context_hint)
             if count > 1:
@@ -917,17 +931,17 @@ def _apply_hunk(content: str, hunk: _Hunk) -> tuple[str, str | None]:
                 idx = content.find(hunk.context_hint)
                 line_end = content.find("\n", idx)
                 if line_end < 0:
-                    new = content + "\n" + addition
+                    new = content + newline + addition
                 else:
-                    new = content[: line_end + 1] + addition + "\n" + content[line_end + 1 :]
+                    new = content[: line_end + 1] + addition + newline + content[line_end + 1 :]
                 return new, None
         # No hint, or hint not found: append to EOF.
         if content and not content.endswith("\n"):
-            content += "\n"
-        return content + addition + "\n", None
+            content += newline
+        return content + addition + newline, None
 
-    search = "\n".join(search_lines)
-    replace = "\n".join(replace_lines)
+    search = newline.join(search_lines)
+    replace = newline.join(replace_lines)
     if not search:
         return content, "hunk has neither context nor removed lines"
 
@@ -988,7 +1002,7 @@ def _apply_v4a(
         if not os.path.isfile(resolved):
             return f"file not found: {resolved}"
         try:
-            with open(resolved, encoding="utf-8") as f:
+            with open(resolved, encoding="utf-8", newline="") as f:
                 fs_state[resolved] = f.read()
             fs_exists[resolved] = True
             original_existed[resolved] = True
@@ -1072,14 +1086,14 @@ def _apply_v4a(
                 old_content = ""
                 if existed:
                     try:
-                        with open(resolved, encoding="utf-8") as f:
+                        with open(resolved, encoding="utf-8", newline="") as f:
                             old_content = f.read()
                     except Exception:
                         old_content = ""
                 if before_write:
                     before_write()
                 Path(resolved).parent.mkdir(parents=True, exist_ok=True)
-                with open(resolved, "w", encoding="utf-8") as f:
+                with open(resolved, "w", encoding="utf-8", newline="") as f:
                     f.write(new_content)
                 try:
                     record_read(None, resolved, content_bytes=new_content.encode("utf-8"))
@@ -1156,8 +1170,13 @@ def _patch_replace(
         return f"Refusing to edit '{path}': {_fresh.detail}. Re-read the file with read_file before editing."
 
     try:
-        with open(resolved, encoding="utf-8") as f:
+        with open(resolved, encoding="utf-8", newline="") as f:
             content = f.read()
+
+        if "\r\n" in content:
+            old_string = old_string.replace("\r\n", "\n").replace("\n", "\r\n")
+        if not replace_all and content.count(old_string) > 1:
+            return f"Error: Could not find a unique match for old_string in {path}. Include more context or explicitly use replace_all."
 
         if before_write:
             before_write()
@@ -1201,6 +1220,9 @@ def _patch_replace(
                 msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
             return msg
 
+        # Preserve surrounding bytes and use the file's line endings for new text.
+        if "\r\n" in content:
+            new_string = new_string.replace("\r\n", "\n").replace("\n", "\r\n")
         if replace_all:
             count = content.count(matched)
             new_content = content.replace(matched, new_string)
@@ -1208,7 +1230,7 @@ def _patch_replace(
             count = 1
             new_content = content.replace(matched, new_string, 1)
 
-        with open(resolved, "w", encoding="utf-8") as f:
+        with open(resolved, "w", encoding="utf-8", newline="") as f:
             f.write(new_content)
 
         try:
@@ -1329,8 +1351,9 @@ EDIT_FILE_PARAMS = {
         "'*** Move File: <src> -> <dst>' markers, so one call can touch "
         "many files. Hunks use unified-diff syntax: lines starting with "
         "' ' (space) are context, '-' lines are removed, '+' lines are "
-        "added. Optional '@@ hint @@' before a hunk narrows fuzzy "
-        "matching to a window around the hint. If any operation fails "
+        "added. Separate hunks with '@@', or '@@ hint @@' to narrow fuzzy "
+        "matching to a window around the hint. The first header is optional. "
+        "These headers use content hints, not unified-diff line numbers. If any operation fails "
         "validation, no files are written. Example:\n"
         "*** Begin Patch\n"
         "*** Update File: a.py\n"
@@ -1383,6 +1406,7 @@ def register_file_tools(
     home: str | None = None,
     write_safe_root: str | list[str] | None = None,
     before_write: Callable[[], None] | None = None,
+    tool_names: set[str] | None = None,
 ) -> None:
     """Register the canonical file tools on an MCP server.
 
@@ -1408,18 +1432,30 @@ def register_file_tools(
             path or a list of allowed write roots — a write must land
             under at least one of them. Reads are unaffected.
         before_write: Hook called before any write/edit (e.g. git snapshot).
+        tool_names: Optional subset to expose (coding roles use read_file + edit_file).
     """
     policy = _FilePolicy(home=home, write_safe_root=write_safe_root)
 
-    @mcp.tool(description=READ_FILE_DOC)
+    def register_tool(**kwargs):
+        def decorate(fn):
+            if tool_names is None or fn.__name__ in tool_names:
+                return mcp.tool(**kwargs)(fn)
+            return fn
+
+        return decorate
+
+    @register_tool(description=READ_FILE_DOC)
     def read_file(
         path: Annotated[str, Field(description=READ_FILE_PARAMS["path"])],
         offset: Annotated[int, Field(description=READ_FILE_PARAMS["offset"])] = 1,
         limit: Annotated[int, Field(description=READ_FILE_PARAMS["limit"])] = 0,
         hashline: Annotated[bool, Field(description=READ_FILE_PARAMS["hashline"])] = False,
+        session_cwd: str | None = None,
     ) -> str:
+        # MCP servers are shared; resolve the injected workdir per call.
+        read_policy = _FilePolicy(home=home or session_cwd, write_safe_root=write_safe_root)
         try:
-            resolved = policy.read_path(path)
+            resolved = read_policy.read_path(path)
         except ValueError as e:
             return f"Error: {e}"
 
@@ -1437,6 +1473,12 @@ def register_file_tools(
 
         if _is_binary(resolved):
             size = os.path.getsize(resolved)
+            # Images and PDFs aren't undisplayable, just not displayable as
+            # text — attach_file base64s them into content the model can
+            # actually look at. Say so, or an agent that reads a screenshot
+            # here concludes it has no way to see the file at all.
+            if os.path.splitext(resolved)[1].lower() in _VIEWABLE_BINARY_EXT:
+                return f'Binary file: {path} ({size:,} bytes). Not displayable as text — view it with attach_file(paths="{path}").'
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:
@@ -1492,7 +1534,7 @@ def register_file_tools(
         except Exception as e:
             return f"Error reading file: {e}"
 
-    @mcp.tool(description=WRITE_FILE_DOC)
+    @register_tool(description=WRITE_FILE_DOC)
     def write_file(
         path: Annotated[str, Field(description=WRITE_FILE_PARAMS["path"])],
         content: Annotated[str, Field(description=WRITE_FILE_PARAMS["content"])],
@@ -1553,7 +1595,7 @@ def register_file_tools(
         except Exception as e:
             return f"Error writing file: {e}"
 
-    @mcp.tool(description=EDIT_FILE_DOC)
+    @register_tool(description=EDIT_FILE_DOC)
     def edit_file(
         mode: Annotated[str, Field(description=EDIT_FILE_PARAMS["mode"])] = "replace",
         path: Annotated[str, Field(description=EDIT_FILE_PARAMS["path"])] = "",
@@ -1561,10 +1603,12 @@ def register_file_tools(
         new_string: Annotated[str, Field(description=EDIT_FILE_PARAMS["new_string"])] = "",
         replace_all: Annotated[bool, Field(description=EDIT_FILE_PARAMS["replace_all"])] = False,
         patch_text: Annotated[str, Field(description=EDIT_FILE_PARAMS["patch_text"])] = "",
+        session_cwd: str | None = None,
     ) -> str:
+        edit_policy = _FilePolicy(home=home or session_cwd, write_safe_root=write_safe_root)
         if mode == "replace":
             return _patch_replace(
-                policy,
+                edit_policy,
                 before_write,
                 path,
                 old_string,
@@ -1572,10 +1616,10 @@ def register_file_tools(
                 replace_all,
             )
         if mode == "patch":
-            return _patch_apply(policy, before_write, patch_text)
+            return _patch_apply(edit_policy, before_write, patch_text)
         return f"Error: unknown mode '{mode}'. Use mode='replace' or mode='patch'."
 
-    @mcp.tool(description=SEARCH_FILES_DOC)
+    @register_tool(description=SEARCH_FILES_DOC)
     def search_files(
         pattern: Annotated[str, Field(description=SEARCH_FILES_PARAMS["pattern"])],
         target: Annotated[str, Field(description=SEARCH_FILES_PARAMS["target"])] = "content",

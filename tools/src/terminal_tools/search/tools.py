@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import queue
 import re
-import select
-import shutil
 import subprocess
+import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
+
+from terminal_tools.common.ring_buffer import RingBuffer
+from terminal_tools.common.ripgrep import installation_hint, resolve_ripgrep as _resolve_rg
+from terminal_tools.search.glob_match import path_matcher
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -32,35 +37,7 @@ _MAX_OUTPUT_BYTES = 256 * 1024
 # by the os.walk fallback — ``rg --files`` prunes via .gitignore on its own.
 _SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", ".tox", ".mypy_cache", ".ruff_cache"})
 
-_GLOB_META_RE = re.compile(r"[*?\[]")
-
-# Well-known absolute install locations for ripgrep. A GUI/Electron-spawned
-# server often inherits a stripped PATH that omits the dir holding rg, so
-# shutil.which() comes up empty even though rg is installed. Probe these
-# before giving up and dropping to the slower Python walk.
-_RG_FALLBACK_PATHS = (
-    "/usr/bin/rg",
-    "/usr/local/bin/rg",
-    "/opt/homebrew/bin/rg",  # macOS arm64 Homebrew
-    "/home/linuxbrew/.linuxbrew/bin/rg",
-    os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rg"),
-)
-
-
-def _resolve_rg() -> str | None:
-    """Return a usable ripgrep executable path, or None.
-
-    Checks PATH (``shutil.which``) first, then common absolute install
-    locations, so a server spawned with a stripped PATH still uses the
-    real (fast, .gitignore-aware) rg instead of the Python fallback.
-    """
-    found = shutil.which("rg")
-    if found:
-        return found
-    for cand in _RG_FALLBACK_PATHS:
-        if os.path.isfile(cand) and os.access(cand, os.X_OK):
-            return cand
-    return None
+_GLOB_META_RE = re.compile(r"[*?\[{]")
 
 
 def _expand_glob_pattern(pattern: str) -> str:
@@ -89,9 +66,10 @@ def _terminate(proc: subprocess.Popen) -> None:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
 
 
-def _stream_paths(argv: list[str], max_results: int) -> tuple[list[str], bool, bool, str]:
+def _stream_paths(argv: list[str], max_results: int, accept: Callable[[str], bool] | None = None) -> tuple[list[str], bool, bool, str]:
     """Run `argv`, reading stdout until `max_results` paths or the deadline.
 
     Streaming + early termination means the cap bounds real work (the child is
@@ -105,13 +83,49 @@ def _stream_paths(argv: list[str], max_results: int) -> tuple[list[str], bool, b
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    fd = proc.stdout.fileno()
     deadline = time.monotonic() + _DEFAULT_TIMEOUT_SEC
+    chunks: queue.Queue[bytes] = queue.Queue(maxsize=8)
+    stopped = threading.Event()
+    errors = RingBuffer(2000)
+
+    # Windows select() accepts sockets only. Reader threads also drain stderr
+    # concurrently, so a noisy rg cannot block before producing any paths.
+    def pump(stream, *, stderr=False):
+        try:
+            while stderr or not stopped.is_set():
+                chunk = os.read(stream.fileno(), 65536)
+                if stderr:
+                    errors.write(chunk)
+                else:
+                    while not stopped.is_set():
+                        try:
+                            chunks.put(chunk, timeout=0.1)
+                            break
+                        except queue.Full:
+                            continue
+                if not chunk:
+                    break
+        except (OSError, ValueError):
+            stopped.set()
+
+    readers = [
+        threading.Thread(target=pump, args=(proc.stdout,), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr,), kwargs={"stderr": True}, daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
     paths: list[str] = []
     truncated = False
     timed_out = False
     pending = b""
+
+    def record(raw: bytes) -> None:
+        path = raw.rstrip(b"\r").decode("utf-8", "replace")
+        if path and (accept is None or accept(path)):
+            paths.append(path)
+
     try:
         while True:
             if len(paths) >= max_results:
@@ -121,24 +135,31 @@ def _stream_paths(argv: list[str], max_results: int) -> tuple[list[str], bool, b
             if remaining <= 0:
                 timed_out = True
                 break
-            rlist, _, _ = select.select([fd], [], [], remaining)
-            if not rlist:
+            try:
+                chunk = chunks.get(timeout=remaining)
+            except queue.Empty:
                 timed_out = True
                 break
-            chunk = os.read(fd, 65536)
             if not chunk:
+                if pending:
+                    record(pending)
                 break  # EOF
             pending += chunk
             parts = pending.split(b"\n")
             pending = parts.pop()  # trailing partial line
             for raw in parts:
                 if raw:
-                    paths.append(raw.decode("utf-8", "replace"))
+                    record(raw)
+                    if len(paths) >= max_results:
+                        break
     finally:
+        stopped.set()
         _terminate(proc)
-        stderr_tail = ""
-        if proc.stderr is not None:
-            stderr_tail = proc.stderr.read().decode("utf-8", "replace")[-2000:]
+        for reader in readers:
+            reader.join(timeout=2)
+        proc.stdout.close()
+        proc.stderr.close()
+        stderr_tail = errors.tail(2000).data.decode("utf-8", "replace")
     if len(paths) > max_results:
         truncated = True
         paths = paths[:max_results]
@@ -147,11 +168,7 @@ def _stream_paths(argv: list[str], max_results: int) -> tuple[list[str], bool, b
 
 def _walk_paths(pattern: str, path: str, max_results: int, include_ignored: bool) -> tuple[list[str], bool]:
     """os.walk fallback for hosts without ripgrep. Best-effort, no .gitignore."""
-    if pattern.startswith("**/"):
-        bn = pattern[3:]
-        matches = lambda rel, name: fnmatch.fnmatch(name, bn)  # noqa: E731
-    else:
-        matches = lambda rel, name: fnmatch.fnmatch(rel, pattern)  # noqa: E731
+    matches = path_matcher(pattern)
 
     paths: list[str] = []
     for root_dir, dirs, fnames in os.walk(path):
@@ -162,7 +179,7 @@ def _walk_paths(pattern: str, path: str, max_results: int, include_ignored: bool
                 continue
             full = os.path.join(root_dir, fname)
             rel = os.path.relpath(full, path)
-            if matches(rel, fname):
+            if matches(rel.replace(os.sep, "/")):
                 paths.append(full)
                 if len(paths) > max_results:
                     return paths[:max_results], True
@@ -170,8 +187,7 @@ def _walk_paths(pattern: str, path: str, max_results: int, include_ignored: bool
 
 
 # Minimal rg filetype -> extension map for the os.walk content fallback.
-# Covers the shortcuts agents commonly pass; an unknown type_filter falls
-# through to "all files" since the fallback can't know rg's full type table.
+# Covers common shortcuts. Reject unknown types rather than searching all files.
 _TYPE_FILTER_EXTS: dict[str, tuple[str, ...]] = {
     "py": (".py", ".pyi"),
     "js": (".js", ".jsx", ".mjs", ".cjs"),
@@ -203,18 +219,33 @@ def _walk_grep(
     max_depth: int | None,
     hidden: bool,
     no_ignore: bool,
+    context: int = 0,
+    extra_args: list[str] | None = None,
+    allow_fallback: bool = False,
 ) -> dict:
-    """Python regex-over-os.walk fallback for ``terminal_rg`` on hosts
-    without ripgrep, so content search degrades gracefully instead of
-    hard-failing — mirrors ``terminal_glob``'s ``_walk_paths`` fallback and
-    the Python content fallback in aden_tools/file_ops.py.
-
-    Best-effort: no .gitignore awareness and no rg type table. Honors the
-    common flags (glob, type_filter, ignore_case, max_count, max_depth,
-    hidden, no_ignore) and returns the same shape as the rg path — one
-    matched line per hit. ``context`` / ``extra_args`` are rg-only and not
-    reflected here (the rg path's parser drops context events too).
-    """
+    """Opt-in approximate search; never silently discard requested flags."""
+    limitations = ["No .gitignore awareness", "Python regex syntax", "Basename globs and a limited filetype table"]
+    unsupported = []
+    if context:
+        unsupported.append("context")
+    if extra_args:
+        unsupported.append("extra_args")
+    if type_filter and type_filter not in _TYPE_FILTER_EXTS:
+        unsupported.append("type_filter")
+    if glob and (any(c in glob for c in "/\\{}") or glob.startswith("!")):
+        unsupported.append("glob")
+    if not allow_fallback or unsupported:
+        return {
+            "error": (
+                "ripgrep is unavailable; requested parameters require ripgrep: " + ", ".join(unsupported)
+                if unsupported
+                else "ripgrep is unavailable; approximate Python search requires allow_fallback=True."
+            ),
+            "code": "ripgrep_required",
+            "unsupported_parameters": unsupported,
+            "fallback_limitations": limitations,
+            "hint": installation_hint(),
+        }
     try:
         compiled = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
     except re.error as e:
@@ -281,12 +312,14 @@ def _walk_grep(
 
     return {
         "matches": matches,
+        "context": [],
         "total": len(matches),
         "truncated": truncated,
         "exit_code": 0,
         "stderr": "",
         "fallback": "python-walk",
-        "note": ("ripgrep not installed; used a best-effort Python walk (no .gitignore awareness; context/extra_args flags ignored)."),
+        "fallback_limitations": limitations,
+        "note": "ripgrep unavailable; explicitly requested approximate Python search without .gitignore support.",
     }
 
 
@@ -305,6 +338,7 @@ def register_search_tools(mcp: FastMCP) -> None:
         no_ignore: bool = False,
         extra_args: list[str] | None = None,
         session_cwd: str | None = None,
+        allow_fallback: bool = False,
     ) -> dict:
         """Run ripgrep on `path` for `pattern` — the content-search tool.
 
@@ -325,8 +359,14 @@ def register_search_tools(mcp: FastMCP) -> None:
             hidden: Include hidden files (rg ignores them by default).
             no_ignore: Don't respect .gitignore.
             extra_args: Raw flags to append (use sparingly — most needs are covered above).
+            allow_fallback: If rg is missing, explicitly accept approximate Python
+                search without .gitignore support and with Python regex syntax.
+                Context, extra_args, unknown filetypes and complex globs still
+                require rg; unsupported parameters return an error without searching.
 
-        Returns: {matches: [...], total, truncated, command}
+        Returns: {matches: [...], context: [...], total, truncated, exit_code, stderr}.
+            Context entries have the same path/line/text shape as matches;
+            total counts only matches. Missing rg returns ripgrep_required by default.
         """
         # Loose default: resolve a relative path (incl. the "." default) against
         # the framework-injected session workdir.
@@ -344,6 +384,9 @@ def register_search_tools(mcp: FastMCP) -> None:
                 max_depth=max_depth,
                 hidden=hidden,
                 no_ignore=no_ignore,
+                context=context,
+                extra_args=extra_args,
+                allow_fallback=allow_fallback,
             )
 
         argv = [rg_bin, "--json", "--no-heading"]
@@ -377,7 +420,7 @@ def register_search_tools(mcp: FastMCP) -> None:
         except subprocess.TimeoutExpired:
             return {"error": "ripgrep timed out", "command": argv}
         except FileNotFoundError:
-            # rg vanished between the which() check and exec — fall back.
+            # Apply the same fallback policy if rg disappears after discovery.
             return _walk_grep(
                 pattern,
                 path,
@@ -388,13 +431,16 @@ def register_search_tools(mcp: FastMCP) -> None:
                 max_depth=max_depth,
                 hidden=hidden,
                 no_ignore=no_ignore,
+                context=context,
+                extra_args=extra_args,
+                allow_fallback=allow_fallback,
             )
 
-        # Parse JSON-line output: only "match" events are interesting for the
-        # default surface. Errors land in stderr.
+        # Keep requested context separate so it does not inflate the match count.
         import json
 
         matches: list[dict] = []
+        context_lines: list[dict] = []
         truncated = False
         bytes_seen = 0
         for line in proc.stdout.splitlines():
@@ -408,16 +454,19 @@ def register_search_tools(mcp: FastMCP) -> None:
                 evt = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if evt.get("type") != "match":
+            event_type = evt.get("type")
+            if event_type not in {"match", "context"}:
                 continue
             data = evt.get("data", {})
             path_data = (data.get("path") or {}).get("text") or ""
             line_no = data.get("line_number")
             text = (data.get("lines") or {}).get("text") or ""
-            matches.append({"path": path_data, "line": line_no, "text": text.rstrip("\n")})
+            target = matches if event_type == "match" else context_lines
+            target.append({"path": path_data, "line": line_no, "text": text.rstrip("\r\n")})
 
         return {
             "matches": matches,
+            "context": context_lines,
             "total": len(matches),
             "truncated": truncated,
             "exit_code": proc.returncode,
@@ -453,12 +502,18 @@ def register_search_tools(mcp: FastMCP) -> None:
             include_ignored: Include .gitignored / hidden / build-cache files.
 
         Returns: {paths, count, truncated, timed_out, expanded_pattern, command}
+            Without rg, returns fallback="python-walk" and a note: the
+            approximate filename walk does not honor .gitignore.
         """
         # Loose default: resolve a relative path (incl. the "." default) against
         # the framework-injected session workdir.
         if session_cwd and not os.path.isabs(path):
             path = os.path.join(session_cwd, path)
         expanded = _expand_glob_pattern(pattern)
+        try:
+            matches = path_matcher(expanded)
+        except ValueError as exc:
+            return {"error": str(exc), "expanded_pattern": expanded}
 
         rg_bin = _resolve_rg()
         if not rg_bin:
@@ -471,15 +526,23 @@ def register_search_tools(mcp: FastMCP) -> None:
                 "timed_out": False,
                 "expanded_pattern": expanded,
                 "command": ["os.walk", path, expanded],
+                "fallback": "python-walk",
+                "note": "ripgrep unavailable; approximate filename walk does not honor .gitignore.",
             }
 
         argv = [rg_bin, "--files", "--no-messages"]
         if include_ignored:
             argv.extend(["-uu", "--hidden"])
-        argv.extend(["--glob", expanded, "--", path])
+        # Positive rg --glob rules override .gitignore. Filter the eligible
+        # file stream instead, before applying the result cap.
+        argv.extend(["--", path])
+        base = path if os.path.isdir(path) else os.path.dirname(path) or "."
+
+        def accept(candidate: str) -> bool:
+            return matches(os.path.relpath(candidate, base).replace(os.sep, "/"))
 
         try:
-            paths, truncated, timed_out, stderr_tail = _stream_paths(argv, max_results)
+            paths, truncated, timed_out, stderr_tail = _stream_paths(argv, max_results, accept=accept)
         except FileNotFoundError:
             return {"error": "ripgrep (rg) is not installed on this host"}
 

@@ -6,25 +6,15 @@ commands silently transition into the JobManager and surface a
 ``job_id`` so the agent can poll. The "should I background this?"
 decision is removed — the answer is always yes-if-needed.
 
-Implementation notes:
-  - We spawn the process the same way JobManager does, then wait with
-    ``proc.wait(timeout=auto_background_after_sec)``. Inline path
-    drains pipes via ``proc.communicate()`` to avoid pipe-fill
-    deadlocks.
-  - Auto-promotion: when the timeout fires while the process is still
-    running, we already have its stdin/stdout/stderr file objects.
-    We hand them to JobManager which spawns pump threads to fill ring
-    buffers from that point on. The agent sees an envelope with
-    ``auto_backgrounded=True, exit_code=None, job_id=<…>`` and
-    transitions to ``terminal_job_logs``. **There's no early-output loss**
-    because the pumps start before we return from the tool call.
-  - For pure-foreground use (``auto_background_after_sec=0``), we
-    fall back to ``proc.communicate(timeout=timeout_sec)`` which has
-    the simpler "kill on overall timeout" semantics.
+Pump threads drain output throughout execution. Promotion transfers those
+buffers, process-tree ownership, and the original deadline to JobManager.
+The outer agent loop may first return a bg_* handle: collect_result redeems
+that call, then terminal_job_logs retrieves any job_id it returns.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import shlex
 import subprocess
@@ -40,6 +30,7 @@ from terminal_tools.common.limits import (
     resolve_shell_spec,
     sanitized_env,
 )
+from terminal_tools.common.process_tree import close_process_tree, spawn_process, terminate_process_tree
 from terminal_tools.common.ring_buffer import RingBuffer
 from terminal_tools.common.truncation import build_exec_envelope
 from terminal_tools.jobs.manager import JobLimitExceeded, get_manager
@@ -56,6 +47,9 @@ if TYPE_CHECKING:
 # of the line as junk argv, which either errors or returns fake success
 # (e.g. `echo "..." && ps ...` → echo prints the literal command).
 _SHELL_METACHARS: frozenset[str] = frozenset({"|", "&&", "||", ";", ">", "<", ">>", "<<", "&", "2>", "2>&1", "|&"})
+
+# Leave room for termination and pipe draining below the caller's 235s budget.
+MAX_INLINE_SECONDS = 220
 
 
 def register_exec_tools(mcp: FastMCP) -> None:
@@ -81,23 +75,26 @@ def register_exec_tools(mcp: FastMCP) -> None:
         Set auto_background_after_sec=0 to force pure foreground (kill on
         timeout_sec).
 
-        Bash-only on POSIX. Passing shell="/bin/zsh" raises an error — this is
-        a deliberate security stance.
+        The agent loop may first return a bg_* handle; use collect_result for
+        that handle, then terminal_job_logs for any job_id in the result.
+        POSIX uses bash when shell=True; Windows selects Git Bash, PowerShell,
+        then cmd. Read shell_kind before choosing platform-specific syntax.
 
         Args:
-            command: The command. With shell=False we naively split on
-                whitespace; for pipes / quoting / globs use shell=True.
+            command: The command. With shell=False POSIX uses shlex splitting;
+                shell syntax is detected automatically. Use shell=True for scripts.
             cwd: Working directory. Defaults to the session workdir when
                 omitted; pass an absolute path to override (loose default,
                 not a sandbox — you can point anywhere).
             env: Environment override (merged into a sanitized base — zsh
                 dotfile vars are stripped).
-            timeout_sec: Hard kill deadline. Past this, the process is
-                terminated and `timed_out=True` is returned. Should be ≥
-                auto_background_after_sec for the auto-promote path to work.
+            timeout_sec: Total deadline from command start, including background
+                execution. Expiry terminates the process tree and reports
+                timed_out=True. 0 means unlimited, requiring auto-promotion.
             auto_background_after_sec: Inline budget. Past this, promote to
-                a background job and return. 0 disables auto-promotion.
-            shell: True for `/bin/bash -c <command>`. zsh refused.
+                a background job and return. 0 disables auto-promotion. The
+                foreground wait must be finite and at most 220 seconds.
+            shell: True to use the platform shell. zsh refused.
             stdin: Optional stdin payload (string).
             limits: Optional setrlimit caps. Keys: cpu_sec, rss_mb,
                 fsize_mb, nofile.
@@ -106,6 +103,13 @@ def register_exec_tools(mcp: FastMCP) -> None:
 
         Returns the standard envelope: see `terminal-tools-foundations` skill.
         """
+        if not all(math.isfinite(value) and value >= 0 for value in (timeout_sec, auto_background_after_sec)):
+            return _err_envelope(command, "timeout_sec and auto_background_after_sec must be finite and non-negative")
+        waits = [value for value in (timeout_sec, auto_background_after_sec) if value > 0]
+        if not waits or min(waits) > MAX_INLINE_SECONDS:
+            return _err_envelope(
+                command, "Foreground wait must be at most 220 seconds; use auto_background_after_sec=30 or terminal_job_start for longer commands"
+            )
         # Hard guard: browser/runtime kill+launch commands never spawn.
         # (destructive_warning stays advisory; this one blocks.)
         blocked = check_command(command)
@@ -149,7 +153,7 @@ def register_exec_tools(mcp: FastMCP) -> None:
             # and every agent gets the user's own permissions.
             if crm_principal:
                 env = {**(env or {}), "HIVE_CRM_PRINCIPAL": crm_principal}
-            full_env = sanitized_env(env) if env is not None else None
+            full_env = sanitized_env(env)
             preexec = make_preexec_fn(coerce_limits(limits))
         except ZshRefused as e:
             return _err_envelope(command, str(e))
@@ -183,8 +187,9 @@ def register_exec_tools(mcp: FastMCP) -> None:
         # job inherits this because it adopts the already-spawned proc.
         effective_cwd = cwd if cwd is not None else session_cwd
         start = time.monotonic()
+        deadline = start + timeout_sec if timeout_sec > 0 else None
         try:
-            proc = subprocess.Popen(
+            proc = spawn_process(
                 spawn_argv,
                 cwd=effective_cwd,
                 env=full_env,
@@ -209,15 +214,16 @@ def register_exec_tools(mcp: FastMCP) -> None:
         except OSError as e:
             return _err_envelope(command, f"spawn failed: {e}")
 
-        # Push stdin without blocking on the process draining it. For
-        # large stdin payloads this would deadlock; for typical agent
-        # use (small payloads or None) it's fine.
-        if stdin is not None and proc.stdin is not None:
+        # A child that never reads stdin must still be subject to its deadline.
+        def _write_stdin() -> None:
             try:
                 proc.stdin.write(stdin.encode("utf-8"))
                 proc.stdin.close()
             except (BrokenPipeError, OSError):
                 pass
+
+        if stdin is not None and proc.stdin is not None:
+            threading.Thread(target=_write_stdin, daemon=True).start()
 
         # Pump stdout/stderr into ring buffers so we don't deadlock on
         # full pipes during the wait. These same buffers become the
@@ -254,13 +260,12 @@ def register_exec_tools(mcp: FastMCP) -> None:
         # Wait for either: auto-bg budget, hard timeout, or natural exit.
         promoted = False
         timed_out = False
-        budget = auto_background_after_sec if auto_background_after_sec > 0 else timeout_sec
-        budget = min(budget, timeout_sec) if timeout_sec > 0 else budget
+        wake_at = start + min(waits)
 
         try:
-            proc.wait(timeout=budget if budget > 0 else None)
+            proc.wait(timeout=max(0, wake_at - time.monotonic()))
         except subprocess.TimeoutExpired:
-            if auto_background_after_sec > 0:
+            if auto_background_after_sec > 0 and (deadline is None or time.monotonic() < deadline):
                 # Promote: the process keeps running, we hand its
                 # already-pumping buffers to the JobManager.
                 try:
@@ -271,6 +276,8 @@ def register_exec_tools(mcp: FastMCP) -> None:
                         existing_stdout_buf=stdout_buf,
                         existing_stderr_buf=stderr_buf,
                         existing_pumps=pumps,
+                        started_at=start,
+                        deadline=deadline,
                     )
                     promoted = True
                     return build_exec_envelope(
@@ -291,15 +298,11 @@ def register_exec_tools(mcp: FastMCP) -> None:
                     # Cap reached; treat as a hard timeout rather than spin.
                     pass
             # Fall through to hard-kill path.
-            try:
-                proc.terminate()
-                proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+            terminate_process_tree(proc)
             timed_out = True
 
         # Inline path: drain pump threads.
+        close_process_tree(proc)
         for t in pumps:
             t.join(timeout=2.0)
 

@@ -8,6 +8,7 @@ from framework.agent_loop.conversation import (  # noqa: F401
 from framework.agent_loop.types import (  # noqa: F401
     AgentContext,
     AgentProtocol,
+    AgentReport,
     AgentResult,
     AgentSpec,
 )

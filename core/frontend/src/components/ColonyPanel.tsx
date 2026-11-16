@@ -154,7 +154,7 @@ export default function ColonyPanel({
     if (focusWorkerId) setTab("workers");
   }, [focusWorkerId, setTab]);
 
-  // ── Resizable width (mirrors QueenProfilePanel) ─────────────────────
+  // ── Resizable width ─────────────────────────────────────────────────
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 720;
   // Seed from a remembered width if the user has dragged before; otherwise a

@@ -7,8 +7,8 @@ desktop chat can render the chart live in the message bubble (using the
 same ECharts/Mermaid spec the server rendered).
 
 Bash-only? No — this is the cross-platform charting surface, complementary
-to terminal-tools. Identical pipeline-integration shape: auto-seeded into
-``_DEFAULT_LOCAL_SERVERS``, paired with a tool-gated foundational skill.
+to terminal-tools. Identical pipeline-integration shape: an in-process
+harness group in Hive, paired with a tool-gated foundational skill.
 """
 
 from __future__ import annotations
