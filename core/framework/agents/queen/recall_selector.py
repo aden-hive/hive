@@ -1,11 +1,14 @@
-"""Recall selector — pre-turn memory selection for the queen.
+"""Recall selector — memory selection for the queen.
 
-Before each conversation turn the system:
+For each user message the system:
   1. Scans one or more memory directories for ``.md`` files (cap: 200 each).
   2. Reads headers (frontmatter + first 30 lines).
   3. Uses an LLM call with structured JSON output to pick the most relevant
      memories for each scope.
-  4. Injects them into the system prompt.
+  4. Injects them into the conversation as a reminder.
+
+``memory_recall.mode`` decides when (``framework.config.MemoryRecallConfig``);
+in "index" mode there is no pick, and :func:`memory_index` lists every note.
 
 The selector only sees the user's query string — no full conversation
 context.  This keeps it cheap and fast.  Errors are caught and return
@@ -14,8 +17,10 @@ context.  This keeps it cheap and fast.  Errors are caught and return
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -234,33 +239,35 @@ async def build_scoped_recall_blocks(
     global_max_results: int = 3,
     queen_max_results: int = 3,
 ) -> tuple[str, str]:
-    """Build separate recall blocks for global and queen-scoped memory."""
-    global_dir = global_memory_dir or _default_global_memory_dir()
-    global_selected = await select_memories(
-        query,
-        llm,
-        memory_dir=global_dir,
-        max_results=global_max_results,
-    )
-    global_block = format_recall_injection(
-        global_selected,
-        memory_dir=global_dir,
-        label="Global Memories",
-    )
+    """Build separate recall blocks for global and queen-scoped memory.
 
+    The two scopes are picked at once: each pick is a model call, and a turn may be waiting on both.
+    """
+    global_dir = global_memory_dir or _default_global_memory_dir()
+    picks = [select_memories(query, llm, memory_dir=global_dir, max_results=global_max_results)]
+    if queen_memory_dir is not None:
+        picks.append(select_memories(query, llm, memory_dir=queen_memory_dir, max_results=queen_max_results))
+    selected = await asyncio.gather(*picks)
+
+    global_block = format_recall_injection(selected[0], memory_dir=global_dir, label="Global Memories")
     queen_block = ""
     if queen_memory_dir is not None:
-        queen_selected = await select_memories(
-            query,
-            llm,
-            memory_dir=queen_memory_dir,
-            max_results=queen_max_results,
-        )
         queen_label = f"Queen Memories: {queen_id}" if queen_id else "Queen Memories"
-        queen_block = format_recall_injection(
-            queen_selected,
-            memory_dir=queen_memory_dir,
-            label=queen_label,
-        )
-
+        queen_block = format_recall_injection(selected[1], memory_dir=queen_memory_dir, label=queen_label)
     return global_block, queen_block
+
+
+def memory_index(scopes: Sequence[tuple[str, Path | None]]) -> list[tuple[str, Path, dict[str, str]]]:
+    """Every note in each ``(label, directory)`` scope as one manifest line, keyed by filename.
+
+    What :class:`~framework.agent_loop.memory_reminders.MemoryIndexReminderSource` shows her in
+    place of a model's pick. Scopes without a directory or a note are left out.
+    """
+    out: list[tuple[str, Path, dict[str, str]]] = []
+    for label, directory in scopes:
+        if directory is None:
+            continue
+        entries = {mf.filename: format_memory_manifest([mf]) for mf in scan_memory_files(directory)}
+        if entries:
+            out.append((label, directory, entries))
+    return out

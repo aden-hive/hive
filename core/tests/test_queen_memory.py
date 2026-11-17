@@ -768,31 +768,63 @@ async def test_a_restored_session_is_not_reflected_on_until_someone_speaks(tmp_p
     assert llm.acomplete.await_count == 1
 
 
-def test_memory_llm_is_the_worker_model_when_configured(monkeypatch):
+class _NamedLLM:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    async def acomplete(self, *args, **kwargs) -> str:
+        return f"{self.model} answered"
+
+
+def test_memory_llm_follows_the_setting_while_the_session_runs(monkeypatch):
     from framework.server.session_manager import Session, SessionManager
 
-    queen_llm, worker_llm = object(), object()
+    queen_llm, worker_llm = _NamedLLM("queen-model"), _NamedLLM("worker-model")
     session = Session(id="session_memory_llm", event_bus=None, llm=queen_llm, loaded_at=0.0)
     manager = SessionManager()
     monkeypatch.setattr(manager, "build_worker_llm", lambda: worker_llm)
+    settings: dict = {"worker_llm": {"model": "worker-model"}}
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: settings)
+    llm = manager.memory_llm(session)
 
-    monkeypatch.setattr("framework.config.get_hive_config", lambda: {"memory_reflection": {"model": "worker"}})
-    assert manager.memory_llm(session) is worker_llm
+    assert (llm.model, asyncio.run(llm.acomplete([]))) == ("worker-model", "worker-model answered")
 
-    monkeypatch.setattr("framework.config.get_hive_config", lambda: {})
-    assert manager.memory_llm(session) is queen_llm
+    settings["memory_reflection"] = {"model": "main"}
+    assert (llm.model, asyncio.run(llm.acomplete([]))) == ("queen-model", "queen-model answered")
+
+
+def test_memory_llm_builds_the_worker_model_again_only_when_its_slot_changes(monkeypatch):
+    from framework.server.session_manager import Session, SessionManager
+
+    session = Session(id="session_memory_llm", event_bus=None, llm=_NamedLLM("queen-model"), loaded_at=0.0)
+    manager = SessionManager()
+    settings: dict = {"worker_llm": {"model": "worker-a"}}
+    built: list[str] = []
+
+    def build() -> _NamedLLM:
+        built.append(settings["worker_llm"]["model"])
+        return _NamedLLM(built[-1])
+
+    monkeypatch.setattr(manager, "build_worker_llm", build)
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: settings)
+    llm = manager.memory_llm(session)
+
+    assert [llm.model, llm.model] == ["worker-a", "worker-a"]
+    settings["worker_llm"] = {"model": "worker-b"}
+    assert llm.model == "worker-b"
+    assert built == ["worker-a", "worker-b"]
 
 
 def test_memory_llm_falls_back_to_her_model_without_a_worker_model(monkeypatch):
     from framework.server.session_manager import Session, SessionManager
 
-    queen_llm = object()
+    queen_llm = _NamedLLM("queen-model")
     session = Session(id="session_memory_llm", event_bus=None, llm=queen_llm, loaded_at=0.0)
     manager = SessionManager()
     monkeypatch.setattr(manager, "build_worker_llm", lambda: None)
-    monkeypatch.setattr("framework.config.get_hive_config", lambda: {"memory_reflection": {"model": "worker"}})
+    monkeypatch.setattr("framework.config.get_hive_config", lambda: {})
 
-    assert manager.memory_llm(session) is queen_llm
+    assert manager.memory_llm(session).current() is queen_llm
 
 
 @pytest.mark.asyncio

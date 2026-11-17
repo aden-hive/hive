@@ -901,6 +901,7 @@ class AgentLoop(AgentProtocol):
             ColonyWorkerSnapshotReminderSource,
         )
         from framework.agent_loop.idle_nudge import IdleNudgeSource
+        from framework.agent_loop.memory_reminders import MemoryIndexReminderSource, MemoryRecallReminderSource
         from framework.agent_loop.past_conversations_reminder import PastConversationsReminderSource
         from framework.agent_loop.stream_stall import StreamStallSource
         from framework.agent_loop.tool_skill_reminders import (
@@ -919,6 +920,9 @@ class AgentLoop(AgentProtocol):
         self._reminder_hub.register(ColonyParallelNudgeSource())
         self._reminder_hub.register(ActiveWorkersReminderSource())
         self._reminder_hub.register(PastConversationsReminderSource())
+        # Queen-only, whichever of the two memory_recall.mode wires (or neither).
+        self._reminder_hub.register(MemoryRecallReminderSource())
+        self._reminder_hub.register(MemoryIndexReminderSource())
         self._reminder_hub.register(TurnContextReminderSource())
         # Queen-only: the searchable-tools manifest + skills catalog ride the
         # conversation as <system-reminder>s Self-skip for non-queen streams.

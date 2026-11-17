@@ -220,6 +220,15 @@ class AgentContext:
     # user turn. Wired by the queen orchestrator; None elsewhere.
     past_conversation_recall_provider: Any = None
 
+    # How her memory notes reach her (framework.agent_loop.memory_reminders);
+    # the orchestrator wires the one ``memory_recall.mode`` names and leaves
+    # the other None. ``memory_recall_provider``: async Callable[[str], str],
+    # the user's message in, the notes a model picked for it out ("" for
+    # none). ``memory_index_provider``: Callable[[], list[(label, folder,
+    # {file name: manifest line})]], every note in her scopes.
+    memory_recall_provider: Any = None
+    memory_index_provider: Any = None
+
     # Optional Callable[[], str | None]: the chat app this conversation comes
     # through (see framework.server.channels), None for the dashboard. The user
     # there can't see the task panel. Wired by the queen orchestrator.

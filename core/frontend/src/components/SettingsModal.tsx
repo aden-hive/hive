@@ -14,6 +14,7 @@ import { configApi, type ModelOption, type RateLimitEntry } from "@/api/config";
 import { compressImage } from "@/lib/image-utils";
 import { useShowRuntimeLogs } from "@/hooks/use-show-runtime-logs";
 import McpServersPanel from "./McpServersPanel";
+import { MemorySettingsSection } from "./MemorySettingsSection";
 import { Switch } from "./Switch";
 import type { MotionPref } from "@/lib/motion";
 
@@ -58,7 +59,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const [about, setAbout] = useState(userProfile.about);
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<"profile" | "byok" | "mcp" | "cloud" | "help" | "developer" | "rate-limits">(initialSection || "profile");
+  const [activeSection, setActiveSection] = useState<"profile" | "byok" | "memory" | "mcp" | "cloud" | "help" | "developer" | "rate-limits">(initialSection || "profile");
   const [showRuntimeLogs, setShowRuntimeLogs] = useShowRuntimeLogs();
   // null = not yet loaded from the runtime (Switch renders disabled until
   // the GET resolves). Loaded lazily on first visit to the Developer tab.
@@ -258,6 +259,12 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
               AI Model
             </button>
             <button
+              onClick={() => setActiveSection("memory")}
+              className={`text-left text-xs px-2.5 py-1.5 rounded-md transition-colors ${activeSection === "memory" ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"}`}
+            >
+              Memory
+            </button>
+            <button
               onClick={() => setActiveSection("rate-limits")}
               className={`text-left text-xs px-2.5 py-1.5 rounded-md transition-colors ${activeSection === "rate-limits" ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"}`}
             >
@@ -431,6 +438,15 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                 </div>
 
               </>
+            )}
+
+            {activeSection === "memory" && (
+              <MemorySettingsSection
+                onOpenModels={() => {
+                  onClose();
+                  window.location.hash = "#/models";
+                }}
+              />
             )}
 
             {activeSection === "help" && (

@@ -378,6 +378,37 @@ def _ensure_minimal_colony(colony_id: str, *, queen_name: str | None = None) -> 
     return colony_dir
 
 
+class _MemoryLLM:
+    """The model a session's memory work calls (``SessionManager.memory_llm``), chosen at each call.
+
+    Memory work uses only ``acomplete`` and ``model``. The worker provider is built again only when
+    the ``worker_llm`` section changes.
+    """
+
+    def __init__(self, manager: "SessionManager", session: Session) -> None:
+        self._manager = manager
+        self._session = session
+        # (the worker_llm section it was built from, the worker provider or None)
+        self._worker: tuple[str, Any] | None = None
+
+    def current(self) -> Any:
+        from framework.config import get_hive_config, get_memory_reflection_config
+
+        if get_memory_reflection_config().model != "worker":
+            return self._session.llm
+        section = json.dumps(get_hive_config().get("worker_llm"), sort_keys=True, default=str)
+        if self._worker is None or self._worker[0] != section:
+            self._worker = (section, self._manager.build_worker_llm())
+        return self._worker[1] or self._session.llm
+
+    @property
+    def model(self) -> str:
+        return getattr(self.current(), "model", "")
+
+    async def acomplete(self, *args: Any, **kwargs: Any) -> Any:
+        return await self.current().acomplete(*args, **kwargs)
+
+
 class SessionManager:
     """Manages session lifecycles.
 
@@ -517,16 +548,13 @@ class SessionManager:
             **get_worker_llm_extra_kwargs(),
         )
 
-    def memory_llm(self, session: Session) -> Any:
+    def memory_llm(self, session: Session) -> _MemoryLLM:
         """The model a session's memory work (reflection, timeline) runs on: the worker model
-        when ``memory_reflection.model`` is "worker" and one is set, else the session's own."""
-        from framework.config import get_memory_reflection_config
+        when ``memory_reflection.model`` is "worker" and one is set, else the session's own.
 
-        if get_memory_reflection_config().model == "worker":
-            worker = self.build_worker_llm()
-            if worker is not None:
-                return worker
-        return session.llm
+        Chosen again at each call, so a change in Settings reaches sessions already running.
+        """
+        return _MemoryLLM(self, session)
 
     # ------------------------------------------------------------------
     # Session lifecycle

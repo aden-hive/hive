@@ -78,11 +78,11 @@ class TestOpenRouterConfig:
 @pytest.mark.parametrize(
     ("section", "expected"),
     [
-        (None, MemoryReflectionConfig(every_turns=6, long_every=4, model="main")),
-        ({"every_turns": 10, "long_every": 2, "model": "worker"}, MemoryReflectionConfig(10, 2, "worker")),
-        ({"every_turns": 0, "long_every": -1, "model": "cheap"}, MemoryReflectionConfig(6, 4, "main")),
-        ({"every_turns": "3", "long_every": True}, MemoryReflectionConfig(6, 4, "main")),
-        ("often", MemoryReflectionConfig(6, 4, "main")),
+        (None, MemoryReflectionConfig(every_turns=6, long_every=4, model="worker")),
+        ({"every_turns": 10, "long_every": 2, "model": "main"}, MemoryReflectionConfig(10, 2, "main")),
+        ({"every_turns": 0, "long_every": -1, "model": "cheap"}, MemoryReflectionConfig(6, 4, "worker")),
+        ({"every_turns": "3", "long_every": True}, MemoryReflectionConfig(6, 4, "worker")),
+        ("often", MemoryReflectionConfig(6, 4, "worker")),
     ],
 )
 def test_memory_reflection_config(monkeypatch, section, expected):

@@ -1272,6 +1272,8 @@ async def create_queen(
     # there would invalidate the cached history prefix on every refresh.
     # An injected reminder appends near the tail instead, and stays in
     # history — so it is only re-injected when its content changes.
+    from framework.agent_loop.memory_reminders import RECALL_HEADER
+
     _last_injected_recall = ""
 
     # NOTE: this helper MUST NOT be named `_queen_loop` — the main
@@ -1298,9 +1300,7 @@ async def create_queen(
         # one. A wake-up injection could land just after the queen replied
         # and make her answer the same message again.
         await loop.inject_event(
-            "<system-reminder>\nRecalled memories relevant to the latest "
-            "user message (supersedes earlier recall reminders):\n\n"
-            f"{block}\n</system-reminder>",
+            f"<system-reminder>\n{RECALL_HEADER}\n\n{block}\n</system-reminder>",
             wake=False,
         )
 
@@ -1319,6 +1319,10 @@ async def create_queen(
         agent_loop.inject_event() and do NOT publish CLIENT_INPUT_RECEIVED,
         so this runs exactly once per real user turn.
         """
+        from framework.config import get_memory_recall_config
+
+        if get_memory_recall_config().mode != "background":
+            return
         query = (event.data or {}).get("content", "")
         await _inject_recall_if_changed()
 
@@ -1333,11 +1337,33 @@ async def create_queen(
 
         _asyncio.create_task(_bg_refresh())
 
+    # memory_recall.mode: "background" is the handler above; "wait" and
+    # "index" are reminder sources (framework.agent_loop.memory_reminders),
+    # wired with the agent context below. All three are wired and each acts
+    # only while its mode is set, read at each message: a change in Settings
+    # reaches running sessions.
     session.event_bus.subscribe(
         [EventType.CLIENT_INPUT_RECEIVED],
         _recall_on_user_input,
         filter_stream="queen",
     )
+
+    async def _recall_for_message(text: str) -> str:
+        """The notes a model picks for *text* ("wait" mode); the last pick when this one fails."""
+        await _refresh_recall_cache(text)
+        return phase_state.render_recall_block()
+
+    def _memory_index() -> list:
+        """Every note in her two scopes ("index" mode)."""
+        from framework.agents.queen.queen_memory_v2 import global_memory_dir
+        from framework.agents.queen.recall_selector import memory_index
+
+        return memory_index(
+            [
+                ("Shared with every queen", phase_state.global_memory_dir or global_memory_dir()),
+                ("Yours alone", phase_state.queen_memory_dir),
+            ]
+        )
 
     async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
         from framework.agent_loop.internals.types import HookResult
@@ -1429,7 +1455,10 @@ async def create_queen(
 
         # Seed recall cache so the first turn has relevant memories.
         # Use a short timeout to avoid blocking the first turn on slow models.
-        if trigger:
+        # "background" mode only: the other modes recall at the first message themselves.
+        from framework.config import get_memory_recall_config
+
+        if trigger and get_memory_recall_config().mode == "background":
             try:
                 import asyncio
 
@@ -1688,6 +1717,10 @@ async def create_queen(
                 # Same scope search_messages uses; the live session is
                 # excluded (it's already in context).
                 past_conversation_recall_provider=lambda text: _recall_past_conversations(session, text, queen_dir.name),
+                # Her memory notes, before she answers, while memory_recall.mode
+                # says so (framework.agent_loop.memory_reminders).
+                memory_recall_provider=_recall_for_message,
+                memory_index_provider=_memory_index,
                 chat_app_provider=lambda: session.channel,
                 # Whatever installed turn-context packages (e.g. voice
                 # examples) want her to see before she answers; nothing

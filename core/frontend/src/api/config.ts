@@ -63,6 +63,17 @@ export interface RateLimitEntry {
   weekly_default?: number;
 }
 
+/** Settings → Memory: how a queen's memory notes reach her, and which model writes them. */
+export interface MemorySettings {
+  recall_mode: string;
+  /** The modes the server accepts, in the order to list them. */
+  recall_modes: string[];
+  /** Set when the server's HIVE_MEMORY_RECALL env var overrides the saved recall mode. */
+  recall_mode_env: string | null;
+  reflection_model: string;
+  reflection_models: string[];
+}
+
 export interface FeaturesConfig {
   /** Colony-adaptive worker tool budgets (Developer options toggle). */
   adaptive_tool_budget: boolean;
@@ -170,6 +181,12 @@ export const configApi = {
       "/config/features",
       { features },
     ),
+
+  getMemorySettings: () => api.get<{ memory: MemorySettings }>("/config/memory"),
+
+  /** Saves to configuration.json; running sessions follow from their next message. */
+  setMemorySettings: (memory: Partial<Pick<MemorySettings, "recall_mode" | "reflection_model">>) =>
+    api.put<{ memory: MemorySettings }>("/config/memory", { memory }),
 
   setLLMConfig: (provider: string, model: string) =>
     api.put<LLMConfigUpdateResponse>("/config/llm", { provider, model }),

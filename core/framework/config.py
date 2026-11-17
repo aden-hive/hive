@@ -1012,19 +1012,23 @@ def get_stall_check_enabled() -> bool:
     return bool(get_hive_config().get("stall_check", False))
 
 
+#: The models memory reflection can run on, in the order Settings lists them.
+MEMORY_REFLECTION_MODELS = ("worker", "main")
+
+
 @dataclass(frozen=True)
 class MemoryReflectionConfig:
     """How often a queen's memory reflection runs, and on which model.
 
-    configuration.json: ``"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "main"}``.
+    configuration.json: ``"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "worker"}``.
     """
 
     #: Reflect after every this many of her answered turns in a session.
     every_turns: int = 6
     #: Every this many reflections, also consolidate the memory files (a long reflection).
     long_every: int = 4
-    #: "main" (the session's model) or "worker" (the worker_llm slot, when set).
-    model: str = "main"
+    #: "worker" (the worker_llm slot; the session's model when none is set) or "main" (the session's model).
+    model: str = "worker"
 
 
 def get_memory_reflection_config() -> MemoryReflectionConfig:
@@ -1042,7 +1046,50 @@ def get_memory_reflection_config() -> MemoryReflectionConfig:
     return MemoryReflectionConfig(
         every_turns=positive("every_turns", default.every_turns),
         long_every=positive("long_every", default.long_every),
-        model=model if model in ("main", "worker") else default.model,
+        model=model if model in MEMORY_REFLECTION_MODELS else default.model,
+    )
+
+
+#: The ways memory notes can reach a queen, in the order Settings lists them.
+MEMORY_RECALL_MODES = ("index", "wait", "background")
+
+
+@dataclass(frozen=True)
+class MemoryRecallConfig:
+    """How a queen's memory notes reach her (``framework.agent_loop.memory_reminders``).
+
+    configuration.json: ``"memory_recall": {"mode": "wait", "wait_seconds": 10}``.
+    """
+
+    #: "index": no pick; she sees every note's name and description, and reads the ones she wants.
+    #: "wait": a model picks notes for each message, finished before she answers, or skipped for that
+    #: message past ``wait_seconds``. "background": the same pick after she has started answering, so
+    #: the notes arrive mid-turn or with the next message.
+    mode: str = "index"
+    #: The longest "wait" holds a message for its pick.
+    wait_seconds: float = 10.0
+
+
+def get_memory_recall_env_mode() -> str | None:
+    """The mode the ``HIVE_MEMORY_RECALL`` env var sets, when it names one: it overrides the configured mode."""
+    mode = os.environ.get("HIVE_MEMORY_RECALL", "").strip().lower()
+    return mode if mode in MEMORY_RECALL_MODES else None
+
+
+def get_memory_recall_config() -> MemoryRecallConfig:
+    """The ``memory_recall`` section, with defaults for anything missing or invalid.
+
+    The ``HIVE_MEMORY_RECALL`` env var, when set to a mode, overrides the configured one.
+    """
+    raw = get_hive_config().get("memory_recall")
+    raw = raw if isinstance(raw, dict) else {}
+    default = MemoryRecallConfig()
+    mode = get_memory_recall_env_mode() or raw.get("mode")
+    wait = raw.get("wait_seconds")
+    is_seconds = isinstance(wait, int | float) and not isinstance(wait, bool) and wait > 0
+    return MemoryRecallConfig(
+        mode=mode if mode in MEMORY_RECALL_MODES else default.mode,
+        wait_seconds=float(wait) if is_seconds else default.wait_seconds,
     )
 
 

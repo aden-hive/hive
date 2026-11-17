@@ -973,6 +973,74 @@ async def handle_update_features(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------
+# Memory (Settings → Memory)
+# ------------------------------------------------------------------
+
+# Request field → (configuration.json section, key in it).
+_MEMORY_SETTINGS = {
+    "recall_mode": ("memory_recall", "mode"),
+    "reflection_model": ("memory_reflection", "model"),
+}
+
+
+def _memory_choices() -> dict[str, tuple[str, ...]]:
+    from framework.config import MEMORY_RECALL_MODES, MEMORY_REFLECTION_MODELS
+
+    return {"recall_mode": MEMORY_RECALL_MODES, "reflection_model": MEMORY_REFLECTION_MODELS}
+
+
+def _memory_settings() -> dict[str, Any]:
+    from framework.config import get_memory_recall_config, get_memory_recall_env_mode, get_memory_reflection_config
+
+    choices = _memory_choices()
+    return {
+        "recall_mode": get_memory_recall_config().mode,
+        "recall_modes": list(choices["recall_mode"]),
+        # Set when the HIVE_MEMORY_RECALL env var overrides the saved recall mode.
+        "recall_mode_env": get_memory_recall_env_mode(),
+        "reflection_model": get_memory_reflection_config().model,
+        "reflection_models": list(choices["reflection_model"]),
+    }
+
+
+async def handle_get_memory_settings(request: web.Request) -> web.Response:
+    """GET /api/config/memory — how notes reach a queen, and which model writes them."""
+    return web.json_response({"memory": _memory_settings()})
+
+
+async def handle_update_memory_settings(request: web.Request) -> web.Response:
+    """PUT /api/config/memory — body ``{"memory": {"recall_mode"?: ..., "reflection_model"?: ...}}``.
+
+    Saves ``memory_recall.mode`` and ``memory_reflection.model`` in configuration.json, keeping the
+    sections' other keys. Running sessions follow: recall from her next message, the model from the
+    next reflection.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    block = body.get("memory", body) if isinstance(body, dict) else None
+    if not isinstance(block, dict):
+        return web.json_response({"error": "memory must be an object"}, status=400)
+    choices = _memory_choices()
+    updates = {field: block[field] for field in _MEMORY_SETTINGS if field in block}
+    if not updates:
+        return web.json_response({"error": f"No known memory settings. Supported: {', '.join(_MEMORY_SETTINGS)}"}, status=400)
+    for field, value in updates.items():
+        if value not in choices[field]:
+            return web.json_response({"error": f"{field} must be one of: {', '.join(choices[field])}"}, status=400)
+
+    config = get_hive_config()
+    for field, value in updates.items():
+        section, key = _MEMORY_SETTINGS[field]
+        current = config.get(section)
+        config[section] = {**(current if isinstance(current, dict) else {}), key: value}
+    _write_config_atomic(config)
+    logger.info("memory settings: updated %s", updates)
+    return web.json_response({"memory": _memory_settings()})
+
+
+# ------------------------------------------------------------------
 # User avatar
 # ------------------------------------------------------------------
 
@@ -1422,6 +1490,8 @@ def register_routes(app: web.Application) -> None:
     app.router.add_put("/api/config/sentinel", handle_update_sentinel_config)
     app.router.add_get("/api/config/features", handle_get_features)
     app.router.add_put("/api/config/features", handle_update_features)
+    app.router.add_get("/api/config/memory", handle_get_memory_settings)
+    app.router.add_put("/api/config/memory", handle_update_memory_settings)
     app.router.add_get("/api/config/rate-limits", handle_get_rate_limits)
     app.router.add_put("/api/config/rate-limits", handle_update_rate_limits)
     app.router.add_get("/api/config/profile", handle_get_profile)
