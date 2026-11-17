@@ -309,6 +309,8 @@ export GROQ_API_KEY="..."
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
 
+For how the provider and model are selected, how failures are retried, and how to switch models at runtime, see [LLM Providers](llm-providers.md).
+
 ### Provider Examples
 
 Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
