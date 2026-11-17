@@ -6,7 +6,7 @@ It comes in two sizes. **LongMemEval-S** gives each question about 48 past sessi
 
 (These sizes are measured on the 2025 cleaned release we run, with the o200k tokenizer: M histories came to 1.07–1.15M tokens across a sample of 12 questions. The LongMemEval paper describes M as about 500 sessions and 1.5M tokens.)
 
-This page reports the results for Hive V1, how we got them, and what they don't show.
+This page reports the results for Hive V1, a first measurement of the memory notes added in 1.0.15, how we got them, and what they don't show.
 
 ## Results at a glance
 
@@ -61,6 +61,27 @@ Hive answered 26 of the 30 abstention questions correctly on both S and M. Media
 
 The biggest gains on LongMemEval-S were in preferences (10.0% to 63.3%), combining facts across sessions (69.2% to 82.0%) and facts the user stated (87.1% to 100.0%), mostly from the Queen no longer asking you for things you had already told her.
 
+## Memory notes in 1.0.15
+
+The results above measure conversation recall alone. As a Queen talks with you she also keeps short memory notes about you, and none were built from the seeded histories. Version 1.0.15 changed how those notes reach her, so we measured them on part of LongMemEval-S.
+
+**Setup.** We used the 108 questions of the two types notes should help most: the user's preferences (30) and facts that changed over time (78). For each question, Hive's reflection read every seeded session in date order, as it would after each real conversation, and left 14 to 33 notes (median 23). The same notes were then delivered four ways. `gpt-6.1-sol` answered every question and also graded them, as the development judge rather than the official one.
+
+| Configuration | Preferences (30) | Changed facts (78) | All 108 | Median seconds |
+|---|---|---|---|---|
+| No notes | 19 | 75 | 94 (87.0%) | 10.4 |
+| Notes picked while she answers (before 1.0.15) | 21 | 75 | 96 (88.9%) | 11.3 |
+| Notes picked before she answers (`wait`) | 26 | 75 | 101 (93.5%) | 12.7 |
+| **Every note listed, she opens what she needs (`index`, the 1.0.15 default)** | **25** | **76** | **101 (93.5%)** | **10.1** |
+
+- **Before 1.0.15 the notes rarely arrived in time.** A model picked notes for each message after she had started answering. They reached her conversation on only 4 of the 108 questions, and the score barely moved: compared with no notes, 4 answers improved and 2 got worse.
+- **Delivered before she answers, notes help with preferences.** Both new ways raised preference answers from 19 to 25 or 26 of 30 (63% to 83–87%). Facts that changed over time were already at 96% and stayed there.
+- **The list costs no time.** Against no notes, `index` changed 9 answers, 8 of them for the better (sign test p ≈ 0.04), and answered as fast. She opened a note on only 8 questions: the one-line descriptions were usually enough. With the list in front of her she also searched past conversations more often, on 18 of the 30 preference questions against 10 without notes.
+- **Waiting for a pick costs about 2 seconds a reply.** `wait` changed 13 answers against no notes, 10 for the better (p ≈ 0.09). Between `wait` and `index`, 4 answers went each way, so they are tied.
+- **Notes cost one abstention.** Of the 6 questions whose honest answer is "you never told me", Hive declined 5 without notes and 4 in each configuration with them.
+
+Each configuration was run once, on two of the six question types, and graded by the development judge, so these numbers aren't comparable with the 500-question results above. The notes were written with the reflection prompt as it stood before 1.0.15, which has since gained lines about who wrote a note and when it was last confirmed.
+
 ## Where Hive still loses points
 
 - **Preferences, especially in large histories: 63.3% on S, 30.0% on M.** Questions like "any tips for keeping my kitchen clean?" depend on details you mentioned once, such as your countertop material. On M the Queen searched on 87% of these questions, but the session holding the detail appeared in her results only 23% of the time. A likely reason is that generic topic words like "kitchen" match dozens of the roughly 476 sessions.
@@ -100,7 +121,7 @@ What the comparison does and doesn't show:
 - **Each configuration was run once.** The confidence intervals above reflect sampling over questions, not run-to-run variation. Two identical runs of the same 37-question subset scored 3 and 9 correct, so expect a point or two of movement between full runs.
 - **Answering-model access.** The answering models are named by the identifiers our OpenAI-compatible endpoint serves (`gpt-6.1-sol`, `gpt-6-luna`).
 - **Dataset version.** We use the 2025 cleaned release; most published results predate it and use the original. Between S and M, the cleaned release keeps the same questions, answers and evidence sessions, but the M histories carry different session and question dates.
-- **What the setup leaves out.** Each question is a single message to a fresh Queen. The Queen's reflection notes (the short memory files she writes about you as you talk) are not built from the seeded history, so the benchmark measures conversation recall, not those notes. The optional timeline was off.
+- **What the setup leaves out.** Each question is a single message to a fresh Queen. For the 500-question results, the Queen's reflection notes (the short memory files she writes about you as you talk) are not built from the seeded history, so those results measure conversation recall, not the notes; [Memory notes in 1.0.15](#memory-notes-in-1015) measures them on 108 questions. The optional timeline was off.
 - **Indexing.** On M, the memory index is built before the Queen starts, as it would have been built up over time in real use, so the first question isn't charged for indexing ~476 sessions at once.
 - **How the M run was executed.** The 500 M answers were produced over three resumed runs. Partway through, the judge's API quota ran out; the 79 questions affected were asked again from scratch, and all 500 answers were then graded together by the official judge.
 - **Builds.** The S results come from the 8 October 2026 build and the M results from the 10–11 October builds. Memory search, automatic recall and the Queen's memory instructions are identical in all of them; in between, some unrelated passages (team CRM and browser instructions) were removed from the Queen's prompt, and a charting skill was edited.
@@ -120,6 +141,11 @@ export HIVE_LME_JUDGE_API_KEY=$OPENAI_API_KEY
 
 # Hive on LongMemEval-S (the dataset downloads on first use)
 HIVE_LME_QUESTIONS=all uv run pytest tests/e2e/test_longmemeval.py -m live -n 3
+
+# With the memory notes each history would have left (the first build per question
+# reflects on every session in turn; cached after). HIVE_MEMORY_RECALL=wait or background
+# compares how the notes reach her.
+HIVE_LME_NOTES=1 HIVE_LME_QUESTIONS=all uv run pytest tests/e2e/test_longmemeval.py -m live -n 3
 
 # Hive on LongMemEval-M (2.7 GB download)
 HIVE_LME_DATASET=m HIVE_LME_QUESTIONS=all uv run pytest tests/e2e/test_longmemeval.py -m live -n 3
