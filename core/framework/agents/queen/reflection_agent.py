@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from framework.agents.queen import memory_log
 from framework.agents.queen.queen_memory_v2 import (
     GLOBAL_MEMORY_CATEGORIES,
     MAX_FILE_SIZE_BYTES,
@@ -121,6 +122,10 @@ _REFLECTION_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Memory scope: 'global' or 'queen'. Defaults to 'global'.",
                 },
+                "reason": {
+                    "type": "string",
+                    "description": "Why it goes, e.g. 'merged into user-diet.md' or 'the user said it no longer holds'.",
+                },
             },
             "required": ["filename"],
             "additionalProperties": False,
@@ -200,8 +205,15 @@ def _execute_tool(
     memory_dir: Path | dict[str, Path],
     *,
     queen_id: str | None = None,
+    confirms: bool = True,
+    now: datetime | None = None,
 ) -> str:
-    """Execute a reflection tool synchronously.  Returns the result string."""
+    """Execute a reflection tool synchronously.  Returns the result string.
+
+    Writes and deletions go through :mod:`memory_log`, as the reflection's. *confirms*: a
+    conversation backs what it writes (false for housekeeping, which only reorganises). *now*: the
+    day it writes as, for conversations replayed after the fact.
+    """
     memory_dirs = _normalize_memory_dirs(memory_dir)
     if name == "list_memory_files":
         requested_scope = args.get("scope")
@@ -249,9 +261,6 @@ def _execute_tool(
         mem_type = (fm.get("type") or "").strip().lower()
         if mem_type and mem_type not in GLOBAL_MEMORY_CATEGORIES:
             return f"ERROR: Invalid memory type '{mem_type}'. Allowed types: {', '.join(GLOBAL_MEMORY_CATEGORIES)}."
-        # Enforce file size limit.
-        if len(content.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
-            return f"ERROR: Content exceeds {MAX_FILE_SIZE_BYTES} byte limit."
         # Enforce file cap (only for new files).
         try:
             path = _safe_memory_path(filename, scope_dir)
@@ -261,8 +270,10 @@ def _execute_tool(
             existing = list(scope_dir.glob("*.md"))
             if len(existing) >= MAX_FILES:
                 return f"ERROR: File cap reached in {scope} ({MAX_FILES}). Delete a file first."
-        scope_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        try:
+            memory_log.write(scope_dir, path.name, content, author="reflection", confirms=confirms, now=now)
+        except (memory_log.OwnerWritten, memory_log.TooLarge) as exc:
+            return f"ERROR: {exc}"
         logger.debug(
             "reflect: tool write_memory_file[%s] → %s (%d chars)",
             scope,
@@ -283,7 +294,10 @@ def _execute_tool(
             return f"ERROR: {exc}"
         if not path.exists():
             return f"ERROR: File not found in {scope}: {filename}"
-        path.unlink()
+        try:
+            memory_log.retire(memory_dirs[scope], path.name, author="reflection", reason=str(args.get("reason") or ""), now=now)
+        except memory_log.OwnerWritten as exc:
+            return f"ERROR: {exc}"
         logger.debug("reflect: tool delete_memory_file[%s] → %s", scope, filename)
         return f"Deleted {scope}:{filename}."
 
@@ -336,10 +350,12 @@ async def _reflection_loop(
     max_turns: int = _MAX_TURNS,
     *,
     queen_id: str | None = None,
+    confirms: bool = True,
+    now: datetime | None = None,
 ) -> tuple[bool, list[str], str]:
     """Run a mini tool-use loop: LLM → tool calls → repeat.
 
-    Returns (success, changed_files, last_text).
+    Returns (success, changed_files, last_text). *confirms* and *now*: see :func:`_execute_tool`.
     """
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
     changed_files: list[str] = []
@@ -457,7 +473,7 @@ async def _reflection_loop(
         tool_results: list[dict[str, Any]] = []
         for tc in tool_calls_raw:
             tc_input = tc.get("input", {})
-            result = _execute_tool(tc["name"], tc_input, memory_dirs, queen_id=queen_id)
+            result = _execute_tool(tc["name"], tc_input, memory_dirs, queen_id=queen_id, confirms=confirms, now=now)
             if tc["name"] in ("write_memory_file", "delete_memory_file"):
                 fname = tc_input.get("filename", "")
                 try:
@@ -547,6 +563,12 @@ Rules:
   queen, or agent as the identity in this file. Add/update other sections
   below it.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files per scope.
+- The `author`, `learned` and `confirmed` lines are kept by the system: leave them out. A file
+  marked `author: owner` was written by the user and can't be changed; when you learn something
+  that differs from it, write it to another file.
+- Writing a file you didn't change confirms it as of this conversation, so only write what this
+  conversation supports. A deleted file is kept in a history the user can restore from: give the
+  reason.
 """
 
 
@@ -580,6 +602,9 @@ Rules:
 - Remove memories that are stale, superseded, or misplaced.
 - Keep the total collection lean and high-signal.
 - Do NOT invent new information — only reorganise what exists.
+- Files marked `author: owner` were written by the user: leave them as they are. Leave the
+  `author`, `learned` and `confirmed` lines out; the system keeps them.
+- When you merge files, give each deleted one the reason (e.g. "merged into user-diet.md").
 """
 
 
@@ -677,8 +702,6 @@ async def _run_short_reflection_with_prompt(
     queen_id: str | None,
 ) -> None:
     """Run a short reflection with a scope-specific system prompt."""
-    mem_dir = memory_dir
-
     messages = await _read_conversation_parts(session_dir)
     if not messages:
         logger.info("reflect: no conversation parts found in %s, skipping", session_dir)
@@ -687,6 +710,53 @@ async def _run_short_reflection_with_prompt(
         logger.info("reflect: nothing new in %s since the last reflection, skipping", session_dir)
         return
 
+    changed, reason = await _reflect_on(messages, llm, memory_dir, system_prompt=system_prompt, queen_id=queen_id)
+    _reflected_parts[str(session_dir)] = len(messages)
+    if changed:
+        logger.info("reflect: %s short reflection done, changed files: %s", log_label, changed)
+    else:
+        logger.info(
+            "reflect: %s short reflection done, no changes — %s",
+            log_label,
+            reason or "no reason",
+        )
+
+
+async def reflect_on_messages(
+    messages: list[dict[str, Any]],
+    llm: Any,
+    *,
+    global_memory_dir: Path,
+    queen_memory_dir: Path,
+    queen_id: str,
+    now: datetime | None = None,
+) -> list[str]:
+    """One short reflection over *messages*, as if a session holding them had just ended at *now*.
+
+    For conversations that never ran here (the memory benchmark's seeded history). Returns the
+    files changed, as ``scope:filename``.
+    """
+    changed, _reason = await _reflect_on(
+        messages,
+        llm,
+        {"global": global_memory_dir, "queen": queen_memory_dir},
+        system_prompt=_build_unified_short_reflect_system(queen_id),
+        queen_id=queen_id,
+        now=now,
+    )
+    return changed
+
+
+async def _reflect_on(
+    messages: list[dict[str, Any]],
+    llm: Any,
+    mem_dir: Path | dict[str, Path],
+    *,
+    system_prompt: str,
+    queen_id: str | None,
+    now: datetime | None = None,
+) -> tuple[list[str], str]:
+    """Reflect on the recent *messages*: (files changed, her reason when she changed none)."""
     transcript_lines: list[str] = []
     for msg in messages[-50:]:
         role = msg.get("role", "")
@@ -699,11 +769,11 @@ async def _run_short_reflection_with_prompt(
         transcript_lines.append(f"[{label}]: {content}")
 
     if not transcript_lines:
-        logger.info("reflect: no transcript lines after filtering, skipping")
-        return
+        return [], "no transcript lines after filtering"
 
     transcript = "\n".join(transcript_lines)
-    user_msg = f"## Recent conversation ({len(messages)} messages total)\n\n{transcript}\n\nTimestamp: {datetime.now().isoformat(timespec='minutes')}"
+    stamp = (now or datetime.now()).isoformat(timespec="minutes")
+    user_msg = f"## Recent conversation ({len(messages)} messages total)\n\n{transcript}\n\nTimestamp: {stamp}"
 
     _, changed, reason = await _reflection_loop(
         llm,
@@ -711,16 +781,9 @@ async def _run_short_reflection_with_prompt(
         user_msg,
         mem_dir,
         queen_id=queen_id,
+        now=now,
     )
-    _reflected_parts[str(session_dir)] = len(messages)
-    if changed:
-        logger.info("reflect: %s short reflection done, changed files: %s", log_label, changed)
-    else:
-        logger.info(
-            "reflect: %s short reflection done, no changes — %s",
-            log_label,
-            reason or "no reason",
-        )
+    return changed, reason
 
 
 async def run_long_reflection(
@@ -747,6 +810,7 @@ async def run_long_reflection(
         user_msg,
         mem_dir,
         queen_id=None,
+        confirms=False,
     )
     if changed:
         logger.debug(
@@ -786,6 +850,7 @@ async def run_unified_long_reflection(
         user_msg,
         memory_dirs,
         queen_id=queen_id if "queen" in memory_dirs else None,
+        confirms=False,
     )
     if changed:
         logger.debug("reflect: unified long reflection changed: %s", changed)

@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from framework.agents.queen import memory_log
 from framework.agents.queen.queen_memory_v2 import (
     format_memory_manifest,
     global_memory_dir as _default_global_memory_dir,
@@ -166,21 +168,18 @@ async def select_memories(
         return pinned
 
 
-def _format_relative_age(mtime: float) -> str | None:
-    """Return age description if memory is older than 48 hours.
+def _format_relative_age(content: str, mtime: float) -> str | None:
+    """How long since a conversation last supported the memory, once that is more than two days.
 
-    Returns None if 48 hours or newer, otherwise returns "X days old".
+    Counted from its ``confirmed`` day (:mod:`memory_log`); a file from before those were recorded
+    counts from when it was last written.
     """
-    import time
-
-    age_seconds = time.time() - mtime
-    hours = age_seconds / 3600
-    if hours <= 48:
+    today = datetime.now().date()
+    confirmed = memory_log.confirmed_on(content) or datetime.fromtimestamp(mtime).date()
+    days = (today - confirmed).days
+    if days <= 2:
         return None
-    days = int(age_seconds / 86400)
-    if days == 1:
-        return "1 day old"
-    return f"{days} days old"
+    return f"last confirmed {days} days ago"
 
 
 def format_recall_injection(
@@ -191,7 +190,7 @@ def format_recall_injection(
 ) -> str:
     """Read selected memory files and format for system prompt injection.
 
-    Includes relative timestamp (e.g., "3 days old") for memories older than 48 hours.
+    Says how long ago a memory was last confirmed, once that is more than two days.
     """
 
     mem_dir = memory_dir or _default_global_memory_dir()
@@ -207,7 +206,7 @@ def format_recall_injection(
             content = path.read_text(encoding="utf-8").strip()
             # Get file modification time for age calculation
             mtime = path.stat().st_mtime
-            age_note = _format_relative_age(mtime)
+            age_note = _format_relative_age(content, mtime)
         except OSError:
             continue
 

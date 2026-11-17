@@ -16,6 +16,7 @@ from typing import Any
 
 from aiohttp import web
 
+from framework.agents.queen import memory_log
 from framework.agents.queen.queen_memory_v2 import (
     build_memory_document,
     global_memory_dir,
@@ -743,7 +744,8 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
             body=new_body if new_body else "No profile information yet.",
         )
 
-        memory_path.write_text(content, encoding="utf-8")
+        # The identity lines are the owner's and the rest the reflection's: it stays whoever's it was.
+        memory_log.write(mem_dir, profile_filename, content, author="owner", claim=False, reason="profile settings")
         logger.debug("User profile synced to global memory: %s", memory_path)
     except Exception as exc:
         # Don't fail the API call if memory write fails

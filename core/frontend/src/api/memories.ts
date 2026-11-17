@@ -16,7 +16,13 @@ import { api } from "./client";
  *   GET    /memories               → list every memory across scopes
  *   GET    /memories/file?path=…   → read one memory's content
  *   PUT    /memories/file?path=…   → overwrite one memory's content
- *   DELETE /memories/file?path=…   → delete one memory
+ *   DELETE /memories/file?path=…   → retire one memory (kept in its history)
+ *   GET    /memories/history?path=… → every change to one memory
+ *   POST   /memories/restore?path=… → put a memory back as one change left it
+ *   GET    /memories/retired       → memories retired and not restored
+ *
+ * Edits and removals made here are the owner's: a memory the owner wrote
+ * or edited can't be overwritten or retired by a queen.
  *
  * (Main rewrites these to ``/api/memories…`` before they hit the runtime.)
  */
@@ -38,10 +44,46 @@ export interface Memory {
   scope: MemoryScope;
   /** Queen / colony / agent id when scope is queen/colony/agent; empty for global. */
   scope_name: string;
+  /** Who last wrote it; absent on files from before authors were recorded. */
+  author?: MemoryAuthor | null;
+  /** The day it was first written (YYYY-MM-DD). */
+  learned?: string | null;
+  /** The last day a conversation supported it (YYYY-MM-DD). */
+  confirmed?: string | null;
   /** File mtime in epoch seconds — runtime-provided when available. */
   mtime?: number;
   /** Full markdown body. Absent on list responses; populated by ``read()`` / ``update()``. */
   content?: string;
+}
+
+export type MemoryAuthor = "owner" | "queen" | "reflection";
+
+/** One change to a memory file, from its history. */
+export interface MemoryChange {
+  /** Its number in the scope's log; what ``restore`` takes. */
+  n: number;
+  at: string;
+  op: "write" | "retire" | "restore";
+  file: string;
+  author: MemoryAuthor;
+  reason: string;
+  sources: { quote: string; where: string }[];
+  /** The file's text before and after the change; null where there was none. */
+  before: string | null;
+  after: string | null;
+}
+
+/** A memory retired and not restored. */
+export interface RetiredMemory {
+  path: string;
+  filename: string;
+  /** The retirement's change number. */
+  n: number;
+  at: string;
+  author: MemoryAuthor;
+  reason: string;
+  scope: MemoryScope;
+  scope_name: string;
 }
 
 interface ListResponse {
@@ -67,10 +109,34 @@ export const memoriesApi = {
       { content },
     ),
 
-  /** Delete a memory file by path. */
+  /** Retire a memory file by path; it stays in its history. */
   delete: (path: string) =>
     api.delete<{ deleted: string }>(`/memories/file?${pathQuery(path)}`),
+
+  /** Every change to one memory, oldest first. */
+  history: (path: string) =>
+    api.get<{ path: string; changes: MemoryChange[] }>(
+      `/memories/history?${pathQuery(path)}`,
+    ),
+
+  /** Put a memory back as change ``n`` left it (as it was before, for a retirement). */
+  restore: (path: string, n: number) =>
+    api.post<Memory & { content: string }>(
+      `/memories/restore?${pathQuery(path)}`,
+      { n },
+    ),
+
+  /** Memories retired and not restored, newest first. */
+  retired: () => api.get<{ retired: RetiredMemory[] }>("/memories/retired"),
 };
+
+/** Who wrote a memory, as the page says it. */
+export function memoryAuthorLabel(author: MemoryAuthor | null | undefined): string | null {
+  if (author === "owner") return "You";
+  if (author === "queen") return "Queen";
+  if (author === "reflection") return "Reflection";
+  return null;
+}
 
 /** Display title for a memory — frontmatter ``name`` wins, else derive from filename. */
 export function memoryDisplayTitle(memory: Memory): string {

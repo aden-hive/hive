@@ -10,7 +10,13 @@ can review and edit the long-term memory the queens have accumulated.
 - GET    /api/memories            — list every memory file, grouped by scope
 - GET    /api/memories/file       — read one memory file (?path=relative/path.md)
 - PUT    /api/memories/file       — overwrite one memory file's contents
-- DELETE /api/memories/file       — delete one memory file
+- DELETE /api/memories/file       — retire one memory file (it stays in the history)
+- GET    /api/memories/history    — every change to one memory file (?path=…)
+- POST   /api/memories/restore    — put a file back as one change left it (?path=…, body {"n"})
+- GET    /api/memories/retired    — files retired and not restored, across scopes
+
+Changes made here are the owner's (``memory_log``): a file the owner wrote or edited is theirs,
+and a queen's reflection can't overwrite or retire it.
 """
 
 import logging
@@ -18,6 +24,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from framework.agents.queen import memory_log
 from framework.agents.queen.queen_memory_v2 import (
     MAX_FILE_SIZE_BYTES,
     MemoryFile,
@@ -85,6 +92,9 @@ def _memory_to_dict(mf: MemoryFile, rel_path: str) -> dict:
         "name": mf.name,
         "type": mf.type,
         "description": mf.description,
+        "author": mf.author,
+        "learned": mf.learned,
+        "confirmed": mf.confirmed,
         "mtime": mf.mtime,
     }
     entry.update(_scope_for_rel(list(Path(rel_path).parts)))
@@ -182,8 +192,10 @@ async def handle_create_memory(request: web.Request) -> web.Response:
         )
 
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        # A seed from onboarding: nobody's, so her reflection can build on it.
+        content = memory_log.write(target.parent, target.name, content, author="owner", claim=False, reason="seeded")
+    except memory_log.TooLarge as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     except OSError as exc:
         logger.warning("Failed to create memory %s: %s", rel, exc)
         return web.json_response({"error": "Could not create memory"}, status=500)
@@ -219,12 +231,10 @@ async def handle_update_memory(request: web.Request) -> web.Response:
             status=400,
         )
 
-    # Normalise trailing newline — matches how the queen agent writes
-    # these files, so manual edits don't churn the diff on next save.
-    if not content.endswith("\n"):
-        content += "\n"
     try:
-        target.write_text(content, encoding="utf-8")
+        content = memory_log.write(target.parent, target.name, content, author="owner", reason="edited on the Memory page")
+    except memory_log.TooLarge as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     except OSError as exc:
         logger.warning("Failed to write memory %s: %s", rel, exc)
         return web.json_response({"error": "Could not write memory"}, status=500)
@@ -247,14 +257,71 @@ async def handle_delete_memory(request: web.Request) -> web.Response:
         return web.json_response({"error": "Memory not found"}, status=404)
 
     try:
-        target.unlink()
+        memory_log.retire(target.parent, target.name, author="owner", reason="deleted on the Memory page")
     except OSError as exc:
         logger.warning("Failed to delete memory %s: %s", rel, exc)
         return web.json_response({"error": "Could not delete memory"}, status=500)
 
-    logger.info("Memory deleted: %s", rel)
+    logger.info("Memory retired: %s", rel)
     _maybe_sync_memory(rel)
     return web.json_response({"deleted": rel})
+
+
+async def handle_memory_history(request: web.Request) -> web.Response:
+    """GET /api/memories/history?path=… — every change to one memory file, oldest first."""
+    rel = request.rel_url.query.get("path", "")
+    target = _resolve_safe_path(rel)
+    if target is None:
+        return web.json_response({"error": "Invalid path"}, status=400)
+    return web.json_response({"path": rel, "changes": memory_log.history(target.parent, target.name)})
+
+
+async def handle_restore_memory(request: web.Request) -> web.Response:
+    """POST /api/memories/restore?path=… — body ``{"n": <change>}``: the file as that change left it."""
+    rel = request.rel_url.query.get("path", "")
+    target = _resolve_safe_path(rel)
+    if target is None:
+        return web.json_response({"error": "Invalid path"}, status=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+    n = body.get("n") if isinstance(body, dict) else None
+    if not isinstance(n, int) or isinstance(n, bool):
+        return web.json_response({"error": "n must be the number of a change in the file's history"}, status=400)
+    try:
+        content = memory_log.restore(target.parent, target.name, n)
+    except LookupError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    logger.info("Memory restored: %s to change %d", rel, n)
+    _maybe_sync_memory(rel)
+    payload = _memory_to_dict(MemoryFile.from_path(target), rel)
+    payload["content"] = content
+    return web.json_response(payload)
+
+
+async def handle_retired_memories(request: web.Request) -> web.Response:
+    """GET /api/memories/retired — files retired and not restored, with who retired them and why."""
+    if not MEMORIES_DIR.is_dir():
+        return web.json_response({"retired": []})
+    base = MEMORIES_DIR.resolve()
+    entries: list[dict] = []
+    for log in base.rglob(memory_log.LOG_FILE):
+        for entry in memory_log.retired(log.parent):
+            rel = (log.parent / entry["file"]).relative_to(base).as_posix()
+            entries.append(
+                {
+                    "path": rel,
+                    "filename": entry["file"],
+                    "n": entry["n"],
+                    "at": entry.get("at"),
+                    "author": entry.get("author"),
+                    "reason": entry.get("reason"),
+                    **_scope_for_rel(list(Path(rel).parts)),
+                }
+            )
+    entries.sort(key=lambda e: e.get("at") or "", reverse=True)
+    return web.json_response({"retired": entries})
 
 
 def register_routes(app: web.Application) -> None:
@@ -263,3 +330,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/memories/file", handle_create_memory)
     app.router.add_put("/api/memories/file", handle_update_memory)
     app.router.add_delete("/api/memories/file", handle_delete_memory)
+    app.router.add_get("/api/memories/history", handle_memory_history)
+    app.router.add_post("/api/memories/restore", handle_restore_memory)
+    app.router.add_get("/api/memories/retired", handle_retired_memories)

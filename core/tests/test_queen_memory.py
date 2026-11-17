@@ -529,6 +529,89 @@ async def test_short_reflection_rejects_non_global_types(tmp_path: Path):
     assert not (mem_dir / "bad-type.md").exists()
 
 
+def test_reflection_writes_are_hers_and_logged(tmp_path: Path):
+    from framework.agents.queen import memory_log
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    note = "---\nname: tea\ntype: preference\ndescription: what Ava drinks\n---\nAva drinks oolong."
+    result = _execute_tool("write_memory_file", {"filename": "tea.md", "content": note}, tmp_path)
+
+    assert result.startswith("Wrote global:tea.md")
+    assert memory_log.author_of((tmp_path / "tea.md").read_text(encoding="utf-8")) == "reflection"
+    assert [e["op"] for e in memory_log.history(tmp_path, "tea.md")] == ["write"]
+
+
+def test_reflection_cannot_overwrite_or_delete_what_the_owner_wrote(tmp_path: Path):
+    from framework.agents.queen import memory_log
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    note = "---\nname: tea\ntype: preference\ndescription: what Ava drinks\n---\nAva drinks oolong."
+    mine = memory_log.write(tmp_path, "tea.md", note, author="owner")
+
+    wrote = _execute_tool("write_memory_file", {"filename": "tea.md", "content": note.replace("oolong", "coffee")}, tmp_path)
+    deleted = _execute_tool("delete_memory_file", {"filename": "tea.md"}, tmp_path)
+
+    assert wrote.startswith("ERROR: tea.md was written by the owner")
+    assert deleted.startswith("ERROR: tea.md was written by the owner")
+    assert (tmp_path / "tea.md").read_text(encoding="utf-8") == mine
+
+
+def test_a_file_reflection_deletes_stays_in_the_log_with_her_reason(tmp_path: Path):
+    from framework.agents.queen import memory_log
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    note = "---\nname: tea\ntype: preference\ndescription: what Ava drinks\n---\nAva drinks oolong."
+    written = memory_log.write(tmp_path, "tea.md", note, author="reflection")
+
+    result = _execute_tool("delete_memory_file", {"filename": "tea.md", "reason": "merged into drinks.md"}, tmp_path)
+
+    assert result == "Deleted global:tea.md."
+    (entry,) = memory_log.retired(tmp_path)
+    assert (entry["reason"], entry["before"]) == ("merged into drinks.md", written)
+
+
+def test_recall_says_how_long_ago_a_memory_was_last_confirmed(tmp_path: Path, monkeypatch):
+    from datetime import datetime as real_datetime
+
+    from framework.agents.queen import memory_log, recall_selector
+
+    note = "---\nname: tea\ntype: preference\ndescription: what Ava drinks\n---\nAva drinks oolong."
+    memory_log.write(tmp_path, "tea.md", note, author="reflection", now=real_datetime(2026, 3, 2))
+
+    class _Later(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(2026, 3, 12)
+
+    monkeypatch.setattr(recall_selector, "datetime", _Later)
+
+    assert "### tea.md (last confirmed 10 days ago)" in format_recall_injection(["tea.md"], memory_dir=tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_does_not_confirm_what_it_rewrites(tmp_path: Path):
+    from datetime import date, datetime
+
+    from framework.agents.queen import memory_log
+    from framework.agents.queen.reflection_agent import run_long_reflection
+
+    note = "---\nname: tea\ntype: preference\ndescription: what Ava drinks\n---\nAva drinks oolong."
+    memory_log.write(tmp_path, "tea.md", note, author="reflection", now=datetime(2026, 3, 2))
+    llm = AsyncMock()
+    llm.acomplete.side_effect = [
+        _make_litellm_response(
+            tool_calls=[{"id": "tc_1", "name": "write_memory_file", "input": {"filename": "tea.md", "content": note + " Tidied."}}],
+        ),
+        _make_litellm_response(content="Done."),
+    ]
+
+    await run_long_reflection(llm, memory_dir=tmp_path)
+
+    text = (tmp_path / "tea.md").read_text(encoding="utf-8")
+    assert "Tidied." in text
+    assert memory_log.confirmed_on(text) == date(2026, 3, 2)
+
+
 @pytest.mark.asyncio
 async def test_long_reflection(tmp_path: Path):
     """Long reflection reads all memories and can merge/delete them."""

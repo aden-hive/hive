@@ -110,6 +110,10 @@ class MemoryFile:
     name: str | None = None
     type: str | None = None
     description: str | None = None
+    # Provenance (``memory_log``): who last wrote it, when it was first written and last confirmed.
+    author: str | None = None
+    learned: str | None = None
+    confirmed: str | None = None
     # First N lines of the file (for manifest / header scanning).
     header_lines: list[str] = field(default_factory=list)
     # Filesystem modification time (seconds since epoch).
@@ -137,6 +141,9 @@ class MemoryFile:
             name=fm.get("name"),
             type=parse_global_memory_category(fm.get("type")),
             description=fm.get("description"),
+            author=fm.get("author"),
+            learned=fm.get("learned"),
+            confirmed=fm.get("confirmed"),
             header_lines=lines,
             mtime=mtime,
         )

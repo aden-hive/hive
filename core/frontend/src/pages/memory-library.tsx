@@ -11,18 +11,211 @@ import {
   ChevronRight,
   AlertCircle,
   Loader2,
+  History,
+  RotateCcw,
 } from "lucide-react";
 import { SearchInput } from "@/components/SearchInput";
 import {
   memoriesApi,
+  memoryAuthorLabel,
   memoryDisplayTitle,
   type Memory,
+  type MemoryChange,
   type MemoryScope,
+  type RetiredMemory,
 } from "@/api/memories";
 import { useColony } from "@/context/ColonyContext";
 import { isQueenDecommissioned, useMe } from "@/lib/me";
 import { orderQueens } from "@/lib/colony-registry";
 import { QueenSelect } from "@/components/QueenSelect";
+
+/** "2026-03-02" or an ISO time → "Mar 2, 2026"; the input as given when it isn't a date. */
+function shortDay(value: string | null | undefined): string {
+  if (!value) return "";
+  const d = new Date(value.length === 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** "You · confirmed Mar 2, 2026" — whichever parts the memory has. */
+function memoryMeta(memory: Memory): string {
+  const parts = [memoryAuthorLabel(memory.author), memory.confirmed ? `confirmed ${shortDay(memory.confirmed)}` : null];
+  return parts.filter(Boolean).join(" · ");
+}
+
+const CHANGE_VERB: Record<MemoryChange["op"], string> = {
+  write: "wrote",
+  retire: "removed",
+  restore: "restored",
+};
+
+/** Every change to one memory, newest first; any version can be put back. */
+function MemoryHistory({
+  path,
+  onRestore,
+}: {
+  path: string;
+  onRestore: (n: number) => Promise<void>;
+}) {
+  const [changes, setChanges] = useState<MemoryChange[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    memoriesApi
+      .history(path)
+      .then((resp) => !cancelled && setChanges([...resp.changes].reverse()))
+      .catch((e) => !cancelled && setError((e as Error)?.message || "Failed to load history"));
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  const restore = async (n: number) => {
+    setRestoring(n);
+    setError(null);
+    try {
+      await onRestore(n);
+    } catch (e) {
+      setError((e as Error)?.message || "Failed to restore");
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  if (error) {
+    return (
+      <p className="text-[11px] text-destructive mt-2 flex items-center gap-1">
+        <AlertCircle className="w-3 h-3" /> {error}
+      </p>
+    );
+  }
+  if (changes === null) {
+    return (
+      <div className="flex items-center justify-center py-3">
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (changes.length === 0) {
+    return <p className="text-[11px] text-muted-foreground/70 mt-2">No changes recorded yet.</p>;
+  }
+  return (
+    <ul className="mt-2 flex flex-col gap-1" aria-label="History">
+      {changes.map((change, i) => {
+        // A retirement shows what was removed; any other change, what it left.
+        const text = change.op === "retire" ? change.before : change.after;
+        const current = i === 0 && change.op !== "retire";
+        return (
+          <li key={change.n} className="rounded-md border border-border/40 bg-muted/10">
+            <div className="flex items-center gap-2 px-2.5 py-1.5">
+              <button
+                type="button"
+                onClick={() => setOpen((prev) => (prev === change.n ? null : change.n))}
+                className="flex-1 min-w-0 text-left text-[11px] text-muted-foreground"
+              >
+                <span className="text-foreground/80">{shortDay(change.at)}</span>
+                {" · "}
+                {memoryAuthorLabel(change.author) ?? change.author} {CHANGE_VERB[change.op] ?? change.op}
+                {change.reason ? ` — ${change.reason}` : ""}
+              </button>
+              {current ? (
+                <span className="text-[10px] text-muted-foreground/60">current</span>
+              ) : (
+                text && (
+                  <button
+                    type="button"
+                    onClick={() => restore(change.n)}
+                    disabled={restoring !== null}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-50"
+                  >
+                    {restoring === change.n ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                    Restore
+                  </button>
+                )
+              )}
+            </div>
+            {open === change.n && text && (
+              <pre className="px-2.5 pb-2 text-[11px] font-sans text-foreground/80 leading-relaxed whitespace-pre-wrap break-words">
+                {text}
+              </pre>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Memories removed from this scope, newest first, each restorable. */
+function RetiredMemories({
+  items,
+  onRestore,
+}: {
+  items: RetiredMemory[];
+  onRestore: (item: RetiredMemory) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (items.length === 0) return null;
+
+  const restore = async (item: RetiredMemory) => {
+    setRestoring(item.path);
+    setError(null);
+    try {
+      await onRestore(item);
+    } catch (e) {
+      setError((e as Error)?.message || "Failed to restore");
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider"
+      >
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        Removed ({items.length})
+      </button>
+      {error && (
+        <p className="text-[11px] text-destructive mt-2 flex items-center gap-1">
+          <AlertCircle className="w-3 h-3" /> {error}
+        </p>
+      )}
+      {open && (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {items.map((item) => (
+            <li key={item.path} className="flex items-center gap-2 rounded-md border border-dashed border-border/60 px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] text-foreground/80 truncate">{item.filename}</p>
+                <p className="text-[11px] text-muted-foreground/70 truncate">
+                  {shortDay(item.at)} · {memoryAuthorLabel(item.author) ?? item.author}
+                  {item.reason ? ` — ${item.reason}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => restore(item)}
+                disabled={restoring !== null}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-50"
+              >
+                {restoring === item.path ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                Restore
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function MemoryCard({
   memory,
@@ -30,14 +223,17 @@ function MemoryCard({
   onToggle,
   onSave,
   onDelete,
+  onRestore,
 }: {
   memory: Memory;
   expanded: boolean;
   onToggle: () => void;
   onSave: (content: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  onRestore: (n: number) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [draft, setDraft] = useState(memory.content ?? "");
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -86,6 +282,7 @@ function MemoryCard({
   };
 
   const title = memoryDisplayTitle(memory);
+  const meta = memoryMeta(memory);
   const contentLoading = expanded && memory.content === undefined;
 
   return (
@@ -117,6 +314,9 @@ function MemoryCard({
             <p className="text-[11px] text-muted-foreground/80 line-clamp-1 mt-0.5">
               {preview}
             </p>
+          )}
+          {meta && (
+            <p className="text-[10px] text-muted-foreground/60 mt-0.5">{meta}</p>
           )}
         </div>
         <span className="text-[10px] font-mono text-muted-foreground/50 ml-2 mt-0.5 truncate max-w-[140px]">
@@ -178,7 +378,7 @@ function MemoryCard({
                 <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5">
                   <AlertCircle className="w-3.5 h-3.5 text-destructive flex-shrink-0" />
                   <span className="text-xs text-destructive flex-1">
-                    Delete this memory?
+                    Delete this memory? It can be restored from Removed.
                   </span>
                   <button
                     onClick={() => setConfirmingDelete(false)}
@@ -196,6 +396,17 @@ function MemoryCard({
               ) : (
                 <div className="flex items-center justify-end gap-1.5 mt-3">
                   <button
+                    onClick={() => setShowHistory((v) => !v)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      showHistory
+                        ? "text-primary bg-primary/10"
+                        : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    }`}
+                  >
+                    <History className="w-3 h-3" />
+                    History
+                  </button>
+                  <button
                     onClick={() => setEditing(true)}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                   >
@@ -210,6 +421,10 @@ function MemoryCard({
                     Delete
                   </button>
                 </div>
+              )}
+              {showHistory && (
+                // Keyed by the content, so a restore or an edit reloads the list.
+                <MemoryHistory key={memory.content ?? ""} path={memory.path} onRestore={onRestore} />
               )}
             </>
           )}
@@ -284,6 +499,7 @@ export default function MemoryLibrary() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [retired, setRetired] = useState<RetiredMemory[]>([]);
 
   const activeQueen = useMemo(
     () => queenProfiles.find((q) => q.id === selectedQueenId) ?? null,
@@ -296,6 +512,11 @@ export default function MemoryLibrary() {
     try {
       const resp = await memoriesApi.list();
       setAllMemories(resp.memories);
+      // The removed list is extra: the page works without it.
+      memoriesApi
+        .retired()
+        .then((r) => setRetired(r.retired))
+        .catch(() => setRetired([]));
     } catch (e) {
       setError((e as Error)?.message || "Failed to load memories");
       setAllMemories([]);
@@ -318,6 +539,14 @@ export default function MemoryLibrary() {
       (m) => m.scope === "queen" && m.scope_name === selectedQueenId,
     );
   }, [allMemories, scope, selectedQueenId]);
+
+  const scopedRetired = useMemo(
+    () =>
+      retired.filter((r) =>
+        scope === "global" ? r.scope === "global" : r.scope === "queen" && r.scope_name === selectedQueenId,
+      ),
+    [retired, scope, selectedQueenId],
+  );
 
   const filtered = useMemo(() => {
     if (!search.trim()) return scopedMemories;
@@ -367,6 +596,20 @@ export default function MemoryLibrary() {
     await memoriesApi.delete(memory.path);
     setAllMemories((prev) => prev.filter((m) => m.path !== memory.path));
     if (expandedKey === memory.path) setExpandedKey(null);
+    memoriesApi
+      .retired()
+      .then((r) => setRetired(r.retired))
+      .catch(() => {});
+  };
+
+  const handleRestore = async (path: string, n: number) => {
+    const restored = await memoriesApi.restore(path, n);
+    setAllMemories((prev) =>
+      prev.some((m) => m.path === path)
+        ? prev.map((m) => (m.path === path ? { ...m, ...restored } : m))
+        : [restored, ...prev],
+    );
+    setRetired((prev) => prev.filter((r) => r.path !== path));
   };
 
   return (
@@ -469,9 +712,14 @@ export default function MemoryLibrary() {
                     }
                     onSave={(content) => handleSave(m, content)}
                     onDelete={() => handleDelete(m)}
+                    onRestore={(n) => handleRestore(m.path, n)}
                   />
                 ))}
               </div>
+            )}
+
+            {!loading && !search.trim() && (
+              <RetiredMemories items={scopedRetired} onRestore={(item) => handleRestore(item.path, item.n)} />
             )}
           </div>
         </div>
