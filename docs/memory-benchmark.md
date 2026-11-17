@@ -6,7 +6,7 @@ It comes in two sizes. **LongMemEval-S** gives each question about 48 past sessi
 
 (These sizes are measured on the 2025 cleaned release we run, with the o200k tokenizer: M histories came to 1.07–1.15M tokens across a sample of 12 questions. The LongMemEval paper describes M as about 500 sessions and 1.5M tokens.)
 
-This page reports the results for Hive V1, a first measurement of the memory notes added in 1.0.15, how we got them, and what they don't show.
+This page reports the results for Hive V1, a measurement of the memory notes as 1.0.15 delivers them, how we got them, and what they don't show.
 
 ## Results at a glance
 
@@ -63,9 +63,36 @@ The biggest gains on LongMemEval-S were in preferences (10.0% to 63.3%), combini
 
 ## Memory notes in 1.0.15
 
-The results above measure conversation recall alone. As a Queen talks with you she also keeps short memory notes about you, and none were built from the seeded histories. Version 1.0.15 changed how those notes reach her, so we measured them on part of LongMemEval-S.
+The results above measure conversation recall alone. As a Queen talks with you she also keeps short memory notes about you, and none were built from the seeded histories. Version 1.0.15 changed how those notes reach her, so we measured them on LongMemEval-S: on all 500 questions with and without notes, and on 108 of them to compare the ways notes can reach her.
 
-**Setup.** We used the 108 questions of the two types notes should help most: the user's preferences (30) and facts that changed over time (78). For each question, Hive's reflection read every seeded session in date order, as it would after each real conversation, and left 14 to 33 notes (median 23). The same notes were then delivered four ways. `gpt-6.1-sol` answered every question and also graded them, as the development judge rather than the official one.
+**Setup.** For each question, Hive's reflection read every seeded session in date order, as it would after each real conversation, and left the notes that history would have produced. `gpt-6.1-sol` answered every question and also graded them, as the development judge rather than the official one.
+
+### All 500 questions
+
+The 1.0.15 build answered all 500 questions twice: without notes, and with them in the default `index` mode, where she is shown every note's name and one-line description and opens the ones she needs. Reflection used the 1.0.15 prompt and left 14 to 35 notes per question (median 25).
+
+| Question type | n | No notes | With notes | Better / worse |
+|---|---|---|---|---|
+| A fact the user stated | 70 | 69 (98.6%) | 69 (98.6%) | 1 / 1 |
+| Something the assistant said | 56 | 54 (96.4%) | 56 (100.0%) | 2 / 0 |
+| The user's preferences | 30 | 21 (70.0%) | 26 (86.7%) | 6 / 1 |
+| Combining facts across sessions | 133 | 110 (82.7%) | 114 (85.7%) | 8 / 4 |
+| Facts that changed over time | 78 | 73 (93.6%) | 76 (97.4%) | 3 / 0 |
+| Reasoning about dates | 133 | 128 (96.2%) | 126 (94.7%) | 1 / 3 |
+| **All questions** | 500 | **455 (91.0%)**, 88.2–93.2 | **467 (93.4%)**, 90.9–95.3 | **21 / 9** |
+
+- **Notes added 2.4 points.** They changed 30 answers, 21 for the better (sign test p ≈ 0.04).
+- **The gain is largest on preferences**, from 21 to 26 of 30 (70% to 87%), as in the 108-question comparison below.
+- **The descriptions do most of the work.** She opened a note on only 12 of the 500 questions. With the list in front of her she searched past conversations on slightly fewer questions, 364 against 389.
+- **A description can hold half an answer.** Notes cost 3 answers on reasoning about dates and 4 on combining facts across sessions. In the misses we read, she built on what a description said and stopped short. Asked how many online courses she'd completed, she saw a note described as "Completed 12 Coursera courses", searched for that, and missed the 8 edX courses recorded in a broader profile note whose description didn't mention them.
+- **Notes cost one abstention.** Hive declined 25 of the 30 "you never told me" questions without notes and 24 with them. Asked how long the user had collected vintage films, she answered about the vintage cameras a note recorded.
+- **Notes didn't slow her down.** The median answer took 15 seconds without notes and 13 with them. The two runs used different concurrency (6 and 8 questions at a time) on a shared endpoint, so the times aren't a close comparison.
+
+Without notes, the 1.0.15 build answered 455 questions where V1's final run answered 448 under the same development judge, mostly from things the assistant said (54 against 46).
+
+### How the notes reach her (108 questions)
+
+Before the full run we compared four ways of delivering the same notes, on the 108 questions of the two types notes should help most: the user's preferences (30) and facts that changed over time (78). Reflection left 14 to 33 notes per question (median 23).
 
 | Configuration | Preferences (30) | Changed facts (78) | All 108 | Median seconds |
 |---|---|---|---|---|
@@ -80,7 +107,9 @@ The results above measure conversation recall alone. As a Queen talks with you s
 - **Waiting for a pick costs about 2 seconds a reply.** `wait` changed 13 answers against no notes, 10 for the better (p ≈ 0.09). Between `wait` and `index`, 4 answers went each way, so they are tied.
 - **Notes cost one abstention.** Of the 6 questions whose honest answer is "you never told me", Hive declined 5 without notes and 4 in each configuration with them.
 
-Each configuration was run once, on two of the six question types, and graded by the development judge, so these numbers aren't comparable with the 500-question results above. The notes were written with the reflection prompt as it stood before 1.0.15, which has since gained lines about who wrote a note and when it was last confirmed.
+These notes were written with the reflection prompt as it stood before 1.0.15, which has since gained lines about who wrote a note and when it was last confirmed.
+
+Each configuration in this section was run once and graded by the development judge, so its numbers aren't comparable with the official-judge results at the top of this page. On V1's final S run the development judge marked 448 answers correct where the official judge marked 442.
 
 ## Where Hive still loses points
 
@@ -121,12 +150,12 @@ What the comparison does and doesn't show:
 - **Each configuration was run once.** The confidence intervals above reflect sampling over questions, not run-to-run variation. Two identical runs of the same 37-question subset scored 3 and 9 correct, so expect a point or two of movement between full runs.
 - **Answering-model access.** The answering models are named by the identifiers our OpenAI-compatible endpoint serves (`gpt-6.1-sol`, `gpt-6-luna`).
 - **Dataset version.** We use the 2025 cleaned release; most published results predate it and use the original. Between S and M, the cleaned release keeps the same questions, answers and evidence sessions, but the M histories carry different session and question dates.
-- **What the setup leaves out.** Each question is a single message to a fresh Queen. For the 500-question results, the Queen's reflection notes (the short memory files she writes about you as you talk) are not built from the seeded history, so those results measure conversation recall, not the notes; [Memory notes in 1.0.15](#memory-notes-in-1015) measures them on 108 questions. The optional timeline was off.
+- **What the setup leaves out.** Each question is a single message to a fresh Queen. For the 500-question results, the Queen's reflection notes (the short memory files she writes about you as you talk) are not built from the seeded history, so those results measure conversation recall, not the notes; [Memory notes in 1.0.15](#memory-notes-in-1015) measures them on all 500 S questions. The optional timeline was off.
 - **Indexing.** On M, the memory index is built before the Queen starts, as it would have been built up over time in real use, so the first question isn't charged for indexing ~476 sessions at once.
 - **How the M run was executed.** The 500 M answers were produced over three resumed runs. Partway through, the judge's API quota ran out; the 79 questions affected were asked again from scratch, and all 500 answers were then graded together by the official judge.
-- **Builds.** The S results come from the 8 October 2026 build and the M results from the 10–11 October builds. Memory search, automatic recall and the Queen's memory instructions are identical in all of them; in between, some unrelated passages (team CRM and browser instructions) were removed from the Queen's prompt, and a charting skill was edited.
+- **Builds.** The S results come from the 8 October 2026 build and the M results from the 10–11 October builds. Memory search, automatic recall and the Queen's memory instructions are identical in all of them; in between, some unrelated passages (team CRM and browser instructions) were removed from the Queen's prompt, and a charting skill was edited. The memory-notes results come from the 1.0.15 build (500 questions, 16–17 November 2026) and builds leading up to it (108 questions, 9–10 November).
 - **Errors.** One Hive V1 question on S produced no gradable answer, and one question from the pre-V1 run was never recorded; both count as wrong.
-- **Judges during development.** While iterating we graded with `gpt-6.1-sol`; on the final S run it agreed with the official judge on 490 of 500 questions. All numbers on this page were re-graded with the official judge, except the timeline experiment, which used the development judge.
+- **Judges during development.** While iterating we graded with `gpt-6.1-sol`; on the final S run it agreed with the official judge on 490 of 500 questions. All numbers on this page were re-graded with the official judge, except the timeline and memory-notes experiments, which used the development judge.
 - **Raw results** (per-question answers, verdicts and transcripts) are kept from these runs but are not in this repository.
 
 ## Reproducing the results

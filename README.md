@@ -122,7 +122,7 @@ The **[architecture overview](docs/architecture/README.md)** goes deeper: the lo
 | **Hive** | **88.4%** | **82.0%** |
 | The same model reading the whole history | 96.8% | doesn't fit |
 
-When a whole history fits in the model's context, reading all of it is still more accurate than Hive's memory. When it doesn't, as on LongMemEval-M, memory is the only option. These scores measure recall of past conversations. Her notes come on top: since 1.0.15 they reach her before she answers, and on 108 LongMemEval-S questions they raised preference answers from 63% to 83%. The [benchmark page](docs/memory-benchmark.md) has the methodology, per-type results, the notes experiment, a comparison with other memory systems, and the limitations.
+When a whole history fits in the model's context, reading all of it is still more accurate than Hive's memory. When it doesn't, as on LongMemEval-M, memory is the only option. These scores measure recall of past conversations. Her notes come on top: since 1.0.15 they reach her before she answers, and on LongMemEval-S they raised the score from 91.0% to 93.4%, and preference answers from 70% to 87%, graded by our development judge. The [benchmark page](docs/memory-benchmark.md) has the methodology, per-type results, the notes experiment, a comparison with other memory systems, and the limitations.
 
 **Built-in tools that run in-process.** Shell commands and background jobs, file editing, fast code search, PDFs, attachments and images, web scraping, charts (ECharts and Mermaid), CSV files, and image generation through Hive LLM. They run inside Hive itself, with no tool servers to start.
 
