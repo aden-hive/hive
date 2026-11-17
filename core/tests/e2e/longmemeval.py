@@ -86,6 +86,8 @@ _CLOCK_MODULES = (
     "framework.agent_loop.agent_loop",
     "framework.agent_loop.internals.cursor_persistence",
     "aden_tools.tools.time_tool.time_tool",
+    # How long ago a recalled memory was last confirmed.
+    "framework.agents.queen.recall_selector",
 )
 
 
@@ -271,6 +273,52 @@ async def build_timelines(hive_home: Path, *, api_base: str, api_key: str, model
         cache_dir=DATA_DIR / "timeline_cache" / re.sub(r"[^\w.-]", "_", model),
         concurrency=int(os.environ.get("HIVE_LME_TIMELINE_CONCURRENCY", "4")),
     )
+
+
+async def build_notes(hive_home: Path, item: dict[str, Any], *, api_base: str, api_key: str, model: str, queen_id: str = QUEEN_ID) -> int:
+    """Write the memory notes the seeded history would have left. Returns how many files.
+
+    In production a reflection reads each conversation as it happens and keeps notes about the
+    user (``framework.agents.queen.reflection_agent``); a session too short for a mid-session
+    reflection gets one when it stops. So each seeded session is reflected on once, oldest
+    first, each seeing the notes the earlier ones left.
+
+    Cached per question under ``$HIVE_LME_DATA/notes_cache/<model>/<reflection prompt>``: a
+    question's notes cost a few model calls per session, in order, and don't depend on what
+    is then asked. ``HIVE_LME_NOTES_VERSION`` names a cached version to use instead of the
+    current prompt's, to compare ways of recalling the same notes.
+    """
+    import hashlib
+    import shutil
+
+    from framework.agents.queen import reflection_agent
+    from framework.agents.queen.queen_memory_v2 import global_memory_dir, queen_memory_dir
+    from framework.llm.litellm import LiteLLMProvider
+
+    memories = hive_home / "memories"
+    dirs = {"global_memory_dir": global_memory_dir(), "queen_memory_dir": queen_memory_dir(queen_id)}
+    if not all(d.is_relative_to(memories) for d in dirs.values()):
+        raise RuntimeError(f"memory notes would be written outside the sandbox: {dirs}")
+    prompt = reflection_agent._build_unified_short_reflect_system(queen_id) + json.dumps([t.parameters for t in reflection_agent._REFLECTION_TOOLS])
+    pinned = os.environ.get("HIVE_LME_NOTES_VERSION", "").strip()
+    version = pinned or hashlib.sha256(prompt.encode()).hexdigest()[:12]
+    cached = DATA_DIR / "notes_cache" / re.sub(r"[^\w.-]", "_", model) / version / f"{VARIANT}_{item['question_id']}"
+    if cached.is_dir():
+        shutil.copytree(cached, memories, dirs_exist_ok=True)
+    elif pinned:
+        raise RuntimeError(f"HIVE_LME_NOTES_VERSION={pinned} has no notes for {item['question_id']} under {cached.parent}")
+    else:
+        llm = LiteLLMProvider(model=f"openai/{model}", api_key=api_key, api_base=api_base)
+        sessions = sorted(zip(item["haystack_dates"], item["haystack_sessions"], strict=True), key=lambda s: parse_date(s[0]))
+        for date, turns in sessions:
+            messages = [{"role": t["role"], "content": t["content"]} for t in turns if t.get("content")]
+            if messages:
+                await reflection_agent.reflect_on_messages(messages, llm, queen_id=queen_id, now=parse_date(date), **dirs)
+        part = cached.with_name(cached.name + ".part")
+        shutil.rmtree(part, ignore_errors=True)
+        shutil.copytree(memories, part) if memories.is_dir() else part.mkdir(parents=True)
+        part.replace(cached)
+    return sum(1 for _ in memories.rglob("*.md"))
 
 
 def warm_index(queen_id: str = QUEEN_ID) -> None:
@@ -487,6 +535,13 @@ def _full_result(result: Any) -> str:
     return text
 
 
+def _in_conversation(queen_dir: Path, text: str) -> bool | None:
+    """Whether *text* is in a message of the conversation the queen kept in *queen_dir*; None when she kept none."""
+    needle = text.encode()
+    files = [p for p in (queen_dir / "conversations").rglob("*") if p.is_file()]
+    return any(needle in p.read_bytes() for p in files) if files else None
+
+
 def run_dir() -> Path:
     path = Path(os.environ.get("HIVE_LME_RUN_DIR") or DATA_DIR / "runs" / "adhoc")
     path.mkdir(parents=True, exist_ok=True)
@@ -501,11 +556,13 @@ def record(
     *,
     reader_model: str | None = None,
     judge_error: BaseException | None = None,
+    notes: int | None = None,
 ) -> dict[str, Any]:
     """Append one result line and save the transcript. Returns the line.
 
     With *judge_error* the answer is kept but marked ungraded (counted wrong
-    until ``rejudge`` grades it).
+    until ``rejudge`` grades it). *notes* is how many memory notes the history
+    left (:func:`build_notes`), None when none were built.
     """
     searches = run.called("search_messages") + run.called("search_timeline")
     seen = " ".join(_full_result(c.result) for c in searches)
@@ -534,6 +591,19 @@ def record(
     }
     if judge_error is not None:
         line["judge_error"] = f"{type(judge_error).__name__}: {judge_error}"[:500]
+    if notes is not None:
+        from framework.agent_loop.memory_reminders import INDEX_HEADER, RECALL_HEADER
+        from framework.config import get_memory_recall_config
+
+        line["notes"] = notes
+        line["notes_mode"] = get_memory_recall_config().mode
+        # Did a model's pick of notes reach her? ("background": mid-turn at the earliest.)
+        line["notes_recalled"] = _in_conversation(run.workdir, RECALL_HEADER)
+        # "index": was she shown the list, and which notes did she read?
+        line["notes_indexed"] = _in_conversation(run.workdir, INDEX_HEADER.split(":")[0])
+        line["notes_read"] = sorted(
+            {name for c in run.tool_calls if "memories" in (text := json.dumps(c.input)) for name in re.findall(r"([\w.-]+\.md)", text)}
+        )
     out = run_dir()
     with (out / "results.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(line, default=str) + "\n")

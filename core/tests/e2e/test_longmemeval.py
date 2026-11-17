@@ -10,6 +10,7 @@ LongMemEval-M:                    HIVE_LME_DATASET=m ...  (2.7 GB download on fi
 Resume a stopped run:             HIVE_LME_RESUME=1 HIVE_LME_RUN_DIR=<same dir> ...
 Specific questions:               HIVE_LME_QUESTIONS=e47becba,gpt4_2655b836 uv run pytest ...
 With timeline extraction:         HIVE_LME_TIMELINE=1 ...  (first run per question extracts; cached after)
+With memory notes:                HIVE_LME_NOTES=1 ...  (first run per question reflects on every session; cached after)
 """
 
 from __future__ import annotations
@@ -59,6 +60,17 @@ async def test_longmemeval(question_id: str, run_queen, hive_home, monkeypatch) 
             api_key=harness.API_KEY,
             model=os.environ.get("HIVE_LME_TIMELINE_MODEL", harness.MODEL),
         )
+    # Off by default: a question's first build reflects on each of its sessions in turn (about
+    # 48 on S, 476 on M). docs/memory-benchmark.md says which published scores turn it on.
+    notes = None
+    if os.environ.get("HIVE_LME_NOTES", "0") != "0":
+        notes = await lme.build_notes(
+            hive_home,
+            item,
+            api_base=harness.API_BASE,
+            api_key=harness.API_KEY,
+            model=os.environ.get("HIVE_LME_NOTES_MODEL", harness.MODEL),
+        )
     lme.freeze_clock(monkeypatch, lme.parse_date(item["question_date"]))
 
     judge_model = os.environ.get("HIVE_LME_JUDGE_MODEL", harness.MODEL)
@@ -83,9 +95,9 @@ async def test_longmemeval(question_id: str, run_queen, hive_home, monkeypatch) 
         # The answer exists; only grading failed (e.g. the judge's quota).
         # Keep it, marked ungraded, so `rejudge` can grade it later.
         ungraded = lme.Verdict(correct=False, raw="", judge_model=judge_model)
-        lme.record(item, run, ungraded, session_map=session_map, reader_model=harness.MODEL, judge_error=exc)
+        lme.record(item, run, ungraded, session_map=session_map, reader_model=harness.MODEL, judge_error=exc, notes=notes)
         raise
-    result = lme.record(item, run, verdict, session_map=session_map, reader_model=harness.MODEL)
+    result = lme.record(item, run, verdict, session_map=session_map, reader_model=harness.MODEL, notes=notes)
 
     assert verdict.correct, (
         f"[{item['question_type']}] {item['question']}\n"
