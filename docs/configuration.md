@@ -113,17 +113,40 @@ takes a few model calls each time. The `memory_reflection` section sets how ofte
 model:
 
 ```json
-"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "main"}
+"memory_reflection": {"every_turns": 6, "long_every": 4, "model": "worker"}
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
 | `every_turns` | `6` | Reflect after every this many of her replies |
 | `long_every` | `4` | Every this many reflections, also tidy all her memory files (merge and delete duplicates) |
-| `model` | `"main"` | `"main"`: the model she talks with. `"worker"`: the `worker_llm` model, or hers if `worker_llm` isn't set. Her dated timeline uses the same model |
+| `model` | `"worker"` | `"worker"`: the `worker_llm` model, or hers if `worker_llm` isn't set. `"main"`: the model she talks with. Her dated timeline uses the same model |
 
 A context compaction also tidies her memory, and ending a session reflects once more if anything was
 said since the last reflection.
+
+Every change to a memory file is kept in its folder's `log.jsonl`, with who made it and why, and the
+Memory page shows a file's history and restores any earlier version. A file you write or edit there
+is yours: reflection won't change or delete it, and writes what it learns to another file instead.
+
+### How memory reaches a queen
+
+Before she answers, a queen is shown her memory files in one of three ways, set by the
+`memory_recall` section or in Settings → Memory:
+
+```json
+"memory_recall": {"mode": "index", "wait_seconds": 10}
+```
+
+| `mode` | What she sees |
+|---|---|
+| `"index"` (default) | Every memory file's name and one-line description, in full when a session starts and after a compaction, then only what changed. She opens the ones she needs. No extra model calls |
+| `"wait"` | The files a model picks for each message, before she answers. If the pick takes longer than `wait_seconds`, that message goes on without it |
+| `"background"` | The same pick, made while she answers, so it often arrives a message late |
+
+A change, here or in Settings, reaches running sessions from their next message; a change to
+`memory_reflection.model` from their next reflection. The `HIVE_MEMORY_RECALL` environment variable
+overrides `mode`.
 
 ### A queen's soul
 
