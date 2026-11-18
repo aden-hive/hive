@@ -101,28 +101,41 @@ actors = apify_search_actors(query="instagram", limit=5)
 
 ## Use Cases
 
+`apify_run_actor` starts a run and returns its `run_id`, `status` and `dataset_id`. Poll `apify_get_run` until the run finishes, then read the output with `apify_get_dataset_items`. The examples below share this helper:
+
+```python
+import time
+
+def run_and_fetch(actor_id, input_data, limit=100):
+    run = apify_run_actor(actor_id=actor_id, input_data=input_data)
+    while run.get("status") in ("READY", "RUNNING"):
+        time.sleep(5)
+        run = apify_get_run(actor_id=actor_id, run_id=run["run_id"])
+    if run.get("status") != "SUCCEEDED":
+        raise RuntimeError(f"Actor run did not succeed: {run}")
+    return apify_get_dataset_items(dataset_id=run["dataset_id"], limit=limit)["items"]
+```
+
 ### Lead Generation
 
 ```python
 # Find decision-makers on LinkedIn by job title and location
-result = apify_run_actor(
-    actor_id="johnvc/linkedin-people-search-api",
-    input={"jobTitle": "CEO", "location": "San Francisco", "maxResults": 25},
-    wait=True
+people = run_and_fetch(
+    "johnvc/linkedin-people-search-api",
+    {"jobTitle": "CEO", "location": "San Francisco", "maxResults": 25},
 )
-leads = [(p["fullName"], p["profileUrl"]) for p in result["items"] if p.get("profileUrl")]
+leads = [(p["fullName"], p["profileUrl"]) for p in people if p.get("profileUrl")]
 ```
 
 ### Market Research
 
 ```python
 # Compare product prices across stores (Google Shopping)
-result = apify_run_actor(
-    actor_id="johnvc/google-shopping-api-google-shopping-products-prices-deals",
-    input={"q": "wireless headphones"},
-    wait=True
+items = run_and_fetch(
+    "johnvc/google-shopping-api-google-shopping-products-prices-deals",
+    {"q": "wireless headphones"},
 )
-offers = result["items"][0]["shopping_results"]
+offers = items[0]["shopping_results"]
 prices = [o["extracted_price"] for o in offers if o.get("extracted_price")]
 avg_price = sum(prices) / len(prices)
 ```
@@ -131,12 +144,11 @@ avg_price = sum(prices) / len(prices)
 
 ```python
 # Get a YouTube video's transcript for sentiment analysis
-result = apify_run_actor(
-    actor_id="johnvc/YoutubeTranscripts",
-    input={"youtube_url": "https://youtube.com/watch?v=...", "output_formats": ["text"]},
-    wait=True
+items = run_and_fetch(
+    "johnvc/YoutubeTranscripts",
+    {"youtube_url": "https://youtube.com/watch?v=...", "output_formats": ["text"]},
 )
-transcript = result["items"][0]["text"]
+transcript = items[0]["text"]
 ```
 
 ## Error Handling
