@@ -2361,7 +2361,7 @@ fi
 # Show credential store status
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
-    echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
+    echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted; API keys entered during setup are saved to your shell profile instead)"
     echo ""
 fi
 

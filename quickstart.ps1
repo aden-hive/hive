@@ -2312,7 +2312,7 @@ if ($SelectedProviderId) {
 # Show credential store status
 if ($credKey) {
     Write-Color -Text "Credential Store:" -Color White
-    Write-Ok "~/.hive/credentials/  (encrypted)"
+    Write-Ok "~/.hive/credentials/  (encrypted; API keys entered during setup are saved as user environment variables instead)"
     Write-Host ""
 }
 

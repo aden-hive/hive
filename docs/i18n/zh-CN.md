@@ -67,7 +67,7 @@ cd hive
 .\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-quickstart 脚本会为整个工作区创建一个 Python 环境，把你的 API key 加密保存在 `~/.hive` 下，询问要使用哪个模型，然后构建仪表盘并在 `http://127.0.0.1:8787` 打开。下次在仓库目录下运行 `hive open` 即可。
+quickstart 脚本会为整个工作区创建一个 Python 环境，把你的 API key 以 `export` 行的形式写入你的 shell 配置文件（如 `~/.bashrc` 或 `~/.zshrc`；在 Windows 上则保存为用户环境变量），询问要使用哪个模型，然后构建仪表盘并在 `http://127.0.0.1:8787` 打开。下次在仓库目录下运行 `hive open` 即可。
 
 > [!NOTE]
 > Hive 是一个 `uv` 工作区，而不是 pip 包。`pip install -e .` 只会装上一个无法运行的占位包；请使用 quickstart 脚本。
@@ -161,7 +161,7 @@ Hive 只有**一个执行原语**：智能体循环（agent loop）。Queen 就�
 大多数框架要你设计一张智能体图，再把各个智能体的输入和输出连起来。Hive 只有一种智能体：Queen 是一个智能体循环，每个 worker 都是它的克隆体。编排在运行时通过工具调用完成，智能体之间靠一个共享的 SQL tracker 协同，而不是沿着图的边传递消息。持久化、恢复、预算、上下文压缩和人工监督都内建在这一个循环里，所以每个智能体都自带这些能力。
 
 **我的数据存放在哪里？**
-就在你自己的机器上。会话、蜂群、tracker 和记忆都是 `~/.hive`（或 `HIVE_HOME` 指向的目录）下的普通文件，API key 也加密存放在那里。
+就在你自己的机器上。会话、蜂群、tracker 和记忆都是 `~/.hive`（或 `HIVE_HOME` 指向的目录）下的普通文件，在仪表盘 Models 页面添加的 API key 会加密存放在那里；而在 quickstart 中输入的 key 会以明文 `export` 行保存在 shell 配置文件中（Windows 上为用户环境变量）。
 
 **如何控制成本？**
 每个 worker 的轮次和工具调用次数都有硬性上限，卡住的 worker 会自行停止；同时运行的 worker 数量也有上限。每次模型调用都会计量。目前还不支持按金额设置支出上限。

@@ -67,7 +67,7 @@ cd hive
 .\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-The quickstart creates a single Python environment for the workspace, stores your API key encrypted under `~/.hive`, asks which model to use, builds the dashboard and opens it at `http://127.0.0.1:8787`. Next time, run `hive open` from the repository.
+The quickstart creates a single Python environment for the workspace, saves your API key as an `export` line in your shell profile (such as `~/.bashrc` or `~/.zshrc`), or as a user environment variable on Windows, asks which model to use, builds the dashboard and opens it at `http://127.0.0.1:8787`. Next time, run `hive open` from the repository.
 
 > [!NOTE]
 > This repository is a `uv` workspace: `pip install -e .` at its root installs a placeholder that won't run, so use the quickstart. Without the repository, `pip install "aden-hive[tools]"` installs Hive from PyPI; then run `hive open`. To add an optional package (a chat-app channel, for example), see [Optional packages](docs/optional-packages.md). To build your own project on Hive's agent loop and models, depend on `aden-hive`: see [Building on Hive](docs/building-on-hive.md).
@@ -172,7 +172,7 @@ Yes. Choose Ollama in the quickstart, or set a model such as `ollama/llama3` wit
 Most frameworks ask you to design a graph of agents and wire up their inputs and outputs. Hive has one kind of agent: the queen is an agent loop, and every worker is a clone of it. Orchestration happens at runtime through tool calls, and agents coordinate through a shared SQL tracker instead of passing messages along edges. Persistence, resume, budgets, compaction and oversight live in that one loop, so every agent gets them.
 
 **Where does my data live?**
-On your machine. Sessions, colonies, trackers and memory are plain files under `~/.hive` (or wherever `HIVE_HOME` points), and API keys are stored there encrypted.
+On your machine. Sessions, colonies, trackers and memory are plain files under `~/.hive` (or wherever `HIVE_HOME` points), and API keys you add on the dashboard's Models page are stored there encrypted. The quickstart instead saves the key you enter as a plain-text `export` line in your shell profile (a user environment variable on Windows).
 
 **How do I keep costs under control?**
 Every worker runs under hard limits on turns and tool calls, so a stuck worker stops by itself, and the number of workers running at once is capped. Every model call is metered. There are no spending limits in dollars yet.

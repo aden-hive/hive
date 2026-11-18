@@ -67,7 +67,7 @@ cd hive
 .\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-O quickstart cria um único ambiente Python para o workspace, guarda sua chave de API criptografada em `~/.hive`, pergunta qual modelo usar, faz o build do dashboard e o abre em `http://127.0.0.1:8787`. Da próxima vez, execute `hive open` a partir do repositório.
+O quickstart cria um único ambiente Python para o workspace, salva sua chave de API como uma linha `export` no perfil do seu shell (por exemplo `~/.bashrc` ou `~/.zshrc`), ou como variável de ambiente do usuário no Windows, pergunta qual modelo usar, faz o build do dashboard e o abre em `http://127.0.0.1:8787`. Da próxima vez, execute `hive open` a partir do repositório.
 
 > [!NOTE]
 > O Hive é um workspace `uv`, não um pacote pip. O `pip install -e .` instala um placeholder que não roda; use o quickstart.
@@ -161,7 +161,7 @@ Sim. Escolha Ollama no quickstart ou configure um modelo como `ollama/llama3` co
 A maioria dos frameworks pede que você desenhe um grafo de agentes e conecte as entradas e saídas deles. O Hive tem um único tipo de agente: a queen é um agent loop, e cada worker é um clone dela. A orquestração acontece em tempo de execução, por meio de chamadas de ferramenta, e os agentes se coordenam por um tracker SQL compartilhado, em vez de trocar mensagens ao longo das arestas. Persistência, retomada, orçamentos, compactação e supervisão ficam nesse único loop, então todo agente já vem com eles.
 
 **Onde ficam meus dados?**
-Na sua máquina. Sessões, colônias, trackers e memória são arquivos comuns em `~/.hive` (ou onde `HIVE_HOME` apontar), e as chaves de API ficam guardadas ali, criptografadas.
+Na sua máquina. Sessões, colônias, trackers e memória são arquivos comuns em `~/.hive` (ou onde `HIVE_HOME` apontar), e as chaves de API que você adiciona na página Models do dashboard ficam guardadas ali, criptografadas. Já o quickstart salva a chave que você digita como uma linha `export` em texto puro no perfil do seu shell (uma variável de ambiente do usuário no Windows).
 
 **Como mantenho os custos sob controle?**
 Cada worker roda com limites rígidos de turnos e de chamadas de ferramenta, então um worker travado para sozinho, e o número de workers rodando ao mesmo tempo tem um teto. Toda chamada ao modelo é contabilizada. Ainda não há limites de gasto em dólares.
