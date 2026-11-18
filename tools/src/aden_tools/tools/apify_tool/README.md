@@ -76,7 +76,7 @@ Read a run's results.
 - `dataset_id` (str): Dataset ID from `apify_run_actor` or `apify_get_run`
 - `limit` (int): Number of items (default 100)
 - `offset` (int): Pagination offset (default 0)
-- `format` (str): `json`, `csv`, `xlsx`, `xml` or `rss` (default `json`)
+- `format` (str): Output format (default `json`). The tool parses the response as JSON, so use `json`; other formats return an error.
 
 **Example:**
 
@@ -115,7 +115,7 @@ Read one record from a key-value store, such as a run's `OUTPUT`.
 
 ## Use Cases
 
-The examples below share this helper, which starts a run, waits for it to finish and returns its items:
+The examples below share this helper, which starts a run, waits for it to finish and returns the first `limit` items (default 100). For larger runs, call `apify_get_dataset_items` again with an `offset`.
 
 ```python
 import time
@@ -173,7 +173,7 @@ avg_price = sum(prices) / len(prices)
 # Get a YouTube video's transcript for sentiment analysis
 items = run_and_fetch(
     "johnvc/YoutubeTranscripts",
-    {"youtube_url": "https://youtube.com/watch?v=...", "output_formats": ["text"]},
+    {"youtube_url": "https://www.youtube.com/watch?v=1UL8iZJD38U", "output_formats": ["text"]},
 )
 row = items[0]
 if "text" not in row:  # e.g. the video has no captions
