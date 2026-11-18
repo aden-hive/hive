@@ -115,7 +115,7 @@ Read one record from a key-value store, such as a run's `OUTPUT`.
 
 ## Use Cases
 
-The examples below share this helper, which starts a run, waits for it to finish and returns the first `limit` items (default 100). For larger runs, call `apify_get_dataset_items` again with an `offset`.
+The examples below share this helper, which starts a run, waits for it to finish and returns the first `limit` items (default 100). For larger runs, pass a higher `limit` (the tool accepts up to 250,000).
 
 ```python
 import time
