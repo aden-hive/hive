@@ -10,8 +10,8 @@ Apify is a cloud platform providing a marketplace of thousands of ready-made web
 
 While agents can make raw HTTP requests, Apify interactions are complex:
 
-1. **Async Polling**: Actor runs take time (seconds to minutes). A raw request just returns a `runId`, requiring the agent to loop, sleep, and poll status—which LLMs struggle with.
-2. **Dataset Abstraction**: Fetching results requires knowing specific dataset IDs and pagination logic. This tool abstracts that into a simple `wait=True` parameter.
+1. **Async Polling**: Actor runs take time (seconds to minutes). `apify_run_actor` starts a run and returns its `run_id`, and `apify_get_run` reports the run's status, so an agent can check progress without building raw API requests.
+2. **Dataset Abstraction**: Results live in the run's dataset. `apify_get_dataset_items` takes the `dataset_id` that the run returns and handles `limit`/`offset` paging.
 3. **Security**: Keeps the `APIFY_API_TOKEN` in the credential store instead of exposing it to the agent context.
 
 ## Credential Setup
@@ -23,97 +23,124 @@ While agents can make raw HTTP requests, Apify interactions are complex:
 
 ## Tools
 
+These are MCP tools that `register_tools` adds to the server, and agents call them through MCP. The Python snippets in this README show the same calls with the same arguments.
+
+`actor_id` is an Actor ID or `owner~name` (for example `apify~web-scraper`). The tools put it straight into the API path, so use `~`, not `/`, between the owner and the name.
+
 ### `apify_run_actor`
 
-Run an Apify Actor to scrape or automate websites.
+Start an Actor run.
 
 **Parameters:**
 
-- `actor_id` (str): Actor identifier (e.g., `"apify/instagram-scraper"`)
-- `input` (dict): JSON input specific to the actor (default: `{}`)
-- `wait` (bool): If `True`, waits for completion and returns results immediately. If `False`, returns `runId` for async status checks (default: `True`)
+- `actor_id` (str): Actor ID or `owner~name`
+- `input_data` (dict): JSON input for the Actor (optional)
+- `memory_mbytes` (int): Memory in MB (optional, 0 = Actor default)
+- `timeout_secs` (int): Run timeout in seconds (optional, 0 = Actor default)
+- `build` (str): Build tag (optional)
 
 **Example:**
 
 ```python
-# Synchronous execution (recommended)
-result = apify_run_actor(
-    actor_id="apify/instagram-profile-scraper",
-    input={"usernames": ["instagram", "google"]},
-    wait=True
+run = apify_run_actor(
+    actor_id="apify~web-scraper",
+    input_data={"startUrls": [{"url": "https://example.com"}]},
 )
-# Returns: {"items": [...], "run_id": "...", "status": "SUCCEEDED"}
-
-# Asynchronous execution
-result = apify_run_actor(
-    actor_id="apify/web-scraper",
-    input={"startUrls": [{"url": "https://example.com"}]},
-    wait=False
-)
-# Returns: {"run_id": "abc123", "status": "RUNNING"}
+# Returns: {"run_id": "abc123", "status": "READY", "dataset_id": "xyz789", ...}
 ```
 
-### `apify_get_dataset`
-
-Retrieve results from a completed actor run.
-
-**Parameters:**
-
-- `dataset_id` (str): Dataset identifier from a completed run
-
-**Example:**
-
-```python
-data = apify_get_dataset(dataset_id="xyz789")
-# Returns: {"items": [...], "count": 42}
-```
+The call returns as soon as the run starts. Poll `apify_get_run` until `status` is `SUCCEEDED`, then read the results with `apify_get_dataset_items`.
 
 ### `apify_get_run`
 
-Check the status of an actor run.
+Check the status of a run.
 
 **Parameters:**
 
-- `run_id` (str): Run identifier returned from `apify_run_actor` with `wait=False`
+- `actor_id` (str): The same `actor_id` used to start the run
+- `run_id` (str): Run ID returned by `apify_run_actor`
 
 **Example:**
 
 ```python
-status = apify_get_run(run_id="abc123")
-# Returns: {"status": "SUCCEEDED", "default_dataset_id": "xyz789", ...}
+status = apify_get_run(actor_id="apify~web-scraper", run_id="abc123")
+# Returns: {"run_id": "abc123", "status": "SUCCEEDED", "dataset_id": "xyz789", "started_at": "...", "finished_at": "...", ...}
 ```
 
-### `apify_search_actors`
+### `apify_get_dataset_items`
 
-Search the Apify marketplace for actors (optional).
+Read a run's results.
 
 **Parameters:**
 
-- `query` (str): Search keywords
-- `limit` (int): Maximum results to return (default: 10)
+- `dataset_id` (str): Dataset ID from `apify_run_actor` or `apify_get_run`
+- `limit` (int): Number of items (default 100)
+- `offset` (int): Pagination offset (default 0)
+- `format` (str): `json`, `csv`, `xlsx`, `xml` or `rss` (default `json`)
 
 **Example:**
 
 ```python
-actors = apify_search_actors(query="instagram", limit=5)
-# Returns: {"items": [...], "total": 24}
+data = apify_get_dataset_items(dataset_id="xyz789", limit=50)
+# Returns: {"items": [...], "count": 50}
 ```
+
+### `apify_list_actors`
+
+List the Actors in your Apify account.
+
+**Parameters:**
+
+- `limit` (int): Number of results (default 50)
+- `offset` (int): Pagination offset (default 0)
+
+### `apify_list_runs`
+
+List recent runs, for one Actor or for all of them.
+
+**Parameters:**
+
+- `actor_id` (str): Actor to filter by (optional; empty lists all runs)
+- `limit` (int): Number of results (default 50)
+- `offset` (int): Pagination offset (default 0)
+
+### `apify_get_kv_store_record`
+
+Read one record from a key-value store, such as a run's `OUTPUT`.
+
+**Parameters:**
+
+- `store_id` (str): Key-value store ID (`kv_store_id` from `apify_get_run`)
+- `key` (str): Record key
 
 ## Use Cases
 
-`apify_run_actor` starts a run and returns its `run_id`, `status` and `dataset_id`. Poll `apify_get_run` until the run finishes, then read the output with `apify_get_dataset_items`. The examples below share this helper:
+The examples below share this helper, which starts a run, waits for it to finish and returns its items:
 
 ```python
 import time
 
 def run_and_fetch(actor_id, input_data, limit=100):
+    actor_id = actor_id.replace("/", "~")  # the API path needs owner~name
     run = apify_run_actor(actor_id=actor_id, input_data=input_data)
-    while run.get("status") in ("READY", "RUNNING"):
+    if "error" in run:
+        raise RuntimeError(f"Could not start {actor_id}: {run['error']}")
+    run_id, status, misses = run["run_id"], run["status"], 0
+    while status in ("READY", "RUNNING"):
         time.sleep(5)
-        run = apify_get_run(actor_id=actor_id, run_id=run["run_id"])
-    if run.get("status") != "SUCCEEDED":
-        raise RuntimeError(f"Actor run did not succeed: {run}")
-    return apify_get_dataset_items(dataset_id=run["dataset_id"], limit=limit)["items"]
+        check = apify_get_run(actor_id=actor_id, run_id=run_id)
+        if "error" in check:  # a failed status check does not stop the run
+            misses += 1
+            if misses == 5:
+                raise RuntimeError(f"Lost track of run {run_id} of {actor_id}: {check['error']}")
+            continue
+        status, run, misses = check["status"], check, 0
+    if status != "SUCCEEDED":
+        raise RuntimeError(f"Run {run_id} of {actor_id} ended with status {status}")
+    data = apify_get_dataset_items(dataset_id=run["dataset_id"], limit=limit)
+    if "error" in data:
+        raise RuntimeError(f"Could not read results of run {run_id}: {data['error']}")
+    return data["items"]
 ```
 
 ### Lead Generation
@@ -148,7 +175,10 @@ items = run_and_fetch(
     "johnvc/YoutubeTranscripts",
     {"youtube_url": "https://youtube.com/watch?v=...", "output_formats": ["text"]},
 )
-transcript = items[0]["text"]
+row = items[0]
+if "text" not in row:  # e.g. the video has no captions
+    raise RuntimeError(row.get("error_message", "No transcript returned"))
+transcript = row["text"]
 ```
 
 ## Error Handling
