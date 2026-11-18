@@ -67,7 +67,7 @@ cd hive
 .\quickstart.ps1         # Windows (PowerShell 5.1+)
 ```
 
-El quickstart crea un único entorno de Python para el workspace, guarda tu API key cifrada en `~/.hive`, te pregunta qué modelo usar, compila el panel y lo abre en `http://127.0.0.1:8787`. La próxima vez, ejecuta `hive open` desde el repositorio.
+El quickstart crea un único entorno de Python para el workspace, guarda tu API key como una línea `export` en el perfil de tu shell (por ejemplo `~/.bashrc` o `~/.zshrc`), o como variable de entorno de usuario en Windows, te pregunta qué modelo usar, compila el panel y lo abre en `http://127.0.0.1:8787`. La próxima vez, ejecuta `hive open` desde el repositorio.
 
 > [!NOTE]
 > Hive es un workspace de `uv`, no un paquete de pip. `pip install -e .` instala un paquete provisional que no funciona; usa el quickstart.
@@ -161,7 +161,7 @@ Sí. Elige Ollama en el quickstart, o configura un modelo como `ollama/llama3` c
 La mayoría de los frameworks te piden diseñar un grafo de agentes y conectar sus entradas y salidas. Hive tiene un solo tipo de agente: la Queen es un bucle de agente y cada trabajador es un clon suyo. La orquestación ocurre en tiempo de ejecución mediante llamadas a herramientas, y los agentes se coordinan a través de un tracker SQL compartido en lugar de pasarse mensajes por las aristas de un grafo. La persistencia, la reanudación, los presupuestos, la compactación y la supervisión viven en ese único bucle, así que todos los agentes los tienen.
 
 **¿Dónde se guardan mis datos?**
-En tu máquina. Las sesiones, las colonias, los trackers y la memoria son archivos normales dentro de `~/.hive` (o donde apunte `HIVE_HOME`), y las API keys se guardan ahí cifradas.
+En tu máquina. Las sesiones, las colonias, los trackers y la memoria son archivos normales dentro de `~/.hive` (o donde apunte `HIVE_HOME`), y las API keys que añades en la página Models del panel se guardan ahí cifradas. En cambio, el quickstart guarda la key que introduces como una línea `export` en texto plano en el perfil de tu shell (una variable de entorno de usuario en Windows).
 
 **¿Cómo mantengo los costos bajo control?**
 Cada trabajador funciona con límites estrictos de turnos y llamadas a herramientas, así que un trabajador atascado se detiene solo, y el número de trabajadores que se ejecutan a la vez está limitado. Se mide el consumo de cada llamada al modelo. Todavía no hay límites de gasto en dólares.
