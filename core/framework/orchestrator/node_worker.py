@@ -337,6 +337,9 @@ class NodeWorker:
                 self._last_result = result
                 self._last_activations = activations
                 await self._publish_failure(result.error or "Unknown error")
+        except asyncio.CancelledError:
+            # Re-raise to preserve system responsiveness and lifecycle interrupts
+            raise
         except Exception as exc:
             error = str(exc) or type(exc).__name__
             logger.exception("Worker %s crashed during execution", node_spec.id)
@@ -377,7 +380,8 @@ class NodeWorker:
                 if attempt + 1 < total_attempts:
                     gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
-                    delay = 1.0 * (2**attempt)
+                    import random
+                    delay = (1.0 * (2**attempt)) + random.uniform(0.1, 0.5)
                     logger.warning(
                         "Worker %s failed (attempt %d/%d), retrying in %.1fs: %s",
                         self.node_spec.id,
@@ -403,11 +407,15 @@ class NodeWorker:
                         error=f"failed after {attempt + 1} attempts: {result.error}",
                     )
 
+            except asyncio.CancelledError:
+                # Re-raise to preserve system responsiveness and lifecycle interrupts
+                raise
             except Exception as exc:
                 if attempt + 1 < total_attempts:
                     gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
                     gc.nodes_with_retries.add(self.node_spec.id)
-                    delay = 1.0 * (2**attempt)
+                    import random
+                    delay = (1.0 * (2**attempt)) + random.uniform(0.1, 0.5)
                     logger.warning(
                         "Worker %s raised %s (attempt %d/%d), retrying in %.1fs",
                         self.node_spec.id,
@@ -416,6 +424,15 @@ class NodeWorker:
                         max(1, max_retries),
                         delay,
                     )
+                    # Emit retry event for raw exceptions
+                    if gc.event_bus:
+                        await gc.event_bus.emit_node_retry(
+                            stream_id=gc.stream_id,
+                            node_id=self.node_spec.id,
+                            attempt=attempt + 1,
+                            max_retries=max_retries,
+                            execution_id=gc.execution_id,
+                        )
                     await asyncio.sleep(delay)
                     continue
                 return NodeResult(
