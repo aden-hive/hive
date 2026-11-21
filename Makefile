@@ -11,7 +11,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-lint: ## Run ruff linter and formatter (with auto-fix)
+lint: ## Run Ruff linter and formatter (with auto-fix)
 	cd core && uv run ruff check --fix .
 	cd tools && uv run ruff check --fix .
 	cd core && uv run ruff format .
