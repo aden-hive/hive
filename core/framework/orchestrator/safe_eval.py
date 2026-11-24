@@ -3,6 +3,7 @@ import operator
 import signal
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import Any
 
@@ -247,21 +248,16 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
+        # Support dot access on mappings (the documented ``output.confidence``
+        # syntax) before falling back to attribute access. A matching key
+        # wins; otherwise getattr still allows real attributes/methods such as
+        # ``output.get(...)`` and ``output.keys()``.
+        if isinstance(val, Mapping) and node.attr in val:
+            return val[node.attr]
 
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")

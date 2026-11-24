@@ -431,6 +431,31 @@ class TestAttributeAccess:
         with pytest.raises(ValueError, match="private attribute"):
             safe_eval("x._internal", {"x": {}})
 
+    def test_dict_dot_access(self):
+        """Documented ``output.confidence`` dot access resolves a mapping key."""
+        ctx = {"output": {"confidence": 0.9}}
+        assert safe_eval("output.confidence < 0.8", ctx) is False
+        assert safe_eval("output.confidence > 0.8", ctx) is True
+
+    def test_dict_dot_access_missing_key_still_raises(self):
+        """A missing key must still raise AttributeError (not silently fail)."""
+        with pytest.raises(AttributeError):
+            safe_eval("output.nonexistent", {"output": {"confidence": 0.9}})
+
+    def test_dict_dot_access_preserves_methods(self):
+        """When no matching key exists, dict methods still work via getattr."""
+        ctx = {"output": {"confidence": 0.9}}
+        assert safe_eval("output.get('confidence')", ctx) == 0.9
+        assert safe_eval("list(output.keys())", ctx) == ["confidence"]
+
+    def test_plain_object_attribute_access(self):
+        """Non-mapping attribute access is unchanged."""
+
+        class Obj:
+            x = 5
+
+        assert safe_eval("obj.x", {"obj": Obj}) == 5
+
 
 # ---------------------------------------------------------------------------
 # Whitelisted function calls
