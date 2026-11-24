@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -785,6 +786,18 @@ def _make_tracker_upsert_executor():
                     return {
                         "success": False,
                         "error": (f"row is missing key_columns {missing_keys} required for upsert"),
+                    }
+                null_keys = [
+                    k for k in key_columns if row[k] is None or (isinstance(row[k], float) and math.isnan(row[k]))
+                ]
+                if null_keys:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"key_columns {null_keys} must not be null: a NULL key never matches an "
+                            "existing row, so every call would insert a duplicate. Pass the row's "
+                            "real key value."
+                        ),
                     }
 
             # Encode complex values as JSON text so the row is always

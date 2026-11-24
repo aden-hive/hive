@@ -327,6 +327,66 @@ async def test_upsert_requires_key_columns_in_upsert_mode(with_ctx: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_upsert_rejects_null_key_values(with_ctx: Path) -> None:
+    """A NULL key never matches in a UNIQUE index, so ON CONFLICT never fires
+    and every retry inserts a duplicate orphan row. tracker_upsert must reject
+    a null key value instead (regression for #7531)."""
+    sql = _executors()["tracker_sql"]
+    reg = _executors()["tracker_register_writable"]
+    up = _executors()["tracker_upsert"]
+
+    await sql({"sql": "CREATE TABLE competitors (slug TEXT PRIMARY KEY, name TEXT, researched_at TEXT)"})
+    await sql({"sql": "INSERT INTO competitors(slug, name) VALUES ('stripe', 'Stripe')"})
+    await reg({"table": "competitors", "write_columns": ["name", "researched_at"], "key_columns": ["slug"]})
+
+    for _ in range(3):
+        r = await up({"table": "competitors", "row": {"slug": None, "name": "Stripe", "researched_at": "2026-11-16"}})
+        assert r["success"] is False
+        assert "must not be null" in r["error"]
+
+    # Nothing was written by the rejected calls.
+    rows = await sql({"sql": "SELECT COUNT(*) FROM competitors"})
+    assert rows["rows"] == [[1]]
+
+    # A retry with the real key updates the seeded row in place.
+    ok = await up({"table": "competitors", "row": {"slug": "stripe", "name": "Stripe", "researched_at": "2026-11-16"}})
+    assert ok["success"] is True
+    rows = await sql({"sql": "SELECT slug, researched_at FROM competitors ORDER BY rowid"})
+    assert rows["rows"] == [["stripe", "2026-11-16"]]
+
+
+@pytest.mark.asyncio
+async def test_upsert_rejects_null_part_of_composite_key(with_ctx: Path) -> None:
+    """A composite UNIQUE(a, b) key with a null part never conflicts either."""
+    sql = _executors()["tracker_sql"]
+    reg = _executors()["tracker_register_writable"]
+    up = _executors()["tracker_upsert"]
+
+    await sql({"sql": "CREATE TABLE t (a TEXT, b TEXT, v TEXT, UNIQUE(a, b))"})
+    await reg({"table": "t", "write_columns": ["v"], "key_columns": ["a", "b"]})
+
+    r = await up({"table": "t", "row": {"a": "x", "b": None, "v": "1"}})
+    assert r["success"] is False
+    assert "must not be null" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_allows_null_in_non_key_columns(with_ctx: Path) -> None:
+    """Null in a non-key column is fine; only key columns are checked."""
+    sql = _executors()["tracker_sql"]
+    reg = _executors()["tracker_register_writable"]
+    up = _executors()["tracker_upsert"]
+
+    await sql({"sql": "CREATE TABLE t (slug TEXT PRIMARY KEY, name TEXT, note TEXT)"})
+    await reg({"table": "t", "write_columns": ["name", "note"], "key_columns": ["slug"]})
+
+    r = await up({"table": "t", "row": {"slug": "acme", "name": None, "note": None}})
+    assert r["success"] is True
+    rows = await sql({"sql": "SELECT slug, name, note FROM t"})
+    assert rows["rows"] == [["acme", None, None]]
+
+
+@pytest.mark.asyncio
 async def test_upsert_encodes_complex_values_as_json(with_ctx: Path) -> None:
     sql = _executors()["tracker_sql"]
     reg = _executors()["tracker_register_writable"]
