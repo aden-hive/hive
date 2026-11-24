@@ -235,6 +235,38 @@ async def test_register_accepts_unique_index_as_key(with_ctx: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ddl", [
+    "CREATE TABLE int_key (id INTEGER PRIMARY KEY, v TEXT)",
+    "CREATE TABLE int_auto (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)",
+])
+async def test_register_accepts_integer_primary_key(with_ctx: Path, ddl: str) -> None:
+    """A single-column INTEGER PRIMARY KEY is an alias for rowid and gets no
+    entry in PRAGMA index_list, but ON CONFLICT(id) DO UPDATE still works, so
+    it must be accepted as a valid upsert key (regression for #7533)."""
+    sql = _executors()["tracker_sql"]
+    name = ddl.split()[2]
+    await sql({"sql": ddl})
+    r = await _executors()["tracker_register_writable"]({"table": name, "write_columns": ["v"], "key_columns": ["id"]})
+    assert r["success"] is True
+    # Repeated upserts update the existing row rather than creating duplicates.
+    up = _executors()["tracker_upsert"]
+    await up({"table": name, "row": {"id": 1, "v": "a"}})
+    await up({"table": name, "row": {"id": 1, "v": "b"}})
+    rows = await sql({"sql": f"SELECT id, v FROM {name} ORDER BY id"})
+    assert rows["rows"] == [[1, "b"]]
+
+
+@pytest.mark.asyncio
+async def test_register_still_rejects_unindexed_integer_column(with_ctx: Path) -> None:
+    """A plain INTEGER column that is not a PRIMARY KEY must still be rejected."""
+    sql = _executors()["tracker_sql"]
+    await sql({"sql": "CREATE TABLE t (id INTEGER, v TEXT)"})
+    r = await _executors()["tracker_register_writable"]({"table": "t", "write_columns": ["v"], "key_columns": ["id"]})
+    assert r["success"] is False
+    assert "UNIQUE" in r["error"]
+
+
+@pytest.mark.asyncio
 async def test_register_re_register_replaces_spec(with_ctx: Path) -> None:
     sql = _executors()["tracker_sql"]
     reg = _executors()["tracker_register_writable"]

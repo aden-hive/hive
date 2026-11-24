@@ -437,6 +437,19 @@ def _key_columns_uniquely_indexed(con: sqlite3.Connection, table: str, keys: lis
     doesn't care about declaration order). We compare as sets.
     """
     keys_set = set(keys)
+
+    # A single-column ``INTEGER PRIMARY KEY`` is an alias for ``rowid`` and
+    # gets no entry in ``PRAGMA index_list``, so it must be detected from
+    # ``PRAGMA table_info`` (pk > 0 marks a PRIMARY KEY column). ``ON CONFLICT
+    # (<col>) DO UPDATE`` works fine against it, so it is a valid upsert key.
+    if len(keys_set) == 1:
+        pk_rows = con.execute(f"PRAGMA table_info({_quote_ident(table)})").fetchall()
+        for row in pk_rows:
+            # table_info columns: cid, name, type, notnull, dflt_value, pk
+            name, declared_type, pk = row[1], row[2], row[5]
+            if pk and name in keys_set and str(declared_type).upper() == "INTEGER":
+                return True
+
     idx_rows = con.execute(f"PRAGMA index_list({_quote_ident(table)})").fetchall()
     for idx in idx_rows:
         # PRAGMA index_list columns: seq, name, unique, origin, partial
