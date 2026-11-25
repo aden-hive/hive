@@ -443,11 +443,14 @@ def _key_columns_uniquely_indexed(con: sqlite3.Connection, table: str, keys: lis
     # ``PRAGMA table_info`` (pk > 0 marks a PRIMARY KEY column). ``ON CONFLICT
     # (<col>) DO UPDATE`` works fine against it, so it is a valid upsert key.
     if len(keys_set) == 1:
-        pk_rows = con.execute(f"PRAGMA table_info({_quote_ident(table)})").fetchall()
-        for row in pk_rows:
+        pk_rows = [
+            row for row in con.execute(f"PRAGMA table_info({_quote_ident(table)})") if row[5]
+        ]
+        if len(pk_rows) == 1:
+            row = pk_rows[0]
             # table_info columns: cid, name, type, notnull, dflt_value, pk
-            name, declared_type, pk = row[1], row[2], row[5]
-            if pk and name in keys_set and str(declared_type).upper() == "INTEGER":
+            name, declared_type = row[1], row[2]
+            if name in keys_set and str(declared_type).upper() == "INTEGER":
                 return True
 
     idx_rows = con.execute(f"PRAGMA index_list({_quote_ident(table)})").fetchall()
