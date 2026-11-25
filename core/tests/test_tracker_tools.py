@@ -267,6 +267,17 @@ async def test_register_still_rejects_unindexed_integer_column(with_ctx: Path) -
 
 
 @pytest.mark.asyncio
+async def test_register_rejects_single_member_of_composite_primary_key(with_ctx: Path) -> None:
+    executors = _executors()
+    await executors["tracker_sql"]({"sql": "CREATE TABLE t (id INTEGER, tenant TEXT, v TEXT, PRIMARY KEY(id, tenant))"})
+    result = await executors["tracker_register_writable"](
+        {"table": "t", "write_columns": ["v"], "key_columns": ["id"]}
+    )
+    assert result["success"] is False
+    assert "UNIQUE" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_register_re_register_replaces_spec(with_ctx: Path) -> None:
     sql = _executors()["tracker_sql"]
     reg = _executors()["tracker_register_writable"]
