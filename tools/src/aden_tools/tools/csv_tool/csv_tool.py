@@ -262,7 +262,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             import duckdb
         except ImportError:
-            return {"error": ("DuckDB not installed. Install with: uv pip install duckdb  or  uv pip install tools[sql]")}
+            return {"error": ('DuckDB not installed. Install with: uv pip install duckdb  or  uv pip install "aden-tools[sql]"')}
 
         try:
             secure_path = resolve_safe_path(path)

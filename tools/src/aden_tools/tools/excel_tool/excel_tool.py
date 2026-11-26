@@ -39,7 +39,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -155,7 +155,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import Workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -227,7 +227,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -312,7 +312,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -387,7 +387,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -450,12 +450,12 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             import duckdb
         except ImportError:
-            return {"error": ("DuckDB not installed. Install with: pip install duckdb  or  pip install tools[sql]")}
+            return {"error": ('DuckDB not installed. Install with: pip install duckdb  or  pip install "aden-tools[sql]"')}
 
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
@@ -601,7 +601,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             from openpyxl import load_workbook
         except ImportError:
-            return {"error": ("openpyxl not installed. Install with: pip install openpyxl  or  pip install tools[excel]")}
+            return {"error": ('openpyxl not installed. Install with: pip install openpyxl  or  pip install "aden-tools[excel]"')}
 
         try:
             secure_path = get_sandboxed_path(path, agent_id)
