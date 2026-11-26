@@ -18,7 +18,7 @@ For SQL queries, DuckDB must be installed:
 ```bash
 pip install duckdb
 # or
-uv pip install tools[sql]
+uv pip install "aden-tools[sql]"
 ```
 
 ## Usage Examples

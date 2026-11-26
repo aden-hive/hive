@@ -9,7 +9,7 @@ The Excel tool requires `openpyxl`. Install it with:
 ```bash
 pip install openpyxl
 # or
-pip install tools[excel]
+pip install "aden-tools[excel]"
 ```
 
 ## Available Functions
