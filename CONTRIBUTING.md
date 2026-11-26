@@ -224,7 +224,7 @@ else:  # linux
 - **Python 3.11+** (3.12 or 3.13 recommended)
 - **Git** for version control
 - **uv** for package management (installed automatically by quickstart)
-- **Node.js 18+** (optional, for frontend development)
+- **Node.js 20+** (optional, for frontend development)
 
 > **Windows Users:**
 > Native Windows is supported. Use `.\quickstart.ps1` for setup and `.\hive.ps1` to run (PowerShell 5.1+). Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts. WSL is also an option but not required.
@@ -351,8 +351,8 @@ npm run dev
 ### Useful Development Commands
 
 ```bash
-# Run tests with coverage
-uv run pytest --cov=core --cov-report=html
+# Run tests with coverage (pytest-cov isn't a workspace dependency; --with adds it for this run)
+uv run --with pytest-cov pytest --cov=core --cov-report=html
 
 # Run tests in parallel
 uv run pytest -n auto
@@ -366,11 +366,8 @@ uv run ruff check . --fix
 # Format code
 uv run ruff format .
 
-# Type checking (if using mypy)
-uv run mypy core/
-
-# Run a specific agent
-uv run python -m exports.ai_outreach_architect
+# Type checking (mypy isn't a workspace dependency; --with adds it for this run)
+uv run --with mypy mypy core/
 ```
 
 ### Skills by Contribution Level
