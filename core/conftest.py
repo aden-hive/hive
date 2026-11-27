@@ -25,8 +25,10 @@ import pytest
 
 # Resolved the way framework.config resolves HIVE_HOME: the variable the run
 # started with, else ~/.hive. The repository .env's HIVE_HOME doesn't count,
-# since load_dotenv() never gets to apply it now.
-_REAL_HIVE_HOME = Path(os.environ.get("HIVE_HOME") or Path.home() / ".hive").expanduser()
+# since load_dotenv() never gets to apply it now. pytest-xdist workers inherit
+# HIVE_HOME after it's replaced below, so the first process passes the real
+# home on to them in HIVE_TESTS_REAL_HIVE_HOME.
+_REAL_HIVE_HOME = Path(os.environ.setdefault("HIVE_TESTS_REAL_HIVE_HOME", os.environ.get("HIVE_HOME") or str(Path.home() / ".hive"))).expanduser()
 
 _IMPORT_TIME_HIVE_HOME = tempfile.mkdtemp(prefix="hive-tests-")
 os.environ["HIVE_HOME"] = _IMPORT_TIME_HIVE_HOME

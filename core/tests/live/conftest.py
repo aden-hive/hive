@@ -130,25 +130,29 @@ def resolve_live_llm_config() -> LiveLLMConfig:
     api_base = rc.api_base
     extra = dict(rc.extra_kwargs)
 
-    # When HIVE_LIVE_MODEL overrides the provider prefix, the configured
-    # api_key (bound to the user's main provider) doesn't authenticate
-    # the new provider. Resolve provider-specific env vars in priority.
+    # Provider-specific env vars take priority. When HIVE_LIVE_MODEL switches
+    # to another provider, the configured api_key (bound to the user's main
+    # provider) doesn't authenticate it, so that provider's env var is required.
+    configured = rc.model.lower()
     if model.lower().startswith("hive/"):
         hive_key = os.getenv("HIVE_API_KEY")
-        if not hive_key:
+        if hive_key:
+            api_key = hive_key
+            api_base = None  # let rewrite_proxy_model set the hive proxy base
+        elif not configured.startswith("hive/"):
             pytest.skip(
                 "HIVE_LIVE_MODEL points at hive/, but HIVE_API_KEY is not set. "
                 "Exchange your access JWT for a stream token via "
                 "POST https://app.open-hive.com/user/refresh-stream-token "
                 "and export the returned streamToken as HIVE_API_KEY."
             )
-        api_key = hive_key
-        api_base = None  # let rewrite_proxy_model set the hive proxy base
     elif model.lower().startswith("anthropic/") and not model.lower().startswith("anthropic/hive"):
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         if anthropic_key:
             api_key = anthropic_key
             api_base = None
+        elif not configured.startswith("anthropic/"):
+            pytest.skip("HIVE_LIVE_MODEL points at anthropic/, but ANTHROPIC_API_KEY is not set, and the configured key is for another provider.")
 
     if not api_key and not api_base:
         # A configured provider that resolves nothing is a harness problem, not missing setup.
@@ -181,11 +185,15 @@ def live_llm_config() -> LiveLLMConfig:
       rewrites ``hive/`` to ``anthropic/`` and points the api_base at
       the Hive proxy when applicable.
     * ``HIVE_API_KEY`` — bearer token for ``hive/`` models. Required
-      when ``HIVE_LIVE_MODEL`` starts with ``hive/`` because the user's
-      configured ``api_key`` is bound to a different provider (e.g.
-      Z.AI). Obtain by exchanging a user JWT via
+      when ``HIVE_LIVE_MODEL`` switches to ``hive/`` from another
+      provider, because the user's configured ``api_key`` is bound to
+      that provider (e.g. Z.AI). Obtain by exchanging a user JWT via
       ``POST https://app.open-hive.com/user/refresh-stream-token``.
-    * ``ANTHROPIC_API_KEY`` — bearer for direct ``anthropic/`` models.
+    * ``ANTHROPIC_API_KEY`` — bearer for direct ``anthropic/`` models,
+      required the same way when ``HIVE_LIVE_MODEL`` switches to one.
+
+    When set, either key takes the place of the configured one for its
+    provider.
 
     Fails instead of skipping when the configuration names a provider
     but no key or API base resolves for it.
