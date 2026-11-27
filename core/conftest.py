@@ -8,6 +8,9 @@ home; and Hive modules compute paths from ``HIVE_HOME`` when they are imported
 tests/conftest.py repoint only some of those, so a test once overwrote a real
 home's credential key. With ``HIVE_HOME`` already set, ``load_dotenv()`` leaves
 it alone and every import-time path lands in a throwaway directory.
+
+The home the run started with is recorded first: live tests read their LLM
+configuration and keys from it (``real_hive_home``), and nothing writes to it.
 """
 
 from __future__ import annotations
@@ -16,7 +19,25 @@ import atexit
 import os
 import shutil
 import tempfile
+from pathlib import Path
+
+import pytest
+
+# Resolved the way framework.config resolves HIVE_HOME: the variable the run
+# started with, else ~/.hive. The repository .env's HIVE_HOME doesn't count,
+# since load_dotenv() never gets to apply it now.
+_REAL_HIVE_HOME = Path(os.environ.get("HIVE_HOME") or Path.home() / ".hive").expanduser()
 
 _IMPORT_TIME_HIVE_HOME = tempfile.mkdtemp(prefix="hive-tests-")
 os.environ["HIVE_HOME"] = _IMPORT_TIME_HIVE_HOME
 atexit.register(shutil.rmtree, _IMPORT_TIME_HIVE_HOME, ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
+def real_hive_home() -> Path:
+    """The Hive home this run started with, which live tests read config and keys from.
+
+    Read it, never write to it. tests/live/conftest.py points only the LLM
+    config and key lookups here; everything else stays in the sandbox.
+    """
+    return _REAL_HIVE_HOME
